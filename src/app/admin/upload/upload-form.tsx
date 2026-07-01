@@ -78,7 +78,7 @@ export function UploadForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <div className="flex flex-col gap-1">
           <label htmlFor="year" className="text-sm text-zinc-600">
             연도
@@ -93,6 +93,17 @@ export function UploadForm({
           />
         </div>
         <div className="flex flex-col gap-1">
+          <label htmlFor="level" className="text-sm text-zinc-600">
+            급수 (선택)
+          </label>
+          <input
+            id="level"
+            name="level"
+            placeholder="9급"
+            className="rounded border border-zinc-300 px-3 py-2"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
           <label htmlFor="round" className="text-sm text-zinc-600">
             회차 (기본 1)
           </label>
@@ -101,6 +112,32 @@ export function UploadForm({
             name="round"
             type="number"
             defaultValue={1}
+            className="rounded border border-zinc-300 px-3 py-2"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="flex flex-col gap-1">
+          <label htmlFor="question_count" className="text-sm text-zinc-600">
+            문항 수 (선택)
+          </label>
+          <input
+            id="question_count"
+            name="question_count"
+            type="number"
+            placeholder="20"
+            className="rounded border border-zinc-300 px-3 py-2"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="tags" className="text-sm text-zinc-600">
+            태그 (쉼표로 구분, 선택)
+          </label>
+          <input
+            id="tags"
+            name="tags"
+            placeholder="문법, 비문학"
             className="rounded border border-zinc-300 px-3 py-2"
           />
         </div>

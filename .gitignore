@@ -32,9 +32,15 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.local.example
 
 # vercel
 .vercel
+
+# 로컬 벌크 업로드 대기/처리 폴더 (실제 저작권 있는 PDF는 git에 올리지 않음)
+/uploads/*
+!/uploads/.gitkeep
+/src/testpaper/
 
 # typescript
 *.tsbuildinfo

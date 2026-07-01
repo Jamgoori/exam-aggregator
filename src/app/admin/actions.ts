@@ -45,7 +45,10 @@ export async function uploadExamPaper(
   const examTypeId = String(formData.get("exam_type_id") ?? "");
   const year = Number(formData.get("year"));
   const round = Number(formData.get("round") ?? 1);
+  const level = String(formData.get("level") ?? "").trim();
   const title = String(formData.get("title") ?? "");
+  const questionCountRaw = String(formData.get("question_count") ?? "").trim();
+  const tagsRaw = String(formData.get("tags") ?? "").trim();
 
   if (!file || file.size === 0) {
     return { error: "파일을 선택해주세요." };
@@ -54,7 +57,7 @@ export async function uploadExamPaper(
     return { error: "필수 항목을 모두 입력해주세요." };
   }
 
-  const filePath = `${year}/${crypto.randomUUID()}-${file.name}`;
+  const filePath = `${year}/${crypto.randomUUID()}.pdf`;
 
   const { error: uploadError } = await supabase.storage
     .from("exam-papers")
@@ -64,14 +67,22 @@ export async function uploadExamPaper(
     return { error: `업로드 실패: ${uploadError.message}` };
   }
 
+  const tags = tagsRaw
+    ? tagsRaw.split(",").map((t) => t.trim()).filter(Boolean)
+    : [];
+
   const { error: insertError } = await supabase.from("exam_papers").insert({
     subject_id: subjectId,
     exam_type_id: examTypeId,
     year,
     round,
+    level: level || null,
     title,
+    question_count: questionCountRaw ? Number(questionCountRaw) : null,
+    tags,
     file_path: filePath,
     file_name: file.name,
+    file_size: file.size,
     uploaded_by: user.id,
   });
 
@@ -80,6 +91,6 @@ export async function uploadExamPaper(
     return { error: `저장 실패: ${insertError.message}` };
   }
 
-  revalidatePath("/subjects", "layout");
+  revalidatePath("/", "layout");
   return { success: true };
 }

@@ -16,10 +16,35 @@ export type ExamPaper = {
   exam_type_id: string;
   year: number;
   round: number;
+  level: string | null;
   title: string;
+  question_count: number | null;
+  tags: string[];
   file_path: string;
   file_name: string;
+  file_size: number | null;
+  view_count: number;
+  download_count: number;
   uploaded_by: string | null;
   created_at: string;
+  subjects?: Subject;
   exam_types?: ExamType;
+};
+
+export type Comment = {
+  id: string;
+  paper_id: string;
+  user_id: string | null;
+  nickname: string;
+  content: string;
+  created_at: string;
+};
+
+export type DifficultyRating = {
+  id: string;
+  paper_id: string;
+  user_id: string | null;
+  guest_token: string | null;
+  score: number;
+  created_at: string;
 };

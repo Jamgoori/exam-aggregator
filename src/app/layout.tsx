@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import { SiteHeader } from "@/components/site-header";
+import { createClient } from "@/lib/supabase/server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -17,17 +20,35 @@ export const metadata: Metadata = {
   description: "공무원 시험 기출문제 아그리게이터",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const headerUser = user
+    ? {
+        nickname:
+          (user.user_metadata?.nickname as string | undefined) ??
+          user.email?.split("@")[0] ??
+          "회원",
+      }
+    : null;
+
   return (
     <html
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <SiteHeader user={headerUser} />
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
