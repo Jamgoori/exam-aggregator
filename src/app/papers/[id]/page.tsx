@@ -139,41 +139,21 @@ export default async function PaperDetailPage({
           ← 홈으로
         </Link>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {typedPaper.level && (
-            <span
-              className={`rounded px-2 py-0.5 text-xs font-bold ${levelColor(typedPaper.level)}`}
-            >
-              {typedPaper.level}
-            </span>
-          )}
-          {subject && (
-            <span
-              className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(subject.slug)}`}
-            >
-              {subject.name}
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold leading-snug">
-              {typedPaper.title}
-            </h1>
-            <p className="mt-2 text-sm text-zinc-500">
-              {examType?.name}
-              {examType?.name ? " · " : ""}
-              {typedPaper.year}년
-              {typedPaper.round > 1 ? ` · ${typedPaper.round}회차` : ""}
-              {typedPaper.question_count
-                ? ` · ${typedPaper.question_count}문제`
-                : ""}
-            </p>
-            {typedPaper.tags.length > 0 && (
-              <p className="mt-1 text-sm text-zinc-400">
-                {typedPaper.tags.map((tag) => `#${tag}`).join(" ")}
-              </p>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {typedPaper.level && (
+              <span
+                className={`rounded px-2 py-0.5 text-xs font-bold ${levelColor(typedPaper.level)}`}
+              >
+                {typedPaper.level}
+              </span>
+            )}
+            {subject && (
+              <span
+                className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(subject.slug)}`}
+              >
+                {subject.name}
+              </span>
             )}
           </div>
           <BookmarkButton
@@ -181,6 +161,26 @@ export default async function PaperDetailPage({
             initialBookmarked={isBookmarked}
             loggedIn={loggedIn}
           />
+        </div>
+
+        <div>
+          <h1 className="text-3xl font-bold leading-snug">
+            {typedPaper.title}
+          </h1>
+          <p className="mt-2 text-sm text-zinc-500">
+            {examType?.name}
+            {examType?.name ? " · " : ""}
+            {typedPaper.year}년
+            {typedPaper.round > 1 ? ` · ${typedPaper.round}회차` : ""}
+            {typedPaper.question_count
+              ? ` · ${typedPaper.question_count}문제`
+              : ""}
+          </p>
+          {typedPaper.tags.length > 0 && (
+            <p className="mt-1 text-sm text-zinc-400">
+              {typedPaper.tags.map((tag) => `#${tag}`).join(" ")}
+            </p>
+          )}
         </div>
       </div>
 
