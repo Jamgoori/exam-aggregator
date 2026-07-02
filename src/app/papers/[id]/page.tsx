@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Download, ExternalLink } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { subjectColor } from "@/lib/subject-colors";
+import { levelColor } from "@/lib/level-colors";
 import { formatCount, formatFileSize } from "@/lib/format";
 import { DifficultyRating } from "@/components/difficulty-rating";
 import { CommentsSection } from "@/components/comments-section";
@@ -38,6 +39,9 @@ export default async function PaperDetailPage({
   answerKeyQuery = typedPaper.level
     ? answerKeyQuery.eq("level", typedPaper.level)
     : answerKeyQuery.is("level", null);
+  answerKeyQuery = typedPaper.track
+    ? answerKeyQuery.eq("track", typedPaper.track)
+    : answerKeyQuery.is("track", null);
 
   const [{ data: comments }, { data: ratings }, userResult, { data: answerKey }] =
     await Promise.all([
@@ -94,16 +98,18 @@ export default async function PaperDetailPage({
         </Link>
 
         <div className="flex flex-wrap items-center gap-2">
+          {typedPaper.level && (
+            <span
+              className={`rounded px-2 py-0.5 text-xs font-bold ${levelColor(typedPaper.level)}`}
+            >
+              {typedPaper.level}
+            </span>
+          )}
           {subject && (
             <span
               className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(subject.slug)}`}
             >
               {subject.name}
-            </span>
-          )}
-          {typedPaper.level && (
-            <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-              {typedPaper.level}
             </span>
           )}
         </div>

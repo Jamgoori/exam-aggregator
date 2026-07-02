@@ -18,6 +18,7 @@ export type ExamPaper = {
   year: number;
   round: number;
   level: string | null;
+  track: string | null;
   title: string;
   question_count: number | null;
   tags: string[];
@@ -57,6 +58,7 @@ export type AnswerKey = {
   year: number;
   level: string | null;
   round: number;
+  track: string | null;
   file_path: string;
   file_name: string;
   file_size: number | null;

@@ -1,0 +1,48 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Search } from "lucide-react";
+
+const DEBOUNCE_MS = 300;
+
+export function SearchInput({ initialQuery }: { initialQuery?: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [value, setValue] = useState(initialQuery ?? "");
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setValue(initialQuery ?? "");
+  }, [initialQuery]);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  function handleChange(next: string) {
+    setValue(next);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next) params.set("q", next);
+      else params.delete("q");
+      params.delete("page");
+      router.push(`/?${params.toString()}`);
+    }, DEBOUNCE_MS);
+  }
+
+  return (
+    <div className="flex w-full max-w-md items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
+      <Search size={16} className="text-blue-400" />
+      <input
+        value={value}
+        onChange={(e) => handleChange(e.target.value)}
+        placeholder="과목명, 시험 종류, 연도로 검색..."
+        className="w-full text-sm outline-none"
+      />
+    </div>
+  );
+}

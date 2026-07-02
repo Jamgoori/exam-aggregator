@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { Search, FileStack, Download } from "lucide-react";
+import { FileStack, Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { SortSelect } from "@/components/sort-select";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { Pagination } from "@/components/pagination";
+import { SearchInput } from "@/components/search-input";
 import type { ExamPaper, ExamType, Subject } from "@/lib/supabase/types";
 
 const PAGE_SIZE = 24;
@@ -85,17 +86,7 @@ export default async function Home({
           정리했어요.
         </p>
 
-        <form action="/" method="GET" className="w-full max-w-md">
-          <div className="flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
-            <Search size={16} className="text-blue-400" />
-            <input
-              name="q"
-              defaultValue={q}
-              placeholder="과목명, 시험 종류, 연도로 검색..."
-              className="w-full text-sm outline-none"
-            />
-          </div>
-        </form>
+        <SearchInput initialQuery={q} />
 
         <div className="flex flex-wrap gap-3 text-sm">
           <div className="flex items-center gap-2 rounded-full border border-zinc-200 px-4 py-2">

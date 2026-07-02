@@ -11,6 +11,70 @@ function buildHref(params: Record<string, string | undefined>, page: number) {
   return qs ? `/?${qs}` : "/";
 }
 
+function PageBlock({
+  currentPage,
+  totalPages,
+  blockSize,
+  params,
+  className,
+}: {
+  currentPage: number;
+  totalPages: number;
+  blockSize: number;
+  params: Record<string, string | undefined>;
+  className: string;
+}) {
+  const blockStart = Math.floor((currentPage - 1) / blockSize) * blockSize + 1;
+  const blockEnd = Math.min(blockStart + blockSize - 1, totalPages);
+  const prevBlockPage = blockStart - 1;
+  const nextBlockPage = blockEnd + 1;
+
+  const pages = [];
+  for (let p = blockStart; p <= blockEnd; p++) pages.push(p);
+
+  return (
+    <nav className={`items-center justify-center gap-1 pt-4 ${className}`}>
+      <Link
+        href={buildHref(params, Math.max(1, prevBlockPage))}
+        aria-disabled={prevBlockPage < 1}
+        className={`flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 ${
+          prevBlockPage < 1
+            ? "pointer-events-none opacity-40"
+            : "hover:border-blue-300 hover:text-blue-600"
+        }`}
+      >
+        <ChevronLeft size={16} />
+      </Link>
+
+      {pages.map((p) => (
+        <Link
+          key={p}
+          href={buildHref(params, p)}
+          className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium ${
+            p === currentPage
+              ? "bg-blue-600 text-white"
+              : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
+          }`}
+        >
+          {p}
+        </Link>
+      ))}
+
+      <Link
+        href={buildHref(params, Math.min(totalPages, nextBlockPage))}
+        aria-disabled={nextBlockPage > totalPages}
+        className={`flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 ${
+          nextBlockPage > totalPages
+            ? "pointer-events-none opacity-40"
+            : "hover:border-blue-300 hover:text-blue-600"
+        }`}
+      >
+        <ChevronRight size={16} />
+      </Link>
+    </nav>
+  );
+}
+
 export function Pagination({
   currentPage,
   totalPages,
@@ -22,68 +86,22 @@ export function Pagination({
 }) {
   if (totalPages <= 1) return null;
 
-  // 현재 페이지 주변 ±2, 첫/끝 페이지만 노출하고 나머지는 "..."
-  const pages = new Set<number>();
-  pages.add(1);
-  pages.add(totalPages);
-  for (let p = currentPage - 2; p <= currentPage + 2; p++) {
-    if (p >= 1 && p <= totalPages) pages.add(p);
-  }
-  const sorted = [...pages].sort((a, b) => a - b);
-
-  const items: (number | "...")[] = [];
-  let prev = 0;
-  for (const p of sorted) {
-    if (p - prev > 1) items.push("...");
-    items.push(p);
-    prev = p;
-  }
-
   return (
-    <nav className="flex items-center justify-center gap-1 pt-4">
-      <Link
-        href={buildHref(params, Math.max(1, currentPage - 1))}
-        aria-disabled={currentPage === 1}
-        className={`flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 ${
-          currentPage === 1
-            ? "pointer-events-none opacity-40"
-            : "hover:border-blue-300 hover:text-blue-600"
-        }`}
-      >
-        <ChevronLeft size={16} />
-      </Link>
-
-      {items.map((item, i) =>
-        item === "..." ? (
-          <span key={`ellipsis-${i}`} className="px-1 text-zinc-400">
-            …
-          </span>
-        ) : (
-          <Link
-            key={item}
-            href={buildHref(params, item)}
-            className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium ${
-              item === currentPage
-                ? "bg-blue-600 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
-            }`}
-          >
-            {item}
-          </Link>
-        ),
-      )}
-
-      <Link
-        href={buildHref(params, Math.min(totalPages, currentPage + 1))}
-        aria-disabled={currentPage === totalPages}
-        className={`flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 ${
-          currentPage === totalPages
-            ? "pointer-events-none opacity-40"
-            : "hover:border-blue-300 hover:text-blue-600"
-        }`}
-      >
-        <ChevronRight size={16} />
-      </Link>
-    </nav>
+    <>
+      <PageBlock
+        currentPage={currentPage}
+        totalPages={totalPages}
+        blockSize={5}
+        params={params}
+        className="flex sm:hidden"
+      />
+      <PageBlock
+        currentPage={currentPage}
+        totalPages={totalPages}
+        blockSize={10}
+        params={params}
+        className="hidden sm:flex"
+      />
+    </>
   );
 }

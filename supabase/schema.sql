@@ -47,6 +47,8 @@ alter table exam_papers add column if not exists tags text[] not null default '{
 alter table exam_papers add column if not exists file_size bigint;
 alter table exam_papers add column if not exists view_count int not null default 0;
 alter table exam_papers add column if not exists download_count int not null default 0;
+-- 같은 연도/급수를 공유하는 특수모집 분야 구분용 (예: "근로감독 및 산업안전분야"). 일반 채용은 null.
+alter table exam_papers add column if not exists track text;
 
 create index if not exists exam_papers_subject_idx on exam_papers(subject_id);
 create index if not exists exam_papers_exam_type_idx on exam_papers(exam_type_id);
@@ -133,13 +135,40 @@ create table if not exists answer_keys (
   year int not null,
   level text,
   round int not null default 1,
+  track text,          -- 특수모집 분야 구분용 (exam_papers.track과 동일한 의미). 일반 채용은 null.
   file_path text not null,
   file_name text not null,
   file_size bigint,
   uploaded_by uuid references auth.users(id),
   created_at timestamptz not null default now(),
-  unique nulls not distinct (exam_type_id, year, level, round)
+  unique nulls not distinct (exam_type_id, year, level, round, track)
 );
+
+-- 기존 설치본 대비: track 컬럼 추가 + 기존 4컬럼 unique 제약을 track 포함 5컬럼으로 교체
+alter table answer_keys add column if not exists track text;
+
+do $$
+declare
+  cons_name text;
+begin
+  select conname into cons_name
+  from pg_constraint
+  where conrelid = 'answer_keys'::regclass
+    and contype = 'u'
+    and conkey = (
+      select array_agg(attnum order by attnum)
+      from pg_attribute
+      where attrelid = 'answer_keys'::regclass
+        and attname in ('exam_type_id', 'year', 'level', 'round')
+    );
+  if cons_name is not null then
+    execute format('alter table answer_keys drop constraint %I', cons_name);
+  end if;
+end $$;
+
+alter table answer_keys drop constraint if exists answer_keys_unique_key;
+alter table answer_keys add constraint answer_keys_unique_key
+  unique nulls not distinct (exam_type_id, year, level, round, track);
 
 -- RLS
 alter table subjects enable row level security;

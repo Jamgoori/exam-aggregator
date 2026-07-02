@@ -25,6 +25,8 @@ function parseArgs(argv) {
 const EXAM_TYPE_KEYWORDS = {
   국가공무원: "국가직",
   지방공무원: "지방직",
+  국가직: "국가직",
+  지방직: "지방직",
   서울시: "서울시",
   경찰공무원: "경찰",
   소방공무원: "소방",
@@ -35,6 +37,11 @@ const EXAM_TYPE_KEYWORDS = {
   지역인재: "지역인재",
   계리: "계리직",
   간호: "간호직",
+};
+
+// 같은 연도/급수를 공유하는 특수모집 분야 키워드 -> exam_papers.track과 동일한 값으로 매핑
+const TRACK_KEYWORDS = {
+  근로감독: "근로감독 및 산업안전분야",
 };
 
 async function main() {
@@ -94,8 +101,16 @@ async function main() {
       : filename.includes("7급")
         ? "7급"
         : null;
-    // 2017 국가직 9급처럼 추가선발(2차모집) 시험이 있는 연도는 round=2로 구분
-    const round = filename.includes("추가") ? 2 : 1;
+    // 2017 국가직 9급 추가선발(2차모집), 7급 1차/2차 시험처럼 회차가 나뉘는 경우 round로 구분
+    const round = filename.includes("추가") || filename.includes("2차") ? 2 : 1;
+
+    let track = null;
+    for (const [keyword, mapped] of Object.entries(TRACK_KEYWORDS)) {
+      if (filename.includes(keyword)) {
+        track = mapped;
+        break;
+      }
+    }
 
     let examTypeName = null;
     for (const [keyword, mapped] of Object.entries(EXAM_TYPE_KEYWORDS)) {
@@ -137,11 +152,12 @@ async function main() {
           year,
           level,
           round,
+          track,
           file_path: storagePath,
           file_name: filename,
           file_size: fileStat.size,
         },
-        { onConflict: "exam_type_id,year,level,round" },
+        { onConflict: "exam_type_id,year,level,round,track" },
       );
 
     if (upsertError) {
@@ -153,7 +169,7 @@ async function main() {
     await rename(filePath, path.join(doneDir, filename));
     uploaded++;
     console.log(
-      `완료: ${year} ${examType.name}${level ? " " + level : ""} 정답${round > 1 ? ` (${round}회차/추가선발)` : ""}`,
+      `완료: ${year} ${examType.name}${level ? " " + level : ""}${track ? ` (${track})` : ""} 정답${round > 1 ? ` (${round}회차/추가선발)` : ""}`,
     );
   }
 

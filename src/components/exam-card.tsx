@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { FileText, ChevronRight, MapPin } from "lucide-react";
 import { subjectColor } from "@/lib/subject-colors";
+import { levelColor } from "@/lib/level-colors";
 import { formatCount, formatFileSize, isRecent } from "@/lib/format";
 import type { ExamPaper } from "@/lib/supabase/types";
 
@@ -29,16 +30,18 @@ export function ExamCard({
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
             <FileText size={16} />
           </span>
+          {paper.level && (
+            <span
+              className={`rounded px-2 py-0.5 text-xs font-bold ${levelColor(paper.level)}`}
+            >
+              {paper.level}
+            </span>
+          )}
           {subject && (
             <span
               className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(subject.slug)}`}
             >
               {subject.name}
-            </span>
-          )}
-          {paper.level && (
-            <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-              {paper.level}
             </span>
           )}
         </div>
