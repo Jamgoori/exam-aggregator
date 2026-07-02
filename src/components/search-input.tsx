@@ -40,7 +40,7 @@ export function SearchInput({ initialQuery }: { initialQuery?: string }) {
       <input
         value={value}
         onChange={(e) => handleChange(e.target.value)}
-        placeholder="과목명, 시험 종류, 연도로 검색..."
+        placeholder="과목명으로 검색..."
         className="w-full text-base outline-none placeholder:text-zinc-400"
       />
     </div>

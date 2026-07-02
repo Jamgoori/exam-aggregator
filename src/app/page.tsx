@@ -2,7 +2,6 @@ import Link from "next/link";
 import { FileStack, Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
-import { SortSelect } from "@/components/sort-select";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
@@ -46,15 +45,14 @@ export default async function Home({
   searchParams: Promise<{
     type?: string;
     level?: string;
-    sort?: string;
     q?: string;
     page?: string;
   }>;
 }) {
-  const { type, level, sort = "latest", q, page } = await searchParams;
+  const { type, level, q, page } = await searchParams;
   const currentPage = Math.max(1, Number(page) || 1);
   const supabase = await createClient();
-  const baseParams = { type, level, sort: sort === "latest" ? undefined : sort, q };
+  const baseParams = { type, level, q };
 
   // 초성만 입력된 검색어("ㄱㅇ")는 title이 아니라 초성 변환값으로 매칭해야 해서
   // 후보 id를 먼저 뽑아 .in()으로 좁힌다. 일반 텍스트 검색은 기존처럼 ilike 사용.
@@ -62,25 +60,28 @@ export default async function Home({
   let choseongMatchedIds: string[] | null = null;
 
   if (choseongSearch) {
-    const candidates = await fetchAllRows<{ id: string; title: string }>(
+    const candidates = await fetchAllRows<{ id: string; subjects: { name: string } }>(
       (from, to) => {
         let candidateQuery = supabase
           .from("exam_papers")
-          .select("id, title, exam_types!inner(name)")
+          .select("id, subjects!inner(name), exam_types!inner(name)")
           .range(from, to);
         if (type) candidateQuery = candidateQuery.eq("exam_types.name", type);
         if (level) candidateQuery = candidateQuery.eq("level", level);
-        return candidateQuery;
+        // 임베디드 리소스(subjects)는 실제로는 단일 객체지만 타입 추론상 배열로 잡혀서 캐스팅한다.
+        return candidateQuery as unknown as PromiseLike<{
+          data: { id: string; subjects: { name: string } }[] | null;
+        }>;
       },
     );
     choseongMatchedIds = candidates
-      .filter((c) => matchesChoseong(c.title, q))
+      .filter((c) => matchesChoseong(c.subjects.name, q))
       .map((c) => c.id);
   }
 
   let query = supabase
     .from("exam_papers")
-    .select("*, subjects(*), exam_types!inner(*)", { count: "exact" });
+    .select("*, subjects!inner(*), exam_types!inner(*)", { count: "exact" });
 
   if (type) {
     query = query.eq("exam_types.name", type);
@@ -91,16 +92,10 @@ export default async function Home({
   if (choseongSearch) {
     query = query.in("id", choseongMatchedIds ?? []);
   } else if (q) {
-    query = query.ilike("title", `%${q}%`);
+    query = query.ilike("subjects.name", `%${q}%`);
   }
 
-  if (sort === "downloads") {
-    query = query.order("download_count", { ascending: false });
-  } else {
-    query = query
-      .order("year", { ascending: false })
-      .order("round", { ascending: false });
-  }
+  query = query.order("year", { ascending: false }).order("round", { ascending: false });
 
   const from = (currentPage - 1) * PAGE_SIZE;
   query = query.range(from, from + PAGE_SIZE - 1);
@@ -163,33 +158,30 @@ export default async function Home({
       </section>
 
       <section className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={buildHomeHref({ ...baseParams, type: undefined })}
+            className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+              !type
+                ? "bg-blue-600 text-white"
+                : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
+            }`}
+          >
+            전체
+          </Link>
+          {((examTypes ?? []) as ExamType[]).map((t) => (
             <Link
-              href={buildHomeHref({ ...baseParams, type: undefined })}
+              key={t.id}
+              href={buildHomeHref({ ...baseParams, type: t.name })}
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-                !type
+                type === t.name
                   ? "bg-blue-600 text-white"
                   : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
               }`}
             >
-              전체
+              {t.name}
             </Link>
-            {((examTypes ?? []) as ExamType[]).map((t) => (
-              <Link
-                key={t.id}
-                href={buildHomeHref({ ...baseParams, type: t.name })}
-                className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-                  type === t.name
-                    ? "bg-blue-600 text-white"
-                    : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
-                }`}
-              >
-                {t.name}
-              </Link>
-            ))}
-          </div>
-          <SortSelect />
+          ))}
         </div>
 
         <div className="flex flex-wrap gap-2">
