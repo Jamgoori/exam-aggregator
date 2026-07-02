@@ -14,12 +14,7 @@ export function SiteHeader({
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white">
             <BookMarked size={18} />
           </span>
-          <span className="flex flex-col leading-tight">
-            <span className="font-semibold">공모아</span>
-            <span className="text-xs text-zinc-500">
-              공무원 기출문제 자료실
-            </span>
-          </span>
+          <span className="text-xl font-bold">공모아</span>
         </Link>
 
         <div className="flex items-center gap-3">
