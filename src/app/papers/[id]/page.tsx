@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Download, ExternalLink } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { subjectColor } from "@/lib/subject-colors";
-import { levelColor } from "@/lib/level-colors";
+import { levelColor, compareLevels } from "@/lib/level-colors";
 import { formatCount, formatFileSize } from "@/lib/format";
 import { DifficultyRating } from "@/components/difficulty-rating";
 import { CommentsSection } from "@/components/comments-section";
@@ -12,10 +12,13 @@ import type { AnswerKey, Comment, ExamPaper } from "@/lib/supabase/types";
 
 export default async function PaperDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ level?: string }>;
 }) {
   const { id } = await params;
+  const { level } = await searchParams;
   const supabase = await createClient();
 
   const { data: paper } = await supabase
@@ -205,11 +208,68 @@ export default async function PaperDetailPage({
           <h2 className="text-lg font-semibold">
             {subject.name} 기출문제 목록
           </h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {(subjectPapers as ExamPaper[]).map((p) => (
-              <ExamCard key={p.id} paper={p} isCurrent={p.id === typedPaper.id} />
-            ))}
-          </div>
+
+          {(() => {
+            const allSubjectPapers = subjectPapers as ExamPaper[];
+            const availableLevels = [
+              ...new Set(
+                allSubjectPapers
+                  .map((p) => p.level)
+                  .filter((l): l is string => !!l),
+              ),
+            ].sort(compareLevels);
+            const filteredSubjectPapers = level
+              ? allSubjectPapers.filter((p) => p.level === level)
+              : allSubjectPapers;
+
+            return (
+              <>
+                {availableLevels.length > 1 && (
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/papers/${typedPaper.id}`}
+                      className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+                        !level
+                          ? "bg-zinc-800 text-white"
+                          : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                      }`}
+                    >
+                      전체
+                    </Link>
+                    {availableLevels.map((lv) => (
+                      <Link
+                        key={lv}
+                        href={`/papers/${typedPaper.id}?level=${encodeURIComponent(lv)}`}
+                        className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+                          level === lv
+                            ? levelColor(lv)
+                            : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                        }`}
+                      >
+                        {lv}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {filteredSubjectPapers.length === 0 && (
+                    <p className="col-span-full py-8 text-center text-zinc-500">
+                      해당 급수의 기출문제가 없습니다.
+                    </p>
+                  )}
+                  {filteredSubjectPapers.map((p) => (
+                    <ExamCard
+                      key={p.id}
+                      paper={p}
+                      isCurrent={p.id === typedPaper.id}
+                      linkLevel={level}
+                    />
+                  ))}
+                </div>
+              </>
+            );
+          })()}
         </div>
       ) : null}
     </div>

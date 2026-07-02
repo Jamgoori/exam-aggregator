@@ -15,7 +15,7 @@ export function SiteHeader({
             <BookMarked size={18} />
           </span>
           <span className="flex flex-col leading-tight">
-            <span className="font-semibold">공기모아</span>
+            <span className="font-semibold">공모아</span>
             <span className="text-xs text-zinc-500">
               공무원 기출문제 자료실
             </span>

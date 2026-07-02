@@ -89,7 +89,7 @@ export default async function SubjectPage({
           </p>
         )}
         {filteredPapers.map((paper) => (
-          <ExamCard key={paper.id} paper={paper} />
+          <ExamCard key={paper.id} paper={paper} linkLevel={level} />
         ))}
       </div>
     </div>

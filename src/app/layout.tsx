@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "공기모아 - 공무원 기출문제 자료실",
+  title: "공모아 - 공무원 기출문제 자료실",
   description: "공무원 시험 기출문제 아그리게이터",
 };
 

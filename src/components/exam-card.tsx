@@ -8,9 +8,12 @@ import type { ExamPaper } from "@/lib/supabase/types";
 export function ExamCard({
   paper,
   isCurrent = false,
+  linkLevel,
 }: {
   paper: ExamPaper;
   isCurrent?: boolean;
+  // 상세페이지 하단 "같은 과목 목록"의 급수 탭 상태를 이어서 넘겨주기 위한 값
+  linkLevel?: string;
 }) {
   const subject = paper.subjects;
   const examType = paper.exam_types;
@@ -90,8 +93,12 @@ export function ExamCard({
     return <div className={className}>{content}</div>;
   }
 
+  const href = linkLevel
+    ? `/papers/${paper.id}?level=${encodeURIComponent(linkLevel)}`
+    : `/papers/${paper.id}`;
+
   return (
-    <Link href={`/papers/${paper.id}`} className={className}>
+    <Link href={href} className={className}>
       {content}
     </Link>
   );
