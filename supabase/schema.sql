@@ -292,6 +292,20 @@ drop policy if exists "delete own bookmarks" on bookmarks;
 create policy "delete own bookmarks" on bookmarks
   for delete to authenticated using (auth.uid() = user_id);
 
+-- 회원가입 IP 레이트리밋: 캡차(Turnstile)와 별개로 짧은 시간 동안의 대량 가입 시도를
+-- 막는 2차 방어선. 성공/실패 관계없이 시도할 때마다 한 행씩 기록한다.
+create table if not exists signup_attempts (
+  id uuid primary key default gen_random_uuid(),
+  ip_address text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists signup_attempts_ip_idx on signup_attempts(ip_address, created_at desc);
+
+alter table signup_attempts enable row level security;
+-- 클라이언트에서는 직접 못 건드리고, 서버 액션에서 service_role로만 기록/조회한다.
+-- (anon/authenticated에 아무 정책도 주지 않으므로 RLS가 모든 접근을 막는다.)
+
 -- 초기 과목 데이터 (필요에 맞게 추가/수정하세요)
 insert into subjects (slug, name, display_order) values
   ('korean', '국어', 1),
