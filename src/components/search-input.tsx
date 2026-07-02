@@ -35,13 +35,13 @@ export function SearchInput({ initialQuery }: { initialQuery?: string }) {
   }
 
   return (
-    <div className="flex w-full max-w-md items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
-      <Search size={16} className="text-blue-400" />
+    <div className="flex w-full max-w-2xl items-center gap-3 rounded-2xl border-2 border-zinc-200 bg-white px-5 py-4 shadow-sm transition-colors focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-100">
+      <Search size={22} className="shrink-0 text-blue-400" />
       <input
         value={value}
         onChange={(e) => handleChange(e.target.value)}
         placeholder="과목명, 시험 종류, 연도로 검색..."
-        className="w-full text-sm outline-none"
+        className="w-full text-base outline-none placeholder:text-zinc-400"
       />
     </div>
   );
