@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -11,6 +12,47 @@ const NICKNAME_MAX = 10;
 const CONTENT_MAX = 2000;
 const PW_MIN = 4;
 const PW_MAX = 16;
+
+// 비회원 댓글 도배 방지 기준
+const GUEST_COOLDOWN_MS = 10_000; // 같은 IP에서 연속 작성 시 최소 간격
+const GUEST_HOURLY_LIMIT = 20; // 같은 IP에서 1시간 내 허용하는 최대 개수
+
+async function getClientIp(): Promise<string | null> {
+  const h = await headers();
+  const forwarded = h.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim();
+  return h.get("x-real-ip");
+}
+
+// 비회원 댓글만 대상으로 IP 기반 도배 방지. 계정 없이도 작성 가능한 경로라
+// 로그인한 회원 댓글보다 스팸에 취약해서 이 경로에만 적용한다.
+async function checkGuestRateLimit(
+  admin: ReturnType<typeof createAdminClient>,
+  ip: string | null,
+): Promise<string | null> {
+  if (!ip) return null; // IP를 알 수 없는 환경(로컬 등)에서는 건너뜀
+
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { data } = await admin
+    .from("comments")
+    .select("created_at")
+    .eq("ip_address", ip)
+    .is("user_id", null)
+    .gte("created_at", oneHourAgo)
+    .order("created_at", { ascending: false })
+    .limit(GUEST_HOURLY_LIMIT);
+
+  if (!data || data.length === 0) return null;
+
+  const lastCommentAt = new Date(data[0].created_at).getTime();
+  if (Date.now() - lastCommentAt < GUEST_COOLDOWN_MS) {
+    return "잠시 후 다시 시도해주세요.";
+  }
+  if (data.length >= GUEST_HOURLY_LIMIT) {
+    return "짧은 시간 동안 너무 많은 댓글을 남겼어요. 잠시 후 다시 시도해주세요.";
+  }
+  return null;
+}
 
 // UUID 형식 검증 (임의 문자열이 쿼리에 들어가지 않도록 1차 방어)
 function isUuid(v: string) {
@@ -75,6 +117,10 @@ export async function postComment(input: {
     const pwError = validatePassword(password);
     if (pwError) return { error: pwError };
 
+    const ip = await getClientIp();
+    const rateLimitError = await checkGuestRateLimit(admin, ip);
+    if (rateLimitError) return { error: rateLimitError };
+
     const passwordHash = await bcrypt.hash(password, 10);
     const { error } = await admin.from("comments").insert({
       paper_id: paperId,
@@ -82,6 +128,7 @@ export async function postComment(input: {
       nickname,
       content,
       password_hash: passwordHash,
+      ip_address: ip,
     });
     if (error) return { error: "댓글 등록에 실패했어요." };
   }

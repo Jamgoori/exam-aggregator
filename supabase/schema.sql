@@ -87,12 +87,18 @@ create table if not exists comments (
   nickname text not null,
   content text not null,
   password_hash text,                 -- 비회원 댓글만 사용 (bcrypt 해시)
+  ip_address text,                    -- 비회원 댓글 도배 방지용 rate-limit 조회에 사용
   created_at timestamptz not null default now(),
   updated_at timestamptz
 );
 
 alter table comments add column if not exists password_hash text;
 alter table comments add column if not exists updated_at timestamptz;
+alter table comments add column if not exists ip_address text;
+
+create index if not exists comments_guest_rate_limit_idx
+  on comments(ip_address, created_at desc)
+  where user_id is null and ip_address is not null;
 
 -- 길이 제한 (닉네임 10자, 내용 1~2000자) — DB 레벨에서도 강제
 do $$ begin

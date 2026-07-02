@@ -16,7 +16,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "공모아 - 공무원 기출문제 자료실",
+  title: {
+    default: "공모아 - 공무원 기출문제 자료실",
+    template: "%s | 공모아",
+  },
   description: "공무원 시험 기출문제 아그리게이터",
 };
 

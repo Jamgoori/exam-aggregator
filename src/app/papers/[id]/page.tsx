@@ -1,3 +1,4 @@
+import { cache } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Download, ExternalLink } from "lucide-react";
@@ -9,6 +10,37 @@ import { DifficultyRating } from "@/components/difficulty-rating";
 import { CommentsSection } from "@/components/comments-section";
 import { ExamCard } from "@/components/exam-card";
 import type { AnswerKey, Comment, ExamPaper } from "@/lib/supabase/types";
+import type { Metadata } from "next";
+
+// generateMetadata와 페이지 본문이 같은 id로 중복 조회하지 않도록 캐싱
+const getPaper = cache(async (id: string) => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("exam_papers")
+    .select("*, subjects(*), exam_types(*)")
+    .eq("id", id)
+    .single();
+  return data as ExamPaper | null;
+});
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const paper = await getPaper(id);
+  if (!paper) return {};
+
+  const subject = paper.subjects;
+  const examType = paper.exam_types;
+  const title = `${paper.title} 기출문제`;
+  const description = `${examType?.name ?? ""} ${paper.level ?? ""} ${paper.year}년 ${subject?.name ?? ""} 기출문제를 정답과 함께 무료로 열람·다운로드하세요.`
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return { title, description };
+}
 
 export default async function PaperDetailPage({
   params,
@@ -21,17 +53,13 @@ export default async function PaperDetailPage({
   const { level } = await searchParams;
   const supabase = await createClient();
 
-  const { data: paper } = await supabase
-    .from("exam_papers")
-    .select("*, subjects(*), exam_types(*)")
-    .eq("id", id)
-    .single();
+  const paper = await getPaper(id);
 
   if (!paper) {
     notFound();
   }
 
-  const typedPaper = paper as ExamPaper;
+  const typedPaper = paper;
 
   let answerKeyQuery = supabase
     .from("answer_keys")

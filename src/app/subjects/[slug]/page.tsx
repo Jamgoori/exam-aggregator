@@ -1,9 +1,37 @@
+import { cache } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { levelColor, compareLevels } from "@/lib/level-colors";
 import type { ExamPaper, Subject } from "@/lib/supabase/types";
+import type { Metadata } from "next";
+
+// generateMetadata와 페이지 본문이 같은 slug로 중복 조회하지 않도록 캐싱
+const getSubject = cache(async (slug: string) => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("subjects")
+    .select("*")
+    .eq("slug", slug)
+    .single();
+  return data as Subject | null;
+});
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const subject = await getSubject(slug);
+  if (!subject) return {};
+
+  return {
+    title: `${subject.name} 기출문제 모음`,
+    description: `${subject.name} 과목의 공무원 기출문제를 연도별·급수별로 모아봤어요.`,
+  };
+}
 
 export default async function SubjectPage({
   params,
@@ -16,11 +44,7 @@ export default async function SubjectPage({
   const { level } = await searchParams;
   const supabase = await createClient();
 
-  const { data: subject } = await supabase
-    .from("subjects")
-    .select("*")
-    .eq("slug", slug)
-    .single();
+  const subject = await getSubject(slug);
 
   if (!subject) {
     notFound();
@@ -29,7 +53,7 @@ export default async function SubjectPage({
   const { data: papers } = await supabase
     .from("exam_papers")
     .select("*, subjects(*), exam_types(*)")
-    .eq("subject_id", (subject as Subject).id)
+    .eq("subject_id", subject.id)
     .order("year", { ascending: false })
     .order("round", { ascending: false });
 
@@ -48,7 +72,7 @@ export default async function SubjectPage({
           ← 홈으로
         </Link>
         <h1 className="mt-2 text-3xl font-semibold">
-          {(subject as Subject).name}
+          {subject.name}
         </h1>
       </div>
 
