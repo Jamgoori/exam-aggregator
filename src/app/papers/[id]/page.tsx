@@ -156,24 +156,31 @@ export default async function PaperDetailPage({
           )}
         </div>
 
-        <div>
-          <h1 className="text-3xl font-bold leading-snug">
-            {typedPaper.title}
-          </h1>
-          <p className="mt-2 text-sm text-zinc-500">
-            {examType?.name}
-            {examType?.name ? " · " : ""}
-            {typedPaper.year}년
-            {typedPaper.round > 1 ? ` · ${typedPaper.round}회차` : ""}
-            {typedPaper.question_count
-              ? ` · ${typedPaper.question_count}문제`
-              : ""}
-          </p>
-          {typedPaper.tags.length > 0 && (
-            <p className="mt-1 text-sm text-zinc-400">
-              {typedPaper.tags.map((tag) => `#${tag}`).join(" ")}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold leading-snug">
+              {typedPaper.title}
+            </h1>
+            <p className="mt-2 text-sm text-zinc-500">
+              {examType?.name}
+              {examType?.name ? " · " : ""}
+              {typedPaper.year}년
+              {typedPaper.round > 1 ? ` · ${typedPaper.round}회차` : ""}
+              {typedPaper.question_count
+                ? ` · ${typedPaper.question_count}문제`
+                : ""}
             </p>
-          )}
+            {typedPaper.tags.length > 0 && (
+              <p className="mt-1 text-sm text-zinc-400">
+                {typedPaper.tags.map((tag) => `#${tag}`).join(" ")}
+              </p>
+            )}
+          </div>
+          <BookmarkButton
+            paperId={typedPaper.id}
+            initialBookmarked={isBookmarked}
+            loggedIn={loggedIn}
+          />
         </div>
       </div>
 
@@ -196,11 +203,6 @@ export default async function PaperDetailPage({
           >
             <Download size={20} />
           </a>
-          <BookmarkButton
-            paperId={typedPaper.id}
-            initialBookmarked={isBookmarked}
-            loggedIn={loggedIn}
-          />
         </div>
 
         {typedAnswerKey && answerKeyFileUrl && (
