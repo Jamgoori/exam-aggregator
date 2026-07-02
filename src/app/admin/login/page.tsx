@@ -42,7 +42,7 @@ export default async function LoginPage({
         )}
         <button
           type="submit"
-          className="rounded bg-zinc-900 px-4 py-2 text-white hover:bg-zinc-700"
+          className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
         >
           로그인
         </button>

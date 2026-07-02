@@ -51,14 +51,14 @@ export default async function SignupPage({
         {error && <p className="text-sm text-red-600">{error}</p>}
         <button
           type="submit"
-          className="rounded bg-zinc-900 px-4 py-2 text-white hover:bg-zinc-700"
+          className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
         >
           가입하기
         </button>
       </form>
       <p className="text-sm text-zinc-500">
         이미 계정이 있나요?{" "}
-        <Link href="/login" className="underline">
+        <Link href="/login" className="text-blue-600 underline-offset-2 hover:underline">
           로그인
         </Link>
       </p>

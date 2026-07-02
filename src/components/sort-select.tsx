@@ -18,6 +18,7 @@ export function SortSelect() {
       onChange={(e) => {
         const params = new URLSearchParams(searchParams.toString());
         params.set("sort", e.target.value);
+        params.delete("page");
         router.push(`/?${params.toString()}`);
       }}
       className="rounded-md border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600"

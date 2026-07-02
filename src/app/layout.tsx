@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "공무원 기출문제 아카이브",
+  title: "공기모아 - 공무원 기출문제 자료실",
   description: "공무원 시험 기출문제 아그리게이터",
 };
 
@@ -44,7 +44,7 @@ export default async function RootLayout({
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full">
         <SiteHeader user={headerUser} />
         {children}
         <Analytics />

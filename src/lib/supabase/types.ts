@@ -8,6 +8,7 @@ export type Subject = {
 export type ExamType = {
   id: string;
   name: string;
+  display_order: number;
 };
 
 export type ExamPaper = {
@@ -38,6 +39,7 @@ export type Comment = {
   nickname: string;
   content: string;
   created_at: string;
+  updated_at: string | null;
 };
 
 export type DifficultyRating = {
@@ -46,5 +48,18 @@ export type DifficultyRating = {
   user_id: string | null;
   guest_token: string | null;
   score: number;
+  created_at: string;
+};
+
+export type AnswerKey = {
+  id: string;
+  exam_type_id: string;
+  year: number;
+  level: string | null;
+  round: number;
+  file_path: string;
+  file_name: string;
+  file_size: number | null;
+  uploaded_by: string | null;
   created_at: string;
 };

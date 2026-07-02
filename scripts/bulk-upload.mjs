@@ -27,6 +27,8 @@ const SUBJECT_ALIASES = {
   행정학: "행정학개론",
   국사: "한국사",
   헌법학: "헌법",
+  // 옛날 연도 파일은 가운뎃점 U+00B7(·), DB는 U+318D(ㆍ) 사용 -> 같은 과목으로 통일
+  "직업상담·심리학개론": "직업상담ㆍ심리학개론",
 };
 
 async function main() {
@@ -105,11 +107,15 @@ async function main() {
 
   for (const entry of pdfFiles) {
     const filename = entry.name;
-    // "국어(지방9급)-D.pdf" -> "국어" : 괄호 설명과 문제책형(-A/-B/-C/-D) 접미사를 제거
+    // 파일명에서 과목명만 추출. 아래 3종류 포맷을 모두 처리한다.
+    //   "국어(지방9급)-D.pdf"         -> "국어"  (괄호 설명 + -A/-B/-C/-D)
+    //   "250405 국가 9급 국어-나.pdf" -> "국어"  (YYMMDD 국가 N급 접두사 + -가/-나)
+    //   "국어(9)-나.pdf" / "국어-2.pdf" -> "국어"  ((9) 표기, -숫자/-가/-나 책형)
     const baseName = filename
       .replace(/\.pdf$/i, "")
-      .replace(/\([^)]*\)/g, "")
-      .replace(/-[A-Za-z]$/, "")
+      .replace(/^\d{6}\s+\S+\s+\d+급\s+/, "") // "250405 국가 9급 " 접두사 제거
+      .replace(/\([^)]*\)/g, "") // "(9)", "(지방9급)" 등 괄호 제거
+      .replace(/[-_][가-힣A-Za-z0-9]$/, "") // 끝의 책형 접미사(-가/-나/-2/-D 등) 제거
       .trim();
     const subjectName = SUBJECT_ALIASES[baseName] ?? baseName;
     const subject = subjects.find((s) => s.name === subjectName);

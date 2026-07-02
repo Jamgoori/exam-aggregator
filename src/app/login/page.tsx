@@ -40,14 +40,14 @@ export default async function LoginPage({
         {message && <p className="text-sm text-green-600">{message}</p>}
         <button
           type="submit"
-          className="rounded bg-zinc-900 px-4 py-2 text-white hover:bg-zinc-700"
+          className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
         >
           로그인
         </button>
       </form>
       <p className="text-sm text-zinc-500">
         계정이 없나요?{" "}
-        <Link href="/signup" className="underline">
+        <Link href="/signup" className="text-blue-600 underline-offset-2 hover:underline">
           회원가입
         </Link>
       </p>

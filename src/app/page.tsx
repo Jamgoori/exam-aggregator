@@ -1,26 +1,36 @@
 import Link from "next/link";
-import { Search, FileStack, TrendingUp, Download } from "lucide-react";
+import { Search, FileStack, Download } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { SortSelect } from "@/components/sort-select";
-import type { ExamPaper, ExamType } from "@/lib/supabase/types";
+import { SubjectIndexTabs } from "@/components/subject-index-tabs";
+import { Pagination } from "@/components/pagination";
+import type { ExamPaper, ExamType, Subject } from "@/lib/supabase/types";
+
+const PAGE_SIZE = 24;
 
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ type?: string; sort?: string; q?: string }>;
+  searchParams: Promise<{
+    type?: string;
+    sort?: string;
+    q?: string;
+    page?: string;
+  }>;
 }) {
-  const { type, sort = "latest", q } = await searchParams;
+  const { type, sort = "latest", q, page } = await searchParams;
+  const currentPage = Math.max(1, Number(page) || 1);
   const supabase = await createClient();
 
-  const { data: examTypes } = await supabase
-    .from("exam_types")
-    .select("*")
-    .order("name");
+  const [{ data: examTypes }, { data: subjects }] = await Promise.all([
+    supabase.from("exam_types").select("*").order("display_order"),
+    supabase.from("subjects").select("*").order("name"),
+  ]);
 
   let query = supabase
     .from("exam_papers")
-    .select("*, subjects(*), exam_types!inner(*)");
+    .select("*, subjects(*), exam_types!inner(*)", { count: "exact" });
 
   if (type) {
     query = query.eq("exam_types.name", type);
@@ -37,20 +47,16 @@ export default async function Home({
       .order("round", { ascending: false });
   }
 
-  const { data: papers } = await query;
+  const from = (currentPage - 1) * PAGE_SIZE;
+  query = query.range(from, from + PAGE_SIZE - 1);
 
-  const [{ count: totalCount }, { count: monthCount }, { data: downloadRows }] =
-    await Promise.all([
-      supabase.from("exam_papers").select("*", { count: "exact", head: true }),
-      supabase
-        .from("exam_papers")
-        .select("*", { count: "exact", head: true })
-        .gte(
-          "created_at",
-          new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString(),
-        ),
-      supabase.from("exam_papers").select("download_count"),
-    ]);
+  const { data: papers, count: filteredCount } = await query;
+  const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
+
+  const [{ count: totalCount }, { data: downloadRows }] = await Promise.all([
+    supabase.from("exam_papers").select("*", { count: "exact", head: true }),
+    supabase.from("exam_papers").select("download_count"),
+  ]);
 
   const totalDownloads = (downloadRows ?? []).reduce(
     (sum, row) => sum + (row.download_count ?? 0),
@@ -59,7 +65,7 @@ export default async function Home({
   const latestYear = (papers as ExamPaper[] | null)?.[0]?.year;
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-10 px-4 py-12">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 py-12">
       <section className="flex flex-col items-start gap-4">
         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600">
           {latestYear
@@ -77,8 +83,8 @@ export default async function Home({
         </p>
 
         <form action="/" method="GET" className="w-full max-w-md">
-          <div className="flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2">
-            <Search size={16} className="text-zinc-400" />
+          <div className="flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
+            <Search size={16} className="text-blue-400" />
             <input
               name="q"
               defaultValue={q}
@@ -90,15 +96,11 @@ export default async function Home({
 
         <div className="flex flex-wrap gap-3 text-sm">
           <div className="flex items-center gap-2 rounded-full border border-zinc-200 px-4 py-2">
-            <FileStack size={16} className="text-zinc-400" />총 자료 수{" "}
+            <FileStack size={16} className="text-blue-500" />총 자료 수{" "}
             <strong>{totalCount ?? 0}건</strong>
           </div>
           <div className="flex items-center gap-2 rounded-full border border-zinc-200 px-4 py-2">
-            <TrendingUp size={16} className="text-zinc-400" />
-            이번 달 업로드 <strong>{monthCount ?? 0}건</strong>
-          </div>
-          <div className="flex items-center gap-2 rounded-full border border-zinc-200 px-4 py-2">
-            <Download size={16} className="text-zinc-400" />
+            <Download size={16} className="text-blue-500" />
             누적 다운로드 <strong>{totalDownloads}회</strong>
           </div>
         </div>
@@ -111,8 +113,8 @@ export default async function Home({
               href="/"
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 !type
-                  ? "bg-zinc-900 text-white"
-                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                  ? "bg-blue-600 text-white"
+                  : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
               }`}
             >
               전체
@@ -123,8 +125,8 @@ export default async function Home({
                 href={`/?type=${encodeURIComponent(t.name)}`}
                 className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                   type === t.name
-                    ? "bg-zinc-900 text-white"
-                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                    ? "bg-blue-600 text-white"
+                    : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
                 }`}
               >
                 {t.name}
@@ -134,11 +136,13 @@ export default async function Home({
           <SortSelect />
         </div>
 
+        <SubjectIndexTabs subjects={(subjects ?? []) as Subject[]} />
+
         <p className="text-sm text-zinc-500">
-          총 {(papers as ExamPaper[] | null)?.length ?? 0}개의 자료
+          총 {filteredCount ?? 0}개의 자료
         </p>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {((papers as ExamPaper[] | null) ?? []).map((paper) => (
             <ExamCard key={paper.id} paper={paper} />
           ))}
@@ -148,6 +152,12 @@ export default async function Home({
             </p>
           )}
         </div>
+
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          params={{ type, sort: sort === "latest" ? undefined : sort, q }}
+        />
       </section>
     </div>
   );

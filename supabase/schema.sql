@@ -11,11 +11,14 @@ create table if not exists subjects (
   display_order int not null default 0
 );
 
--- 시험 직렬 (국가직, 지방직, 서울시, 법원직, 경찰직 ...) - 급수는 exam_papers.level에 따로 저장
+-- 시험 직렬 (국가직, 지방직, 서울시, 경찰, 소방, 해경, 국회직, 법원직 ...) - 급수는 exam_papers.level에 따로 저장
 create table if not exists exam_types (
   id uuid primary key default gen_random_uuid(),
-  name text unique not null
+  name text unique not null,
+  display_order int not null default 0
 );
+
+alter table exam_types add column if not exists display_order int not null default 0;
 
 -- 실제 업로드되는 기출문제 PDF 한 건 = 특정 연도/시험/과목의 문제지
 create table if not exists exam_papers (
@@ -74,14 +77,31 @@ grant execute on function is_admin() to anon, authenticated;
 
 -- 댓글 (회원/비회원 모두 작성 가능). auth.users는 공개 API로 조인이 안 되므로
 -- nickname을 작성 시점에 그대로 저장해둔다 (회원이면 서버에서 user_metadata.nickname을 읽어 채움).
+-- 비회원 댓글은 password_hash(bcrypt)로 수정/삭제 권한을 확인한다.
 create table if not exists comments (
   id uuid primary key default gen_random_uuid(),
   paper_id uuid not null references exam_papers(id) on delete cascade,
   user_id uuid references auth.users(id) on delete cascade,
   nickname text not null,
   content text not null,
-  created_at timestamptz not null default now()
+  password_hash text,                 -- 비회원 댓글만 사용 (bcrypt 해시)
+  created_at timestamptz not null default now(),
+  updated_at timestamptz
 );
+
+alter table comments add column if not exists password_hash text;
+alter table comments add column if not exists updated_at timestamptz;
+
+-- 길이 제한 (닉네임 10자, 내용 1~2000자) — DB 레벨에서도 강제
+do $$ begin
+  alter table comments add constraint comments_nickname_len
+    check (char_length(nickname) between 1 and 10);
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table comments add constraint comments_content_len
+    check (char_length(content) between 1 and 2000);
+exception when duplicate_object then null; end $$;
 
 create index if not exists comments_paper_idx on comments(paper_id, created_at);
 
@@ -105,12 +125,29 @@ create unique index if not exists difficulty_ratings_user_unique
 create unique index if not exists difficulty_ratings_guest_unique
   on difficulty_ratings(paper_id, guest_token) where guest_token is not null;
 
+-- 정답지: 과목별이 아니라 "그 시험(연도+직렬+급수+회차) 전체"에 1개만 업로드해서
+-- 해당 조건에 맞는 모든 exam_papers 상세페이지에서 공유해서 보여준다.
+create table if not exists answer_keys (
+  id uuid primary key default gen_random_uuid(),
+  exam_type_id uuid not null references exam_types(id) on delete restrict,
+  year int not null,
+  level text,
+  round int not null default 1,
+  file_path text not null,
+  file_name text not null,
+  file_size bigint,
+  uploaded_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  unique nulls not distinct (exam_type_id, year, level, round)
+);
+
 -- RLS
 alter table subjects enable row level security;
 alter table exam_types enable row level security;
 alter table exam_papers enable row level security;
 alter table comments enable row level security;
 alter table difficulty_ratings enable row level security;
+alter table answer_keys enable row level security;
 
 -- 누구나 읽기 가능 (공개 사이트)
 drop policy if exists "public read subjects" on subjects;
@@ -138,22 +175,35 @@ drop policy if exists "admin delete exam_papers" on exam_papers;
 create policy "admin delete exam_papers" on exam_papers
   for delete to authenticated using (is_admin());
 
--- 댓글: 누구나 읽기, 본인 글만 작성(회원은 user_id=본인, 비회원은 user_id=null), 삭제는 작성자 본인 또는 관리자
+-- 정답지: 누구나 읽기, 관리자만 쓰기
+drop policy if exists "public read answer_keys" on answer_keys;
+create policy "public read answer_keys" on answer_keys for select using (true);
+
+drop policy if exists "admin insert answer_keys" on answer_keys;
+create policy "admin insert answer_keys" on answer_keys
+  for insert to authenticated with check (is_admin());
+
+drop policy if exists "admin update answer_keys" on answer_keys;
+create policy "admin update answer_keys" on answer_keys
+  for update to authenticated using (is_admin());
+
+drop policy if exists "admin delete answer_keys" on answer_keys;
+create policy "admin delete answer_keys" on answer_keys
+  for delete to authenticated using (is_admin());
+
+-- 댓글: 누구나 읽기(단 password_hash는 절대 노출 안 됨). 쓰기(insert/update/delete)는
+-- 전부 서버 액션(service_role)에서 비밀번호/세션 검증 후 수행하므로, anon/authenticated에는
+-- 쓰기 권한을 주지 않고 select도 컬럼 단위로 제한한다.
 drop policy if exists "public read comments" on comments;
 create policy "public read comments" on comments for select using (true);
 
 drop policy if exists "insert own comments" on comments;
-create policy "insert own comments" on comments
-  for insert to anon, authenticated
-  with check (
-    (auth.uid() is not null and user_id = auth.uid()) or
-    (auth.uid() is null and user_id is null)
-  );
-
 drop policy if exists "delete own or admin comments" on comments;
-create policy "delete own or admin comments" on comments
-  for delete to authenticated
-  using (user_id = auth.uid() or is_admin());
+
+-- password_hash 컬럼이 공개 API로 새어나가지 않도록 컬럼 단위 권한으로 제한
+revoke all on comments from anon, authenticated;
+grant select (id, paper_id, user_id, nickname, content, created_at, updated_at)
+  on comments to anon, authenticated;
 
 -- 난이도 평가: 누구나 읽기, 본인 명의로만 작성 (문제지당 1회는 unique index로 강제)
 drop policy if exists "public read ratings" on difficulty_ratings;
@@ -195,14 +245,23 @@ on conflict (slug) do nothing;
 update exam_types set name = '국가직' where name = '국가직 9급';
 update exam_types set name = '지방직' where name = '지방직 9급';
 update exam_types set name = '서울시' where name = '서울시 9급';
+-- 예전에 "경찰직"으로 넣었던 경우 "경찰"로 정리
+update exam_types set name = '경찰' where name = '경찰직';
 
-insert into exam_types (name) values
-  ('국가직'),
-  ('지방직'),
-  ('서울시'),
-  ('법원직'),
-  ('경찰직')
-on conflict (name) do nothing;
+insert into exam_types (name, display_order) values
+  ('국가직', 1),
+  ('지방직', 2),
+  ('서울시', 3),
+  ('경찰', 4),
+  ('소방', 5),
+  ('해경', 6),
+  ('국회직', 7),
+  ('법원직', 8),
+  ('기상직', 9),
+  ('지역인재', 10),
+  ('계리직', 11),
+  ('간호직', 12)
+on conflict (name) do update set display_order = excluded.display_order;
 
 -- 관리자 이메일 (본인 계정으로 바꿔서 실행하세요)
 insert into admins (email) values ('lks2354@gmail.com')

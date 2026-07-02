@@ -1,22 +1,20 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Download } from "lucide-react";
+import { Download, ExternalLink } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { subjectColor } from "@/lib/subject-colors";
 import { formatCount, formatFileSize } from "@/lib/format";
-import { postComment } from "@/app/papers/actions";
 import { DifficultyRating } from "@/components/difficulty-rating";
-import type { Comment, ExamPaper } from "@/lib/supabase/types";
+import { CommentsSection } from "@/components/comments-section";
+import { ExamCard } from "@/components/exam-card";
+import type { AnswerKey, Comment, ExamPaper } from "@/lib/supabase/types";
 
 export default async function PaperDetailPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
-  const { error } = await searchParams;
   const supabase = await createClient();
 
   const { data: paper } = await supabase
@@ -31,38 +29,71 @@ export default async function PaperDetailPage({
 
   const typedPaper = paper as ExamPaper;
 
-  const [{ data: comments }, { data: ratings }, userResult] = await Promise.all([
-    supabase
-      .from("comments")
-      .select("*")
-      .eq("paper_id", id)
-      .order("created_at", { ascending: false }),
-    supabase.from("difficulty_ratings").select("score").eq("paper_id", id),
-    supabase.auth.getUser(),
-  ]);
+  let answerKeyQuery = supabase
+    .from("answer_keys")
+    .select("*")
+    .eq("exam_type_id", typedPaper.exam_type_id)
+    .eq("year", typedPaper.year)
+    .eq("round", typedPaper.round);
+  answerKeyQuery = typedPaper.level
+    ? answerKeyQuery.eq("level", typedPaper.level)
+    : answerKeyQuery.is("level", null);
+
+  const [{ data: comments }, { data: ratings }, userResult, { data: answerKey }] =
+    await Promise.all([
+      supabase
+        .from("comments")
+        .select("id, paper_id, user_id, nickname, content, created_at, updated_at")
+        .eq("paper_id", id)
+        .order("created_at", { ascending: false }),
+      supabase.from("difficulty_ratings").select("score").eq("paper_id", id),
+      supabase.auth.getUser(),
+      answerKeyQuery.maybeSingle(),
+    ]);
+
+  const { data: subjectPapers } = typedPaper.subject_id
+    ? await supabase
+        .from("exam_papers")
+        .select("*, subjects(*), exam_types(*)")
+        .eq("subject_id", typedPaper.subject_id)
+        .order("year", { ascending: false })
+        .order("round", { ascending: false })
+    : { data: null };
 
   const scores = (ratings ?? []).map((r) => r.score as number);
   const averageScore =
     scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-  const loggedIn = !!userResult.data.user;
+  const currentUser = userResult.data.user;
+  const loggedIn = !!currentUser;
+  const { data: isAdminData } = loggedIn
+    ? await supabase.rpc("is_admin")
+    : { data: false };
+  const isAdmin = isAdminData === true;
 
   const subject = typedPaper.subjects;
   const examType = typedPaper.exam_types;
   const fileSize = formatFileSize(typedPaper.file_size);
 
-  return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-8 px-4 py-12">
-      <div>
-        {subject && (
-          <Link
-            href={`/subjects/${subject.slug}`}
-            className="text-sm text-zinc-500 underline"
-          >
-            ← {subject.name} 목록으로
-          </Link>
-        )}
+  // "열기"는 브라우저 내장 뷰어로 바로 보여주는 원본 URL (다운로드 카운트 미반영),
+  // "다운로드"는 /download 라우트를 거쳐 실제 파일 저장 + 카운트 반영
+  const { data: paperFileUrl } = supabase.storage
+    .from("exam-papers")
+    .getPublicUrl(typedPaper.file_path);
+  const typedAnswerKey = answerKey as AnswerKey | null;
+  const answerKeyFileUrl = typedAnswerKey
+    ? supabase.storage.from("exam-papers").getPublicUrl(typedAnswerKey.file_path)
+        .data.publicUrl
+    : null;
 
-        <div className="mt-3 flex items-center gap-2">
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-4 py-12">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-10">
+      <div className="flex flex-col gap-4">
+        <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600">
+          ← 홈으로
+        </Link>
+
+        <div className="flex flex-wrap items-center gap-2">
           {subject && (
             <span
               className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(subject.slug)}`}
@@ -77,32 +108,75 @@ export default async function PaperDetailPage({
           )}
         </div>
 
-        <h1 className="mt-2 text-2xl font-semibold">{typedPaper.title}</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          {examType?.name}
-          {examType?.name ? " · " : ""}
-          {typedPaper.year}년
-          {typedPaper.round > 1 ? ` · ${typedPaper.round}회차` : ""}
-          {typedPaper.question_count ? ` · ${typedPaper.question_count}문제` : ""}
-        </p>
-        {typedPaper.tags.length > 0 && (
-          <p className="mt-1 text-sm text-zinc-400">
-            {typedPaper.tags.map((tag) => `#${tag}`).join(" ")}
+        <div>
+          <h1 className="text-3xl font-bold leading-snug">
+            {typedPaper.title}
+          </h1>
+          <p className="mt-2 text-sm text-zinc-500">
+            {examType?.name}
+            {examType?.name ? " · " : ""}
+            {typedPaper.year}년
+            {typedPaper.round > 1 ? ` · ${typedPaper.round}회차` : ""}
+            {typedPaper.question_count
+              ? ` · ${typedPaper.question_count}문제`
+              : ""}
           </p>
-        )}
+          {typedPaper.tags.length > 0 && (
+            <p className="mt-1 text-sm text-zinc-400">
+              {typedPaper.tags.map((tag) => `#${tag}`).join(" ")}
+            </p>
+          )}
+        </div>
       </div>
 
-      <a
-        href={`/download/${typedPaper.id}`}
-        className="flex items-center justify-center gap-2 rounded-lg bg-zinc-900 px-4 py-3 font-medium text-white hover:bg-zinc-700"
-      >
-        <Download size={18} />
-        PDF 다운로드
-        <span className="text-sm text-zinc-300">
-          (다운로드 {formatCount(typedPaper.download_count)}회
-          {fileSize ? ` · ${fileSize}` : ""})
-        </span>
-      </a>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-stretch gap-2">
+          <a
+            href={paperFileUrl.publicUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-4 text-lg font-medium text-white hover:bg-blue-700"
+          >
+            <ExternalLink size={20} />
+            문제 열기
+          </a>
+          <a
+            href={`/download/${typedPaper.id}`}
+            aria-label="문제 다운로드"
+            title="문제 다운로드"
+            className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+          >
+            <Download size={20} />
+          </a>
+        </div>
+
+        {typedAnswerKey && answerKeyFileUrl && (
+          <div className="flex items-stretch gap-2">
+            <a
+              href={answerKeyFileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 font-medium text-blue-700 hover:bg-blue-100"
+            >
+              <ExternalLink size={18} />
+              정답 열기
+            </a>
+            <a
+              href={`/download/answer/${typedAnswerKey.id}`}
+              aria-label="정답 다운로드"
+              title="정답 다운로드"
+              className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+            >
+              <Download size={18} />
+            </a>
+          </div>
+        )}
+
+        <p className="mt-1 text-xs text-zinc-400">
+          다운로드 {formatCount(typedPaper.download_count)}회
+          {fileSize ? ` · ${fileSize}` : ""}
+        </p>
+      </div>
 
       <DifficultyRating
         paperId={typedPaper.id}
@@ -111,56 +185,27 @@ export default async function PaperDetailPage({
         loggedIn={loggedIn}
       />
 
-      <section className="flex flex-col gap-4">
-        <h2 className="font-semibold">댓글 {comments?.length ?? 0}개</h2>
+      <CommentsSection
+        paperId={typedPaper.id}
+        comments={(comments ?? []) as Comment[]}
+        currentUserId={currentUser?.id ?? null}
+        loggedIn={loggedIn}
+        isAdmin={isAdmin}
+      />
+      </div>
 
-        <form action={postComment} className="flex flex-col gap-2">
-          <input type="hidden" name="paper_id" value={typedPaper.id} />
-          {!loggedIn && (
-            <input
-              name="nickname"
-              placeholder="닉네임"
-              required
-              className="rounded border border-zinc-300 px-3 py-2 text-sm"
-            />
-          )}
-          <textarea
-            name="content"
-            placeholder="이 시험에 대한 의견을 남겨주세요"
-            required
-            rows={3}
-            className="rounded border border-zinc-300 px-3 py-2 text-sm"
-          />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            className="self-end rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
-          >
-            댓글 등록
-          </button>
-        </form>
-
-        <div className="flex flex-col divide-y divide-zinc-100">
-          {((comments ?? []) as Comment[]).length === 0 && (
-            <p className="py-8 text-center text-sm text-zinc-500">
-              아직 댓글이 없어요. 첫 댓글을 남겨보세요.
-            </p>
-          )}
-          {((comments ?? []) as Comment[]).map((comment) => (
-            <div key={comment.id} className="flex flex-col gap-1 py-3">
-              <div className="flex items-baseline gap-2">
-                <span className="text-sm font-medium">{comment.nickname}</span>
-                <span className="text-xs text-zinc-400">
-                  {new Date(comment.created_at).toLocaleDateString("ko-KR")}
-                </span>
-              </div>
-              <p className="text-sm text-zinc-700 whitespace-pre-wrap">
-                {comment.content}
-              </p>
-            </div>
-          ))}
+      {subject && (subjectPapers as ExamPaper[] | null)?.length ? (
+        <div className="flex flex-col gap-4 border-t border-zinc-100 pt-10">
+          <h2 className="text-lg font-semibold">
+            {subject.name} 기출문제 목록
+          </h2>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {(subjectPapers as ExamPaper[]).map((p) => (
+              <ExamCard key={p.id} paper={p} isCurrent={p.id === typedPaper.id} />
+            ))}
+          </div>
         </div>
-      </section>
+      ) : null}
     </div>
   );
 }

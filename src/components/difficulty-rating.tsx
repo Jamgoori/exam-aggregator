@@ -27,8 +27,11 @@ export function DifficultyRating({
   loggedIn: boolean;
 }) {
   const [message, setMessage] = useState<string | null>(null);
-  const [voted, setVoted] = useState(false);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [hovered, setHovered] = useState<number | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const displayScore = hovered ?? selected ?? 0;
 
   function vote(score: number) {
     startTransition(async () => {
@@ -37,7 +40,7 @@ export function DifficultyRating({
       if (result.error) {
         setMessage(result.error);
       } else {
-        setVoted(true);
+        setSelected(score);
         setMessage("평가해주셔서 감사해요.");
       }
     });
@@ -52,17 +55,23 @@ export function DifficultyRating({
           {voteCount}명 참여
         </span>
       </div>
-      <div className="flex gap-1">
+      <div className="flex gap-1" onMouseLeave={() => setHovered(null)}>
         {[1, 2, 3, 4, 5].map((score) => (
           <button
             key={score}
             type="button"
-            disabled={pending || voted}
+            disabled={pending || selected !== null}
             onClick={() => vote(score)}
+            onMouseEnter={() => setHovered(score)}
             aria-label={`난이도 ${score}점`}
-            className="text-zinc-300 hover:text-amber-400 disabled:cursor-default"
+            className={`disabled:cursor-default ${
+              score <= displayScore ? "text-amber-400" : "text-zinc-300"
+            }`}
           >
-            <Star size={22} fill={voted ? "currentColor" : "none"} />
+            <Star
+              size={22}
+              fill={score <= displayScore ? "currentColor" : "none"}
+            />
           </button>
         ))}
       </div>

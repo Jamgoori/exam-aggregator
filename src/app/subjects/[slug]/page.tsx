@@ -30,17 +30,17 @@ export default async function SubjectPage({
     .order("round", { ascending: false });
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-12">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-12">
       <div>
-        <Link href="/subjects" className="text-sm text-zinc-500 underline">
-          ← 전체 과목
+        <Link href="/" className="text-sm text-zinc-500 underline">
+          ← 홈으로
         </Link>
         <h1 className="mt-2 text-3xl font-semibold">
           {(subject as Subject).name}
         </h1>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {((papers ?? []) as ExamPaper[]).length === 0 && (
           <p className="col-span-full py-12 text-center text-zinc-500">
             아직 업로드된 기출문제가 없습니다.
