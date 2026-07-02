@@ -50,6 +50,7 @@ async function checkSignupRateLimit(ip: string | null): Promise<string | null> {
 export async function signUpUser(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
+  const passwordConfirm = String(formData.get("passwordConfirm") ?? "");
   const nickname = String(formData.get("nickname") ?? "").trim();
   const captchaToken = String(formData.get("cf-turnstile-response") ?? "");
 
@@ -61,6 +62,10 @@ export async function signUpUser(formData: FormData) {
     redirect(
       `/signup?error=${encodeURIComponent(`비밀번호는 ${PASSWORD_MIN}자 이상이어야 해요`)}`,
     );
+  }
+
+  if (password !== passwordConfirm) {
+    redirect(`/signup?error=${encodeURIComponent("비밀번호가 일치하지 않아요")}`);
   }
 
   // 사이트 키가 설정된 경우에만 캡차를 요구한다 (로컬 개발 중 Turnstile 미설정 시에는 건너뜀).

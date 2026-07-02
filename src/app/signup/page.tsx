@@ -68,6 +68,19 @@ export default async function SignupPage({
             className="rounded border border-zinc-300 px-3 py-2"
           />
         </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="passwordConfirm" className="text-sm text-zinc-600">
+            비밀번호 확인
+          </label>
+          <input
+            id="passwordConfirm"
+            name="passwordConfirm"
+            type="password"
+            minLength={8}
+            required
+            className="rounded border border-zinc-300 px-3 py-2"
+          />
+        </div>
         {turnstileSiteKey && (
           <div className="cf-turnstile" data-sitekey={turnstileSiteKey} />
         )}
