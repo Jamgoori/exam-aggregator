@@ -32,3 +32,9 @@ select:focus {
   border-color: #2563eb;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
 }
+
+/* Tailwind v4 프리플라이트는 button에 cursor: pointer를 안 넣어줘서(브라우저 기본값은 default)
+   사이트 전체 버튼에서 손모양 커서가 안 보이는 문제가 있었음. 여기서 한 번에 고친다. */
+button:not(:disabled) {
+  cursor: pointer;
+}
