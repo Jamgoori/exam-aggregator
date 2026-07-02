@@ -249,3 +249,44 @@ export async function postRating(
   revalidatePath(`/papers/${paperId}`);
   return { success: true };
 }
+
+export type BookmarkResult = CommentResult & { bookmarked?: boolean };
+
+export async function toggleBookmark(paperId: string): Promise<BookmarkResult> {
+  if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { error: "로그인이 필요해요." };
+
+  const { data: existing } = await supabase
+    .from("bookmarks")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("paper_id", paperId)
+    .maybeSingle();
+
+  if (existing) {
+    const { error } = await supabase
+      .from("bookmarks")
+      .delete()
+      .eq("id", existing.id);
+    if (error) return { error: "즐겨찾기 해제에 실패했어요." };
+
+    revalidatePath(`/papers/${paperId}`);
+    revalidatePath("/mypage");
+    return { success: true, bookmarked: false };
+  }
+
+  const { error } = await supabase
+    .from("bookmarks")
+    .insert({ user_id: user.id, paper_id: paperId });
+  if (error) return { error: "즐겨찾기에 실패했어요." };
+
+  revalidatePath(`/papers/${paperId}`);
+  revalidatePath("/mypage");
+  return { success: true, bookmarked: true };
+}

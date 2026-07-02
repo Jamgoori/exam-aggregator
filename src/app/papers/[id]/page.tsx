@@ -9,6 +9,7 @@ import { formatCount, formatFileSize } from "@/lib/format";
 import { DifficultyRating } from "@/components/difficulty-rating";
 import { CommentsSection } from "@/components/comments-section";
 import { ExamCard } from "@/components/exam-card";
+import { BookmarkButton } from "@/components/bookmark-button";
 import type { AnswerKey, Comment, ExamPaper } from "@/lib/supabase/types";
 import type { Metadata } from "next";
 
@@ -105,6 +106,16 @@ export default async function PaperDetailPage({
     : { data: false };
   const isAdmin = isAdminData === true;
 
+  const { data: bookmarkData } = currentUser
+    ? await supabase
+        .from("bookmarks")
+        .select("id")
+        .eq("user_id", currentUser.id)
+        .eq("paper_id", typedPaper.id)
+        .maybeSingle()
+    : { data: null };
+  const isBookmarked = !!bookmarkData;
+
   const subject = typedPaper.subjects;
   const examType = typedPaper.exam_types;
   const fileSize = formatFileSize(typedPaper.file_size);
@@ -185,6 +196,11 @@ export default async function PaperDetailPage({
           >
             <Download size={20} />
           </a>
+          <BookmarkButton
+            paperId={typedPaper.id}
+            initialBookmarked={isBookmarked}
+            loggedIn={loggedIn}
+          />
         </div>
 
         {typedAnswerKey && answerKeyFileUrl && (

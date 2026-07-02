@@ -25,7 +25,12 @@ export function SiteHeader({
         <div className="flex items-center gap-3">
           {user ? (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-zinc-600">{user.nickname}님</span>
+              <Link
+                href="/mypage"
+                className="text-sm text-zinc-600 hover:text-blue-600 hover:underline"
+              >
+                {user.nickname}님
+              </Link>
               <form action={signOutUser}>
                 <button
                   type="submit"

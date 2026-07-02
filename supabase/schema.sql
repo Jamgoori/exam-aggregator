@@ -265,6 +265,33 @@ $$;
 
 grant execute on function increment_download_count(uuid) to anon, authenticated;
 
+-- 마이페이지 즐겨찾기: 회원이 문제지를 찜해두고 나중에 다시 찾아볼 수 있게 한다.
+-- (추후 CBT 채점 결과/오답노트/시험별 점수도 마이페이지에 같이 들어갈 예정이라
+--  회원 전용 개인화 데이터는 이 테이블처럼 user_id 기준 RLS로 분리해서 쌓아간다.)
+create table if not exists bookmarks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (user_id, paper_id)
+);
+
+create index if not exists bookmarks_user_idx on bookmarks(user_id, created_at desc);
+
+alter table bookmarks enable row level security;
+
+drop policy if exists "select own bookmarks" on bookmarks;
+create policy "select own bookmarks" on bookmarks
+  for select to authenticated using (auth.uid() = user_id);
+
+drop policy if exists "insert own bookmarks" on bookmarks;
+create policy "insert own bookmarks" on bookmarks
+  for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "delete own bookmarks" on bookmarks;
+create policy "delete own bookmarks" on bookmarks
+  for delete to authenticated using (auth.uid() = user_id);
+
 -- 초기 과목 데이터 (필요에 맞게 추가/수정하세요)
 insert into subjects (slug, name, display_order) values
   ('korean', '국어', 1),

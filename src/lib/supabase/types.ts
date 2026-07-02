@@ -52,6 +52,13 @@ export type DifficultyRating = {
   created_at: string;
 };
 
+export type Bookmark = {
+  id: string;
+  user_id: string;
+  paper_id: string;
+  created_at: string;
+};
+
 export type AnswerKey = {
   id: string;
   exam_type_id: string;
