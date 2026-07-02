@@ -23,11 +23,6 @@ export default async function Home({
   const currentPage = Math.max(1, Number(page) || 1);
   const supabase = await createClient();
 
-  const [{ data: examTypes }, { data: subjects }] = await Promise.all([
-    supabase.from("exam_types").select("*").order("display_order"),
-    supabase.from("subjects").select("*").order("name"),
-  ]);
-
   let query = supabase
     .from("exam_papers")
     .select("*, subjects(*), exam_types!inner(*)", { count: "exact" });
@@ -50,13 +45,21 @@ export default async function Home({
   const from = (currentPage - 1) * PAGE_SIZE;
   query = query.range(from, from + PAGE_SIZE - 1);
 
-  const { data: papers, count: filteredCount } = await query;
-  const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
-
-  const [{ count: totalCount }, { data: downloadRows }] = await Promise.all([
+  const [
+    { data: examTypes },
+    { data: subjects },
+    { data: papers, count: filteredCount },
+    { count: totalCount },
+    { data: downloadRows },
+  ] = await Promise.all([
+    supabase.from("exam_types").select("*").order("display_order"),
+    supabase.from("subjects").select("*").order("name"),
+    query,
     supabase.from("exam_papers").select("*", { count: "exact", head: true }),
     supabase.from("exam_papers").select("download_count"),
   ]);
+
+  const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
 
   const totalDownloads = (downloadRows ?? []).reduce(
     (sum, row) => sum + (row.download_count ?? 0),
