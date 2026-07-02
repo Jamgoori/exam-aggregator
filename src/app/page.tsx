@@ -6,23 +6,77 @@ import { SortSelect } from "@/components/sort-select";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
+import { levelColor } from "@/lib/level-colors";
+import { isChoseongQuery, matchesChoseong } from "@/lib/hangul";
 import type { ExamPaper, ExamType, Subject } from "@/lib/supabase/types";
 
 const PAGE_SIZE = 24;
+const LEVELS = ["9급", "7급"];
+
+// PostgREST의 기본 max-rows(1000) 제한 때문에 한 번에 전체 exam_papers를 못 가져오므로
+// 초성 검색 후보를 모을 때는 1000개씩 나눠서 끝까지 가져온다.
+async function fetchAllRows<T>(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
+): Promise<T[]> {
+  const PAGE = 1000;
+  let all: T[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data } = await buildQuery(offset, offset + PAGE - 1);
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < PAGE) break;
+    offset += PAGE;
+  }
+  return all;
+}
+
+function buildHomeHref(params: Record<string, string | undefined>) {
+  const usp = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) usp.set(key, value);
+  }
+  const qs = usp.toString();
+  return qs ? `/?${qs}` : "/";
+}
 
 export default async function Home({
   searchParams,
 }: {
   searchParams: Promise<{
     type?: string;
+    level?: string;
     sort?: string;
     q?: string;
     page?: string;
   }>;
 }) {
-  const { type, sort = "latest", q, page } = await searchParams;
+  const { type, level, sort = "latest", q, page } = await searchParams;
   const currentPage = Math.max(1, Number(page) || 1);
   const supabase = await createClient();
+  const baseParams = { type, level, sort: sort === "latest" ? undefined : sort, q };
+
+  // 초성만 입력된 검색어("ㄱㅇ")는 title이 아니라 초성 변환값으로 매칭해야 해서
+  // 후보 id를 먼저 뽑아 .in()으로 좁힌다. 일반 텍스트 검색은 기존처럼 ilike 사용.
+  const choseongSearch = !!q && isChoseongQuery(q);
+  let choseongMatchedIds: string[] | null = null;
+
+  if (choseongSearch) {
+    const candidates = await fetchAllRows<{ id: string; title: string }>(
+      (from, to) => {
+        let candidateQuery = supabase
+          .from("exam_papers")
+          .select("id, title, exam_types!inner(name)")
+          .range(from, to);
+        if (type) candidateQuery = candidateQuery.eq("exam_types.name", type);
+        if (level) candidateQuery = candidateQuery.eq("level", level);
+        return candidateQuery;
+      },
+    );
+    choseongMatchedIds = candidates
+      .filter((c) => matchesChoseong(c.title, q))
+      .map((c) => c.id);
+  }
 
   let query = supabase
     .from("exam_papers")
@@ -31,7 +85,12 @@ export default async function Home({
   if (type) {
     query = query.eq("exam_types.name", type);
   }
-  if (q) {
+  if (level) {
+    query = query.eq("level", level);
+  }
+  if (choseongSearch) {
+    query = query.in("id", choseongMatchedIds ?? []);
+  } else if (q) {
     query = query.ilike("title", `%${q}%`);
   }
 
@@ -46,19 +105,22 @@ export default async function Home({
   const from = (currentPage - 1) * PAGE_SIZE;
   query = query.range(from, from + PAGE_SIZE - 1);
 
+  const skipMainQuery = choseongSearch && choseongMatchedIds?.length === 0;
+
   const [
     { data: examTypes },
     { data: subjects },
-    { data: papers, count: filteredCount },
+    mainResult,
     { count: totalCount },
     { data: downloadRows },
   ] = await Promise.all([
     supabase.from("exam_types").select("*").order("display_order"),
     supabase.from("subjects").select("*").order("name"),
-    query,
+    skipMainQuery ? Promise.resolve({ data: [], count: 0 }) : query,
     supabase.from("exam_papers").select("*", { count: "exact", head: true }),
     supabase.from("exam_papers").select("download_count"),
   ]);
+  const { data: papers, count: filteredCount } = mainResult;
 
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
 
@@ -104,7 +166,7 @@ export default async function Home({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/"
+              href={buildHomeHref({ ...baseParams, type: undefined })}
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 !type
                   ? "bg-blue-600 text-white"
@@ -116,7 +178,7 @@ export default async function Home({
             {((examTypes ?? []) as ExamType[]).map((t) => (
               <Link
                 key={t.id}
-                href={`/?type=${encodeURIComponent(t.name)}`}
+                href={buildHomeHref({ ...baseParams, type: t.name })}
                 className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                   type === t.name
                     ? "bg-blue-600 text-white"
@@ -130,6 +192,32 @@ export default async function Home({
           <SortSelect />
         </div>
 
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={buildHomeHref({ ...baseParams, level: undefined })}
+            className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+              !level
+                ? "bg-zinc-800 text-white"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+            }`}
+          >
+            전체
+          </Link>
+          {LEVELS.map((lv) => (
+            <Link
+              key={lv}
+              href={buildHomeHref({ ...baseParams, level: lv })}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+                level === lv
+                  ? levelColor(lv)
+                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+              }`}
+            >
+              {lv}
+            </Link>
+          ))}
+        </div>
+
         <SubjectIndexTabs subjects={(subjects ?? []) as Subject[]} />
 
         <p className="text-sm text-zinc-500">
@@ -138,7 +226,7 @@ export default async function Home({
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {((papers as ExamPaper[] | null) ?? []).map((paper) => (
-            <ExamCard key={paper.id} paper={paper} />
+            <ExamCard key={paper.id} paper={paper} linkLevel={level} />
           ))}
           {((papers as ExamPaper[] | null) ?? []).length === 0 && (
             <p className="col-span-full py-12 text-center text-zinc-500">
@@ -150,7 +238,7 @@ export default async function Home({
         <Pagination
           currentPage={currentPage}
           totalPages={totalPages}
-          params={{ type, sort: sort === "latest" ? undefined : sort, q }}
+          params={baseParams}
         />
       </section>
     </div>
