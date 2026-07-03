@@ -88,7 +88,7 @@ export default async function PaperDetailPage({
       .from("comments")
       .select("id, paper_id, user_id, nickname, content, created_at, updated_at")
       .eq("paper_id", id)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: true }),
     supabase.from("difficulty_ratings").select("score").eq("paper_id", id),
     supabase.auth.getUser(),
     answerKeyQuery.maybeSingle(),
