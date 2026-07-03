@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { ChevronLeft, Clock, Trophy, X } from "lucide-react";
+import { ChevronLeft, Clock, Eraser, PenLine, Trophy, X } from "lucide-react";
 import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
 
 function formatDuration(totalSeconds: number) {
@@ -11,24 +11,20 @@ function formatDuration(totalSeconds: number) {
   return `${minutes}분 ${seconds}초`;
 }
 
+const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
+
 export function CbtSolver({
   paperId,
   paperTitle,
   fileUrl,
   totalQuestions,
   choiceCount,
-  subjectName,
-  examTypeName,
-  level,
 }: {
   paperId: string;
   paperTitle: string;
   fileUrl: string;
   totalQuestions: number;
   choiceCount: number;
-  subjectName: string | null;
-  examTypeName: string | null;
-  level: string | null;
 }) {
   const [answers, setAnswers] = useState<(number | null)[]>(
     Array(totalQuestions).fill(null),
@@ -39,10 +35,76 @@ export function CbtSolver({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const startedAtRef = useRef(0);
+  const [penMode, setPenMode] = useState(false);
+  const [penColor, setPenColor] = useState(PEN_COLORS[0]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawingRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     startedAtRef.current = Date.now();
   }, []);
+
+  // PDF 위에 필기하는 캔버스는 iframe(PDF)과 별개 레이어라, PDF를 스크롤/확대해도
+  // 필기 내용은 그 위치를 따라가지 않고 화면에 고정된 채로 남는다 (단순 메모용).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = canvas?.parentElement;
+    if (!canvas || !container) return;
+
+    function resize() {
+      if (!canvas || !container) return;
+      const rect = container.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+    }
+    resize();
+
+    const observer = new ResizeObserver(resize);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  function getCanvasPoint(e: React.PointerEvent<HTMLCanvasElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }
+
+  function handlePenDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!penMode) return;
+    drawingRef.current = true;
+    lastPointRef.current = getCanvasPoint(e);
+  }
+
+  function handlePenMove(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!penMode || !drawingRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    const last = lastPointRef.current;
+    if (!ctx || !last) return;
+    const point = getCanvasPoint(e);
+    ctx.strokeStyle = penColor;
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(last.x, last.y);
+    ctx.lineTo(point.x, point.y);
+    ctx.stroke();
+    lastPointRef.current = point;
+  }
+
+  function handlePenUp() {
+    drawingRef.current = false;
+    lastPointRef.current = null;
+  }
+
+  function clearDrawing() {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
 
   useEffect(() => {
     if (result) return;
@@ -116,11 +178,23 @@ export function CbtSolver({
             {paperTitle}
           </h1>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2">
           <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
             <Clock size={16} />
             {formatDuration(elapsedSeconds)}
           </div>
+          <button
+            type="button"
+            onClick={() => setPenMode((v) => !v)}
+            aria-pressed={penMode}
+            className={`flex items-center justify-center rounded-lg p-1.5 ${
+              penMode
+                ? "bg-blue-600 text-white"
+                : "text-zinc-600 hover:bg-zinc-100"
+            }`}
+          >
+            <PenLine size={18} />
+          </button>
           <button
             type="button"
             onClick={() => setOmrOpen(true)}
@@ -131,20 +205,52 @@ export function CbtSolver({
         </div>
       </header>
 
+      {penMode && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-zinc-200 bg-white px-3 py-1.5">
+          {PEN_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              aria-label="펜 색상"
+              onClick={() => setPenColor(color)}
+              style={{ backgroundColor: color }}
+              className={`h-5 w-5 rounded-full ${
+                penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+              }`}
+            />
+          ))}
+          <button
+            type="button"
+            onClick={clearDrawing}
+            className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
+          >
+            <Eraser size={14} />
+            지우기
+          </button>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1">
+        <div className="relative min-w-0 flex-1">
           <iframe
             src={`https://docs.google.com/gview?url=${encodeURIComponent(fileUrl)}&embedded=true`}
             title={paperTitle}
             className="h-full w-full"
           />
+          <canvas
+            ref={canvasRef}
+            onPointerDown={handlePenDown}
+            onPointerMove={handlePenMove}
+            onPointerUp={handlePenUp}
+            onPointerLeave={handlePenUp}
+            className={`absolute inset-0 h-full w-full touch-none ${
+              penMode ? "pointer-events-auto" : "pointer-events-none"
+            }`}
+          />
         </div>
 
         <OmrPanel
           className="hidden w-[360px] shrink-0 border-l border-zinc-200 lg:flex"
-          subjectName={subjectName}
-          examTypeName={examTypeName}
-          level={level}
           totalQuestions={totalQuestions}
           choiceCount={choiceCount}
           answers={answers}
@@ -165,8 +271,8 @@ export function CbtSolver({
             onClick={() => setOmrOpen(false)}
             className="absolute inset-0 bg-black/40"
           />
-          <div className="relative flex max-h-[85dvh] flex-col rounded-t-2xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
+          <div className="relative flex max-h-[65dvh] flex-col rounded-t-2xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2">
               <h2 className="text-sm font-semibold text-zinc-700">OMR 답안지</h2>
               <button
                 type="button"
@@ -179,9 +285,6 @@ export function CbtSolver({
             </div>
             <OmrPanel
               className="flex min-h-0 flex-1 flex-col"
-              subjectName={subjectName}
-              examTypeName={examTypeName}
-              level={level}
               totalQuestions={totalQuestions}
               choiceCount={choiceCount}
               answers={answers}
@@ -245,9 +348,6 @@ export function CbtSolver({
 
 function OmrPanel({
   className,
-  subjectName,
-  examTypeName,
-  level,
   totalQuestions,
   choiceCount,
   answers,
@@ -259,9 +359,6 @@ function OmrPanel({
   resultByQuestion,
 }: {
   className: string;
-  subjectName: string | null;
-  examTypeName: string | null;
-  level: string | null;
   totalQuestions: number;
   choiceCount: number;
   answers: (number | null)[];
@@ -279,32 +376,15 @@ function OmrPanel({
 
   return (
     <div className={className}>
-      <div className="flex shrink-0 flex-col gap-2 border-b border-zinc-100 px-4 py-3">
-        <div className="flex flex-wrap gap-1.5">
-          {examTypeName && (
-            <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-              {examTypeName}
-            </span>
-          )}
-          {level && (
-            <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-              {level}
-            </span>
-          )}
-          {subjectName && (
-            <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-              {subjectName}
-            </span>
-          )}
-        </div>
+      <div className="shrink-0 border-b border-zinc-100 px-4 py-2">
         <p className="text-sm text-zinc-500">
           {answeredCount}/{totalQuestions} 문항 표기
         </p>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
         <div
-          className={`grid gap-2 ${choiceCount > 4 ? "grid-cols-1" : "grid-cols-2"}`}
+          className={`grid gap-1.5 ${choiceCount > 4 ? "grid-cols-1" : "grid-cols-2"}`}
         >
           {Array.from({ length: totalQuestions }, (_, i) => {
             const questionNumber = i + 1;
@@ -313,7 +393,7 @@ function OmrPanel({
             return (
               <div
                 key={questionNumber}
-                className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${
+                className={`flex items-center gap-2 rounded-lg border px-2 py-1 ${
                   graded
                     ? questionResult?.is_correct
                       ? "border-emerald-200 bg-emerald-50"
@@ -321,7 +401,7 @@ function OmrPanel({
                     : "border-zinc-200"
                 }`}
               >
-                <span className="w-5 shrink-0 text-xs font-medium text-zinc-500">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white">
                   {questionNumber}
                 </span>
                 <div className="flex flex-1 gap-1">
