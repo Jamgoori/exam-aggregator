@@ -169,7 +169,11 @@ export function PdfCanvasViewer({
       } catch (err) {
         if (!cancelled) {
           console.error("PDF 렌더링 실패:", err);
-          setError("PDF를 불러오지 못했어요.");
+          // 모바일에서는 콘솔을 볼 수 없는 경우가 많아, 원인 파악을 위해 실제 에러
+          // 메시지를 화면에도 그대로 보여준다 (임시 진단용 — 원인 확정되면 걷어낼 것).
+          const detail =
+            err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+          setError(`PDF를 불러오지 못했어요.\n${detail}`);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -190,7 +194,9 @@ export function PdfCanvasViewer({
         <p className="p-4 text-center text-sm text-zinc-500">불러오는 중...</p>
       )}
       {error && (
-        <p className="p-4 text-center text-sm text-red-600">{error}</p>
+        <p className="whitespace-pre-wrap p-4 text-center text-sm text-red-600">
+          {error}
+        </p>
       )}
       <div
         ref={containerRef}
