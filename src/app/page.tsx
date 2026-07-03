@@ -12,24 +12,6 @@ import type { ExamPaper, ExamType, Subject } from "@/lib/supabase/types";
 const PAGE_SIZE = 24;
 const LEVELS = ["9급", "7급"];
 
-// PostgREST의 기본 max-rows(1000) 제한 때문에 한 번에 전체 exam_papers를 못 가져오므로
-// 초성 검색 후보를 모을 때는 1000개씩 나눠서 끝까지 가져온다.
-async function fetchAllRows<T>(
-  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null }>,
-): Promise<T[]> {
-  const PAGE = 1000;
-  let all: T[] = [];
-  let offset = 0;
-  for (;;) {
-    const { data } = await buildQuery(offset, offset + PAGE - 1);
-    if (!data || data.length === 0) break;
-    all = all.concat(data);
-    if (data.length < PAGE) break;
-    offset += PAGE;
-  }
-  return all;
-}
-
 function buildHomeHref(params: Record<string, string | undefined>) {
   const usp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -54,30 +36,16 @@ export default async function Home({
   const supabase = await createClient();
   const baseParams = { type, level, q };
 
-  // 초성만 입력된 검색어("ㄱㅇ")는 title이 아니라 초성 변환값으로 매칭해야 해서
-  // 후보 id를 먼저 뽑아 .in()으로 좁힌다. 일반 텍스트 검색은 기존처럼 ilike 사용.
-  const choseongSearch = !!q && isChoseongQuery(q);
-  let choseongMatchedIds: string[] | null = null;
+  // subjects는 7개뿐이라 먼저 가져와서, 초성 검색은 exam_papers 전체를 훑는 대신
+  // 이름이 초성에 매치되는 과목의 id만 뽑아 subject_id로 필터링한다.
+  const { data: subjects } = await supabase.from("subjects").select("*").order("name");
 
-  if (choseongSearch) {
-    const candidates = await fetchAllRows<{ id: string; subjects: { name: string } }>(
-      (from, to) => {
-        let candidateQuery = supabase
-          .from("exam_papers")
-          .select("id, subjects!inner(name), exam_types!inner(name)")
-          .range(from, to);
-        if (type) candidateQuery = candidateQuery.eq("exam_types.name", type);
-        if (level) candidateQuery = candidateQuery.eq("level", level);
-        // 임베디드 리소스(subjects)는 실제로는 단일 객체지만 타입 추론상 배열로 잡혀서 캐스팅한다.
-        return candidateQuery as unknown as PromiseLike<{
-          data: { id: string; subjects: { name: string } }[] | null;
-        }>;
-      },
-    );
-    choseongMatchedIds = candidates
-      .filter((c) => matchesChoseong(c.subjects.name, q))
-      .map((c) => c.id);
-  }
+  const choseongSearch = !!q && isChoseongQuery(q);
+  const choseongMatchedSubjectIds = choseongSearch
+    ? (subjects ?? [])
+        .filter((s) => matchesChoseong(s.name, q))
+        .map((s) => s.id)
+    : null;
 
   let query = supabase
     .from("exam_papers")
@@ -90,7 +58,7 @@ export default async function Home({
     query = query.eq("level", level);
   }
   if (choseongSearch) {
-    query = query.in("id", choseongMatchedIds ?? []);
+    query = query.in("subject_id", choseongMatchedSubjectIds ?? []);
   } else if (q) {
     query = query.ilike("subjects.name", `%${q}%`);
   }
@@ -100,29 +68,22 @@ export default async function Home({
   const from = (currentPage - 1) * PAGE_SIZE;
   query = query.range(from, from + PAGE_SIZE - 1);
 
-  const skipMainQuery = choseongSearch && choseongMatchedIds?.length === 0;
+  const skipMainQuery = choseongSearch && choseongMatchedSubjectIds?.length === 0;
 
   const [
     { data: examTypes },
-    { data: subjects },
     mainResult,
     { count: totalCount },
-    { data: downloadRows },
+    { data: totalDownloads },
   ] = await Promise.all([
     supabase.from("exam_types").select("*").order("display_order"),
-    supabase.from("subjects").select("*").order("name"),
     skipMainQuery ? Promise.resolve({ data: [], count: 0 }) : query,
     supabase.from("exam_papers").select("*", { count: "exact", head: true }),
-    supabase.from("exam_papers").select("download_count"),
+    supabase.rpc("total_download_count"),
   ]);
   const { data: papers, count: filteredCount } = mainResult;
 
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
-
-  const totalDownloads = (downloadRows ?? []).reduce(
-    (sum, row) => sum + (row.download_count ?? 0),
-    0,
-  );
   const latestYear = (papers as ExamPaper[] | null)?.[0]?.year;
 
   return (
@@ -152,7 +113,7 @@ export default async function Home({
           </div>
           <div className="flex items-center gap-2 rounded-full border border-zinc-200 px-4 py-2">
             <Download size={16} className="text-blue-500" />
-            누적 다운로드 <strong>{totalDownloads}회</strong>
+            누적 다운로드 <strong>{totalDownloads ?? 0}회</strong>
           </div>
         </div>
       </section>

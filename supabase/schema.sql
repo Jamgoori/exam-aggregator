@@ -265,6 +265,18 @@ $$;
 
 grant execute on function increment_download_count(uuid) to anon, authenticated;
 
+-- 홈 화면 "누적 다운로드" 집계용: exam_papers가 많아져도 전체 행을 클라이언트로
+-- 내려받지 않고 DB에서 합계만 계산해서 반환한다.
+create or replace function total_download_count()
+returns bigint
+language sql
+stable
+as $$
+  select coalesce(sum(download_count), 0) from exam_papers;
+$$;
+
+grant execute on function total_download_count() to anon, authenticated;
+
 -- 마이페이지 즐겨찾기: 회원이 문제지를 찜해두고 나중에 다시 찾아볼 수 있게 한다.
 -- (추후 CBT 채점 결과/오답노트/시험별 점수도 마이페이지에 같이 들어갈 예정이라
 --  회원 전용 개인화 데이터는 이 테이블처럼 user_id 기준 RLS로 분리해서 쌓아간다.)
