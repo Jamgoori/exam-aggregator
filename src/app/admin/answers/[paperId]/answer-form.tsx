@@ -36,6 +36,7 @@ export function AnswerForm({
         {questionCount && (
           <p className="text-xs text-zinc-400">
             문항 수 {questionCount}개 — 순서대로 {questionCount}개를 입력해주세요.
+            5번 정답이 있으면 CBT 화면에 자동으로 5지선다로 표시돼요.
           </p>
         )}
       </div>

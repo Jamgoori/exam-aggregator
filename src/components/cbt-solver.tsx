@@ -16,6 +16,7 @@ export function CbtSolver({
   paperTitle,
   fileUrl,
   totalQuestions,
+  choiceCount,
   subjectName,
   examTypeName,
   level,
@@ -24,6 +25,7 @@ export function CbtSolver({
   paperTitle: string;
   fileUrl: string;
   totalQuestions: number;
+  choiceCount: number;
   subjectName: string | null;
   examTypeName: string | null;
   level: string | null;
@@ -140,6 +142,7 @@ export function CbtSolver({
           examTypeName={examTypeName}
           level={level}
           totalQuestions={totalQuestions}
+          choiceCount={choiceCount}
           answers={answers}
           answeredCount={answeredCount}
           onSelect={selectChoice}
@@ -176,6 +179,7 @@ export function CbtSolver({
               examTypeName={examTypeName}
               level={level}
               totalQuestions={totalQuestions}
+              choiceCount={choiceCount}
               answers={answers}
               answeredCount={answeredCount}
               onSelect={selectChoice}
@@ -241,6 +245,7 @@ function OmrPanel({
   examTypeName,
   level,
   totalQuestions,
+  choiceCount,
   answers,
   answeredCount,
   onSelect,
@@ -254,6 +259,7 @@ function OmrPanel({
   examTypeName: string | null;
   level: string | null;
   totalQuestions: number;
+  choiceCount: number;
   answers: (number | null)[];
   answeredCount: number;
   onSelect: (questionIndex: number, choice: number) => void;
@@ -293,7 +299,9 @@ function OmrPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <div className="grid grid-cols-2 gap-2">
+        <div
+          className={`grid gap-2 ${choiceCount > 4 ? "grid-cols-1" : "grid-cols-2"}`}
+        >
           {Array.from({ length: totalQuestions }, (_, i) => {
             const questionNumber = i + 1;
             const selected = answers[i];
@@ -313,21 +321,23 @@ function OmrPanel({
                   {questionNumber}
                 </span>
                 <div className="flex flex-1 gap-1">
-                  {[1, 2, 3, 4].map((choice) => (
-                    <button
-                      key={choice}
-                      type="button"
-                      disabled={graded}
-                      onClick={() => onSelect(i, choice)}
-                      className={`flex h-6 flex-1 items-center justify-center rounded text-xs font-medium ${
-                        selected === choice
-                          ? "bg-blue-600 text-white"
-                          : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
-                      } disabled:cursor-default disabled:hover:bg-zinc-100`}
-                    >
-                      {choice}
-                    </button>
-                  ))}
+                  {Array.from({ length: choiceCount }, (_, c) => c + 1).map(
+                    (choice) => (
+                      <button
+                        key={choice}
+                        type="button"
+                        disabled={graded}
+                        onClick={() => onSelect(i, choice)}
+                        className={`flex h-6 flex-1 items-center justify-center rounded text-xs font-medium ${
+                          selected === choice
+                            ? "bg-blue-600 text-white"
+                            : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+                        } disabled:cursor-default disabled:hover:bg-zinc-100`}
+                      >
+                        {choice}
+                      </button>
+                    ),
+                  )}
                 </div>
               </div>
             );

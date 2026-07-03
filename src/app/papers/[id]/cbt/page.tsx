@@ -62,6 +62,7 @@ export default async function CbtPage({
       paperTitle={typedPaper.title}
       fileUrl={paperFileUrl.publicUrl}
       totalQuestions={typedPaper.question_count}
+      choiceCount={typedPaper.choice_count}
       subjectName={typedPaper.subjects?.name ?? null}
       examTypeName={typedPaper.exam_types?.name ?? null}
       level={typedPaper.level}

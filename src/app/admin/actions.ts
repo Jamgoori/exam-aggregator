@@ -123,8 +123,26 @@ export async function savePaperAnswers(
     .filter(Boolean)
     .map((s) => Number(s));
 
-  if (answers.length === 0 || answers.some((n) => !Number.isInteger(n) || n < 1)) {
-    return { error: "정답은 1 이상의 숫자로, 쉼표나 공백으로 구분해 입력해주세요." };
+  // 실제 정답지에 몇 번까지 나오는지로 선지 수를 그대로 추론한다 (5번 정답이 하나라도
+  // 있으면 5지선다). 관리자가 선지 수를 따로 고를 필요가 없게 하려는 의도.
+  const MAX_CHOICE_COUNT = 5;
+  if (
+    answers.length === 0 ||
+    answers.some((n) => !Number.isInteger(n) || n < 1 || n > MAX_CHOICE_COUNT)
+  ) {
+    return {
+      error: `정답은 1~${MAX_CHOICE_COUNT} 사이 숫자로, 쉼표나 공백으로 구분해 입력해주세요.`,
+    };
+  }
+  const choiceCount = Math.max(4, ...answers);
+
+  const { error: choiceCountError } = await supabase
+    .from("exam_papers")
+    .update({ choice_count: choiceCount })
+    .eq("id", paperId);
+
+  if (choiceCountError) {
+    return { error: `저장 실패: ${choiceCountError.message}` };
   }
 
   const { error } = await supabase.from("paper_answers").upsert(
