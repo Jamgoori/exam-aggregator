@@ -11,9 +11,17 @@ export function SearchInput({ initialQuery }: { initialQuery?: string }) {
   const searchParams = useSearchParams();
   const [value, setValue] = useState(initialQuery ?? "");
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 우리가 마지막으로 push한 값을 기억해뒀다가, 그 push가 반영되어 initialQuery가
+  // 똑같은 값으로 내려오면 "내가 이미 반영한 echo"로 보고 무시한다. 이 구분이 없으면
+  // 디바운스 후 페이지가 재렌더될 때마다 value를 initialQuery로 덮어써서, 그 사이에
+  // 사용자가 이어서 입력한 글자가 사라지거나 IME 조합 중인 글자가 씹히는 문제가 생긴다.
+  const lastPushedRef = useRef(initialQuery ?? "");
 
   useEffect(() => {
-    setValue(initialQuery ?? "");
+    if ((initialQuery ?? "") !== lastPushedRef.current) {
+      setValue(initialQuery ?? "");
+      lastPushedRef.current = initialQuery ?? "";
+    }
   }, [initialQuery]);
 
   useEffect(() => {
@@ -26,6 +34,7 @@ export function SearchInput({ initialQuery }: { initialQuery?: string }) {
     setValue(next);
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(() => {
+      lastPushedRef.current = next;
       const params = new URLSearchParams(searchParams.toString());
       if (next) params.set("q", next);
       else params.delete("q");
