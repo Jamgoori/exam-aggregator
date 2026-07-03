@@ -311,6 +311,94 @@ drop policy if exists "delete own bookmarks" on bookmarks;
 create policy "delete own bookmarks" on bookmarks
   for delete to authenticated using (auth.uid() = user_id);
 
+-- CBT 자동채점용 문항별 정답 배열. 기존 answer_keys(직렬+연도+급수+회차 전체가 공유하는
+-- 정답지 PDF)와 달리, exam_papers(과목별 문제지) 1건당 정답 배열 1건을 구조화된 값으로
+-- 저장한다. 문항 본문/보기까지 디지털화하기 전에도 채점만은 가능하게 하려는 임시 구조이고,
+-- 나중에 문항단위 테이블이 생기면 (paper_id, question_number)로 그대로 조인할 수 있다.
+-- 정답이 그대로 노출되면 채점 의미가 없으므로 anon/authenticated에는 select도 주지 않고
+-- (서버 액션에서 service_role로만 읽어 채점), 관리자 화면만 is_admin()으로 읽고 쓴다.
+create table if not exists paper_answers (
+  id uuid primary key default gen_random_uuid(),
+  paper_id uuid not null unique references exam_papers(id) on delete cascade,
+  answers smallint[] not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table paper_answers enable row level security;
+
+drop policy if exists "admin read paper_answers" on paper_answers;
+create policy "admin read paper_answers" on paper_answers
+  for select to authenticated using (is_admin());
+
+drop policy if exists "admin insert paper_answers" on paper_answers;
+create policy "admin insert paper_answers" on paper_answers
+  for insert to authenticated with check (is_admin());
+
+drop policy if exists "admin update paper_answers" on paper_answers;
+create policy "admin update paper_answers" on paper_answers
+  for update to authenticated using (is_admin());
+
+drop policy if exists "admin delete paper_answers" on paper_answers;
+create policy "admin delete paper_answers" on paper_answers
+  for delete to authenticated using (is_admin());
+
+-- CBT 응시 기록: 사용자가 특정 문제지(paper_id)를 몇 번째 풀었는지 1건당 1행.
+create table if not exists cbt_attempts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  score int not null default 0,
+  total_questions int not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists cbt_attempts_user_idx on cbt_attempts(user_id, created_at desc);
+create index if not exists cbt_attempts_paper_idx on cbt_attempts(paper_id);
+
+alter table cbt_attempts enable row level security;
+
+drop policy if exists "select own cbt attempts" on cbt_attempts;
+create policy "select own cbt attempts" on cbt_attempts
+  for select to authenticated using (auth.uid() = user_id);
+
+drop policy if exists "insert own cbt attempts" on cbt_attempts;
+create policy "insert own cbt attempts" on cbt_attempts
+  for insert to authenticated with check (auth.uid() = user_id);
+
+-- 문항별 응답. selected_choice가 null이면 건너뛴 문제. is_correct는 채점 시점 값을
+-- 그대로 저장해서, 나중에 관리자가 정답을 고쳐도 과거 채점 결과가 뒤바뀌지 않게 한다.
+-- (paper_id, question_number)가 나중에 생길 문항단위 데이터의 조인 키가 된다.
+create table if not exists cbt_attempt_answers (
+  id uuid primary key default gen_random_uuid(),
+  attempt_id uuid not null references cbt_attempts(id) on delete cascade,
+  question_number int not null,
+  selected_choice smallint,
+  is_correct boolean not null,
+  unique (attempt_id, question_number)
+);
+
+create index if not exists cbt_attempt_answers_attempt_idx on cbt_attempt_answers(attempt_id);
+
+alter table cbt_attempt_answers enable row level security;
+
+drop policy if exists "select own cbt attempt answers" on cbt_attempt_answers;
+create policy "select own cbt attempt answers" on cbt_attempt_answers
+  for select to authenticated using (
+    exists (
+      select 1 from cbt_attempts a
+      where a.id = attempt_id and a.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "insert own cbt attempt answers" on cbt_attempt_answers;
+create policy "insert own cbt attempt answers" on cbt_attempt_answers
+  for insert to authenticated with check (
+    exists (
+      select 1 from cbt_attempts a
+      where a.id = attempt_id and a.user_id = auth.uid()
+    )
+  );
+
 -- 회원가입 IP 레이트리밋: 캡차(Turnstile)와 별개로 짧은 시간 동안의 대량 가입 시도를
 -- 막는 2차 방어선. 성공/실패 관계없이 시도할 때마다 한 행씩 기록한다.
 create table if not exists signup_attempts (

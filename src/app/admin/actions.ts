@@ -94,3 +94,49 @@ export async function uploadExamPaper(
   revalidatePath("/", "layout");
   return { success: true };
 }
+
+export type SaveAnswersState = { error?: string; success?: boolean };
+
+export async function savePaperAnswers(
+  _prevState: SaveAnswersState | undefined,
+  formData: FormData,
+): Promise<SaveAnswersState> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { error: "로그인이 필요합니다." };
+  }
+
+  const paperId = String(formData.get("paper_id") ?? "");
+  const answersRaw = String(formData.get("answers") ?? "").trim();
+
+  if (!paperId || !answersRaw) {
+    return { error: "정답을 입력해주세요." };
+  }
+
+  const answers = answersRaw
+    .split(/[,\s]+/)
+    .filter(Boolean)
+    .map((s) => Number(s));
+
+  if (answers.length === 0 || answers.some((n) => !Number.isInteger(n) || n < 1)) {
+    return { error: "정답은 1 이상의 숫자로, 쉼표나 공백으로 구분해 입력해주세요." };
+  }
+
+  const { error } = await supabase.from("paper_answers").upsert(
+    { paper_id: paperId, answers, updated_at: new Date().toISOString() },
+    { onConflict: "paper_id" },
+  );
+
+  if (error) {
+    return { error: `저장 실패: ${error.message}` };
+  }
+
+  revalidatePath(`/admin/answers/${paperId}`);
+  revalidatePath("/admin/answers");
+  return { success: true };
+}

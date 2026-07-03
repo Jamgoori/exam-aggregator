@@ -72,3 +72,27 @@ export type AnswerKey = {
   uploaded_by: string | null;
   created_at: string;
 };
+
+export type PaperAnswers = {
+  id: string;
+  paper_id: string;
+  answers: number[];
+  updated_at: string;
+};
+
+export type CbtAttempt = {
+  id: string;
+  user_id: string;
+  paper_id: string;
+  score: number;
+  total_questions: number;
+  created_at: string;
+};
+
+export type CbtAttemptAnswer = {
+  id: string;
+  attempt_id: string;
+  question_number: number;
+  selected_choice: number | null;
+  is_correct: boolean;
+};

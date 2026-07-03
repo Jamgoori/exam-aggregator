@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/admin/actions";
@@ -30,6 +31,9 @@ export default async function UploadPage() {
           </button>
         </form>
       </div>
+      <Link href="/admin/answers" className="text-sm text-blue-600 underline">
+        CBT 정답 입력하기 →
+      </Link>
       <UploadForm
         subjects={(subjects ?? []) as Subject[]}
         examTypes={(examTypes ?? []) as ExamType[]}
