@@ -135,9 +135,23 @@ export function PdfCanvasViewer({
         const containerWidth = container!.clientWidth || 800;
         const dpr = window.devicePixelRatio || 1;
 
-        for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
-          if (cancelled) return;
-          const page = await doc.getPage(pageNumber);
+        // 먼저 페이지 객체를 전부 병렬로 가져와서(가벼운 메타데이터 조회) 스크롤
+        // 레이아웃(빈 캔버스)을 한 번에 순서대로 만들어두고, 실제 렌더링(무거운 작업,
+        // 워커에서 처리됨)은 그 다음에 여러 페이지를 동시에 진행한다. 페이지를 하나씩
+        // 순서대로 렌더링하면 마지막 페이지가 보이기까지 모든 페이지 렌더링 시간이
+        // 그대로 누적돼서, 문항 수가 많은 문제지일수록 체감 로딩이 느려졌었다.
+        const pages = await Promise.all(
+          Array.from({ length: doc.numPages }, (_, i) => doc.getPage(i + 1)),
+        );
+        if (cancelled) return;
+
+        const pendingRenders: {
+          contentCanvas: HTMLCanvasElement;
+          viewport: import("pdfjs-dist/legacy/build/pdf.mjs").PageViewport;
+          page: Awaited<ReturnType<typeof doc.getPage>>;
+        }[] = [];
+
+        for (const page of pages) {
           const unscaledViewport = page.getViewport({ scale: 1 });
           const cssScale = containerWidth / unscaledViewport.width;
           const viewport = page.getViewport({ scale: cssScale * dpr });
@@ -174,11 +188,26 @@ export function PdfCanvasViewer({
           attachDrawing(annotationCanvas, toolRef, penColorRef);
 
           container!.appendChild(pageWrapper);
-
-          const task = page.render({ canvas: contentCanvas, viewport });
-          renderTasks.push(task);
-          await task.promise;
+          pendingRenders.push({ contentCanvas, viewport, page });
         }
+
+        setLoading(false);
+
+        const RENDER_CONCURRENCY = 3;
+        let nextIndex = 0;
+        async function renderNext(): Promise<void> {
+          while (nextIndex < pendingRenders.length) {
+            if (cancelled) return;
+            const { contentCanvas, viewport, page } =
+              pendingRenders[nextIndex++];
+            const task = page.render({ canvas: contentCanvas, viewport });
+            renderTasks.push(task);
+            await task.promise;
+          }
+        }
+        await Promise.all(
+          Array.from({ length: RENDER_CONCURRENCY }, () => renderNext()),
+        );
       } catch (err) {
         if (!cancelled) {
           console.error("PDF 렌더링 실패:", err);
