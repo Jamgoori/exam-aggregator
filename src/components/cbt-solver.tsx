@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ChevronLeft, Clock, Eraser, PenLine, Trophy, X } from "lucide-react";
 import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
+
+// pdf.js는 브라우저 전용 API(Worker, canvas 등)에 의존해서 서버에서 미리 렌더링하면
+// 안 되므로, 이 컴포넌트는 클라이언트에서만 로드한다.
+const PdfCanvasViewer = dynamic(
+  () => import("@/components/pdf-canvas-viewer").then((m) => m.PdfCanvasViewer),
+  { ssr: false },
+);
 
 function formatDuration(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
@@ -37,73 +45,18 @@ export function CbtSolver({
   const startedAtRef = useRef(0);
   const [penMode, setPenMode] = useState(false);
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawingRef = useRef(false);
-  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const clearDrawingRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     startedAtRef.current = Date.now();
   }, []);
 
-  // PDF 위에 필기하는 캔버스는 iframe(PDF)과 별개 레이어라, PDF를 스크롤/확대해도
-  // 필기 내용은 그 위치를 따라가지 않고 화면에 고정된 채로 남는다 (단순 메모용).
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = canvas?.parentElement;
-    if (!canvas || !container) return;
-
-    function resize() {
-      if (!canvas || !container) return;
-      const rect = container.getBoundingClientRect();
-      canvas.width = rect.width;
-      canvas.height = rect.height;
-    }
-    resize();
-
-    const observer = new ResizeObserver(resize);
-    observer.observe(container);
-    return () => observer.disconnect();
+  const registerClearDrawing = useCallback((clear: () => void) => {
+    clearDrawingRef.current = clear;
   }, []);
 
-  function getCanvasPoint(e: React.PointerEvent<HTMLCanvasElement>) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  }
-
-  function handlePenDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!penMode) return;
-    drawingRef.current = true;
-    lastPointRef.current = getCanvasPoint(e);
-  }
-
-  function handlePenMove(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!penMode || !drawingRef.current) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    const last = lastPointRef.current;
-    if (!ctx || !last) return;
-    const point = getCanvasPoint(e);
-    ctx.strokeStyle = penColor;
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(last.x, last.y);
-    ctx.lineTo(point.x, point.y);
-    ctx.stroke();
-    lastPointRef.current = point;
-  }
-
-  function handlePenUp() {
-    drawingRef.current = false;
-    lastPointRef.current = null;
-  }
-
   function clearDrawing() {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    clearDrawingRef.current();
   }
 
   useEffect(() => {
@@ -232,20 +185,11 @@ export function CbtSolver({
 
       <div className="flex min-h-0 flex-1">
         <div className="relative min-w-0 flex-1">
-          <iframe
-            src={`https://docs.google.com/gview?url=${encodeURIComponent(fileUrl)}&embedded=true`}
-            title={paperTitle}
-            className="h-full w-full"
-          />
-          <canvas
-            ref={canvasRef}
-            onPointerDown={handlePenDown}
-            onPointerMove={handlePenMove}
-            onPointerUp={handlePenUp}
-            onPointerLeave={handlePenUp}
-            className={`absolute inset-0 h-full w-full touch-none ${
-              penMode ? "pointer-events-auto" : "pointer-events-none"
-            }`}
+          <PdfCanvasViewer
+            fileUrl={fileUrl}
+            penMode={penMode}
+            penColor={penColor}
+            onClearReady={registerClearDrawing}
           />
         </div>
 
