@@ -117,6 +117,7 @@ export type CbtAttempt = {
   paper_id: string;
   score: number;
   total_questions: number;
+  duration_seconds: number | null;
   created_at: string;
 };
 

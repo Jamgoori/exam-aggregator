@@ -284,6 +284,21 @@ $$;
 
 grant execute on function total_download_count() to anon, authenticated;
 
+-- CBT 풀이 화면에서 "이 문제지가 CBT를 지원하는지"만 확인할 수 있게 하는 함수.
+-- paper_answers는 정답이 들어있어 anon/authenticated select를 아예 안 열어뒀으므로,
+-- 정답 내용은 노출하지 않고 존재 여부만 security definer로 안전하게 알려준다.
+create or replace function has_cbt_answers(target_paper_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (select 1 from paper_answers where paper_id = target_paper_id);
+$$;
+
+grant execute on function has_cbt_answers(uuid) to anon, authenticated;
+
 -- 마이페이지 즐겨찾기: 회원이 문제지를 찜해두고 나중에 다시 찾아볼 수 있게 한다.
 -- (추후 CBT 채점 결과/오답노트/시험별 점수도 마이페이지에 같이 들어갈 예정이라
 --  회원 전용 개인화 데이터는 이 테이블처럼 user_id 기준 RLS로 분리해서 쌓아간다.)
@@ -466,8 +481,11 @@ create table if not exists cbt_attempts (
   paper_id uuid not null references exam_papers(id) on delete cascade,
   score int not null default 0,
   total_questions int not null,
+  duration_seconds int,
   created_at timestamptz not null default now()
 );
+
+alter table cbt_attempts add column if not exists duration_seconds int;
 
 create index if not exists cbt_attempts_user_idx on cbt_attempts(user_id, created_at desc);
 create index if not exists cbt_attempts_paper_idx on cbt_attempts(paper_id);

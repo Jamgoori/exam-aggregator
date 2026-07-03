@@ -265,6 +265,102 @@ export async function postRating(
   return { success: true, averageScore, voteCount: scores.length };
 }
 
+export type CbtQuestionResult = {
+  question_number: number;
+  selected_choice: number | null;
+  is_correct: boolean;
+};
+
+export type CbtSubmitResult = CommentResult & {
+  attemptId?: string;
+  score?: number;
+  totalQuestions?: number;
+  durationSeconds?: number;
+  voidedQuestions?: number[];
+  questionResults?: CbtQuestionResult[];
+};
+
+export async function submitCbtAttempt(input: {
+  paperId: string;
+  answers: (number | null)[];
+  durationSeconds: number;
+}): Promise<CbtSubmitResult> {
+  const paperId = String(input.paperId ?? "");
+  if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  // 정답은 anon/authenticated에 전혀 노출하지 않으므로 service role로만 조회한다.
+  const admin = createAdminClient();
+  const { data: paperAnswers } = await admin
+    .from("paper_answers")
+    .select("answers, voided_questions")
+    .eq("paper_id", paperId)
+    .maybeSingle();
+
+  if (!paperAnswers) return { error: "이 문제지는 CBT를 지원하지 않아요." };
+
+  const correctAnswers = (paperAnswers.answers ?? []) as number[];
+  const voided = new Set((paperAnswers.voided_questions ?? []) as number[]);
+  const totalQuestions = correctAnswers.length;
+  if (totalQuestions === 0) return { error: "이 문제지는 CBT를 지원하지 않아요." };
+
+  const submitted = Array.isArray(input.answers) ? input.answers : [];
+  const durationSeconds = Math.max(0, Math.round(Number(input.durationSeconds) || 0));
+
+  let score = 0;
+  const questionResults: CbtQuestionResult[] = [];
+  for (let i = 0; i < totalQuestions; i++) {
+    const questionNumber = i + 1;
+    const selected =
+      typeof submitted[i] === "number" ? (submitted[i] as number) : null;
+    const isCorrect = voided.has(questionNumber) || selected === correctAnswers[i];
+    if (isCorrect) score++;
+    questionResults.push({
+      question_number: questionNumber,
+      selected_choice: selected,
+      is_correct: isCorrect,
+    });
+  }
+
+  const { data: attempt, error: attemptError } = await supabase
+    .from("cbt_attempts")
+    .insert({
+      user_id: user.id,
+      paper_id: paperId,
+      score,
+      total_questions: totalQuestions,
+      duration_seconds: durationSeconds,
+    })
+    .select("id")
+    .single();
+
+  if (attemptError || !attempt) return { error: "채점에 실패했어요." };
+
+  const { error: answersError } = await supabase.from("cbt_attempt_answers").insert(
+    questionResults.map((q) => ({ attempt_id: attempt.id, ...q })),
+  );
+
+  if (answersError) {
+    await supabase.from("cbt_attempts").delete().eq("id", attempt.id);
+    return { error: "채점에 실패했어요." };
+  }
+
+  return {
+    success: true,
+    attemptId: attempt.id as string,
+    score,
+    totalQuestions,
+    durationSeconds,
+    voidedQuestions: [...voided],
+    questionResults,
+  };
+}
+
 export type BookmarkResult = CommentResult & { bookmarked?: boolean };
 
 export async function toggleBookmark(paperId: string): Promise<BookmarkResult> {
