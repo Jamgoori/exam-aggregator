@@ -324,6 +324,10 @@ create table if not exists paper_answers (
   updated_at timestamptz not null default now()
 );
 
+-- 전항정답/복수정답 처리된 문제 번호. 전체 회차 CBT에서는 원본 그대로 노출하되 이 번호는
+-- 무조건 정답 처리하고, 기출 섞어풀기에서는 이 번호를 후보에서 제외하는 데 쓴다.
+alter table paper_answers add column if not exists voided_questions smallint[] not null default '{}';
+
 alter table paper_answers enable row level security;
 
 drop policy if exists "admin read paper_answers" on paper_answers;
@@ -340,6 +344,119 @@ create policy "admin update paper_answers" on paper_answers
 
 drop policy if exists "admin delete paper_answers" on paper_answers;
 create policy "admin delete paper_answers" on paper_answers
+  for delete to authenticated using (is_admin());
+
+-- 공통 지문(예: "다음 글을 읽고 5~7번에 답하시오"): 문제 여러 개가 지문 하나를 공유할 때,
+-- 지문 이미지를 문제마다 중복 저장하지 않고 한 번만 저장해서 questions.passage_id로 참조한다.
+create table if not exists question_passages (
+  id uuid primary key default gen_random_uuid(),
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+alter table question_passages enable row level security;
+
+drop policy if exists "public read question_passages" on question_passages;
+create policy "public read question_passages" on question_passages for select using (true);
+
+drop policy if exists "admin insert question_passages" on question_passages;
+create policy "admin insert question_passages" on question_passages
+  for insert to authenticated with check (is_admin());
+
+drop policy if exists "admin update question_passages" on question_passages;
+create policy "admin update question_passages" on question_passages
+  for update to authenticated using (is_admin());
+
+drop policy if exists "admin delete question_passages" on question_passages;
+create policy "admin delete question_passages" on question_passages
+  for delete to authenticated using (is_admin());
+
+-- 지문도 페이지를 넘어갈 수 있으므로 이미지 여러 장을 순서대로 저장한다.
+create table if not exists question_passage_images (
+  id uuid primary key default gen_random_uuid(),
+  passage_id uuid not null references question_passages(id) on delete cascade,
+  order_index int not null default 0,
+  image_path text not null,
+  unique (passage_id, order_index)
+);
+
+alter table question_passage_images enable row level security;
+
+drop policy if exists "public read question_passage_images" on question_passage_images;
+create policy "public read question_passage_images" on question_passage_images for select using (true);
+
+drop policy if exists "admin insert question_passage_images" on question_passage_images;
+create policy "admin insert question_passage_images" on question_passage_images
+  for insert to authenticated with check (is_admin());
+
+drop policy if exists "admin update question_passage_images" on question_passage_images;
+create policy "admin update question_passage_images" on question_passage_images
+  for update to authenticated using (is_admin());
+
+drop policy if exists "admin delete question_passage_images" on question_passage_images;
+create policy "admin delete question_passage_images" on question_passage_images
+  for delete to authenticated using (is_admin());
+
+-- 문항 단위 데이터: 기출 섞어풀기용으로 문제 하나를 원본 페이지 맥락과 무관하게 독립적으로
+-- 보여줄 수 있게 하는 최소 구조. 문제 본문/보기는 텍스트로 옮기지 않고 이미지를 그대로
+-- 잘라 쓴다 (question_images). unit_tag는 오답노트 단원별 분석용이라 이미지 유무와 무관하게
+-- 채워둘 수 있다. 정답은 이 테이블이 아니라 paper_answers에 그대로 둔다 (여기 두면
+-- public read 정책 때문에 정답이 노출된다).
+create table if not exists questions (
+  id uuid primary key default gen_random_uuid(),
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  question_number int not null,
+  choice_count smallint not null default 4,
+  unit_tag text,
+  passage_id uuid references question_passages(id) on delete set null,
+  created_at timestamptz not null default now(),
+  unique (paper_id, question_number)
+);
+
+create index if not exists questions_paper_idx on questions(paper_id);
+
+alter table questions enable row level security;
+
+drop policy if exists "public read questions" on questions;
+create policy "public read questions" on questions for select using (true);
+
+drop policy if exists "admin insert questions" on questions;
+create policy "admin insert questions" on questions
+  for insert to authenticated with check (is_admin());
+
+drop policy if exists "admin update questions" on questions;
+create policy "admin update questions" on questions
+  for update to authenticated using (is_admin());
+
+drop policy if exists "admin delete questions" on questions;
+create policy "admin delete questions" on questions
+  for delete to authenticated using (is_admin());
+
+-- 문제 본문(지문 제외)+보기를 잘라낸 이미지. 문제가 다음 페이지로 이어지는 경우를 위해
+-- 이미지 여러 장을 순서대로 저장한다 (화면에서는 순서대로 이어붙여 보여주기만 하면 됨).
+create table if not exists question_images (
+  id uuid primary key default gen_random_uuid(),
+  question_id uuid not null references questions(id) on delete cascade,
+  order_index int not null default 0,
+  image_path text not null,
+  unique (question_id, order_index)
+);
+
+alter table question_images enable row level security;
+
+drop policy if exists "public read question_images" on question_images;
+create policy "public read question_images" on question_images for select using (true);
+
+drop policy if exists "admin insert question_images" on question_images;
+create policy "admin insert question_images" on question_images
+  for insert to authenticated with check (is_admin());
+
+drop policy if exists "admin update question_images" on question_images;
+create policy "admin update question_images" on question_images
+  for update to authenticated using (is_admin());
+
+drop policy if exists "admin delete question_images" on question_images;
+create policy "admin delete question_images" on question_images
   for delete to authenticated using (is_admin());
 
 -- CBT 응시 기록: 사용자가 특정 문제지(paper_id)를 몇 번째 풀었는지 1건당 1행.
