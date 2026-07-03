@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState, useTransition } from "react";
 import { postRating } from "@/app/papers/actions";
 
@@ -47,6 +48,7 @@ export function DifficultyRating({
   const [avg, setAvg] = useState(averageScore);
   const [count, setCount] = useState(voteCount);
   const [pending, startTransition] = useTransition();
+  const pathname = usePathname();
 
   const voted = myScore !== null;
   const activeScore = myScore ?? hovered ?? selected ?? 0;
@@ -136,7 +138,7 @@ export function DifficultyRating({
               난이도 평가는 로그인 후 참여할 수 있어요
             </p>
             <Link
-              href="/login"
+              href={`/login?next=${encodeURIComponent(pathname || "/")}`}
               className="rounded bg-zinc-800 px-4 py-1.5 text-xs font-medium text-white hover:bg-zinc-700"
             >
               로그인하기

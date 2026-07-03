@@ -2,6 +2,7 @@ import Link from "next/link";
 import { GraduationCap } from "lucide-react";
 import { signOutUser } from "@/app/actions";
 import { SignOutButton } from "@/components/sign-out-button";
+import { LoginLink } from "@/components/login-link";
 
 export function SiteHeader({
   user,
@@ -32,12 +33,7 @@ export function SiteHeader({
               </form>
             </div>
           ) : (
-            <Link
-              href="/login"
-              className="rounded-full bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              로그인
-            </Link>
+            <LoginLink className="rounded-full bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700" />
           )}
         </div>
       </div>

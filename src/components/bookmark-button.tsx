@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Bookmark } from "lucide-react";
 import { toggleBookmark } from "@/app/papers/actions";
 
@@ -15,13 +15,14 @@ export function BookmarkButton({
   loggedIn: boolean;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [bookmarked, setBookmarked] = useState(initialBookmarked);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   function toggle() {
     if (!loggedIn) {
-      router.push("/login");
+      router.push(`/login?next=${encodeURIComponent(pathname || "/")}`);
       return;
     }
     setError(null);

@@ -2,13 +2,15 @@ import Link from "next/link";
 import Script from "next/script";
 import { signUpUser, signInWithGoogle } from "@/app/actions";
 import { GoogleIcon } from "@/components/google-icon";
+import { sanitizeNextPath } from "@/lib/safe-redirect";
 
 export default async function SignupPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, next: rawNext } = await searchParams;
+  const next = sanitizeNextPath(rawNext);
   const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
   return (
@@ -16,6 +18,7 @@ export default async function SignupPage({
       <h1 className="text-2xl font-semibold">회원가입</h1>
 
       <form action={signInWithGoogle}>
+        <input type="hidden" name="next" value={next} />
         <button
           type="submit"
           className="flex w-full items-center justify-center gap-2 rounded border border-zinc-300 px-4 py-2 hover:bg-zinc-50"
@@ -32,6 +35,7 @@ export default async function SignupPage({
       </div>
 
       <form action={signUpUser} className="flex flex-col gap-4">
+        <input type="hidden" name="next" value={next} />
         <div className="flex flex-col gap-1">
           <label htmlFor="nickname" className="text-sm text-zinc-600">
             닉네임
@@ -94,7 +98,10 @@ export default async function SignupPage({
       </form>
       <p className="text-sm text-zinc-500">
         이미 계정이 있나요?{" "}
-        <Link href="/login" className="text-blue-600 underline-offset-2 hover:underline">
+        <Link
+          href={`/login?next=${encodeURIComponent(next)}`}
+          className="text-blue-600 underline-offset-2 hover:underline"
+        >
           로그인
         </Link>
       </p>
