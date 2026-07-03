@@ -131,16 +131,31 @@ export function UploadForm({
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label htmlFor="tags" className="text-sm text-zinc-600">
-            태그 (쉼표로 구분, 선택)
+          <label htmlFor="choice_count" className="text-sm text-zinc-600">
+            선지 수
           </label>
-          <input
-            id="tags"
-            name="tags"
-            placeholder="문법, 비문학"
+          <select
+            id="choice_count"
+            name="choice_count"
+            defaultValue={4}
             className="rounded border border-zinc-300 px-3 py-2"
-          />
+          >
+            <option value={4}>4지선다</option>
+            <option value={5}>5지선다</option>
+          </select>
         </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="tags" className="text-sm text-zinc-600">
+          태그 (쉼표로 구분, 선택)
+        </label>
+        <input
+          id="tags"
+          name="tags"
+          placeholder="문법, 비문학"
+          className="rounded border border-zinc-300 px-3 py-2"
+        />
       </div>
 
       <div className="flex flex-col gap-1">

@@ -49,6 +49,9 @@ alter table exam_papers add column if not exists view_count int not null default
 alter table exam_papers add column if not exists download_count int not null default 0;
 -- 같은 연도/급수를 공유하는 특수모집 분야 구분용 (예: "근로감독 및 산업안전분야"). 일반 채용은 null.
 alter table exam_papers add column if not exists track text;
+-- 선지 수. 대부분 4지선다지만 경찰/소방 등 일부 직렬은 5지선다라 CBT 화면에서
+-- 몇 번까지 버튼을 보여줄지 이 값으로 결정한다. 정답이 아니라 형식 정보라 공개해도 무방.
+alter table exam_papers add column if not exists choice_count smallint not null default 4;
 
 create index if not exists exam_papers_subject_idx on exam_papers(subject_id);
 create index if not exists exam_papers_exam_type_idx on exam_papers(exam_type_id);

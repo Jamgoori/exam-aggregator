@@ -21,6 +21,7 @@ export type ExamPaper = {
   track: string | null;
   title: string;
   question_count: number | null;
+  choice_count: number;
   tags: string[];
   file_path: string;
   file_name: string;
