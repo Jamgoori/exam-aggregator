@@ -1,26 +1,32 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-function buildHref(params: Record<string, string | undefined>, page: number) {
+function buildHref(
+  basePath: string,
+  params: Record<string, string | undefined>,
+  page: number,
+) {
   const usp = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value) usp.set(key, value);
   }
   if (page > 1) usp.set("page", String(page));
   const qs = usp.toString();
-  return qs ? `/?${qs}` : "/";
+  return qs ? `${basePath}?${qs}` : basePath;
 }
 
 function PageBlock({
   currentPage,
   totalPages,
   blockSize,
+  basePath,
   params,
   className,
 }: {
   currentPage: number;
   totalPages: number;
   blockSize: number;
+  basePath: string;
   params: Record<string, string | undefined>;
   className: string;
 }) {
@@ -35,7 +41,7 @@ function PageBlock({
   return (
     <nav className={`items-center justify-center gap-1 pt-4 ${className}`}>
       <Link
-        href={buildHref(params, Math.max(1, prevBlockPage))}
+        href={buildHref(basePath, params, Math.max(1, prevBlockPage))}
         aria-disabled={prevBlockPage < 1}
         className={`flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 ${
           prevBlockPage < 1
@@ -49,7 +55,7 @@ function PageBlock({
       {pages.map((p) => (
         <Link
           key={p}
-          href={buildHref(params, p)}
+          href={buildHref(basePath, params, p)}
           className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium ${
             p === currentPage
               ? "bg-blue-600 text-white"
@@ -61,7 +67,7 @@ function PageBlock({
       ))}
 
       <Link
-        href={buildHref(params, Math.min(totalPages, nextBlockPage))}
+        href={buildHref(basePath, params, Math.min(totalPages, nextBlockPage))}
         aria-disabled={nextBlockPage > totalPages}
         className={`flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 ${
           nextBlockPage > totalPages
@@ -79,10 +85,12 @@ export function Pagination({
   currentPage,
   totalPages,
   params,
+  basePath = "/",
 }: {
   currentPage: number;
   totalPages: number;
   params: Record<string, string | undefined>;
+  basePath?: string;
 }) {
   if (totalPages <= 1) return null;
 
@@ -92,6 +100,7 @@ export function Pagination({
         currentPage={currentPage}
         totalPages={totalPages}
         blockSize={5}
+        basePath={basePath}
         params={params}
         className="flex sm:hidden"
       />
@@ -99,6 +108,7 @@ export function Pagination({
         currentPage={currentPage}
         totalPages={totalPages}
         blockSize={10}
+        basePath={basePath}
         params={params}
         className="hidden sm:flex"
       />

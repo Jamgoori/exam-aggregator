@@ -3,9 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
+import { Pagination } from "@/components/pagination";
 import { levelColor, compareLevels } from "@/lib/level-colors";
 import type { ExamPaper, Subject } from "@/lib/supabase/types";
 import type { Metadata } from "next";
+
+const PAGE_SIZE = 24;
 
 // generateMetadata와 페이지 본문이 같은 slug로 중복 조회하지 않도록 캐싱
 const getSubject = cache(async (slug: string) => {
@@ -38,10 +41,11 @@ export default async function SubjectPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ level?: string }>;
+  searchParams: Promise<{ level?: string; page?: string }>;
 }) {
   const { slug } = await params;
-  const { level } = await searchParams;
+  const { level, page } = await searchParams;
+  const currentPage = Math.max(1, Number(page) || 1);
   const supabase = await createClient();
 
   const subject = await getSubject(slug);
@@ -50,20 +54,31 @@ export default async function SubjectPage({
     notFound();
   }
 
-  const { data: papers } = await supabase
+  // 급수 탭은 이 과목에 존재하는 급수 종류만 필요하므로, 목록 전체를 받아오는 대신
+  // level 컬럼만 가볍게 조회해서 만든다.
+  let papersQuery = supabase
     .from("exam_papers")
-    .select("*, subjects(*), exam_types(*)")
-    .eq("subject_id", subject.id)
-    .order("year", { ascending: false })
-    .order("round", { ascending: false });
+    .select("*, subjects(*), exam_types(*)", { count: "exact" })
+    .eq("subject_id", subject.id);
+  if (level) papersQuery = papersQuery.eq("level", level);
+  const from = (currentPage - 1) * PAGE_SIZE;
 
-  const allPapers = (papers ?? []) as ExamPaper[];
+  const [{ data: levelRows }, { data: papers, count: filteredCount }] =
+    await Promise.all([
+      supabase.from("exam_papers").select("level").eq("subject_id", subject.id),
+      papersQuery
+        .order("year", { ascending: false })
+        .order("round", { ascending: false })
+        .range(from, from + PAGE_SIZE - 1),
+    ]);
+
   const availableLevels = [
-    ...new Set(allPapers.map((p) => p.level).filter((l): l is string => !!l)),
+    ...new Set(
+      (levelRows ?? []).map((r) => r.level).filter((l): l is string => !!l),
+    ),
   ].sort(compareLevels);
-  const filteredPapers = level
-    ? allPapers.filter((p) => p.level === level)
-    : allPapers;
+  const filteredPapers = (papers ?? []) as ExamPaper[];
+  const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-12">
@@ -107,7 +122,7 @@ export default async function SubjectPage({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filteredPapers.length === 0 && (
           <p className="col-span-full py-12 text-center text-zinc-500">
-            {allPapers.length === 0
+            {(levelRows ?? []).length === 0
               ? "아직 업로드된 기출문제가 없습니다."
               : "해당 급수의 기출문제가 없습니다."}
           </p>
@@ -116,6 +131,13 @@ export default async function SubjectPage({
           <ExamCard key={paper.id} paper={paper} linkLevel={level} />
         ))}
       </div>
+
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        params={{ level }}
+        basePath={`/subjects/${slug}`}
+      />
     </div>
   );
 }

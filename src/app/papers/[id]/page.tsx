@@ -13,6 +13,8 @@ import { BookmarkButton } from "@/components/bookmark-button";
 import type { AnswerKey, Comment, ExamPaper } from "@/lib/supabase/types";
 import type { Metadata } from "next";
 
+const RELATED_PAPERS_LIMIT = 12;
+
 // generateMetadata와 페이지 본문이 같은 id로 중복 조회하지 않도록 캐싱
 const getPaper = cache(async (id: string) => {
   const supabase = await createClient();
@@ -87,14 +89,31 @@ export default async function PaperDetailPage({
       answerKeyQuery.maybeSingle(),
     ]);
 
-  const { data: subjectPapers } = typedPaper.subject_id
-    ? await supabase
+  // "같은 과목 목록"은 미리보기 성격이라 최근 RELATED_PAPERS_LIMIT개만 보여주고,
+  // 전체 목록은 /subjects/[slug] 페이지(페이지네이션 적용됨)로 넘긴다.
+  // 급수 탭은 이 과목에 존재하는 급수 종류만 필요하므로 level 컬럼만 가볍게 조회한다.
+  let subjectPapersQuery = typedPaper.subject_id
+    ? supabase
         .from("exam_papers")
         .select("*, subjects(*), exam_types(*)")
         .eq("subject_id", typedPaper.subject_id)
-        .order("year", { ascending: false })
-        .order("round", { ascending: false })
-    : { data: null };
+    : null;
+  if (subjectPapersQuery && level) {
+    subjectPapersQuery = subjectPapersQuery.eq("level", level);
+  }
+
+  const [{ data: subjectPapers }, { data: subjectLevelRows }] = typedPaper.subject_id
+    ? await Promise.all([
+        subjectPapersQuery!
+          .order("year", { ascending: false })
+          .order("round", { ascending: false })
+          .limit(RELATED_PAPERS_LIMIT),
+        supabase
+          .from("exam_papers")
+          .select("level")
+          .eq("subject_id", typedPaper.subject_id),
+      ])
+    : [{ data: null }, { data: null }];
 
   const scores = (ratings ?? []).map((r) => r.score as number);
   const averageScore =
@@ -251,22 +270,27 @@ export default async function PaperDetailPage({
 
       {subject && (subjectPapers as ExamPaper[] | null)?.length ? (
         <div className="flex flex-col gap-4 border-t border-zinc-100 pt-10">
-          <h2 className="text-lg font-semibold">
-            {subject.name} 기출문제 목록
-          </h2>
+          <div className="flex items-center justify-between gap-4">
+            <h2 className="text-lg font-semibold">
+              {subject.name} 기출문제 목록
+            </h2>
+            <Link
+              href={`/subjects/${subject.slug}${level ? `?level=${encodeURIComponent(level)}` : ""}`}
+              className="shrink-0 text-sm font-medium text-blue-600 hover:underline"
+            >
+              전체보기
+            </Link>
+          </div>
 
           {(() => {
-            const allSubjectPapers = subjectPapers as ExamPaper[];
+            const filteredSubjectPapers = subjectPapers as ExamPaper[];
             const availableLevels = [
               ...new Set(
-                allSubjectPapers
-                  .map((p) => p.level)
+                (subjectLevelRows ?? [])
+                  .map((r) => r.level)
                   .filter((l): l is string => !!l),
               ),
             ].sort(compareLevels);
-            const filteredSubjectPapers = level
-              ? allSubjectPapers.filter((p) => p.level === level)
-              : allSubjectPapers;
 
             return (
               <>
