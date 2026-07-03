@@ -3,8 +3,18 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { ChevronLeft, Clock, Eraser, PenLine, Trophy, X } from "lucide-react";
+import {
+  ChevronLeft,
+  Clock,
+  Eraser,
+  Hand,
+  PenLine,
+  Trash2,
+  Trophy,
+  X,
+} from "lucide-react";
 import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
+import type { DrawTool } from "@/components/pdf-canvas-viewer";
 
 // pdf.js는 브라우저 전용 API(Worker, canvas 등)에 의존해서 서버에서 미리 렌더링하면
 // 안 되므로, 이 컴포넌트는 클라이언트에서만 로드한다.
@@ -43,7 +53,7 @@ export function CbtSolver({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const startedAtRef = useRef(0);
-  const [penMode, setPenMode] = useState(false);
+  const [tool, setTool] = useState<DrawTool>("move");
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
   const clearDrawingRef = useRef<() => void>(() => {});
 
@@ -136,18 +146,47 @@ export function CbtSolver({
             <Clock size={16} />
             {formatDuration(elapsedSeconds)}
           </div>
-          <button
-            type="button"
-            onClick={() => setPenMode((v) => !v)}
-            aria-pressed={penMode}
-            className={`flex items-center justify-center rounded-lg p-1.5 ${
-              penMode
-                ? "bg-blue-600 text-white"
-                : "text-zinc-600 hover:bg-zinc-100"
-            }`}
-          >
-            <PenLine size={18} />
-          </button>
+          <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
+            <button
+              type="button"
+              onClick={() => setTool("move")}
+              aria-label="화면 이동"
+              aria-pressed={tool === "move"}
+              className={`flex items-center justify-center rounded-md p-1.5 ${
+                tool === "move"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-600 hover:bg-zinc-200"
+              }`}
+            >
+              <Hand size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTool("pen")}
+              aria-label="펜"
+              aria-pressed={tool === "pen"}
+              className={`flex items-center justify-center rounded-md p-1.5 ${
+                tool === "pen"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-600 hover:bg-zinc-200"
+              }`}
+            >
+              <PenLine size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTool("eraser")}
+              aria-label="지우개"
+              aria-pressed={tool === "eraser"}
+              className={`flex items-center justify-center rounded-md p-1.5 ${
+                tool === "eraser"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-600 hover:bg-zinc-200"
+              }`}
+            >
+              <Eraser size={18} />
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => setOmrOpen(true)}
@@ -158,27 +197,33 @@ export function CbtSolver({
         </div>
       </header>
 
-      {penMode && (
+      {tool !== "move" && (
         <div className="flex shrink-0 items-center gap-2 border-b border-zinc-200 bg-white px-3 py-1.5">
-          {PEN_COLORS.map((color) => (
-            <button
-              key={color}
-              type="button"
-              aria-label="펜 색상"
-              onClick={() => setPenColor(color)}
-              style={{ backgroundColor: color }}
-              className={`h-5 w-5 rounded-full ${
-                penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
-              }`}
-            />
-          ))}
+          {tool === "pen" &&
+            PEN_COLORS.map((color) => (
+              <button
+                key={color}
+                type="button"
+                aria-label="펜 색상"
+                onClick={() => setPenColor(color)}
+                style={{ backgroundColor: color }}
+                className={`h-5 w-5 rounded-full ${
+                  penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                }`}
+              />
+            ))}
+          {tool === "eraser" && (
+            <p className="text-xs text-zinc-400">
+              드래그한 부분만 지워져요
+            </p>
+          )}
           <button
             type="button"
             onClick={clearDrawing}
             className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
           >
-            <Eraser size={14} />
-            지우기
+            <Trash2 size={14} />
+            전체 지우기
           </button>
         </div>
       )}
@@ -187,7 +232,7 @@ export function CbtSolver({
         <div className="relative min-w-0 flex-1">
           <PdfCanvasViewer
             fileUrl={fileUrl}
-            penMode={penMode}
+            tool={tool}
             penColor={penColor}
             onClearReady={registerClearDrawing}
           />
