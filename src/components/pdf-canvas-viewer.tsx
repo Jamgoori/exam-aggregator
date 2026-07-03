@@ -109,7 +109,13 @@ export function PdfCanvasViewer({
         const pdfjsLib = await import("pdfjs-dist");
         pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_SRC;
 
-        const doc = await pdfjsLib.getDocument({ url: fileUrl }).promise;
+        // Range 요청(부분 다운로드)은 Supabase Storage 쪽 CORS preflight에 걸려
+        // 실패할 수 있어서, 단순 GET 한 번으로 전체를 받아오게 강제한다.
+        const doc = await pdfjsLib.getDocument({
+          url: fileUrl,
+          disableRange: true,
+          disableStream: true,
+        }).promise;
         if (cancelled) return;
 
         const containerWidth = container!.clientWidth || 800;
@@ -160,8 +166,11 @@ export function PdfCanvasViewer({
           renderTasks.push(task);
           await task.promise;
         }
-      } catch {
-        if (!cancelled) setError("PDF를 불러오지 못했어요.");
+      } catch (err) {
+        if (!cancelled) {
+          console.error("PDF 렌더링 실패:", err);
+          setError("PDF를 불러오지 못했어요.");
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
