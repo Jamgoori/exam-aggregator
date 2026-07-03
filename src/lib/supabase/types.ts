@@ -77,7 +77,38 @@ export type PaperAnswers = {
   id: string;
   paper_id: string;
   answers: number[];
+  voided_questions: number[];
   updated_at: string;
+};
+
+export type QuestionPassage = {
+  id: string;
+  paper_id: string;
+  created_at: string;
+};
+
+export type QuestionPassageImage = {
+  id: string;
+  passage_id: string;
+  order_index: number;
+  image_path: string;
+};
+
+export type Question = {
+  id: string;
+  paper_id: string;
+  question_number: number;
+  choice_count: number;
+  unit_tag: string | null;
+  passage_id: string | null;
+  created_at: string;
+};
+
+export type QuestionImage = {
+  id: string;
+  question_id: string;
+  order_index: number;
+  image_path: string;
 };
 
 export type CbtAttempt = {
