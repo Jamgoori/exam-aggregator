@@ -8,13 +8,20 @@ import { useEffect, useRef, useState } from "react";
 // 버전과 정확히 맞물리게 하기 위함.
 const WORKER_SRC = "/pdf.worker.min.mjs";
 
+export type DrawTool = "move" | "pen" | "eraser";
+
+const PEN_LINE_WIDTH = 3;
+const ERASER_LINE_WIDTH = 24;
+
 // 문항 페이지 위에 손글씨로 메모하는 용도의 캔버스. PDF 페이지마다 별도의 주석 캔버스를
 // 페이지 캔버스 바로 위에 겹쳐서, 스크롤해도 필기가 해당 페이지에 그대로 붙어 있게 한다
 // (전체 스크롤 영역을 하나의 큰 캔버스로 덮으면 페이지가 많을 때 캔버스 크기가 과도하게
 // 커져 저사양 기기에서 메모리 문제가 생길 수 있어 페이지 단위로 나눴다).
+// 지우개는 destination-out으로 그려서, 이 캔버스(필기)에서만 지나간 자리만큼 지워지고
+// 아래 PDF 페이지 캔버스에는 전혀 영향을 주지 않는다.
 function attachDrawing(
   canvas: HTMLCanvasElement,
-  penModeRef: { current: boolean },
+  toolRef: { current: DrawTool },
   penColorRef: { current: string },
 ) {
   let drawing = false;
@@ -26,17 +33,19 @@ function attachDrawing(
   }
 
   canvas.addEventListener("pointerdown", (e) => {
-    if (!penModeRef.current) return;
+    if (toolRef.current === "move") return;
     drawing = true;
     last = getPoint(e);
   });
   canvas.addEventListener("pointermove", (e) => {
-    if (!penModeRef.current || !drawing || !last) return;
+    if (toolRef.current === "move" || !drawing || !last) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const isEraser = toolRef.current === "eraser";
     const point = getPoint(e);
+    ctx.globalCompositeOperation = isEraser ? "destination-out" : "source-over";
     ctx.strokeStyle = penColorRef.current;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = isEraser ? ERASER_LINE_WIDTH : PEN_LINE_WIDTH;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.beginPath();
@@ -55,12 +64,12 @@ function attachDrawing(
 
 export function PdfCanvasViewer({
   fileUrl,
-  penMode,
+  tool,
   penColor,
   onClearReady,
 }: {
   fileUrl: string;
-  penMode: boolean;
+  tool: DrawTool;
   penColor: string;
   // next/dynamic(ssr:false)로 불러오는 컴포넌트는 일반 함수 컴포넌트로 감싸져서
   // ref가 전달되지 않으므로(useImperativeHandle을 못 씀), "지우기" 함수를 콜백으로
@@ -69,17 +78,17 @@ export function PdfCanvasViewer({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const annotationCanvasesRef = useRef<HTMLCanvasElement[]>([]);
-  const penModeRef = useRef(penMode);
+  const toolRef = useRef(tool);
   const penColorRef = useRef(penColor);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    penModeRef.current = penMode;
+    toolRef.current = tool;
     for (const canvas of annotationCanvasesRef.current) {
-      canvas.style.pointerEvents = penMode ? "auto" : "none";
+      canvas.style.pointerEvents = tool === "move" ? "none" : "auto";
     }
-  }, [penMode]);
+  }, [tool]);
 
   useEffect(() => {
     penColorRef.current = penColor;
@@ -158,12 +167,11 @@ export function PdfCanvasViewer({
           annotationCanvas.style.left = "0";
           annotationCanvas.style.top = "0";
           annotationCanvas.style.touchAction = "none";
-          annotationCanvas.style.pointerEvents = penModeRef.current
-            ? "auto"
-            : "none";
+          annotationCanvas.style.pointerEvents =
+            toolRef.current === "move" ? "none" : "auto";
           pageWrapper.appendChild(annotationCanvas);
           annotationCanvasesRef.current.push(annotationCanvas);
-          attachDrawing(annotationCanvas, penModeRef, penColorRef);
+          attachDrawing(annotationCanvas, toolRef, penColorRef);
 
           container!.appendChild(pageWrapper);
 
