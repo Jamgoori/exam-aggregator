@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// pdf.js 워커는 node_modules에서 매 설치(postinstall)마다 public/pdf.worker.min.mjs로
-// 복사해서 같은 출처(same-origin) 정적 파일로 서빙한다. 번들러(터보팩/웹팩) 자산 처리
-// 방식 차이나 CDN 의존성 없이 항상 설치된 pdfjs-dist 버전과 정확히 맞물리게 하기 위함.
+// pdf.js 워커(legacy 빌드)는 node_modules에서 매 설치(postinstall)마다
+// public/pdf.worker.min.mjs로 복사해서 같은 출처(same-origin) 정적 파일로 서빙한다.
+// 번들러(터보팩/웹팩) 자산 처리 방식 차이나 CDN 의존성 없이 항상 설치된 pdfjs-dist
+// 버전과 정확히 맞물리게 하기 위함.
 const WORKER_SRC = "/pdf.worker.min.mjs";
 
 // 문항 페이지 위에 손글씨로 메모하는 용도의 캔버스. PDF 페이지마다 별도의 주석 캔버스를
@@ -106,7 +107,11 @@ export function PdfCanvasViewer({
 
     async function run() {
       try {
-        const pdfjsLib = await import("pdfjs-dist");
+        // "legacy" 빌드는 Uint8Array.prototype.toHex처럼 아주 최근에 추가된 JS 엔진
+        // 기능이 없는 브라우저(구형 삼성인터넷 등)를 위해 폴리필을 포함한다. 기본
+        // 빌드는 그런 폴리필이 없어서 해당 브라우저에서 "toHex is not a function"으로
+        // 죽는다.
+        const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
         pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_SRC;
 
         // Range 요청(부분 다운로드)은 Supabase Storage 쪽 CORS preflight에 걸려

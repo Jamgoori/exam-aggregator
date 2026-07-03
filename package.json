@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "node -e \"require('fs').copyFileSync('node_modules/pdfjs-dist/build/pdf.worker.min.mjs', 'public/pdf.worker.min.mjs')\"",
+    "postinstall": "node -e \"require('fs').copyFileSync('node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', 'public/pdf.worker.min.mjs')\"",
     "bulk-upload": "node --env-file=.env.local scripts/bulk-upload.mjs",
     "upload-answer": "node --env-file=.env.local scripts/upload-answer-key.mjs"
   },
