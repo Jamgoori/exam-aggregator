@@ -133,6 +133,9 @@ export async function signInUser(formData: FormData) {
 
 export async function signOutUser() {
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  // scope: "local"은 Supabase Auth 서버로 세션 폐기 요청을 보내지 않고 이 브라우저의
+  // 쿠키만 지운다. 이 사이트는 민감 정보를 다루지 않으므로, 그 왕복 시간만큼 로그아웃
+  // 버튼이 굼떠 보이던 문제를 없애는 쪽을 택한다.
+  await supabase.auth.signOut({ scope: "local" });
   redirect("/");
 }

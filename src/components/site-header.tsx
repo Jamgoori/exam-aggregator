@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { GraduationCap } from "lucide-react";
 import { signOutUser } from "@/app/actions";
+import { SignOutButton } from "@/components/sign-out-button";
 
 export function SiteHeader({
   user,
@@ -27,12 +28,7 @@ export function SiteHeader({
                 {user.nickname}님
               </Link>
               <form action={signOutUser}>
-                <button
-                  type="submit"
-                  className="rounded-full border border-zinc-200 px-4 py-1.5 text-sm font-medium text-zinc-600 hover:border-blue-300 hover:text-blue-600"
-                >
-                  로그아웃
-                </button>
+                <SignOutButton />
               </form>
             </div>
           ) : (
