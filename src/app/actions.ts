@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sanitizeNextPath } from "@/lib/safe-redirect";
 
 const PASSWORD_MIN = 8;
 const SIGNUP_HOURLY_LIMIT = 5; // 같은 IP에서 1시간 내 허용하는 최대 가입 시도 횟수
@@ -53,29 +54,31 @@ export async function signUpUser(formData: FormData) {
   const passwordConfirm = String(formData.get("passwordConfirm") ?? "");
   const nickname = String(formData.get("nickname") ?? "").trim();
   const captchaToken = String(formData.get("cf-turnstile-response") ?? "");
+  const next = sanitizeNextPath(String(formData.get("next") ?? ""));
+  const nextQuery = `next=${encodeURIComponent(next)}`;
 
   if (!nickname) {
-    redirect(`/signup?error=${encodeURIComponent("닉네임을 입력해주세요")}`);
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("닉네임을 입력해주세요")}`);
   }
 
   if (password.length < PASSWORD_MIN) {
     redirect(
-      `/signup?error=${encodeURIComponent(`비밀번호는 ${PASSWORD_MIN}자 이상이어야 해요`)}`,
+      `/signup?${nextQuery}&error=${encodeURIComponent(`비밀번호는 ${PASSWORD_MIN}자 이상이어야 해요`)}`,
     );
   }
 
   if (password !== passwordConfirm) {
-    redirect(`/signup?error=${encodeURIComponent("비밀번호가 일치하지 않아요")}`);
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("비밀번호가 일치하지 않아요")}`);
   }
 
   // 사이트 키가 설정된 경우에만 캡차를 요구한다 (로컬 개발 중 Turnstile 미설정 시에는 건너뜀).
   if (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !captchaToken) {
-    redirect(`/signup?error=${encodeURIComponent("캡차 인증을 완료해주세요")}`);
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("캡차 인증을 완료해주세요")}`);
   }
 
   const rateLimitError = await checkSignupRateLimit(await getClientIp());
   if (rateLimitError) {
-    redirect(`/signup?error=${encodeURIComponent(rateLimitError)}`);
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent(rateLimitError)}`);
   }
 
   const supabase = await createClient();
@@ -89,29 +92,32 @@ export async function signUpUser(formData: FormData) {
   });
 
   if (error) {
-    redirect(`/signup?error=${encodeURIComponent(error.message)}`);
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent(error.message)}`);
   }
 
   if (!data.session) {
     redirect(
-      `/login?message=${encodeURIComponent("가입 확인 이메일을 보냈어요. 메일함을 확인해주세요")}`,
+      `/login?${nextQuery}&message=${encodeURIComponent("가입 확인 이메일을 보냈어요. 메일함을 확인해주세요")}`,
     );
   }
 
-  redirect("/");
+  redirect(next);
 }
 
-export async function signInWithGoogle() {
+export async function signInWithGoogle(formData: FormData) {
   const origin = await getOrigin();
+  const next = sanitizeNextPath(String(formData.get("next") ?? ""));
   const supabase = await createClient();
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: `${origin}/auth/callback` },
+    options: { redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(next)}` },
   });
 
   if (error || !data.url) {
-    redirect(`/login?error=${encodeURIComponent("구글 로그인을 시작할 수 없어요")}`);
+    redirect(
+      `/login?next=${encodeURIComponent(next)}&error=${encodeURIComponent("구글 로그인을 시작할 수 없어요")}`,
+    );
   }
 
   redirect(data.url);
@@ -120,15 +126,18 @@ export async function signInWithGoogle() {
 export async function signInUser(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
+  const next = sanitizeNextPath(String(formData.get("next") ?? ""));
 
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    redirect(`/login?error=${encodeURIComponent("이메일/비밀번호를 확인해주세요")}`);
+    redirect(
+      `/login?next=${encodeURIComponent(next)}&error=${encodeURIComponent("이메일/비밀번호를 확인해주세요")}`,
+    );
   }
 
-  redirect("/");
+  redirect(next);
 }
 
 export async function signOutUser() {

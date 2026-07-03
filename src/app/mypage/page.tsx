@@ -27,7 +27,10 @@ export default async function MyPage({
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect(`/login?error=${encodeURIComponent("로그인이 필요해요")}`);
+    const next = tab ? `/mypage?tab=${encodeURIComponent(tab)}` : "/mypage";
+    redirect(
+      `/login?next=${encodeURIComponent(next)}&error=${encodeURIComponent("로그인이 필요해요")}`,
+    );
   }
 
   const activeTab: TabKey = TABS.some((t) => t.key === tab)
