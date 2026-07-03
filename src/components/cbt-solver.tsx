@@ -200,7 +200,7 @@ export function CbtSolver({
             onClick={() => setOmrOpen(true)}
             className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
           >
-            OMR
+            답안 입력
           </button>
         </div>
       </header>
@@ -250,7 +250,7 @@ export function CbtSolver({
         </div>
 
         <OmrPanel
-          className="hidden w-[360px] shrink-0 border-l border-zinc-200 lg:flex"
+          className="hidden w-[240px] shrink-0 border-l border-zinc-200 lg:flex"
           totalQuestions={totalQuestions}
           choiceCount={choiceCount}
           answers={answers}
@@ -273,7 +273,7 @@ export function CbtSolver({
           />
           <div className="relative flex max-h-[65dvh] flex-col rounded-t-2xl bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2">
-              <h2 className="text-sm font-semibold text-zinc-700">OMR 답안지</h2>
+              <h2 className="text-sm font-semibold text-zinc-700">답안 입력</h2>
               <button
                 type="button"
                 aria-label="닫기"
@@ -383,9 +383,7 @@ function OmrPanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
-        <div
-          className={`grid gap-1.5 ${choiceCount > 4 ? "grid-cols-1" : "grid-cols-2"}`}
-        >
+        <div className="grid grid-cols-1 gap-1.5">
           {Array.from({ length: totalQuestions }, (_, i) => {
             const questionNumber = i + 1;
             const selected = answers[i];

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
-import { SiteHeader } from "@/components/site-header";
+import { SiteHeaderGate } from "@/components/site-header-gate";
 import { createClient } from "@/lib/supabase/server";
 import "./globals.css";
 
@@ -48,7 +48,7 @@ export default async function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">
-        <SiteHeader user={headerUser} />
+        <SiteHeaderGate user={headerUser} />
         {children}
         <Analytics />
       </body>
