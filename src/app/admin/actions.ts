@@ -136,13 +136,16 @@ export async function savePaperAnswers(
   }
   const choiceCount = Math.max(4, ...answers);
 
-  const { error: choiceCountError } = await supabase
+  // question_count도 정답 배열 길이로 같이 맞춰준다. 업로드 시 문항 수를 비워뒀거나
+  // 잘못 적어둔 경우에도, 정답이 저장되는 순간부터는 이 값이 진짜 문항 수가 된다
+  // (CBT 화면이 문항 수를 이 필드 기준으로 판단하기 때문에 비어 있으면 CBT가 열리지 않는다).
+  const { error: paperFieldsError } = await supabase
     .from("exam_papers")
-    .update({ choice_count: choiceCount })
+    .update({ choice_count: choiceCount, question_count: answers.length })
     .eq("id", paperId);
 
-  if (choiceCountError) {
-    return { error: `저장 실패: ${choiceCountError.message}` };
+  if (paperFieldsError) {
+    return { error: `저장 실패: ${paperFieldsError.message}` };
   }
 
   const { error } = await supabase.from("paper_answers").upsert(
