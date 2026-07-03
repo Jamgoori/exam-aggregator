@@ -133,7 +133,11 @@ export function CbtSolver({
 
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
-          <iframe src={fileUrl} title={paperTitle} className="h-full w-full" />
+          <iframe
+            src={`https://docs.google.com/gview?url=${encodeURIComponent(fileUrl)}&embedded=true`}
+            title={paperTitle}
+            className="h-full w-full"
+          />
         </div>
 
         <OmrPanel
