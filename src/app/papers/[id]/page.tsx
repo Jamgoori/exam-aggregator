@@ -125,15 +125,24 @@ export default async function PaperDetailPage({
     : { data: false };
   const isAdmin = isAdminData === true;
 
-  const { data: bookmarkData } = currentUser
-    ? await supabase
-        .from("bookmarks")
-        .select("id")
-        .eq("user_id", currentUser.id)
-        .eq("paper_id", typedPaper.id)
-        .maybeSingle()
-    : { data: null };
+  const [{ data: bookmarkData }, { data: myRatingData }] = currentUser
+    ? await Promise.all([
+        supabase
+          .from("bookmarks")
+          .select("id")
+          .eq("user_id", currentUser.id)
+          .eq("paper_id", typedPaper.id)
+          .maybeSingle(),
+        supabase
+          .from("difficulty_ratings")
+          .select("score")
+          .eq("paper_id", typedPaper.id)
+          .eq("user_id", currentUser.id)
+          .maybeSingle(),
+      ])
+    : [{ data: null }, { data: null }];
   const isBookmarked = !!bookmarkData;
+  const myScore = myRatingData ? (myRatingData.score as number) : null;
 
   const subject = typedPaper.subjects;
   const examType = typedPaper.exam_types;
@@ -257,6 +266,7 @@ export default async function PaperDetailPage({
         averageScore={averageScore}
         voteCount={scores.length}
         loggedIn={loggedIn}
+        initialMyScore={myScore}
       />
 
       <CommentsSection

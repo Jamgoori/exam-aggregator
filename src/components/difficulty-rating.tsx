@@ -28,18 +28,22 @@ export function DifficultyRating({
   averageScore,
   voteCount,
   loggedIn,
+  initialMyScore = null,
 }: {
   paperId: string;
   averageScore: number | null;
   voteCount: number;
   loggedIn: boolean;
+  initialMyScore?: number | null;
 }) {
   const [message, setMessage] = useState<string | null>(null);
   // 막대를 누른 시점엔 아직 서버로 전송하지 않고 "선택만" 해두고, 별도 제출 버튼을 눌러야
   // 실제로 투표된다 (클릭 한 번에 바로 확정되던 기존 방식이 어색하다는 피드백 반영).
   const [selected, setSelected] = useState<number | null>(null);
   const [hovered, setHovered] = useState<number | null>(null);
-  const [myScore, setMyScore] = useState<number | null>(null);
+  // 서버에서 내려준 "이미 투표한 점수"로 초기화한다. 이게 없으면 이미 투표한 사용자도
+  // 페이지를 새로 열 때마다 아직 투표 안 한 것처럼 회색 막대가 다시 클릭 가능해 보였다.
+  const [myScore, setMyScore] = useState<number | null>(initialMyScore);
   const [avg, setAvg] = useState(averageScore);
   const [count, setCount] = useState(voteCount);
   const [pending, startTransition] = useTransition();
@@ -64,14 +68,10 @@ export function DifficultyRating({
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4">
-      {/* 로그인 여부와 상관없이 제목/평균은 항상 그대로 보여줘서, 블러 처리된 영역이
-          "난이도 평가 칸"이라는 걸 알 수 있게 한다. */}
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">체감 난이도</span>
-        <span className="text-sm text-zinc-500">
-          {avg ? `평균 ${avg.toFixed(1)} / 5` : "평가 없음"} · {count}명 참여
-        </span>
-      </div>
+      {/* 로그인 여부와 상관없이 제목은 항상 그대로 보여줘서, 블러 처리된 영역이
+          "난이도 평가 칸"이라는 걸 알 수 있게 한다. 평균/참여자 수는 집계 데이터라
+          비로그인 사용자에게는 블러 영역 안에 숨긴다. */}
+      <span className="text-sm font-medium">체감 난이도</span>
 
       <div className="relative">
         <div
@@ -80,6 +80,10 @@ export function DifficultyRating({
           }`}
           aria-hidden={!loggedIn}
         >
+          <p className="text-sm text-zinc-500">
+            {avg ? `평균 ${avg.toFixed(1)} / 5` : "평가 없음"} · {count}명 참여
+          </p>
+
           <div className="flex flex-col gap-1">
             <div className="flex items-end gap-1" onMouseLeave={() => setHovered(null)}>
               {SCORES.map((score, i) => (
@@ -92,7 +96,7 @@ export function DifficultyRating({
                   aria-label={`난이도 ${score}점`}
                   aria-pressed={selected === score}
                   style={{ height: `${14 + i * 3}px` }}
-                  className={`w-4 rounded-sm transition-colors disabled:cursor-default ${
+                  className={`flex-1 rounded-sm transition-colors disabled:cursor-default ${
                     score <= activeScore ? colorForScore(score) : "bg-zinc-200"
                   }`}
                 />
@@ -100,7 +104,7 @@ export function DifficultyRating({
             </div>
             <div className="flex justify-between text-[11px] text-zinc-400">
               <span>쉬움</span>
-              <span>어려움</span>
+              <span>매우 어려움</span>
             </div>
           </div>
 
