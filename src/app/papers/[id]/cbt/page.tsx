@@ -21,11 +21,7 @@ export default async function CbtPage({
   }
 
   const [{ data: paper }, { data: hasAnswers }] = await Promise.all([
-    supabase
-      .from("exam_papers")
-      .select("*, subjects(*), exam_types(*)")
-      .eq("id", id)
-      .single(),
+    supabase.from("exam_papers").select("*").eq("id", id).single(),
     supabase.rpc("has_cbt_answers", { target_paper_id: id }),
   ]);
 
@@ -63,9 +59,6 @@ export default async function CbtPage({
       fileUrl={paperFileUrl.publicUrl}
       totalQuestions={typedPaper.question_count}
       choiceCount={typedPaper.choice_count}
-      subjectName={typedPaper.subjects?.name ?? null}
-      examTypeName={typedPaper.exam_types?.name ?? null}
-      level={typedPaper.level}
     />
   );
 }

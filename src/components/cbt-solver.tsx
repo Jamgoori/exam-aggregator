@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import { ChevronLeft, Clock, Trophy, X } from "lucide-react";
+import { ChevronLeft, Clock, Eraser, PenLine, Trophy, X } from "lucide-react";
 import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
+
+// pdf.js는 브라우저 전용 API(Worker, canvas 등)에 의존해서 서버에서 미리 렌더링하면
+// 안 되므로, 이 컴포넌트는 클라이언트에서만 로드한다.
+const PdfCanvasViewer = dynamic(
+  () => import("@/components/pdf-canvas-viewer").then((m) => m.PdfCanvasViewer),
+  { ssr: false },
+);
 
 function formatDuration(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
@@ -11,24 +19,20 @@ function formatDuration(totalSeconds: number) {
   return `${minutes}분 ${seconds}초`;
 }
 
+const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
+
 export function CbtSolver({
   paperId,
   paperTitle,
   fileUrl,
   totalQuestions,
   choiceCount,
-  subjectName,
-  examTypeName,
-  level,
 }: {
   paperId: string;
   paperTitle: string;
   fileUrl: string;
   totalQuestions: number;
   choiceCount: number;
-  subjectName: string | null;
-  examTypeName: string | null;
-  level: string | null;
 }) {
   const [answers, setAnswers] = useState<(number | null)[]>(
     Array(totalQuestions).fill(null),
@@ -39,10 +43,21 @@ export function CbtSolver({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const startedAtRef = useRef(0);
+  const [penMode, setPenMode] = useState(false);
+  const [penColor, setPenColor] = useState(PEN_COLORS[0]);
+  const clearDrawingRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     startedAtRef.current = Date.now();
   }, []);
+
+  const registerClearDrawing = useCallback((clear: () => void) => {
+    clearDrawingRef.current = clear;
+  }, []);
+
+  function clearDrawing() {
+    clearDrawingRef.current();
+  }
 
   useEffect(() => {
     if (result) return;
@@ -116,35 +131,70 @@ export function CbtSolver({
             {paperTitle}
           </h1>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2">
           <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
             <Clock size={16} />
             {formatDuration(elapsedSeconds)}
           </div>
           <button
             type="button"
+            onClick={() => setPenMode((v) => !v)}
+            aria-pressed={penMode}
+            className={`flex items-center justify-center rounded-lg p-1.5 ${
+              penMode
+                ? "bg-blue-600 text-white"
+                : "text-zinc-600 hover:bg-zinc-100"
+            }`}
+          >
+            <PenLine size={18} />
+          </button>
+          <button
+            type="button"
             onClick={() => setOmrOpen(true)}
             className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
           >
-            OMR
+            답안 입력
           </button>
         </div>
       </header>
 
+      {penMode && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-zinc-200 bg-white px-3 py-1.5">
+          {PEN_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              aria-label="펜 색상"
+              onClick={() => setPenColor(color)}
+              style={{ backgroundColor: color }}
+              className={`h-5 w-5 rounded-full ${
+                penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+              }`}
+            />
+          ))}
+          <button
+            type="button"
+            onClick={clearDrawing}
+            className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
+          >
+            <Eraser size={14} />
+            지우기
+          </button>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1">
-          <iframe
-            src={`https://docs.google.com/gview?url=${encodeURIComponent(fileUrl)}&embedded=true`}
-            title={paperTitle}
-            className="h-full w-full"
+        <div className="relative min-w-0 flex-1">
+          <PdfCanvasViewer
+            fileUrl={fileUrl}
+            penMode={penMode}
+            penColor={penColor}
+            onClearReady={registerClearDrawing}
           />
         </div>
 
         <OmrPanel
-          className="hidden w-[360px] shrink-0 border-l border-zinc-200 lg:flex"
-          subjectName={subjectName}
-          examTypeName={examTypeName}
-          level={level}
+          className="hidden w-[240px] shrink-0 border-l border-zinc-200 lg:flex"
           totalQuestions={totalQuestions}
           choiceCount={choiceCount}
           answers={answers}
@@ -165,9 +215,9 @@ export function CbtSolver({
             onClick={() => setOmrOpen(false)}
             className="absolute inset-0 bg-black/40"
           />
-          <div className="relative flex max-h-[85dvh] flex-col rounded-t-2xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
-              <h2 className="text-sm font-semibold text-zinc-700">OMR 답안지</h2>
+          <div className="relative flex max-h-[65dvh] flex-col rounded-t-2xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2">
+              <h2 className="text-sm font-semibold text-zinc-700">답안 입력</h2>
               <button
                 type="button"
                 aria-label="닫기"
@@ -179,9 +229,6 @@ export function CbtSolver({
             </div>
             <OmrPanel
               className="flex min-h-0 flex-1 flex-col"
-              subjectName={subjectName}
-              examTypeName={examTypeName}
-              level={level}
               totalQuestions={totalQuestions}
               choiceCount={choiceCount}
               answers={answers}
@@ -245,9 +292,6 @@ export function CbtSolver({
 
 function OmrPanel({
   className,
-  subjectName,
-  examTypeName,
-  level,
   totalQuestions,
   choiceCount,
   answers,
@@ -259,9 +303,6 @@ function OmrPanel({
   resultByQuestion,
 }: {
   className: string;
-  subjectName: string | null;
-  examTypeName: string | null;
-  level: string | null;
   totalQuestions: number;
   choiceCount: number;
   answers: (number | null)[];
@@ -279,33 +320,14 @@ function OmrPanel({
 
   return (
     <div className={className}>
-      <div className="flex shrink-0 flex-col gap-2 border-b border-zinc-100 px-4 py-3">
-        <div className="flex flex-wrap gap-1.5">
-          {examTypeName && (
-            <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-              {examTypeName}
-            </span>
-          )}
-          {level && (
-            <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-              {level}
-            </span>
-          )}
-          {subjectName && (
-            <span className="rounded bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600">
-              {subjectName}
-            </span>
-          )}
-        </div>
+      <div className="shrink-0 border-b border-zinc-100 px-4 py-2">
         <p className="text-sm text-zinc-500">
           {answeredCount}/{totalQuestions} 문항 표기
         </p>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <div
-          className={`grid gap-2 ${choiceCount > 4 ? "grid-cols-1" : "grid-cols-2"}`}
-        >
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2">
+        <div className="grid grid-cols-1 gap-1.5">
           {Array.from({ length: totalQuestions }, (_, i) => {
             const questionNumber = i + 1;
             const selected = answers[i];
@@ -313,7 +335,7 @@ function OmrPanel({
             return (
               <div
                 key={questionNumber}
-                className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 ${
+                className={`flex items-center gap-2 rounded-lg border px-2 py-1 ${
                   graded
                     ? questionResult?.is_correct
                       ? "border-emerald-200 bg-emerald-50"
@@ -321,7 +343,7 @@ function OmrPanel({
                     : "border-zinc-200"
                 }`}
               >
-                <span className="w-5 shrink-0 text-xs font-medium text-zinc-500">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white">
                   {questionNumber}
                 </span>
                 <div className="flex flex-1 gap-1">
