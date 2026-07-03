@@ -1,7 +1,7 @@
 import { cache } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Download, ExternalLink } from "lucide-react";
+import { Download, ExternalLink, Monitor } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor, compareLevels } from "@/lib/level-colors";
@@ -77,17 +77,23 @@ export default async function PaperDetailPage({
     ? answerKeyQuery.eq("track", typedPaper.track)
     : answerKeyQuery.is("track", null);
 
-  const [{ data: comments }, { data: ratings }, userResult, { data: answerKey }] =
-    await Promise.all([
-      supabase
-        .from("comments")
-        .select("id, paper_id, user_id, nickname, content, created_at, updated_at")
-        .eq("paper_id", id)
-        .order("created_at", { ascending: false }),
-      supabase.from("difficulty_ratings").select("score").eq("paper_id", id),
-      supabase.auth.getUser(),
-      answerKeyQuery.maybeSingle(),
-    ]);
+  const [
+    { data: comments },
+    { data: ratings },
+    userResult,
+    { data: answerKey },
+    { data: hasCbtAnswers },
+  ] = await Promise.all([
+    supabase
+      .from("comments")
+      .select("id, paper_id, user_id, nickname, content, created_at, updated_at")
+      .eq("paper_id", id)
+      .order("created_at", { ascending: false }),
+    supabase.from("difficulty_ratings").select("score").eq("paper_id", id),
+    supabase.auth.getUser(),
+    answerKeyQuery.maybeSingle(),
+    supabase.rpc("has_cbt_answers", { target_paper_id: id }),
+  ]);
 
   // "같은 과목 목록"은 미리보기 성격이라 최근 RELATED_PAPERS_LIMIT개만 보여주고,
   // 전체 목록은 /subjects/[slug] 페이지(페이지네이션 적용됨)로 넘긴다.
@@ -232,6 +238,16 @@ export default async function PaperDetailPage({
             <Download size={20} />
           </a>
         </div>
+
+        {hasCbtAnswers && (
+          <Link
+            href={`/papers/${typedPaper.id}/cbt`}
+            className="flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 font-medium text-blue-700 hover:bg-blue-100"
+          >
+            <Monitor size={18} />
+            CBT로 풀기
+          </Link>
+        )}
 
         {typedAnswerKey && answerKeyFileUrl && (
           <div className="flex items-stretch gap-2">
