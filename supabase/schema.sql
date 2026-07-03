@@ -113,13 +113,14 @@ exception when duplicate_object then null; end $$;
 
 create index if not exists comments_paper_idx on comments(paper_id, created_at);
 
--- 난이도 평가 (회원/비회원 모두, 문제지당 1회로 제한)
+-- 난이도 평가 (회원/비회원 모두, 문제지당 1회로 제한). 0.5 단위 입력을 허용하기 위해
+-- score를 smallint가 아니라 numeric(2,1)로 저장한다.
 create table if not exists difficulty_ratings (
   id uuid primary key default gen_random_uuid(),
   paper_id uuid not null references exam_papers(id) on delete cascade,
   user_id uuid references auth.users(id) on delete cascade,
   guest_token text,
-  score smallint not null check (score between 1 and 5),
+  score numeric(2,1) not null check (score in (1,1.5,2,2.5,3,3.5,4,4.5,5)),
   created_at timestamptz not null default now(),
   constraint difficulty_ratings_voter_check
     check (
@@ -127,6 +128,14 @@ create table if not exists difficulty_ratings (
       (user_id is null and guest_token is not null)
     )
 );
+
+-- 기존 설치본 대비: score를 smallint(1~5 정수)에서 numeric(2,1)(0.5 단위)로 변경.
+-- 이미 numeric(2,1)인 설치본에서 다시 실행해도 동일 타입으로의 캐스팅이라 안전하다.
+alter table difficulty_ratings alter column score type numeric(2,1) using score::numeric(2,1);
+
+alter table difficulty_ratings drop constraint if exists difficulty_ratings_score_check;
+alter table difficulty_ratings add constraint difficulty_ratings_score_check
+  check (score in (1,1.5,2,2.5,3,3.5,4,4.5,5));
 
 create unique index if not exists difficulty_ratings_user_unique
   on difficulty_ratings(paper_id, user_id) where user_id is not null;

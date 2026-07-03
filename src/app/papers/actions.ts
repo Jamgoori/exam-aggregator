@@ -219,14 +219,20 @@ export async function deleteComment(input: {
   return { success: true };
 }
 
+const VALID_SCORES = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
+
+export type RatingResult = CommentResult & {
+  averageScore?: number | null;
+  voteCount?: number;
+};
+
 export async function postRating(
   paperId: string,
   score: number,
   guestToken: string | null,
-): Promise<CommentResult> {
+): Promise<RatingResult> {
   if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
-  if (!Number.isInteger(score) || score < 1 || score > 5)
-    return { error: "잘못된 점수입니다." };
+  if (!VALID_SCORES.includes(score)) return { error: "잘못된 점수입니다." };
 
   const supabase = await createClient();
   const {
@@ -246,8 +252,17 @@ export async function postRating(
     };
   }
 
+  // 투표 직후 화면에 바로 최신 평균/참여자 수를 보여주기 위해 다시 집계해서 함께 반환한다.
+  const { data: ratings } = await supabase
+    .from("difficulty_ratings")
+    .select("score")
+    .eq("paper_id", paperId);
+  const scores = (ratings ?? []).map((r) => r.score as number);
+  const averageScore =
+    scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+
   revalidatePath(`/papers/${paperId}`);
-  return { success: true };
+  return { success: true, averageScore, voteCount: scores.length };
 }
 
 export type BookmarkResult = CommentResult & { bookmarked?: boolean };
