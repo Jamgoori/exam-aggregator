@@ -239,16 +239,6 @@ export default async function PaperDetailPage({
           </a>
         </div>
 
-        {hasCbtAnswers && (
-          <Link
-            href={`/papers/${typedPaper.id}/cbt`}
-            className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-medium text-white hover:bg-emerald-700"
-          >
-            <Monitor size={18} />
-            온라인에서 풀기
-          </Link>
-        )}
-
         {typedAnswerKey && answerKeyFileUrl && (
           <div className="flex items-stretch gap-2">
             <a
@@ -269,6 +259,17 @@ export default async function PaperDetailPage({
               <Download size={18} />
             </a>
           </div>
+        )}
+
+        {hasCbtAnswers && (
+          <Link
+            href={`/papers/${typedPaper.id}/cbt`}
+            className="flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-medium hover:opacity-90"
+            style={{ backgroundColor: "#E6F7F0", color: "#00875A" }}
+          >
+            <Monitor size={18} />
+            온라인에서 풀기
+          </Link>
         )}
 
         <p className="mt-1 text-xs text-zinc-400">
