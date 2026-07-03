@@ -9,33 +9,16 @@ export function AnswerForm({
   paperId,
   initialAnswers,
   questionCount,
-  initialChoiceCount,
 }: {
   paperId: string;
   initialAnswers: string;
   questionCount: number | null;
-  initialChoiceCount: number;
 }) {
   const [state, action, pending] = useActionState(savePaperAnswers, initialState);
 
   return (
     <form action={action} className="flex flex-col gap-4">
       <input type="hidden" name="paper_id" value={paperId} />
-
-      <div className="flex flex-col gap-1">
-        <label htmlFor="choice_count" className="text-sm text-zinc-600">
-          선지 수
-        </label>
-        <select
-          id="choice_count"
-          name="choice_count"
-          defaultValue={initialChoiceCount}
-          className="rounded border border-zinc-300 px-3 py-2"
-        >
-          <option value={4}>4지선다</option>
-          <option value={5}>5지선다</option>
-        </select>
-      </div>
 
       <div className="flex flex-col gap-1">
         <label htmlFor="answers" className="text-sm text-zinc-600">
@@ -53,6 +36,7 @@ export function AnswerForm({
         {questionCount && (
           <p className="text-xs text-zinc-400">
             문항 수 {questionCount}개 — 순서대로 {questionCount}개를 입력해주세요.
+            5번 정답이 있으면 CBT 화면에 자동으로 5지선다로 표시돼요.
           </p>
         )}
       </div>

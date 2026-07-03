@@ -48,7 +48,6 @@ export async function uploadExamPaper(
   const level = String(formData.get("level") ?? "").trim();
   const title = String(formData.get("title") ?? "");
   const questionCountRaw = String(formData.get("question_count") ?? "").trim();
-  const choiceCountRaw = String(formData.get("choice_count") ?? "").trim();
   const tagsRaw = String(formData.get("tags") ?? "").trim();
 
   if (!file || file.size === 0) {
@@ -80,7 +79,6 @@ export async function uploadExamPaper(
     level: level || null,
     title,
     question_count: questionCountRaw ? Number(questionCountRaw) : null,
-    choice_count: choiceCountRaw ? Number(choiceCountRaw) : 4,
     tags,
     file_path: filePath,
     file_name: file.name,
@@ -115,13 +113,9 @@ export async function savePaperAnswers(
 
   const paperId = String(formData.get("paper_id") ?? "");
   const answersRaw = String(formData.get("answers") ?? "").trim();
-  const choiceCount = Number(formData.get("choice_count") ?? 4);
 
   if (!paperId || !answersRaw) {
     return { error: "정답을 입력해주세요." };
-  }
-  if (!Number.isInteger(choiceCount) || choiceCount < 2) {
-    return { error: "선지 수가 올바르지 않아요." };
   }
 
   const answers = answersRaw
@@ -129,14 +123,18 @@ export async function savePaperAnswers(
     .filter(Boolean)
     .map((s) => Number(s));
 
+  // 실제 정답지에 몇 번까지 나오는지로 선지 수를 그대로 추론한다 (5번 정답이 하나라도
+  // 있으면 5지선다). 관리자가 선지 수를 따로 고를 필요가 없게 하려는 의도.
+  const MAX_CHOICE_COUNT = 5;
   if (
     answers.length === 0 ||
-    answers.some((n) => !Number.isInteger(n) || n < 1 || n > choiceCount)
+    answers.some((n) => !Number.isInteger(n) || n < 1 || n > MAX_CHOICE_COUNT)
   ) {
     return {
-      error: `정답은 1~${choiceCount} 사이 숫자로, 쉼표나 공백으로 구분해 입력해주세요.`,
+      error: `정답은 1~${MAX_CHOICE_COUNT} 사이 숫자로, 쉼표나 공백으로 구분해 입력해주세요.`,
     };
   }
+  const choiceCount = Math.max(4, ...answers);
 
   const { error: choiceCountError } = await supabase
     .from("exam_papers")

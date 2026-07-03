@@ -22,7 +22,7 @@ export default async function AnswerEditPage({
   const [{ data: paper }, { data: existing }] = await Promise.all([
     supabase
       .from("exam_papers")
-      .select("id, title, year, question_count, choice_count")
+      .select("id, title, year, question_count")
       .eq("id", paperId)
       .single(),
     supabase
@@ -54,7 +54,6 @@ export default async function AnswerEditPage({
         paperId={paper.id}
         initialAnswers={(existing?.answers ?? []).join(", ")}
         questionCount={paper.question_count}
-        initialChoiceCount={paper.choice_count ?? 4}
       />
     </div>
   );
