@@ -245,9 +245,9 @@ export default async function PaperDetailPage({
               href={answerKeyFileUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 font-medium text-blue-700 hover:bg-blue-100"
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-lg font-medium text-blue-700 hover:bg-blue-100"
             >
-              <ExternalLink size={18} />
+              <ExternalLink size={20} />
               정답 열기
             </a>
             <a
@@ -256,7 +256,7 @@ export default async function PaperDetailPage({
               title="정답 다운로드"
               className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
             >
-              <Download size={18} />
+              <Download size={20} />
             </a>
           </div>
         )}
@@ -264,10 +264,14 @@ export default async function PaperDetailPage({
         {hasCbtAnswers && (
           <Link
             href={`/papers/${typedPaper.id}/cbt`}
-            className="flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-medium hover:opacity-90"
-            style={{ backgroundColor: "#E6F7F0", color: "#00875A" }}
+            className="flex items-center justify-center gap-2 rounded-xl border px-4 py-4 text-lg font-medium hover:opacity-90"
+            style={{
+              backgroundColor: "#E6F7F0",
+              color: "#00875A",
+              borderColor: "#B7E4C7",
+            }}
           >
-            <Monitor size={18} />
+            <Monitor size={20} />
             온라인에서 풀기
           </Link>
         )}
