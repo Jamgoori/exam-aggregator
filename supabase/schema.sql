@@ -249,17 +249,15 @@ revoke all on comments from anon, authenticated;
 grant select (id, paper_id, user_id, nickname, content, created_at, updated_at)
   on comments to anon, authenticated;
 
--- 난이도 평가: 누구나 읽기, 본인 명의로만 작성 (문제지당 1회는 unique index로 강제)
+-- 난이도 평가: 누구나 읽기, 로그인한 본인 명의로만 작성 가능 (비회원 평가는 막음).
+-- 문제지당 1회는 unique index로 강제.
 drop policy if exists "public read ratings" on difficulty_ratings;
 create policy "public read ratings" on difficulty_ratings for select using (true);
 
 drop policy if exists "insert own rating" on difficulty_ratings;
 create policy "insert own rating" on difficulty_ratings
-  for insert to anon, authenticated
-  with check (
-    (auth.uid() is not null and user_id = auth.uid() and guest_token is null) or
-    (auth.uid() is null and user_id is null and guest_token is not null)
-  );
+  for insert to authenticated
+  with check (auth.uid() = user_id and guest_token is null);
 
 -- 다운로드 수 증가용 함수: 익명 사용자가 다운로드 카운트만 안전하게 올릴 수 있도록
 -- security definer로 만들고, 테이블 UPDATE 권한은 별도로 열어주지 않는다.

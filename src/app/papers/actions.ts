@@ -229,7 +229,6 @@ export type RatingResult = CommentResult & {
 export async function postRating(
   paperId: string,
   score: number,
-  guestToken: string | null,
 ): Promise<RatingResult> {
   if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
   if (!VALID_SCORES.includes(score)) return { error: "잘못된 점수입니다." };
@@ -238,11 +237,12 @@ export async function postRating(
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
   const { error } = await supabase.from("difficulty_ratings").insert({
     paper_id: paperId,
-    user_id: user?.id ?? null,
-    guest_token: user ? null : guestToken,
+    user_id: user.id,
+    guest_token: null,
     score,
   });
 

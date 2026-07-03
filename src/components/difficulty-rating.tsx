@@ -1,19 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { postRating } from "@/app/papers/actions";
 
-const GUEST_ID_KEY = "exam-aggregator-guest-id";
 const SCORES = [1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5];
-
-function getGuestToken() {
-  let token = localStorage.getItem(GUEST_ID_KEY);
-  if (!token) {
-    token = crypto.randomUUID();
-    localStorage.setItem(GUEST_ID_KEY, token);
-  }
-  return token;
-}
 
 // 별점(=품질 평가) 느낌이 아니라 "쉬움 → 어려움"으로 읽히도록 초록~빨강 그라데이션을 쓴다.
 function colorForScore(score: number) {
@@ -57,10 +48,9 @@ export function DifficultyRating({
   const activeScore = myScore ?? hovered ?? selected ?? 0;
 
   function submit() {
-    if (selected === null) return;
+    if (selected === null || !loggedIn) return;
     startTransition(async () => {
-      const guestToken = loggedIn ? null : getGuestToken();
-      const result = await postRating(paperId, selected, guestToken);
+      const result = await postRating(paperId, selected);
       if (result.error) {
         setMessage(result.error);
       } else {
@@ -73,58 +63,79 @@ export function DifficultyRating({
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium">체감 난이도</span>
-        <span className="text-sm text-zinc-500">
-          {avg ? `평균 ${avg.toFixed(1)} / 5` : "평가 없음"} · {count}명 참여
-        </span>
+    <div className="relative overflow-hidden rounded-lg border border-zinc-200 p-4">
+      <div
+        className={`flex flex-col gap-3 ${
+          loggedIn ? "" : "pointer-events-none select-none blur-sm"
+        }`}
+        aria-hidden={!loggedIn}
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">체감 난이도</span>
+          <span className="text-sm text-zinc-500">
+            {avg ? `평균 ${avg.toFixed(1)} / 5` : "평가 없음"} · {count}명 참여
+          </span>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <div className="flex items-end gap-1" onMouseLeave={() => setHovered(null)}>
+            {SCORES.map((score, i) => (
+              <button
+                key={score}
+                type="button"
+                disabled={pending || voted}
+                onClick={() => setSelected(score)}
+                onMouseEnter={() => setHovered(score)}
+                aria-label={`난이도 ${score}점`}
+                aria-pressed={selected === score}
+                style={{ height: `${14 + i * 3}px` }}
+                className={`w-4 rounded-sm transition-colors disabled:cursor-default ${
+                  score <= activeScore ? colorForScore(score) : "bg-zinc-200"
+                }`}
+              />
+            ))}
+          </div>
+          <div className="flex justify-between text-[11px] text-zinc-400">
+            <span>쉬움</span>
+            <span>어려움</span>
+          </div>
+        </div>
+
+        <p className="text-xs text-zinc-600">
+          {voted
+            ? `내가 준 점수: ${myScore} · ${labelForScore(myScore as number)}`
+            : selected !== null
+              ? `${selected} · ${labelForScore(selected)}`
+              : "막대를 눌러 체감 난이도를 선택해주세요."}
+        </p>
+
+        {!voted && (
+          <button
+            type="button"
+            disabled={pending || selected === null}
+            onClick={submit}
+            className="self-start rounded bg-zinc-800 px-4 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {pending ? "제출 중..." : "평가 제출하기"}
+          </button>
+        )}
+
+        {message && <p className="text-xs text-zinc-500">{message}</p>}
       </div>
 
-      <div className="flex flex-col gap-1">
-        <div className="flex items-end gap-1" onMouseLeave={() => setHovered(null)}>
-          {SCORES.map((score, i) => (
-            <button
-              key={score}
-              type="button"
-              disabled={pending || voted}
-              onClick={() => setSelected(score)}
-              onMouseEnter={() => setHovered(score)}
-              aria-label={`난이도 ${score}점`}
-              aria-pressed={selected === score}
-              style={{ height: `${14 + i * 3}px` }}
-              className={`w-4 rounded-sm transition-colors disabled:cursor-default ${
-                score <= activeScore ? colorForScore(score) : "bg-zinc-200"
-              }`}
-            />
-          ))}
+      {!loggedIn && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/70">
+          <p className="text-sm font-medium text-zinc-700">
+            로그인 후 이용할 수 있어요
+          </p>
+          <Link
+            href="/login"
+            className="rounded bg-zinc-800 px-4 py-1.5 text-xs font-medium text-white hover:bg-zinc-700"
+          >
+            로그인하기
+          </Link>
         </div>
-        <div className="flex justify-between text-[11px] text-zinc-400">
-          <span>쉬움</span>
-          <span>어려움</span>
-        </div>
-      </div>
-
-      <p className="text-xs text-zinc-600">
-        {voted
-          ? `내가 준 점수: ${myScore} · ${labelForScore(myScore as number)}`
-          : selected !== null
-            ? `${selected} · ${labelForScore(selected)}`
-            : "막대를 눌러 체감 난이도를 선택해주세요."}
-      </p>
-
-      {!voted && (
-        <button
-          type="button"
-          disabled={pending || selected === null}
-          onClick={submit}
-          className="self-start rounded bg-zinc-800 px-4 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {pending ? "제출 중..." : "평가 제출하기"}
-        </button>
       )}
-
-      {message && <p className="text-xs text-zinc-500">{message}</p>}
     </div>
   );
 }
