@@ -26,8 +26,10 @@ export async function proxy(request: NextRequest) {
   );
 
   // Refreshes the auth session cookie if needed; required for Supabase
-  // auth to work correctly in Server Components.
-  await supabase.auth.getUser();
+  // auth to work correctly in Server Components. getClaims()는 프로젝트가
+  // 비대칭(ECC/RSA) JWT 서명 키를 쓰면 인증 서버 왕복 없이 로컬에서 검증하므로
+  // getUser()보다 훨씬 빠르다 (대칭 키면 getUser()와 동일하게 동작).
+  await supabase.auth.getClaims();
 
   return response;
 }
