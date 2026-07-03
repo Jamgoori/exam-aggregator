@@ -182,17 +182,17 @@ function CommentRow({
   }
 
   return (
-    <div className="flex flex-col gap-1 py-4">
+    <div className="flex flex-col gap-1 py-5">
       <div className="flex items-center justify-between">
         <div className="flex items-baseline gap-2">
-          <span className="text-sm font-medium">{comment.nickname}</span>
-          <span className="text-xs text-zinc-400">
+          <span className="text-sm font-bold">{comment.nickname}</span>
+          <span className="text-[11px] text-zinc-400">
             {new Date(comment.created_at).toLocaleDateString("ko-KR")}
             {comment.updated_at ? " (수정됨)" : ""}
           </span>
         </div>
         {(canEdit || canDelete) && (
-          <div className="flex gap-2 text-xs text-zinc-400">
+          <div className="flex gap-2 text-[11px] text-zinc-400">
             {canEdit && (
               <button
                 type="button"

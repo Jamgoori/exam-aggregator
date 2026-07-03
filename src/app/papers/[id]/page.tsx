@@ -166,8 +166,8 @@ export default async function PaperDetailPage({
     : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-4 py-12">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-10">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-14 px-4 py-12">
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-14">
       <div className="flex flex-col gap-4">
         <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600">
           ← 홈으로
@@ -300,7 +300,7 @@ export default async function PaperDetailPage({
       </div>
 
       {subject && (subjectPapers as ExamPaper[] | null)?.length ? (
-        <div className="flex flex-col gap-4 border-t border-zinc-100 pt-10">
+        <div className="flex flex-col gap-4 border-t border-zinc-100 pt-14">
           <div className="flex items-center justify-between gap-4">
             <h2 className="text-lg font-semibold">
               {subject.name} 기출문제 목록

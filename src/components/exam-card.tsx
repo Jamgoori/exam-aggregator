@@ -55,7 +55,7 @@ export function ExamCard({
           </span>
         ) : (
           isNew && (
-            <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-semibold text-white">
+            <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
               NEW
             </span>
           )
