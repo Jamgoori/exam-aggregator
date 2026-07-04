@@ -12,6 +12,8 @@ import {
   Trash2,
   Trophy,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
 import type { DrawTool } from "@/components/pdf-canvas-viewer";
@@ -30,6 +32,9 @@ function formatDuration(totalSeconds: number) {
 }
 
 const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 2.5;
+const ZOOM_STEP = 0.25;
 
 export function CbtSolver({
   paperId,
@@ -55,6 +60,7 @@ export function CbtSolver({
   const startedAtRef = useRef(0);
   const [tool, setTool] = useState<DrawTool>("move");
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
+  const [zoom, setZoom] = useState(ZOOM_MIN);
   const clearDrawingRef = useRef<() => void>(() => {});
 
   useEffect(() => {
@@ -141,12 +147,39 @@ export function CbtSolver({
             {paperTitle}
           </h1>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
+        <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto">
+          <div className="flex shrink-0 items-center gap-1 text-sm font-medium text-zinc-600">
             <Clock size={16} />
             {formatDuration(elapsedSeconds)}
           </div>
-          <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
+          <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
+            <button
+              type="button"
+              onClick={() =>
+                setZoom((z) => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
+              }
+              disabled={zoom <= ZOOM_MIN}
+              aria-label="축소"
+              className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <ZoomOut size={18} />
+            </button>
+            <span className="w-8 text-center text-[11px] font-medium text-zinc-500">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setZoom((z) => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
+              }
+              disabled={zoom >= ZOOM_MAX}
+              aria-label="확대"
+              className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <ZoomIn size={18} />
+            </button>
+          </div>
+          <div className="flex shrink-0 items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
             <button
               type="button"
               onClick={() => setTool("move")}
@@ -190,7 +223,7 @@ export function CbtSolver({
           <button
             type="button"
             onClick={() => setOmrOpen(true)}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
+            className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
           >
             답안 입력
           </button>
@@ -234,6 +267,7 @@ export function CbtSolver({
             fileUrl={fileUrl}
             tool={tool}
             penColor={penColor}
+            zoom={zoom}
             onClearReady={registerClearDrawing}
           />
         </div>

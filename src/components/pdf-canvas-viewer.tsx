@@ -66,11 +66,15 @@ export function PdfCanvasViewer({
   fileUrl,
   tool,
   penColor,
+  zoom = 1,
   onClearReady,
 }: {
   fileUrl: string;
   tool: DrawTool;
   penColor: string;
+  // 폭 맞춤(fit-to-width) 배율에 곱해지는 추가 확대율. 모바일에서 글자가 작아
+  // 매번 핀치줌해야 하는 걸 덜어주기 위한 +/- 버튼용.
+  zoom?: number;
   // next/dynamic(ssr:false)로 불러오는 컴포넌트는 일반 함수 컴포넌트로 감싸져서
   // ref가 전달되지 않으므로(useImperativeHandle을 못 씀), "지우기" 함수를 콜백으로
   // 등록받는 방식으로 부모에게 노출한다.
@@ -80,6 +84,12 @@ export function PdfCanvasViewer({
   const annotationCanvasesRef = useRef<HTMLCanvasElement[]>([]);
   const toolRef = useRef(tool);
   const penColorRef = useRef(penColor);
+  // 페이지 목록(pdf.js Page 객체)을 캐싱해서, 확대율만 바뀔 때는 파일을 다시
+  // 내려받지 않고 이미 받아둔 페이지를 새 배율로만 다시 렌더링한다.
+  const pagesRef = useRef<{
+    fileUrl: string;
+    pages: Awaited<ReturnType<import("pdfjs-dist/legacy/build/pdf.mjs").PDFDocumentProxy["getPage"]>>[];
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -116,44 +126,56 @@ export function PdfCanvasViewer({
 
     async function run() {
       try {
-        // "legacy" 빌드는 Uint8Array.prototype.toHex처럼 아주 최근에 추가된 JS 엔진
-        // 기능이 없는 브라우저(구형 삼성인터넷 등)를 위해 폴리필을 포함한다. 기본
-        // 빌드는 그런 폴리필이 없어서 해당 브라우저에서 "toHex is not a function"으로
-        // 죽는다.
-        const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-        pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_SRC;
+        let pages: Awaited<
+          ReturnType<
+            import("pdfjs-dist/legacy/build/pdf.mjs").PDFDocumentProxy["getPage"]
+          >
+        >[];
 
-        // Range 요청(부분 다운로드)은 Supabase Storage 쪽 CORS preflight에 걸려
-        // 실패할 수 있어서, 단순 GET 한 번으로 전체를 받아오게 강제한다.
-        const doc = await pdfjsLib.getDocument({
-          url: fileUrl,
-          disableRange: true,
-          disableStream: true,
-        }).promise;
-        if (cancelled) return;
+        if (pagesRef.current?.fileUrl === fileUrl) {
+          // 확대율만 바뀐 경우: 이미 받아둔 페이지를 재사용해 재다운로드를 피한다.
+          pages = pagesRef.current.pages;
+        } else {
+          // "legacy" 빌드는 Uint8Array.prototype.toHex처럼 아주 최근에 추가된 JS 엔진
+          // 기능이 없는 브라우저(구형 삼성인터넷 등)를 위해 폴리필을 포함한다. 기본
+          // 빌드는 그런 폴리필이 없어서 해당 브라우저에서 "toHex is not a function"으로
+          // 죽는다.
+          const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+          pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_SRC;
+
+          // Range 요청(부분 다운로드)은 Supabase Storage 쪽 CORS preflight에 걸려
+          // 실패할 수 있어서, 단순 GET 한 번으로 전체를 받아오게 강제한다.
+          const doc = await pdfjsLib.getDocument({
+            url: fileUrl,
+            disableRange: true,
+            disableStream: true,
+          }).promise;
+          if (cancelled) return;
+
+          // 먼저 페이지 객체를 전부 병렬로 가져와서(가벼운 메타데이터 조회) 스크롤
+          // 레이아웃(빈 캔버스)을 한 번에 순서대로 만들어두고, 실제 렌더링(무거운 작업,
+          // 워커에서 처리됨)은 그 다음에 여러 페이지를 동시에 진행한다. 페이지를 하나씩
+          // 순서대로 렌더링하면 마지막 페이지가 보이기까지 모든 페이지 렌더링 시간이
+          // 그대로 누적돼서, 문항 수가 많은 문제지일수록 체감 로딩이 느려졌었다.
+          pages = await Promise.all(
+            Array.from({ length: doc.numPages }, (_, i) => doc.getPage(i + 1)),
+          );
+          if (cancelled) return;
+          pagesRef.current = { fileUrl, pages };
+        }
 
         const containerWidth = container!.clientWidth || 800;
         const dpr = window.devicePixelRatio || 1;
 
-        // 먼저 페이지 객체를 전부 병렬로 가져와서(가벼운 메타데이터 조회) 스크롤
-        // 레이아웃(빈 캔버스)을 한 번에 순서대로 만들어두고, 실제 렌더링(무거운 작업,
-        // 워커에서 처리됨)은 그 다음에 여러 페이지를 동시에 진행한다. 페이지를 하나씩
-        // 순서대로 렌더링하면 마지막 페이지가 보이기까지 모든 페이지 렌더링 시간이
-        // 그대로 누적돼서, 문항 수가 많은 문제지일수록 체감 로딩이 느려졌었다.
-        const pages = await Promise.all(
-          Array.from({ length: doc.numPages }, (_, i) => doc.getPage(i + 1)),
-        );
-        if (cancelled) return;
-
         const pendingRenders: {
           contentCanvas: HTMLCanvasElement;
           viewport: import("pdfjs-dist/legacy/build/pdf.mjs").PageViewport;
-          page: Awaited<ReturnType<typeof doc.getPage>>;
+          page: (typeof pages)[number];
         }[] = [];
 
         for (const page of pages) {
           const unscaledViewport = page.getViewport({ scale: 1 });
-          const cssScale = containerWidth / unscaledViewport.width;
+          const cssScale = (containerWidth / unscaledViewport.width) * zoom;
           const viewport = page.getViewport({ scale: cssScale * dpr });
           const cssWidth = viewport.width / dpr;
           const cssHeight = viewport.height / dpr;
@@ -228,10 +250,10 @@ export function PdfCanvasViewer({
       cancelled = true;
       renderTasks.forEach((t) => t.cancel());
     };
-  }, [fileUrl]);
+  }, [fileUrl, zoom]);
 
   return (
-    <div className="relative h-full w-full overflow-y-auto bg-zinc-200">
+    <div className="relative h-full w-full overflow-auto bg-zinc-200">
       {loading && (
         <p className="p-4 text-center text-sm text-zinc-500">불러오는 중...</p>
       )}
@@ -242,7 +264,7 @@ export function PdfCanvasViewer({
       )}
       <div
         ref={containerRef}
-        className="mx-auto flex w-full flex-col items-center py-2"
+        className="mx-auto flex w-fit min-w-full flex-col items-center py-2"
       />
     </div>
   );
