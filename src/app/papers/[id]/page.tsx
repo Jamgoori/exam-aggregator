@@ -131,24 +131,44 @@ export default async function PaperDetailPage({
     : { data: false };
   const isAdmin = isAdminData === true;
 
-  const [{ data: bookmarkData }, { data: myRatingData }] = currentUser
-    ? await Promise.all([
-        supabase
-          .from("bookmarks")
-          .select("id")
-          .eq("user_id", currentUser.id)
-          .eq("paper_id", typedPaper.id)
-          .maybeSingle(),
-        supabase
-          .from("difficulty_ratings")
-          .select("score")
-          .eq("paper_id", typedPaper.id)
-          .eq("user_id", currentUser.id)
-          .maybeSingle(),
-      ])
-    : [{ data: null }, { data: null }];
+  const [{ data: bookmarkData }, { data: myRatingData }, { data: myCbtAttemptRows }] =
+    currentUser
+      ? await Promise.all([
+          supabase
+            .from("bookmarks")
+            .select("id")
+            .eq("user_id", currentUser.id)
+            .eq("paper_id", typedPaper.id)
+            .maybeSingle(),
+          supabase
+            .from("difficulty_ratings")
+            .select("score")
+            .eq("paper_id", typedPaper.id)
+            .eq("user_id", currentUser.id)
+            .maybeSingle(),
+          supabase
+            .from("cbt_attempts")
+            .select("id, score, total_questions, created_at")
+            .eq("paper_id", typedPaper.id)
+            .eq("user_id", currentUser.id)
+            .order("created_at", { ascending: true }),
+        ])
+      : [{ data: null }, { data: null }, { data: null }];
   const isBookmarked = !!bookmarkData;
   const myScore = myRatingData ? (myRatingData.score as number) : null;
+
+  const myCbtAttempts = (myCbtAttemptRows ?? []) as {
+    id: string;
+    score: number;
+    total_questions: number;
+    created_at: string;
+  }[];
+  const myBestAttempt =
+    myCbtAttempts.length > 0
+      ? myCbtAttempts.reduce((best, a) => (a.score > best.score ? a : best))
+      : null;
+  const myLatestAttempt =
+    myCbtAttempts.length > 0 ? myCbtAttempts[myCbtAttempts.length - 1] : null;
 
   const subject = typedPaper.subjects;
   const examType = typedPaper.exam_types;
@@ -274,6 +294,20 @@ export default async function PaperDetailPage({
             <Monitor size={20} />
             온라인에서 풀기
           </Link>
+        )}
+
+        {myCbtAttempts.length > 0 && myBestAttempt && myLatestAttempt && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-zinc-200 px-4 py-3 text-sm text-zinc-600">
+            <span className="font-medium text-zinc-800">
+              내 CBT 기록 · 응시 {myCbtAttempts.length}회
+            </span>
+            <span>
+              최고 {myBestAttempt.score} / {myBestAttempt.total_questions}
+            </span>
+            <span>
+              최근 {myLatestAttempt.score} / {myLatestAttempt.total_questions}
+            </span>
+          </div>
         )}
 
         <p className="mt-1 text-xs text-zinc-400">

@@ -91,6 +91,22 @@ export default async function MyPage({
     }) | null;
   }[];
 
+  // 같은 문제지를 몇 번째 풀었는지("N회독") 계산. myAttempts는 전체를 최신순으로 이미
+  // 받아왔으므로, 문제지별로 묶어 오래된 순으로 다시 정렬해 순번을 매긴다.
+  const attemptsByPaper = new Map<string, typeof myAttempts>();
+  for (const a of myAttempts) {
+    if (!a.exam_papers) continue;
+    const list = attemptsByPaper.get(a.exam_papers.id) ?? [];
+    list.push(a);
+    attemptsByPaper.set(a.exam_papers.id, list);
+  }
+  const roundNumberByAttemptId = new Map<string, number>();
+  for (const list of attemptsByPaper.values()) {
+    [...list]
+      .sort((x, y) => new Date(x.created_at).getTime() - new Date(y.created_at).getTime())
+      .forEach((a, i) => roundNumberByAttemptId.set(a.id, i + 1));
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-12">
       <div>
@@ -241,6 +257,11 @@ export default async function MyPage({
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm">
+                      {roundNumberByAttemptId.has(a.id) && (
+                        <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">
+                          {roundNumberByAttemptId.get(a.id)}회독
+                        </span>
+                      )}
                       <span className="font-semibold">
                         {a.score} / {a.total_questions}
                       </span>
