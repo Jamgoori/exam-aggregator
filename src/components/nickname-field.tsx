@@ -6,8 +6,8 @@ import { NICKNAME_MAX, NICKNAME_MIN } from "@/lib/nickname";
 
 export function NicknameField({
   defaultValue = "",
-  // "edit": 중복확인 통과 시 바로 저장까지 함 (마이페이지 수정 화면, 별도 저장 버튼 없음)
-  // "signup": 중복확인만 하고 실제 저장은 회원가입 폼 제출 시 서버에서 한 번 더 검증함
+  // "edit": 중복확인은 확인만 하고, "적용" 버튼을 눌러야 실제로 저장됨 (마이페이지 수정 화면)
+  // "signup": 중복확인만 하고, 실제 저장은 회원가입 폼 제출 시 서버에서 한 번 더 검증함
   mode,
 }: {
   defaultValue?: string;
@@ -32,16 +32,18 @@ export function NicknameField({
         setMessage("이미 사용 중인 닉네임이에요.");
         return;
       }
-      if (mode === "signup") {
-        setStatus("ok");
-        setMessage("사용 가능한 닉네임이에요.");
-        return;
-      }
+      setStatus("ok");
+      setMessage("사용 가능한 닉네임이에요.");
+    });
+  }
 
-      const saveResult = await setNickname(value);
-      if (saveResult.error) {
+  function handleApply() {
+    setMessage(null);
+    startTransition(async () => {
+      const result = await setNickname(value);
+      if (result.error) {
         setStatus("bad");
-        setMessage(saveResult.error);
+        setMessage(result.error);
         return;
       }
       setStatus("ok");
@@ -54,31 +56,41 @@ export function NicknameField({
       <label htmlFor="nickname" className="text-sm text-zinc-600">
         닉네임
       </label>
-      <div className="flex gap-2">
-        <input
-          id="nickname"
-          name="nickname"
-          value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setStatus("idle");
-            setMessage(null);
-          }}
-          required
-          minLength={NICKNAME_MIN}
-          maxLength={NICKNAME_MAX}
-          className="flex-1 rounded border border-zinc-300 px-3 py-2"
-        />
+      <input
+        id="nickname"
+        name="nickname"
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value);
+          setStatus("idle");
+          setMessage(null);
+        }}
+        required
+        minLength={NICKNAME_MIN}
+        maxLength={NICKNAME_MAX}
+        className="rounded border border-zinc-300 px-3 py-2"
+      />
+      <div className="mt-1 flex gap-2">
         <button
           type="button"
           onClick={handleCheck}
           disabled={isPending || !value}
-          className="shrink-0 rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+          className="flex-1 rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
         >
           중복확인
         </button>
+        {mode === "edit" && (
+          <button
+            type="button"
+            onClick={handleApply}
+            disabled={isPending || !value}
+            className="flex-1 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            적용
+          </button>
+        )}
       </div>
-      <p className="text-xs text-zinc-400">
+      <p className="mt-1 text-xs text-zinc-400">
         {NICKNAME_MIN}~{NICKNAME_MAX}자로 입력해주세요.
       </p>
       {message && (
