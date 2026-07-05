@@ -2,9 +2,11 @@
 
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
+import { validateNickname } from "@/lib/nickname";
 
 const PASSWORD_MIN = 8;
 const SIGNUP_HOURLY_LIMIT = 5; // 같은 IP에서 1시간 내 허용하는 최대 가입 시도 횟수
@@ -52,13 +54,15 @@ export async function signUpUser(formData: FormData) {
   const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const passwordConfirm = String(formData.get("passwordConfirm") ?? "");
-  const nickname = String(formData.get("nickname") ?? "").trim();
   const captchaToken = String(formData.get("cf-turnstile-response") ?? "");
   const next = sanitizeNextPath(String(formData.get("next") ?? ""));
   const nextQuery = `next=${encodeURIComponent(next)}`;
 
-  if (!nickname) {
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("닉네임을 입력해주세요")}`);
+  const { nickname, error: nicknameError } = validateNickname(
+    String(formData.get("nickname") ?? ""),
+  );
+  if (nicknameError) {
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent(nicknameError)}`);
   }
 
   if (password.length < PASSWORD_MIN) {
@@ -147,4 +151,38 @@ export async function signOutUser() {
   // 버튼이 굼떠 보이던 문제를 없애는 쪽을 택한다.
   await supabase.auth.signOut({ scope: "local" });
   redirect("/");
+}
+
+export async function updateNickname(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  // 폼은 로그인 상태에서만 노출되지만, 서버 액션은 URL로 직접 호출될 수도 있으니
+  // 세션 자체를 여기서 다시 검증한다 (본인 계정 외에는 애초에 대상 id를 받지 않음).
+  if (!user) {
+    redirect("/login?next=%2Fmypage%3Ftab%3Daccount");
+  }
+
+  const { nickname, error: nicknameError } = validateNickname(
+    String(formData.get("nickname") ?? ""),
+  );
+  if (nicknameError) {
+    redirect(`/mypage?tab=account&error=${encodeURIComponent(nicknameError)}`);
+  }
+
+  const { error } = await supabase.auth.updateUser({ data: { nickname } });
+  if (error) {
+    redirect(
+      `/mypage?tab=account&error=${encodeURIComponent("닉네임 변경에 실패했어요.")}`,
+    );
+  }
+
+  // 헤더 등 여러 서버 컴포넌트가 user_metadata.nickname을 읽어 렌더링하므로,
+  // 이번 응답 이후 방문하는 페이지에 새 닉네임이 곧바로 반영되게 한다.
+  revalidatePath("/", "layout");
+  redirect(
+    `/mypage?tab=account&message=${encodeURIComponent("닉네임을 변경했어요.")}`,
+  );
 }

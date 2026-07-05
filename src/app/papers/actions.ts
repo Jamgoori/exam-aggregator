@@ -5,10 +5,10 @@ import { headers } from "next/headers";
 import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { NICKNAME_MAX } from "@/lib/nickname";
 
 export type CommentResult = { error?: string; success?: boolean };
 
-const NICKNAME_MAX = 10;
 const CONTENT_MAX = 2000;
 const PW_MIN = 4;
 const PW_MAX = 16;
