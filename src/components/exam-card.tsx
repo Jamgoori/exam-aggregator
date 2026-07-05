@@ -2,7 +2,7 @@ import Link from "next/link";
 import { FileText, ChevronRight, MapPin } from "lucide-react";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor } from "@/lib/level-colors";
-import { formatCount, formatFileSize, isRecent } from "@/lib/format";
+import { formatCount, formatFileSize } from "@/lib/format";
 import type { ExamPaper } from "@/lib/supabase/types";
 
 export function ExamCard({
@@ -17,7 +17,6 @@ export function ExamCard({
 }) {
   const subject = paper.subjects;
   const examType = paper.exam_types;
-  const isNew = isRecent(paper.created_at, 14);
   const fileSize = formatFileSize(paper.file_size);
 
   const className = `flex flex-col gap-3 rounded-xl border p-4 transition-colors ${
@@ -48,17 +47,11 @@ export function ExamCard({
             </span>
           )}
         </div>
-        {isCurrent ? (
+        {isCurrent && (
           <span className="flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
             <MapPin size={12} />
             현재 보는 중
           </span>
-        ) : (
-          isNew && (
-            <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
-              NEW
-            </span>
-          )
         )}
       </div>
 
