@@ -246,7 +246,7 @@ export default async function PaperDetailPage({
       </div>
 
       <div className="flex flex-col gap-3">
-        <div className="flex items-stretch gap-4">
+        <div className="flex items-stretch gap-2">
           <a
             href={paperFileUrl.publicUrl}
             target="_blank"
@@ -291,12 +291,7 @@ export default async function PaperDetailPage({
         {hasCbtAnswers && (
           <Link
             href={`/papers/${typedPaper.id}/cbt`}
-            className="flex items-center justify-center gap-2 rounded-xl border px-4 py-4 text-lg font-medium hover:opacity-90"
-            style={{
-              backgroundColor: "#E6F7F0",
-              color: "#00875A",
-              borderColor: "#B7E4C7",
-            }}
+            className="flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-lg font-medium text-blue-700 hover:bg-blue-100"
           >
             <Monitor size={20} />
             온라인에서 풀기
