@@ -13,6 +13,7 @@ import { BookmarkButton } from "@/components/bookmark-button";
 import {
   MyCbtRecordModal,
   type MyCbtRecordItem,
+  type RoundAverage,
 } from "@/components/my-cbt-record-modal";
 import type { AnswerKey, Comment, ExamPaper } from "@/lib/supabase/types";
 import type { Metadata } from "next";
@@ -87,6 +88,7 @@ export default async function PaperDetailPage({
     userResult,
     { data: answerKey },
     { data: hasCbtAnswers },
+    { data: roundAverageRows },
   ] = await Promise.all([
     supabase
       .from("comments")
@@ -97,7 +99,17 @@ export default async function PaperDetailPage({
     supabase.auth.getUser(),
     answerKeyQuery.maybeSingle(),
     supabase.rpc("has_cbt_answers", { target_paper_id: id }),
+    supabase.rpc("avg_score_by_round", { target_paper_id: id }),
   ]);
+
+  // 표본 3명 미만인 회차는 DB 함수에서 이미 제외하고 내려주므로 여기서는 그대로 매핑만 한다.
+  const roundAverages: RoundAverage[] = (
+    (roundAverageRows ?? []) as { round: number; avg_pct: number; attempt_count: number }[]
+  ).map((r) => ({
+    round: r.round,
+    avgPct: r.avg_pct,
+    attemptCount: r.attempt_count,
+  }));
 
   // "같은 과목 목록"은 미리보기 성격이라 최근 RELATED_PAPERS_LIMIT개만 보여주고,
   // 전체 목록은 /subjects/[slug] 페이지(페이지네이션 적용됨)로 넘긴다.
@@ -304,7 +316,7 @@ export default async function PaperDetailPage({
             {fileSize ? ` · ${fileSize}` : ""}
           </span>
           {myCbtRecordItems.length > 0 && (
-            <MyCbtRecordModal attempts={myCbtRecordItems} />
+            <MyCbtRecordModal attempts={myCbtRecordItems} roundAverages={roundAverages} />
           )}
         </div>
       </div>

@@ -11,7 +11,19 @@ export type MyCbtRecordItem = {
   createdAt: string;
 };
 
-export function MyCbtRecordModal({ attempts }: { attempts: MyCbtRecordItem[] }) {
+export type RoundAverage = {
+  round: number;
+  avgPct: number;
+  attemptCount: number;
+};
+
+export function MyCbtRecordModal({
+  attempts,
+  roundAverages,
+}: {
+  attempts: MyCbtRecordItem[];
+  roundAverages: RoundAverage[];
+}) {
   const [open, setOpen] = useState(false);
 
   if (attempts.length === 0) return null;
@@ -70,6 +82,26 @@ export function MyCbtRecordModal({ attempts }: { attempts: MyCbtRecordItem[] }) 
                 );
               })}
             </div>
+
+            {roundAverages.length > 0 && (
+              <div className="mt-4 border-t border-zinc-100 pt-4">
+                <p className="text-xs font-medium text-zinc-500">전체 응시자 평균</p>
+                <div className="mt-2 flex flex-col gap-1.5">
+                  {roundAverages.map((r) => (
+                    <div
+                      key={r.round}
+                      className="flex items-center justify-between text-sm text-zinc-600"
+                    >
+                      <span>{r.round}회독</span>
+                      <span>
+                        평균 {r.avgPct}점{" "}
+                        <span className="text-xs text-zinc-400">({r.attemptCount}명)</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

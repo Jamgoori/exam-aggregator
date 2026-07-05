@@ -632,3 +632,36 @@ as $$
 $$;
 
 grant execute on function is_nickname_taken(text, uuid) to anon, authenticated;
+
+-- 문제지 상세페이지 "내 기록보기"에서, 내 점수와 함께 "다른 사람들은 몇 회독에 평균
+-- 몇 점이었는지" 보여주기 위한 집계. cbt_attempts는 본인 것만 select 가능한 RLS라
+-- (다른 사용자 응시 기록은 직접 조회 불가) security definer로 전체를 집계해서
+-- 회차(round)별 평균만 반환한다. 응시자가 3명 미만인 회차는 여기서 아예 제외한다:
+-- 표본이 너무 작으면 평균 자체가 왜곡되기도 하고, 1~2명뿐이면 "평균"이 사실상 그
+-- 사람의 점수 그대로라 익명성이 깨진다. 이 함수는 anon/authenticated가 직접 호출할
+-- 수 있으므로, 이 최소 인원 기준은 클라이언트가 아니라 여기 SQL에서 강제해야 의미가 있다.
+create or replace function avg_score_by_round(target_paper_id uuid)
+returns table (round int, avg_pct numeric, attempt_count bigint)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  with ranked as (
+    select
+      row_number() over (partition by user_id order by created_at) as round,
+      case when total_questions > 0 then (score::numeric / total_questions) * 100 else 0 end as pct
+    from cbt_attempts
+    where paper_id = target_paper_id
+  )
+  select
+    round,
+    round(avg(pct), 1) as avg_pct,
+    count(*) as attempt_count
+  from ranked
+  group by round
+  having count(*) >= 3
+  order by round;
+$$;
+
+grant execute on function avg_score_by_round(uuid) to anon, authenticated;
