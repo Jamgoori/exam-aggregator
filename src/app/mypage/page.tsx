@@ -3,8 +3,6 @@ import { redirect } from "next/navigation";
 import { MessageSquare, Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
-import { updateNickname } from "@/app/actions";
-import { NICKNAME_MAX, NICKNAME_MIN } from "@/lib/nickname";
 import { formatDuration } from "@/lib/format";
 import type { ExamPaper } from "@/lib/supabase/types";
 
@@ -13,7 +11,6 @@ const TABS = [
   { key: "bookmarks", label: "즐겨찾기" },
   { key: "comments", label: "내 댓글" },
   { key: "history", label: "내 시험 기록" },
-  { key: "account", label: "내 정보" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -21,9 +18,9 @@ type TabKey = (typeof TABS)[number]["key"];
 export default async function MyPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; error?: string; message?: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
-  const { tab, error, message } = await searchParams;
+  const { tab } = await searchParams;
   const supabase = await createClient();
 
   const {
@@ -100,7 +97,12 @@ export default async function MyPage({
           ← 홈으로
         </Link>
         <h1 className="mt-2 text-3xl font-semibold">{nickname}님의 마이페이지</h1>
-        <p className="mt-1 text-sm text-zinc-500">{user.email}</p>
+        <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500">
+          <span>{user.email}</span>
+          <Link href="/mypage/edit" className="text-blue-600 hover:underline">
+            내 정보 수정
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3">
@@ -248,43 +250,6 @@ export default async function MyPage({
               })}
             </div>
           )}
-        </section>
-      )}
-
-      {activeTab === "account" && (
-        <section className="flex max-w-sm flex-col gap-6">
-          <h2 className="text-lg font-semibold">내 정보</h2>
-
-          <form action={updateNickname} className="flex flex-col gap-1">
-            <label htmlFor="nickname" className="text-sm text-zinc-600">
-              닉네임
-            </label>
-            <input
-              id="nickname"
-              name="nickname"
-              defaultValue={nickname}
-              required
-              minLength={NICKNAME_MIN}
-              maxLength={NICKNAME_MAX}
-              className="rounded border border-zinc-300 px-3 py-2"
-            />
-            <p className="mb-2 text-xs text-zinc-400">
-              {NICKNAME_MIN}~{NICKNAME_MAX}자로 입력해주세요.
-            </p>
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            {message && <p className="text-sm text-green-600">{message}</p>}
-            <button
-              type="submit"
-              className="mt-2 self-start rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              저장
-            </button>
-          </form>
-
-          <div className="flex flex-col gap-1 border-t border-zinc-100 pt-4">
-            <span className="text-sm text-zinc-500">이메일</span>
-            <span className="text-sm text-zinc-700">{user.email}</span>
-          </div>
         </section>
       )}
     </div>

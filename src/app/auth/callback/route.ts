@@ -11,8 +11,18 @@ export async function GET(request: Request) {
 
   if (code) {
     const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // 구글 로그인은 닉네임을 받는 폼이 없어서, 아직 한 번도 설정한 적 없는 계정이면
+      // (최초 가입이든, 온보딩 전 이탈이든) 원래 가려던 곳으로 보내기 전에 먼저 받는다.
+      if (!data.user?.user_metadata?.nickname) {
+        return NextResponse.redirect(
+          new URL(
+            `/onboarding/nickname?next=${encodeURIComponent(next)}`,
+            url.origin,
+          ),
+        );
+      }
       return NextResponse.redirect(new URL(next, url.origin));
     }
   }

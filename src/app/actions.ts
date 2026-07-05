@@ -153,36 +153,101 @@ export async function signOutUser() {
   redirect("/");
 }
 
+function withQuery(path: string, key: string, value: string): string {
+  const sep = path.includes("?") ? "&" : "?";
+  return `${path}${sep}${key}=${encodeURIComponent(value)}`;
+}
+
+// formPath/successPath는 폼의 hidden input으로 넘어오는 값이라 사용자가 임의로 바꿔
+// 보낼 수 있으니, 오픈 리다이렉트로 악용되지 않게 이 사이트 안쪽 경로로만 좁힌다.
+// updateNickname은 마이페이지 "내 정보 수정"(성공 시 같은 페이지로 복귀)과, 구글 로그인
+// 온보딩(성공 시 원래 가려던 next 경로로 진행)에서 함께 쓰인다.
 export async function updateNickname(formData: FormData) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const formPath = sanitizeNextPath(String(formData.get("formPath") ?? "/mypage/edit"));
+  const successPath = sanitizeNextPath(String(formData.get("successPath") ?? formPath));
+
   // 폼은 로그인 상태에서만 노출되지만, 서버 액션은 URL로 직접 호출될 수도 있으니
   // 세션 자체를 여기서 다시 검증한다 (본인 계정 외에는 애초에 대상 id를 받지 않음).
   if (!user) {
-    redirect("/login?next=%2Fmypage%3Ftab%3Daccount");
+    redirect(`/login?next=${encodeURIComponent(formPath)}`);
   }
 
   const { nickname, error: nicknameError } = validateNickname(
     String(formData.get("nickname") ?? ""),
   );
   if (nicknameError) {
-    redirect(`/mypage?tab=account&error=${encodeURIComponent(nicknameError)}`);
+    redirect(withQuery(formPath, "error", nicknameError));
   }
 
   const { error } = await supabase.auth.updateUser({ data: { nickname } });
   if (error) {
-    redirect(
-      `/mypage?tab=account&error=${encodeURIComponent("닉네임 변경에 실패했어요.")}`,
-    );
+    redirect(withQuery(formPath, "error", "닉네임 변경에 실패했어요."));
   }
 
   // 헤더 등 여러 서버 컴포넌트가 user_metadata.nickname을 읽어 렌더링하므로,
   // 이번 응답 이후 방문하는 페이지에 새 닉네임이 곧바로 반영되게 한다.
   revalidatePath("/", "layout");
+
+  // 온보딩처럼 성공 후 완전히 다른 페이지로 넘어가는 경우엔 메시지 없이 그대로 보내고,
+  // 같은 폼으로 되돌아오는 경우(마이페이지 수정)에만 성공 메시지를 붙인다.
   redirect(
-    `/mypage?tab=account&message=${encodeURIComponent("닉네임을 변경했어요.")}`,
+    successPath === formPath
+      ? withQuery(successPath, "message", "닉네임을 변경했어요.")
+      : successPath,
   );
+}
+
+export async function updatePassword(formData: FormData) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login?next=%2Fmypage%2Fedit");
+  }
+
+  const currentPassword = String(formData.get("currentPassword") ?? "");
+  const newPassword = String(formData.get("newPassword") ?? "");
+  const newPasswordConfirm = String(formData.get("newPasswordConfirm") ?? "");
+
+  if (newPassword.length < PASSWORD_MIN) {
+    redirect(
+      withQuery(
+        "/mypage/edit",
+        "error",
+        `새 비밀번호는 ${PASSWORD_MIN}자 이상이어야 해요`,
+      ),
+    );
+  }
+
+  if (newPassword !== newPasswordConfirm) {
+    redirect(withQuery("/mypage/edit", "error", "새 비밀번호가 일치하지 않아요"));
+  }
+
+  if (!user.email) {
+    redirect(withQuery("/mypage/edit", "error", "비밀번호를 변경할 수 없는 계정이에요"));
+  }
+
+  // updateUser는 이미 인증된 세션이면 현재 비밀번호 없이도 바꿔주지만, 방치된 로그인
+  // 브라우저를 다른 사람이 그대로 쓰는 경우까지 대비해 현재 비밀번호를 한 번 더 확인한다.
+  const { error: reauthError } = await supabase.auth.signInWithPassword({
+    email: user.email,
+    password: currentPassword,
+  });
+  if (reauthError) {
+    redirect(withQuery("/mypage/edit", "error", "현재 비밀번호가 일치하지 않아요"));
+  }
+
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) {
+    redirect(withQuery("/mypage/edit", "error", "비밀번호 변경에 실패했어요"));
+  }
+
+  redirect(withQuery("/mypage/edit", "message", "비밀번호를 변경했어요."));
 }
