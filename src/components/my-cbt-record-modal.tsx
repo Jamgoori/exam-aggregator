@@ -94,20 +94,24 @@ export function MyCbtRecordModal({
                       </div>
                     </div>
 
-                    {avg && diff !== null && (
-                      <div className="mt-2 flex items-center justify-between border-t border-zinc-200 pt-2 text-xs text-zinc-500">
-                        <span>전체 평균 {avg.avgPct}점</span>
-                        <span
-                          className={`flex items-center gap-0.5 font-medium ${
-                            diff >= 0 ? "text-blue-600" : "text-zinc-400"
-                          }`}
-                        >
-                          {diff >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                          {diff >= 0 ? "+" : ""}
-                          {diff}점
-                        </span>
-                      </div>
-                    )}
+                    <div className="mt-2 flex items-center justify-between border-t border-zinc-200 pt-2 text-xs text-zinc-500">
+                      {avg && diff !== null ? (
+                        <>
+                          <span>전체 평균 {avg.avgPct}점</span>
+                          <span
+                            className={`flex items-center gap-0.5 font-medium ${
+                              diff >= 0 ? "text-blue-600" : "text-zinc-400"
+                            }`}
+                          >
+                            {diff >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                            {diff >= 0 ? "+" : ""}
+                            {diff}점
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-zinc-400">전체 평균 데이터 수집중</span>
+                      )}
+                    </div>
                   </div>
                 );
               })}
