@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Trophy, X } from "lucide-react";
+import { Trophy, TrendingDown, TrendingUp, X } from "lucide-react";
 
 export type MyCbtRecordItem = {
   id: string;
@@ -28,6 +28,8 @@ export function MyCbtRecordModal({
 
   if (attempts.length === 0) return null;
 
+  const averageByRound = new Map(roundAverages.map((r) => [r.round, r]));
+
   return (
     <>
       <button
@@ -45,63 +47,73 @@ export function MyCbtRecordModal({
           onClick={() => setOpen(false)}
         >
           <div
-            className="w-full max-w-sm rounded-xl bg-white p-5 shadow-lg"
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">내 CBT 기록</h3>
+              <h3 className="flex items-center gap-1.5 text-lg font-semibold">
+                <Trophy size={18} className="text-blue-600" />
+                내 시험 기록
+              </h3>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="닫기"
-                className="text-zinc-400 hover:text-zinc-600"
+                className="rounded-full p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
-            <div className="mt-4 flex max-h-80 flex-col divide-y divide-zinc-100 overflow-y-auto">
+            <div className="mt-4 flex max-h-96 flex-col gap-2.5 overflow-y-auto">
               {attempts.map((a) => {
                 const pct =
                   a.totalQuestions > 0 ? Math.round((a.score / a.totalQuestions) * 100) : 0;
+                const avg = averageByRound.get(a.round);
+                const diff = avg ? Math.round((pct - avg.avgPct) * 10) / 10 : null;
+
                 return (
-                  <div key={a.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                    <span className="flex items-center gap-2">
-                      <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">
-                        {a.round}회독
-                      </span>
-                      <span className="text-xs text-zinc-400">
-                        {new Date(a.createdAt).toLocaleDateString("ko-KR")}
-                      </span>
-                    </span>
-                    <span className="font-semibold">
-                      {a.score}/{a.totalQuestions}{" "}
-                      <span className="font-normal text-zinc-400">({pct}점)</span>
-                    </span>
+                  <div
+                    key={a.id}
+                    className="rounded-xl border border-zinc-100 bg-zinc-50 px-3.5 py-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-semibold text-blue-700">
+                          {a.round}
+                        </span>
+                        <span className="text-xs text-zinc-400">
+                          {new Date(a.createdAt).toLocaleDateString("ko-KR")}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-xl font-bold text-zinc-900">{pct}점</span>
+                        <span className="text-xs text-zinc-400">
+                          {a.score}/{a.totalQuestions}
+                        </span>
+                      </div>
+                    </div>
+
+                    {avg && diff !== null && (
+                      <div className="mt-2 flex items-center justify-between border-t border-zinc-200 pt-2 text-xs text-zinc-500">
+                        <span>
+                          전체 평균 {avg.avgPct}점 · {avg.attemptCount}명 응시
+                        </span>
+                        <span
+                          className={`flex items-center gap-0.5 font-medium ${
+                            diff >= 0 ? "text-blue-600" : "text-zinc-400"
+                          }`}
+                        >
+                          {diff >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                          {diff >= 0 ? "+" : ""}
+                          {diff}점
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
-
-            {roundAverages.length > 0 && (
-              <div className="mt-4 border-t border-zinc-100 pt-4">
-                <p className="text-xs font-medium text-zinc-500">전체 응시자 평균</p>
-                <div className="mt-2 flex flex-col gap-1.5">
-                  {roundAverages.map((r) => (
-                    <div
-                      key={r.round}
-                      className="flex items-center justify-between text-sm text-zinc-600"
-                    >
-                      <span>{r.round}회독</span>
-                      <span>
-                        평균 {r.avgPct}점{" "}
-                        <span className="text-xs text-zinc-400">({r.attemptCount}명)</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       )}
