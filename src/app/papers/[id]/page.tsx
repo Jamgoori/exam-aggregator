@@ -303,16 +303,13 @@ export default async function PaperDetailPage({
           </Link>
         )}
 
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-400">
+        <div className="mt-1 flex items-center justify-between gap-2 text-xs text-zinc-400">
           <span>
             다운로드 {formatCount(typedPaper.download_count)}회
             {fileSize ? ` · ${fileSize}` : ""}
           </span>
           {myCbtRecordItems.length > 0 && (
-            <>
-              <span>·</span>
-              <MyCbtRecordModal attempts={myCbtRecordItems} />
-            </>
+            <MyCbtRecordModal attempts={myCbtRecordItems} />
           )}
         </div>
       </div>

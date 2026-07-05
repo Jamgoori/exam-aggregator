@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X } from "lucide-react";
+import { Trophy, X } from "lucide-react";
 
 export type MyCbtRecordItem = {
   id: string;
@@ -21,8 +21,9 @@ export function MyCbtRecordModal({ attempts }: { attempts: MyCbtRecordItem[] }) 
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="font-medium text-blue-600 hover:underline"
+        className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100"
       >
+        <Trophy size={13} />
         내 기록보기
       </button>
 
