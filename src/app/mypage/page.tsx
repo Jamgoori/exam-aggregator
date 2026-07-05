@@ -4,6 +4,7 @@ import { MessageSquare, Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { formatDuration } from "@/lib/format";
+import { accountLabel } from "@/lib/username";
 import type { ExamPaper } from "@/lib/supabase/types";
 
 // 오답노트는 문항별 정답/오답 이미지를 모아 보여줘야 해서 더 큰 작업이라 별도로 남겨둠.
@@ -98,7 +99,7 @@ export default async function MyPage({
         </Link>
         <h1 className="mt-2 text-3xl font-semibold">{nickname}님의 마이페이지</h1>
         <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500">
-          <span>{user.email}</span>
+          <span>{accountLabel(user)}</span>
           <Link href="/mypage/edit" className="text-blue-600 hover:underline">
             내 정보 수정
           </Link>

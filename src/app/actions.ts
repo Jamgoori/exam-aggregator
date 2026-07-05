@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
 import { validateNickname } from "@/lib/nickname";
+import { usernameToAuthEmail, validateUsername } from "@/lib/username";
 
 const PASSWORD_MIN = 8;
 const SIGNUP_HOURLY_LIMIT = 5; // 같은 IP에서 1시간 내 허용하는 최대 가입 시도 횟수
@@ -51,19 +52,23 @@ async function checkSignupRateLimit(ip: string | null): Promise<string | null> {
 }
 
 export async function signUpUser(formData: FormData) {
-  const email = String(formData.get("email") ?? "");
   const password = String(formData.get("password") ?? "");
   const passwordConfirm = String(formData.get("passwordConfirm") ?? "");
   const captchaToken = String(formData.get("cf-turnstile-response") ?? "");
   const next = sanitizeNextPath(String(formData.get("next") ?? ""));
   const nextQuery = `next=${encodeURIComponent(next)}`;
 
-  const { nickname, error: nicknameError } = validateNickname(
-    String(formData.get("nickname") ?? ""),
-  );
-  if (nicknameError) {
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent(nicknameError)}`);
+  const usernameResult = validateUsername(String(formData.get("username") ?? ""));
+  if (usernameResult.error !== null) {
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent(usernameResult.error)}`);
   }
+  const username = usernameResult.username;
+
+  const nicknameResult = validateNickname(String(formData.get("nickname") ?? ""));
+  if (nicknameResult.error !== null) {
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent(nicknameResult.error)}`);
+  }
+  const nickname = nicknameResult.nickname;
 
   if (password.length < PASSWORD_MIN) {
     redirect(
@@ -86,22 +91,53 @@ export async function signUpUser(formData: FormData) {
   }
 
   const supabase = await createClient();
+
+  // 최종 방어선은 profiles의 유니크 인덱스지만, 계정을 만들고 나서야 걸리면 되돌리기
+  // 번거로우니 계정 생성 전에 한 번 더 확인해서 흔한 경우를 미리 걸러낸다.
+  const { data: taken } = await supabase.rpc("is_nickname_taken", {
+    check_nickname: nickname,
+    exclude_user_id: null,
+  });
+  if (taken) {
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("이미 사용 중인 닉네임이에요.")}`);
+  }
+
+  // Supabase Auth는 이메일/전화번호 식별자만 지원해서, 아이디를 가짜 이메일로 감싸 저장한다.
   const { data, error } = await supabase.auth.signUp({
-    email,
+    email: usernameToAuthEmail(username),
     password,
     options: {
-      data: { nickname },
+      data: { nickname, username },
       ...(captchaToken ? { captchaToken } : {}),
     },
   });
 
   if (error) {
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent(error.message)}`);
+    redirect(
+      `/signup?${nextQuery}&error=${encodeURIComponent("이미 사용 중인 아이디이거나 가입에 실패했어요.")}`,
+    );
+  }
+
+  if (!data.user) {
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("가입에 실패했어요.")}`);
+  }
+
+  // 닉네임을 profiles에 예약해 둔다. 사전 확인 이후 동시에 같은 닉네임으로 가입한
+  // 경합 상황이면 여기서 유니크 인덱스에 걸리므로, 방금 만든 계정을 롤백해 고아 계정이
+  // 남지 않게 한다.
+  const admin = createAdminClient();
+  const { error: profileError } = await admin
+    .from("profiles")
+    .insert({ user_id: data.user.id, nickname });
+
+  if (profileError) {
+    await admin.auth.admin.deleteUser(data.user.id);
+    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("이미 사용 중인 닉네임이에요.")}`);
   }
 
   if (!data.session) {
     redirect(
-      `/login?${nextQuery}&message=${encodeURIComponent("가입 확인 이메일을 보냈어요. 메일함을 확인해주세요")}`,
+      `/login?${nextQuery}&message=${encodeURIComponent("가입이 완료됐어요. 로그인해주세요")}`,
     );
   }
 
@@ -128,16 +164,19 @@ export async function signInWithGoogle(formData: FormData) {
 }
 
 export async function signInUser(formData: FormData) {
-  const email = String(formData.get("email") ?? "");
+  const username = String(formData.get("username") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   const next = sanitizeNextPath(String(formData.get("next") ?? ""));
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { error } = await supabase.auth.signInWithPassword({
+    email: usernameToAuthEmail(username),
+    password,
+  });
 
   if (error) {
     redirect(
-      `/login?next=${encodeURIComponent(next)}&error=${encodeURIComponent("이메일/비밀번호를 확인해주세요")}`,
+      `/login?next=${encodeURIComponent(next)}&error=${encodeURIComponent("아이디/비밀번호를 확인해주세요")}`,
     );
   }
 
@@ -158,10 +197,43 @@ function withQuery(path: string, key: string, value: string): string {
   return `${path}${sep}${key}=${encodeURIComponent(value)}`;
 }
 
+// 닉네임을 profiles(유니크 인덱스)와 user_metadata 양쪽에 반영한다. profiles는 "이
+// 닉네임을 이미 누가 쓰고 있는지" 판별용 그림자 원장이고, user_metadata.nickname은
+// 헤더/댓글/마이페이지 등 실제 화면에 뿌려주는 값의 원본이라 항상 같이 맞춰줘야 한다.
+// upsert가 유니크 인덱스에 걸리면(23505) 사전에 checkNicknameAvailable로 확인했더라도
+// 그 사이 다른 사람이 먼저 가져간 경합 상황이므로, 그 경우만 "중복" 에러로 안내한다.
+async function persistNickname(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  nickname: string,
+): Promise<{ error?: string }> {
+  const admin = createAdminClient();
+  const { error: profileError } = await admin
+    .from("profiles")
+    .upsert({ user_id: userId, nickname }, { onConflict: "user_id" });
+
+  if (profileError) {
+    return {
+      error:
+        profileError.code === "23505"
+          ? "이미 사용 중인 닉네임이에요."
+          : "닉네임 변경에 실패했어요.",
+    };
+  }
+
+  const { error } = await supabase.auth.updateUser({ data: { nickname } });
+  if (error) return { error: "닉네임 변경에 실패했어요." };
+
+  // 헤더 등 여러 서버 컴포넌트가 user_metadata.nickname을 읽어 렌더링하므로,
+  // 이번 응답 이후 방문하는 페이지에 새 닉네임이 곧바로 반영되게 한다.
+  revalidatePath("/", "layout");
+  return {};
+}
+
 // formPath/successPath는 폼의 hidden input으로 넘어오는 값이라 사용자가 임의로 바꿔
 // 보낼 수 있으니, 오픈 리다이렉트로 악용되지 않게 이 사이트 안쪽 경로로만 좁힌다.
-// updateNickname은 마이페이지 "내 정보 수정"(성공 시 같은 페이지로 복귀)과, 구글 로그인
-// 온보딩(성공 시 원래 가려던 next 경로로 진행)에서 함께 쓰인다.
+// updateNickname(폼 제출 → 리다이렉트)은 구글 로그인 온보딩 화면에서 쓰고, 마이페이지
+// "내 정보 수정"의 중복확인 버튼은 아래 setNickname(리다이렉트 없이 결과만 반환)을 쓴다.
 export async function updateNickname(formData: FormData) {
   const supabase = await createClient();
   const {
@@ -177,21 +249,15 @@ export async function updateNickname(formData: FormData) {
     redirect(`/login?next=${encodeURIComponent(formPath)}`);
   }
 
-  const { nickname, error: nicknameError } = validateNickname(
-    String(formData.get("nickname") ?? ""),
-  );
-  if (nicknameError) {
-    redirect(withQuery(formPath, "error", nicknameError));
+  const nicknameResult = validateNickname(String(formData.get("nickname") ?? ""));
+  if (nicknameResult.error !== null) {
+    redirect(withQuery(formPath, "error", nicknameResult.error));
   }
 
-  const { error } = await supabase.auth.updateUser({ data: { nickname } });
+  const { error } = await persistNickname(supabase, user.id, nicknameResult.nickname);
   if (error) {
-    redirect(withQuery(formPath, "error", "닉네임 변경에 실패했어요."));
+    redirect(withQuery(formPath, "error", error));
   }
-
-  // 헤더 등 여러 서버 컴포넌트가 user_metadata.nickname을 읽어 렌더링하므로,
-  // 이번 응답 이후 방문하는 페이지에 새 닉네임이 곧바로 반영되게 한다.
-  revalidatePath("/", "layout");
 
   // 온보딩처럼 성공 후 완전히 다른 페이지로 넘어가는 경우엔 메시지 없이 그대로 보내고,
   // 같은 폼으로 되돌아오는 경우(마이페이지 수정)에만 성공 메시지를 붙인다.
@@ -200,6 +266,46 @@ export async function updateNickname(formData: FormData) {
       ? withQuery(successPath, "message", "닉네임을 변경했어요.")
       : successPath,
   );
+}
+
+// 마이페이지의 "중복확인" 버튼에서 직접(폼 제출이 아니라 클라이언트 코드에서) 호출한다.
+export async function checkNicknameAvailable(
+  rawNickname: string,
+): Promise<{ available?: boolean; error?: string }> {
+  const nicknameResult = validateNickname(rawNickname);
+  if (nicknameResult.error !== null) return { error: nicknameResult.error };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data, error } = await supabase.rpc("is_nickname_taken", {
+    check_nickname: nicknameResult.nickname,
+    exclude_user_id: user?.id ?? null,
+  });
+
+  if (error) return { error: "중복 확인에 실패했어요." };
+  return { available: !data };
+}
+
+// "중복확인"이 통과하면 곧바로 저장까지 하는, 리다이렉트 없는 버전. 마이페이지 수정
+// 화면처럼 별도 "저장" 버튼 없이 그 자리에서 바로 반영하는 UI에서 쓴다.
+export async function setNickname(
+  rawNickname: string,
+): Promise<{ error?: string; success?: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요해요." };
+
+  const nicknameResult = validateNickname(rawNickname);
+  if (nicknameResult.error !== null) return { error: nicknameResult.error };
+
+  const { error } = await persistNickname(supabase, user.id, nicknameResult.nickname);
+  if (error) return { error };
+  return { success: true };
 }
 
 export async function updatePassword(formData: FormData) {

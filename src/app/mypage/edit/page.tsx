@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { updateNickname, updatePassword } from "@/app/actions";
-import { NICKNAME_MAX, NICKNAME_MIN } from "@/lib/nickname";
+import { updatePassword } from "@/app/actions";
+import { NicknameField } from "@/components/nickname-field";
+import { accountLabel } from "@/lib/username";
 
 export default async function EditAccountPage({
   searchParams,
@@ -29,6 +30,7 @@ export default async function EditAccountPage({
 
   // 구글 로그인 등 OAuth로만 가입한 계정은 비밀번호 자체가 없으므로 변경 폼을 보여주지 않는다.
   const hasPassword = user.app_metadata?.provider === "email";
+  const isUsernameAccount = Boolean(user.user_metadata?.username);
 
   return (
     <div className="mx-auto flex w-full max-w-sm flex-col gap-8 px-4 py-12">
@@ -44,31 +46,7 @@ export default async function EditAccountPage({
 
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">닉네임</h2>
-        <form action={updateNickname} className="flex flex-col gap-1">
-          <input type="hidden" name="formPath" value="/mypage/edit" />
-          <input type="hidden" name="successPath" value="/mypage/edit" />
-          <label htmlFor="nickname" className="text-sm text-zinc-600">
-            닉네임
-          </label>
-          <input
-            id="nickname"
-            name="nickname"
-            defaultValue={nickname}
-            required
-            minLength={NICKNAME_MIN}
-            maxLength={NICKNAME_MAX}
-            className="rounded border border-zinc-300 px-3 py-2"
-          />
-          <p className="mb-2 text-xs text-zinc-400">
-            {NICKNAME_MIN}~{NICKNAME_MAX}자로 입력해주세요.
-          </p>
-          <button
-            type="submit"
-            className="mt-2 self-start rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            저장
-          </button>
-        </form>
+        <NicknameField mode="edit" defaultValue={nickname} />
       </section>
 
       {hasPassword && (
@@ -124,8 +102,8 @@ export default async function EditAccountPage({
       )}
 
       <div className="flex flex-col gap-1 border-t border-zinc-100 pt-6">
-        <span className="text-sm text-zinc-500">이메일</span>
-        <span className="text-sm text-zinc-700">{user.email}</span>
+        <span className="text-sm text-zinc-500">{isUsernameAccount ? "아이디" : "이메일"}</span>
+        <span className="text-sm text-zinc-700">{accountLabel(user)}</span>
       </div>
     </div>
   );

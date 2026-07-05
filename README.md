@@ -11,6 +11,11 @@ Next.js + Supabase 기반. 관리자가 연도/시험/과목 라벨을 붙여 PD
    - 개인정보가 없는 공개 기출문제 PDF이므로 public으로 두고 URL로 바로 서빙
 4. Authentication > Users > Add user 에서 관리자 계정(본인 이메일/비밀번호) 1개 생성
    - 이 계정으로 `/admin/login`에 로그인해야 업로드 가능
+5. Authentication > Providers > Email > **Confirm email을 반드시 끈다**
+   - 일반 회원가입(`/signup`)은 이메일이 아니라 아이디로 가입하는데, Supabase Auth가 이메일
+     형식만 지원해서 내부적으로 `아이디@users.invalid` 같은 실존하지 않는 주소로 저장한다.
+     이 주소는 실제로 메일을 받을 수 없으므로, Confirm email이 켜져 있으면 가입 후 아무도
+     로그인할 수 없다.
 
 ## 2. 환경변수
 

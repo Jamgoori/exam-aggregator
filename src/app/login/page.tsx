@@ -35,14 +35,14 @@ export default async function LoginPage({
       <form action={signInUser} className="flex flex-col gap-4">
         <input type="hidden" name="next" value={next} />
         <div className="flex flex-col gap-1">
-          <label htmlFor="email" className="text-sm text-zinc-600">
-            이메일
+          <label htmlFor="username" className="text-sm text-zinc-600">
+            아이디
           </label>
           <input
-            id="email"
-            name="email"
-            type="email"
+            id="username"
+            name="username"
             required
+            autoComplete="username"
             className="rounded border border-zinc-300 px-3 py-2"
           />
         </div>

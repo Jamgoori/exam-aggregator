@@ -2,7 +2,9 @@ import Link from "next/link";
 import Script from "next/script";
 import { signUpUser, signInWithGoogle } from "@/app/actions";
 import { GoogleIcon } from "@/components/google-icon";
+import { NicknameField } from "@/components/nickname-field";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
+import { USERNAME_MAX, USERNAME_MIN } from "@/lib/username";
 
 export default async function SignupPage({
   searchParams,
@@ -37,28 +39,25 @@ export default async function SignupPage({
       <form action={signUpUser} className="flex flex-col gap-4">
         <input type="hidden" name="next" value={next} />
         <div className="flex flex-col gap-1">
-          <label htmlFor="nickname" className="text-sm text-zinc-600">
-            닉네임
+          <label htmlFor="username" className="text-sm text-zinc-600">
+            아이디
           </label>
           <input
-            id="nickname"
-            name="nickname"
+            id="username"
+            name="username"
             required
+            minLength={USERNAME_MIN}
+            maxLength={USERNAME_MAX}
+            pattern="[a-zA-Z0-9_]+"
+            title="영문 소문자, 숫자, _만 사용할 수 있어요"
+            autoComplete="username"
             className="rounded border border-zinc-300 px-3 py-2"
           />
+          <p className="text-xs text-zinc-400">
+            영문 소문자, 숫자, _ 조합 {USERNAME_MIN}~{USERNAME_MAX}자
+          </p>
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="email" className="text-sm text-zinc-600">
-            이메일
-          </label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            required
-            className="rounded border border-zinc-300 px-3 py-2"
-          />
-        </div>
+        <NicknameField mode="signup" />
         <div className="flex flex-col gap-1">
           <label htmlFor="password" className="text-sm text-zinc-600">
             비밀번호 (8자 이상)

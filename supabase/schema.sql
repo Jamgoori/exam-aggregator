@@ -587,3 +587,48 @@ on conflict (name) do update set display_order = excluded.display_order;
 -- 관리자 이메일 (본인 계정으로 바꿔서 실행하세요)
 insert into admins (email) values ('lks2354@gmail.com')
 on conflict (email) do nothing;
+
+-- 닉네임 중복확인/유일성 보장용 그림자 원장. auth.users.raw_user_meta_data.nickname을
+-- 화면에 보여주는 값의 원본으로 그대로 쓰고, 이 테이블은 "이 닉네임을 이미 누가 쓰고
+-- 있는지"만 판별하는 용도다 (auth.users는 공개 API로 직접 조회가 안 되기 때문).
+create table if not exists profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  nickname text not null,
+  created_at timestamptz not null default now()
+);
+
+do $$ begin
+  alter table profiles add constraint profiles_nickname_len
+    check (char_length(nickname) between 2 and 10);
+exception when duplicate_object then null; end $$;
+
+-- 대소문자 구분 없이 유일해야 하므로 lower(nickname)에 유니크 인덱스를 건다.
+create unique index if not exists profiles_nickname_unique_idx on profiles (lower(nickname));
+
+alter table profiles enable row level security;
+
+drop policy if exists "select own profile" on profiles;
+create policy "select own profile" on profiles
+  for select to authenticated using (auth.uid() = user_id);
+
+-- insert/update는 서버 액션에서 service role로만 수행한다 (유니크 위반을 애플리케이션이
+-- 깔끔한 에러 메시지로 바꿔줄 수 있게 anon/authenticated에는 쓰기 정책을 열지 않음).
+
+-- 닉네임 중복확인: 정답지/CBT 지원 여부 확인용 함수들과 같은 패턴으로, 존재 여부만
+-- security definer로 안전하게 알려준다. exclude_user_id는 "내 현재 닉네임"을 중복으로
+-- 오판하지 않게 본인 계정은 검사 대상에서 빼기 위한 값이다.
+create or replace function is_nickname_taken(check_nickname text, exclude_user_id uuid default null)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from profiles
+    where lower(nickname) = lower(check_nickname)
+      and (exclude_user_id is null or user_id <> exclude_user_id)
+  );
+$$;
+
+grant execute on function is_nickname_taken(text, uuid) to anon, authenticated;
