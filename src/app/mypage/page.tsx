@@ -1,17 +1,18 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { MessageSquare, Star } from "lucide-react";
+import { MessageSquare, Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { updateNickname } from "@/app/actions";
 import { NICKNAME_MAX, NICKNAME_MIN } from "@/lib/nickname";
+import { formatDuration } from "@/lib/format";
 import type { ExamPaper } from "@/lib/supabase/types";
 
-// CBT 기능이 추가되면 "내 시험 기록"/"오답노트" 탭이 여기에 추가될 예정.
-// 탭 단위 구조로 짜 둬서 그때 TABS 배열에 항목만 추가하면 되게 해둠.
+// 오답노트는 문항별 정답/오답 이미지를 모아 보여줘야 해서 더 큰 작업이라 별도로 남겨둠.
 const TABS = [
   { key: "bookmarks", label: "즐겨찾기" },
   { key: "comments", label: "내 댓글" },
+  { key: "history", label: "내 시험 기록" },
   { key: "account", label: "내 정보" },
 ] as const;
 
@@ -45,18 +46,26 @@ export default async function MyPage({
     user.email?.split("@")[0] ??
     "회원";
 
-  const [{ data: bookmarkRows }, { data: commentRows }] = await Promise.all([
-    supabase
-      .from("bookmarks")
-      .select("id, created_at, exam_papers(*, subjects(*), exam_types(*))")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("comments")
-      .select("id, content, created_at, updated_at, exam_papers(id, title)")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false }),
-  ]);
+  const [{ data: bookmarkRows }, { data: commentRows }, { data: attemptRows }] =
+    await Promise.all([
+      supabase
+        .from("bookmarks")
+        .select("id, created_at, exam_papers(*, subjects(*), exam_types(*))")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("comments")
+        .select("id, content, created_at, updated_at, exam_papers(id, title)")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("cbt_attempts")
+        .select(
+          "id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, subjects(*), exam_types(*))",
+        )
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
+    ]);
 
   const bookmarkedPapers = (
     (bookmarkRows ?? []) as unknown as { exam_papers: ExamPaper | null }[]
@@ -72,6 +81,18 @@ export default async function MyPage({
     exam_papers: { id: string; title: string } | null;
   }[];
 
+  const myAttempts = (attemptRows ?? []) as unknown as {
+    id: string;
+    score: number;
+    total_questions: number;
+    duration_seconds: number | null;
+    created_at: string;
+    exam_papers: (Pick<ExamPaper, "id" | "title"> & {
+      subjects?: ExamPaper["subjects"];
+      exam_types?: ExamPaper["exam_types"];
+    }) | null;
+  }[];
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-12">
       <div>
@@ -80,6 +101,21 @@ export default async function MyPage({
         </Link>
         <h1 className="mt-2 text-3xl font-semibold">{nickname}님의 마이페이지</h1>
         <p className="mt-1 text-sm text-zinc-500">{user.email}</p>
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
+          <span className="text-xs text-zinc-500">즐겨찾기</span>
+          <span className="text-xl font-semibold">{bookmarkedPapers.length}</span>
+        </div>
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
+          <span className="text-xs text-zinc-500">내 댓글</span>
+          <span className="text-xl font-semibold">{myComments.length}</span>
+        </div>
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
+          <span className="text-xs text-zinc-500">CBT 응시</span>
+          <span className="text-xl font-semibold">{myAttempts.length}</span>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-3">
@@ -156,6 +192,60 @@ export default async function MyPage({
                   </p>
                 </div>
               ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {activeTab === "history" && (
+        <section className="flex flex-col gap-4">
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <Trophy size={18} className="text-amber-500" />
+            내 시험 기록 ({myAttempts.length})
+          </h2>
+          {myAttempts.length === 0 ? (
+            <p className="py-12 text-center text-sm text-zinc-500">
+              아직 CBT로 풀어본 문제가 없어요. 문제 상세 페이지에서 온라인 풀기를
+              눌러보세요.
+            </p>
+          ) : (
+            <div className="flex flex-col divide-y divide-zinc-100">
+              {myAttempts.map((a) => {
+                const pct =
+                  a.total_questions > 0
+                    ? Math.round((a.score / a.total_questions) * 100)
+                    : 0;
+                return (
+                  <div
+                    key={a.id}
+                    className="flex flex-col gap-1 py-4 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="flex flex-col gap-0.5">
+                      {a.exam_papers ? (
+                        <Link
+                          href={`/papers/${a.exam_papers.id}`}
+                          className="text-sm font-medium text-blue-600 hover:underline"
+                        >
+                          {a.exam_papers.title}
+                        </Link>
+                      ) : (
+                        <span className="text-sm text-zinc-400">삭제된 문제</span>
+                      )}
+                      <span className="text-xs text-zinc-400">
+                        {new Date(a.created_at).toLocaleDateString("ko-KR")}
+                        {a.duration_seconds != null &&
+                          ` · ${formatDuration(a.duration_seconds)}`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="font-semibold">
+                        {a.score} / {a.total_questions}
+                      </span>
+                      <span className="text-xs text-zinc-400">({pct}%)</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
 import type { DrawTool } from "@/components/pdf-canvas-viewer";
+import { formatDuration } from "@/lib/format";
 
 // pdf.js는 브라우저 전용 API(Worker, canvas 등)에 의존해서 서버에서 미리 렌더링하면
 // 안 되므로, 이 컴포넌트는 클라이언트에서만 로드한다.
@@ -22,12 +23,6 @@ const PdfCanvasViewer = dynamic(
   () => import("@/components/pdf-canvas-viewer").then((m) => m.PdfCanvasViewer),
   { ssr: false },
 );
-
-function formatDuration(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}분 ${seconds}초`;
-}
 
 const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
 
