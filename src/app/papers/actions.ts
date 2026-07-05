@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { NICKNAME_MAX } from "@/lib/nickname";
+import { NICKNAME_MAX, validateNickname } from "@/lib/nickname";
 
 export type CommentResult = { error?: string; success?: boolean };
 
@@ -109,11 +109,11 @@ export async function postComment(input: {
     if (error) return { error: "댓글 등록에 실패했어요." };
   } else {
     // 비회원: 닉네임 + 비밀번호 필요
-    const nickname = String(input.nickname ?? "").trim();
+    const nicknameResult = validateNickname(String(input.nickname ?? ""));
+    if (nicknameResult.error !== null) return { error: nicknameResult.error };
+    const nickname = nicknameResult.nickname;
     const password = String(input.password ?? "");
 
-    if (!nickname || nickname.length > NICKNAME_MAX)
-      return { error: `닉네임은 1~${NICKNAME_MAX}자로 입력해주세요.` };
     const pwError = validatePassword(password);
     if (pwError) return { error: pwError };
 
