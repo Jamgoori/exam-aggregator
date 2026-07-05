@@ -10,6 +10,10 @@ import { DifficultyRating } from "@/components/difficulty-rating";
 import { CommentsSection } from "@/components/comments-section";
 import { ExamCard } from "@/components/exam-card";
 import { BookmarkButton } from "@/components/bookmark-button";
+import {
+  MyCbtRecordModal,
+  type MyCbtRecordItem,
+} from "@/components/my-cbt-record-modal";
 import type { AnswerKey, Comment, ExamPaper } from "@/lib/supabase/types";
 import type { Metadata } from "next";
 
@@ -163,12 +167,15 @@ export default async function PaperDetailPage({
     total_questions: number;
     created_at: string;
   }[];
-  const myBestAttempt =
-    myCbtAttempts.length > 0
-      ? myCbtAttempts.reduce((best, a) => (a.score > best.score ? a : best))
-      : null;
-  const myLatestAttempt =
-    myCbtAttempts.length > 0 ? myCbtAttempts[myCbtAttempts.length - 1] : null;
+  // 이 페이지는 문제지 하나만 다루므로, 오래된 순으로 이미 받아온 목록에 순서대로
+  // 회차 번호(1회독, 2회독...)를 매기면 된다.
+  const myCbtRecordItems: MyCbtRecordItem[] = myCbtAttempts.map((a, i) => ({
+    id: a.id,
+    round: i + 1,
+    score: a.score,
+    totalQuestions: a.total_questions,
+    createdAt: a.created_at,
+  }));
 
   const subject = typedPaper.subjects;
   const examType = typedPaper.exam_types;
@@ -296,24 +303,18 @@ export default async function PaperDetailPage({
           </Link>
         )}
 
-        {myCbtAttempts.length > 0 && myBestAttempt && myLatestAttempt && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-zinc-200 px-4 py-3 text-sm text-zinc-600">
-            <span className="font-medium text-zinc-800">
-              내 CBT 기록 · 응시 {myCbtAttempts.length}회
-            </span>
-            <span>
-              최고 {myBestAttempt.score} / {myBestAttempt.total_questions}
-            </span>
-            <span>
-              최근 {myLatestAttempt.score} / {myLatestAttempt.total_questions}
-            </span>
-          </div>
-        )}
-
-        <p className="mt-1 text-xs text-zinc-400">
-          다운로드 {formatCount(typedPaper.download_count)}회
-          {fileSize ? ` · ${fileSize}` : ""}
-        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-400">
+          <span>
+            다운로드 {formatCount(typedPaper.download_count)}회
+            {fileSize ? ` · ${fileSize}` : ""}
+          </span>
+          {myCbtRecordItems.length > 0 && (
+            <>
+              <span>·</span>
+              <MyCbtRecordModal attempts={myCbtRecordItems} />
+            </>
+          )}
+        </div>
       </div>
 
       <DifficultyRating

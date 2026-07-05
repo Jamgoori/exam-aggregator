@@ -263,9 +263,9 @@ export default async function MyPage({
                         </span>
                       )}
                       <span className="font-semibold">
-                        {a.score} / {a.total_questions}
+                        {a.score}/{a.total_questions}
                       </span>
-                      <span className="text-xs text-zinc-400">({pct}%)</span>
+                      <span className="text-xs text-zinc-400">({pct}점)</span>
                     </div>
                   </div>
                 );
