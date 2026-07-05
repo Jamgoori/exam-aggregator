@@ -96,9 +96,7 @@ export function MyCbtRecordModal({
 
                     {avg && diff !== null && (
                       <div className="mt-2 flex items-center justify-between border-t border-zinc-200 pt-2 text-xs text-zinc-500">
-                        <span>
-                          전체 평균 {avg.avgPct}점 · {avg.attemptCount}명 응시
-                        </span>
+                        <span>전체 평균 {avg.avgPct}점</span>
                         <span
                           className={`flex items-center gap-0.5 font-medium ${
                             diff >= 0 ? "text-blue-600" : "text-zinc-400"
