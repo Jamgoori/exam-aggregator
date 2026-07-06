@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileStack, Download } from "lucide-react";
+import { FileStack, Download, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
@@ -76,12 +76,14 @@ export default async function Home({
     mainResult,
     { count: totalCount },
     { data: totalDownloads },
+    { data: totalAttempts },
     userResult,
   ] = await Promise.all([
     supabase.from("exam_types").select("*").order("display_order"),
     skipMainQuery ? Promise.resolve({ data: [], count: 0 }) : query,
     supabase.from("exam_papers").select("*", { count: "exact", head: true }),
     supabase.rpc("total_download_count"),
+    supabase.rpc("total_cbt_attempt_count"),
     supabase.auth.getUser(),
   ]);
   const { data: papers, count: filteredCount } = mainResult;
@@ -126,6 +128,10 @@ export default async function Home({
           <div className="flex items-center gap-2 rounded-full border border-zinc-200 px-4 py-2">
             <Download size={16} className="text-blue-500" />
             누적 다운로드 <strong>{totalDownloads ?? 0}회</strong>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-zinc-200 px-4 py-2">
+            <Users size={16} className="text-blue-500" />
+            실시간 총 응시 수 <strong>{totalAttempts ?? 0}건</strong>
           </div>
         </div>
       </section>
