@@ -1,5 +1,5 @@
 import Link from "next/link";
-import Image from "next/image";
+import type { CSSProperties } from "react";
 import { ChevronRight, MapPin } from "lucide-react";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor } from "@/lib/level-colors";
@@ -59,9 +59,17 @@ export function ExamCard({
           roundTier && (
             <span
               title={`${roundTier.name} (${myRoundCount}회독)`}
-              className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold ${roundTier.className}`}
+              className={`tier-badge shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${roundTier.glowDuration ? "tier-glow" : ""} ${roundTier.className}`}
+              style={
+                {
+                  "--shimmer-opacity": roundTier.shimmerOpacity,
+                  "--shimmer-duration": roundTier.shimmerDuration,
+                  ...(roundTier.glowDuration
+                    ? { "--glow-duration": roundTier.glowDuration }
+                    : {}),
+                } as CSSProperties
+              }
             >
-              <Image src={roundTier.iconSrc} alt="" width={14} height={14} unoptimized />
               {myRoundCount}회독
             </span>
           )

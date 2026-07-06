@@ -38,3 +38,50 @@ select:focus {
 button:not(:disabled) {
   cursor: pointer;
 }
+
+/* 회독 랭크 배지: 등급이 오를수록 반짝이는 효과가 강해지도록, 배지마다
+   --shimmer-opacity/--shimmer-duration(및 등급 상위권은 --glow-duration)을
+   인라인 스타일로 다르게 넣어서 이 공통 애니메이션 강도만 조절한다. */
+@keyframes badge-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+@keyframes badge-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  50% {
+    box-shadow: 0 0 6px 1px rgba(255, 255, 255, 0.85);
+  }
+}
+
+.tier-badge {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.tier-badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    75deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.9) 50%,
+    transparent 60%
+  );
+  transform: translateX(-120%);
+  opacity: var(--shimmer-opacity, 0);
+  animation: badge-shimmer var(--shimmer-duration, 3s) ease-in-out infinite;
+}
+
+.tier-badge.tier-glow {
+  animation: badge-glow var(--glow-duration, 2s) ease-in-out infinite;
+}
