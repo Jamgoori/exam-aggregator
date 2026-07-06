@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { ChevronRight, MapPin } from "lucide-react";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor } from "@/lib/level-colors";
@@ -60,7 +61,7 @@ export function ExamCard({
               title={`${roundTier.name} (${myRoundCount}회독)`}
               className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold ${roundTier.className}`}
             >
-              <roundTier.icon size={12} />
+              <Image src={roundTier.iconSrc} alt="" width={14} height={14} unoptimized />
               {myRoundCount}회독
             </span>
           )

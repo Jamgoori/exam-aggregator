@@ -50,6 +50,9 @@ export default async function RootLayout({
       <body className="min-h-full">
         <SiteHeaderGate user={headerUser} />
         {children}
+        <footer className="border-t border-zinc-100 py-4 text-center text-xs text-zinc-400">
+          회독 배지 아이콘: Noto Emoji (Google, Apache License 2.0)
+        </footer>
         <Analytics />
       </body>
     </html>
