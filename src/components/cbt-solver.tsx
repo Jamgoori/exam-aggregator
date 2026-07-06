@@ -159,152 +159,158 @@ export function CbtSolver({
 
   return (
     <div className="flex h-[100dvh] flex-col">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-200 bg-white px-3 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Link
-            href={`/papers/${paperId}`}
-            aria-label="문제지로 돌아가기"
-            className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100"
-          >
-            <ChevronLeft size={20} />
-          </Link>
-          <h1 className="truncate text-sm font-medium text-zinc-700">
-            {paperTitle}
-          </h1>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
-            <Clock size={16} />
-            {formatDuration(elapsedSeconds)}
+      <header className="shrink-0 border-b border-zinc-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <Link
+              href={`/papers/${paperId}`}
+              aria-label="문제지로 돌아가기"
+              className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100"
+            >
+              <ChevronLeft size={20} />
+            </Link>
+            <h1 className="truncate text-sm font-medium text-zinc-700">
+              {paperTitle}
+            </h1>
           </div>
-          <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex">
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
+              <Clock size={16} />
+              {formatDuration(elapsedSeconds)}
+            </div>
+            <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex">
+              <button
+                type="button"
+                onClick={zoomOut}
+                disabled={zoom <= MIN_ZOOM}
+                aria-label="시험지 축소"
+                className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <ZoomOut size={18} />
+              </button>
+              <span className="w-10 text-center text-xs font-medium text-zinc-500">
+                {Math.round(zoom * 100)}%
+              </span>
+              <button
+                type="button"
+                onClick={zoomIn}
+                disabled={zoom >= MAX_ZOOM}
+                aria-label="시험지 확대"
+                className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+              >
+                <ZoomIn size={18} />
+              </button>
+            </div>
+            <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
+              <button
+                type="button"
+                onClick={() => setTool("move")}
+                aria-label="화면 이동"
+                aria-pressed={tool === "move"}
+                className={`flex items-center justify-center rounded-md p-1.5 ${
+                  tool === "move"
+                    ? "bg-blue-600 text-white"
+                    : "text-zinc-600 hover:bg-zinc-200"
+                }`}
+              >
+                <Hand size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTool("pen")}
+                aria-label="펜"
+                aria-pressed={tool === "pen"}
+                className={`flex items-center justify-center rounded-md p-1.5 ${
+                  tool === "pen"
+                    ? "bg-blue-600 text-white"
+                    : "text-zinc-600 hover:bg-zinc-200"
+                }`}
+              >
+                <PenLine size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setTool("eraser")}
+                aria-label="지우개"
+                aria-pressed={tool === "eraser"}
+                className={`flex items-center justify-center rounded-md p-1.5 ${
+                  tool === "eraser"
+                    ? "bg-blue-600 text-white"
+                    : "text-zinc-600 hover:bg-zinc-200"
+                }`}
+              >
+                <Eraser size={18} />
+              </button>
+            </div>
             <button
               type="button"
-              onClick={zoomOut}
-              disabled={zoom <= MIN_ZOOM}
-              aria-label="시험지 축소"
-              className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+              onClick={() => setOmrOpen(true)}
+              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
             >
-              <ZoomOut size={18} />
-            </button>
-            <span className="w-10 text-center text-xs font-medium text-zinc-500">
-              {Math.round(zoom * 100)}%
-            </span>
-            <button
-              type="button"
-              onClick={zoomIn}
-              disabled={zoom >= MAX_ZOOM}
-              aria-label="시험지 확대"
-              className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-            >
-              <ZoomIn size={18} />
+              답안 입력
             </button>
           </div>
-          <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
-            <button
-              type="button"
-              onClick={() => setTool("move")}
-              aria-label="화면 이동"
-              aria-pressed={tool === "move"}
-              className={`flex items-center justify-center rounded-md p-1.5 ${
-                tool === "move"
-                  ? "bg-blue-600 text-white"
-                  : "text-zinc-600 hover:bg-zinc-200"
-              }`}
-            >
-              <Hand size={18} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setTool("pen")}
-              aria-label="펜"
-              aria-pressed={tool === "pen"}
-              className={`flex items-center justify-center rounded-md p-1.5 ${
-                tool === "pen"
-                  ? "bg-blue-600 text-white"
-                  : "text-zinc-600 hover:bg-zinc-200"
-              }`}
-            >
-              <PenLine size={18} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setTool("eraser")}
-              aria-label="지우개"
-              aria-pressed={tool === "eraser"}
-              className={`flex items-center justify-center rounded-md p-1.5 ${
-                tool === "eraser"
-                  ? "bg-blue-600 text-white"
-                  : "text-zinc-600 hover:bg-zinc-200"
-              }`}
-            >
-              <Eraser size={18} />
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => setOmrOpen(true)}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
-          >
-            답안 입력
-          </button>
         </div>
       </header>
 
       {tool !== "move" && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-zinc-200 bg-white px-3 py-1.5">
-          {tool === "pen" &&
-            PEN_COLORS.map((color) => (
-              <button
-                key={color}
-                type="button"
-                aria-label="펜 색상"
-                onClick={() => setPenColor(color)}
-                style={{ backgroundColor: color }}
-                className={`h-5 w-5 rounded-full ${
-                  penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
-                }`}
-              />
-            ))}
-          {tool === "eraser" && (
-            <p className="text-xs text-zinc-400">
-              드래그한 부분만 지워져요
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={clearDrawing}
-            className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
-          >
-            <Trash2 size={14} />
-            전체 지우기
-          </button>
+        <div className="shrink-0 border-b border-zinc-200 bg-white">
+          <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-1.5">
+            {tool === "pen" &&
+              PEN_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  aria-label="펜 색상"
+                  onClick={() => setPenColor(color)}
+                  style={{ backgroundColor: color }}
+                  className={`h-5 w-5 rounded-full ${
+                    penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                  }`}
+                />
+              ))}
+            {tool === "eraser" && (
+              <p className="text-xs text-zinc-400">
+                드래그한 부분만 지워져요
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={clearDrawing}
+              className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
+            >
+              <Trash2 size={14} />
+              전체 지우기
+            </button>
+          </div>
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <div ref={pdfWrapperRef} className="relative min-w-0 flex-1">
-          <PdfCanvasViewer
-            fileUrl={fileUrl}
-            tool={tool}
-            penColor={penColor}
-            zoom={zoom}
-            onClearReady={registerClearDrawing}
+      <div className="flex min-h-0 flex-1 justify-center">
+        <div className="flex min-h-0 w-full max-w-7xl">
+          <div ref={pdfWrapperRef} className="relative min-w-0 flex-1">
+            <PdfCanvasViewer
+              fileUrl={fileUrl}
+              tool={tool}
+              penColor={penColor}
+              zoom={zoom}
+              onClearReady={registerClearDrawing}
+            />
+          </div>
+
+          <OmrPanel
+            className="hidden w-[240px] shrink-0 flex-col border-l border-zinc-200 lg:flex"
+            totalQuestions={totalQuestions}
+            choiceCount={choiceCount}
+            answers={answers}
+            answeredCount={answeredCount}
+            onSelect={selectChoice}
+            onSubmit={handleSubmit}
+            submitting={isPending}
+            error={error}
+            resultByQuestion={result ? resultByQuestion : null}
           />
         </div>
-
-        <OmrPanel
-          className="hidden w-[240px] shrink-0 flex-col border-l border-zinc-200 lg:flex"
-          totalQuestions={totalQuestions}
-          choiceCount={choiceCount}
-          answers={answers}
-          answeredCount={answeredCount}
-          onSelect={selectChoice}
-          onSubmit={handleSubmit}
-          submitting={isPending}
-          error={error}
-          resultByQuestion={result ? resultByQuestion : null}
-        />
       </div>
 
       {omrOpen && (
