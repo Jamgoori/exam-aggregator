@@ -87,6 +87,7 @@ export function PdfCanvasViewer({
   // 등록받는 방식으로 부모에게 노출한다.
   onClearReady?: (clear: () => void) => void;
 }) {
+  const scrollWrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const annotationCanvasesRef = useRef<HTMLCanvasElement[]>([]);
   const toolRef = useRef(tool);
@@ -94,6 +95,26 @@ export function PdfCanvasViewer({
   const zoomRef = useRef(zoom);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 렌더링에 쓸 실제 폭. 문제별 보기 탭일 때 이 뷰어는 display:none이라 clientWidth가
+  // 0인데, 그 상태에서 그려버리면 폭 0 → 폴백값으로 렌더돼 나중에 전체보기로 왔을 때
+  // 모바일 화면을 크게 넘치게 나온다("줌이 이상하고 움직이지 않는" 증상). 그래서 실제
+  // 폭이 잡히거나(0→표시) 화면 회전/리사이즈로 바뀔 때마다 그 폭으로 (다시) 렌더한다.
+  const [renderWidth, setRenderWidth] = useState(0);
+
+  useEffect(() => {
+    const el = scrollWrapperRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      const width = el.clientWidth;
+      // 세로 스크롤바는 항상 있으니 clientWidth는 zoom을 바꿔도 흔들리지 않는다
+      // (가로 스크롤바는 clientHeight만 깎음). 실제 레이아웃 폭이 바뀔 때만 반영한다.
+      if (width > 0) {
+        setRenderWidth((prev) => (Math.abs(prev - width) > 1 ? width : prev));
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     toolRef.current = tool;
@@ -121,7 +142,9 @@ export function PdfCanvasViewer({
 
   useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    // 실제 폭이 아직 안 잡혔으면(숨겨진 상태 등) 렌더링을 미룬다. 폭이 잡히는 순간
+    // renderWidth가 바뀌면서 이 이펙트가 다시 돌아 올바른 폭으로 그린다.
+    if (!container || renderWidth <= 0) return;
 
     let cancelled = false;
     const renderTasks: { cancel: () => void }[] = [];
@@ -148,7 +171,7 @@ export function PdfCanvasViewer({
         }).promise;
         if (cancelled) return;
 
-        const containerWidth = container!.clientWidth || 800;
+        const containerWidth = renderWidth;
         const dpr = window.devicePixelRatio || 1;
 
         // 먼저 페이지 객체를 전부 병렬로 가져와서(가벼운 메타데이터 조회) 스크롤
@@ -244,10 +267,15 @@ export function PdfCanvasViewer({
       cancelled = true;
       renderTasks.forEach((t) => t.cancel());
     };
-  }, [fileUrl]);
+  }, [fileUrl, renderWidth]);
 
   return (
-    <div className="relative h-full w-full overflow-y-auto bg-zinc-200">
+    // 확대(zoom > 1) 시 시험지가 뷰포트보다 넓어지므로 가로 스크롤도 열어둬야 잘린
+    // 오른쪽 부분까지 밀어서 볼 수 있다(모바일에서 "움직이지 않는다"던 증상).
+    <div
+      ref={scrollWrapperRef}
+      className="relative h-full w-full overflow-auto bg-zinc-200"
+    >
       {loading && (
         <p className="p-4 text-center text-sm text-zinc-500">불러오는 중...</p>
       )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { attachDrawing, type DrawTool } from "@/components/pdf-canvas-viewer";
 
 export function SingleQuestionView({
@@ -16,6 +16,10 @@ export function SingleQuestionView({
   tool,
   penColor,
   onClearReady,
+  onSubmit,
+  submitting,
+  submitted,
+  answeredCount,
 }: {
   questionIndex: number;
   totalQuestions: number;
@@ -28,9 +32,14 @@ export function SingleQuestionView({
   tool: DrawTool;
   penColor: string;
   onClearReady?: (clear: () => void) => void;
+  onSubmit: () => void;
+  submitting: boolean;
+  submitted: boolean;
+  answeredCount: number;
 }) {
   const questionNumber = questionIndex + 1;
   const graded = !!questionResult;
+  const isLast = questionIndex === totalQuestions - 1;
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -97,9 +106,22 @@ export function SingleQuestionView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 border-b border-zinc-100 bg-white px-4 py-2 text-center">
-        <span className="text-sm font-bold text-zinc-800">{questionNumber}번</span>
-        <span className="text-sm text-zinc-400"> / {totalQuestions}</span>
+      <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2">
+        <div>
+          <span className="text-sm font-bold text-zinc-800">{questionNumber}번</span>
+          <span className="text-sm text-zinc-400"> / {totalQuestions}</span>
+        </div>
+        {/* 문제별 풀기 도중에도 언제든 전체 채점할 수 있도록 상단에 제출 버튼을 둔다. */}
+        {!submitted && (
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={submitting}
+            className="absolute right-3 rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+          >
+            {submitting ? "채점 중..." : `제출 (${answeredCount}/${totalQuestions})`}
+          </button>
+        )}
       </div>
 
       <div
@@ -172,15 +194,29 @@ export function SingleQuestionView({
             })}
           </div>
 
-          <button
-            type="button"
-            aria-label="다음 문제"
-            disabled={questionIndex === totalQuestions - 1}
-            onClick={() => onNavigate(questionIndex + 1)}
-            className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
-          >
-            <ChevronRight size={22} />
-          </button>
+          {/* 마지막 문제에서는 "다음" 대신 제출 버튼이 되어, 끝까지 푼 뒤 바로
+              채점으로 이어지게 한다. 채점이 끝난 뒤에는(submitted) 비활성 다음 버튼. */}
+          {isLast && !submitted ? (
+            <button
+              type="button"
+              aria-label="제출하고 채점"
+              disabled={submitting}
+              onClick={onSubmit}
+              className="flex shrink-0 items-center justify-center rounded-full bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+            >
+              <Check size={22} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label="다음 문제"
+              disabled={isLast}
+              onClick={() => onNavigate(questionIndex + 1)}
+              className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+            >
+              <ChevronRight size={22} />
+            </button>
+          )}
         </div>
       </div>
     </div>
