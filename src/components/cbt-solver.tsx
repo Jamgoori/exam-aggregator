@@ -205,163 +205,168 @@ export function CbtSolver({
     // 100dvh는 그 헤더를 포함한 뷰포트 전체 높이라서 그만큼을 빼주지 않으면
     // 화면 하단(OMR 제출 버튼 등)이 잘린다. lg 미만은 헤더가 아예 없으니 그대로 둔다.
     <div className="flex h-[100dvh] flex-col lg:h-[calc(100dvh-65px)]">
-      <header className="shrink-0 border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <Link
-              href={`/papers/${paperId}`}
-              aria-label="문제지로 돌아가기"
-              className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100"
-            >
-              <ChevronLeft size={20} />
-            </Link>
-            <h1 className="truncate text-sm font-medium text-zinc-700">
-              {paperTitle}
-            </h1>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
-              <Clock size={16} />
-              {formatDuration(elapsedSeconds)}
+      {/* 헤더/탭/펜 색상 바를 하나의 그룹으로 묶어서, 각 줄마다 진한 구분선이 겹겹이
+          쌓이는 대신 그룹 내부는 옅은 선으로, 콘텐츠와 닿는 맨 아래만 굵은 선으로
+          구분한다. */}
+      <div className="shrink-0 divide-y divide-zinc-100 border-b border-zinc-200 bg-white">
+        <header>
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Link
+                href={`/papers/${paperId}`}
+                aria-label="문제지로 돌아가기"
+                className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100"
+              >
+                <ChevronLeft size={20} />
+              </Link>
+              <h1 className="truncate text-sm font-medium text-zinc-700">
+                {paperTitle}
+              </h1>
             </div>
-            <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex">
-              <button
-                type="button"
-                onClick={zoomOut}
-                disabled={zoom <= MIN_ZOOM}
-                aria-label="시험지 축소"
-                className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                <ZoomOut size={18} />
-              </button>
-              <span className="w-10 text-center text-xs font-medium text-zinc-500">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button
-                type="button"
-                onClick={zoomIn}
-                disabled={zoom >= MAX_ZOOM}
-                aria-label="시험지 확대"
-                className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                <ZoomIn size={18} />
-              </button>
-            </div>
-            <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
-              <button
-                type="button"
-                onClick={() => setTool("move")}
-                aria-label="화면 이동"
-                aria-pressed={tool === "move"}
-                className={`flex items-center justify-center rounded-md p-1.5 ${
-                  tool === "move"
-                    ? "bg-blue-600 text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-              >
-                <Hand size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setTool("pen")}
-                aria-label="펜"
-                aria-pressed={tool === "pen"}
-                className={`flex items-center justify-center rounded-md p-1.5 ${
-                  tool === "pen"
-                    ? "bg-blue-600 text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-              >
-                <PenLine size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setTool("eraser")}
-                aria-label="지우개"
-                aria-pressed={tool === "eraser"}
-                className={`flex items-center justify-center rounded-md p-1.5 ${
-                  tool === "eraser"
-                    ? "bg-blue-600 text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-              >
-                <Eraser size={18} />
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => setOmrOpen(true)}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
-            >
-              답안 입력
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="shrink-0 border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 py-1.5">
-          <button
-            type="button"
-            onClick={() => switchViewMode("full")}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${
-              viewMode === "full"
-                ? "bg-blue-600 text-white"
-                : "text-zinc-500 hover:bg-zinc-100"
-            }`}
-          >
-            전체보기
-          </button>
-          <button
-            type="button"
-            onClick={() => switchViewMode("single")}
-            disabled={!hasQuestionImages}
-            title={
-              hasQuestionImages ? undefined : "문항별 이미지가 아직 등록되지 않았어요"
-            }
-            className={`rounded-full px-3 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
-              viewMode === "single"
-                ? "bg-blue-600 text-white"
-                : "text-zinc-500 hover:bg-zinc-100"
-            }`}
-          >
-            문제별 풀기
-          </button>
-        </div>
-      </div>
-
-      {tool !== "move" && (
-        <div className="shrink-0 border-b border-zinc-200 bg-white">
-          <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-1.5">
-            {tool === "pen" &&
-              PEN_COLORS.map((color) => (
+            <div className="flex shrink-0 items-center gap-2">
+              <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
+                <Clock size={16} />
+                {formatDuration(elapsedSeconds)}
+              </div>
+              <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex">
                 <button
-                  key={color}
                   type="button"
-                  aria-label="펜 색상"
-                  onClick={() => setPenColor(color)}
-                  style={{ backgroundColor: color }}
-                  className={`h-5 w-5 rounded-full ${
-                    penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                  onClick={zoomOut}
+                  disabled={zoom <= MIN_ZOOM}
+                  aria-label="시험지 축소"
+                  className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  <ZoomOut size={18} />
+                </button>
+                <span className="w-10 text-center text-xs font-medium text-zinc-500">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onClick={zoomIn}
+                  disabled={zoom >= MAX_ZOOM}
+                  aria-label="시험지 확대"
+                  className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  <ZoomIn size={18} />
+                </button>
+              </div>
+              <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setTool("move")}
+                  aria-label="화면 이동"
+                  aria-pressed={tool === "move"}
+                  className={`flex items-center justify-center rounded-md p-1.5 ${
+                    tool === "move"
+                      ? "bg-blue-600 text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
                   }`}
-                />
-              ))}
-            {tool === "eraser" && (
-              <p className="text-xs text-zinc-400">
-                드래그한 부분만 지워져요
-              </p>
-            )}
+                >
+                  <Hand size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTool("pen")}
+                  aria-label="펜"
+                  aria-pressed={tool === "pen"}
+                  className={`flex items-center justify-center rounded-md p-1.5 ${
+                    tool === "pen"
+                      ? "bg-blue-600 text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                >
+                  <PenLine size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTool("eraser")}
+                  aria-label="지우개"
+                  aria-pressed={tool === "eraser"}
+                  className={`flex items-center justify-center rounded-md p-1.5 ${
+                    tool === "eraser"
+                      ? "bg-blue-600 text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                >
+                  <Eraser size={18} />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOmrOpen(true)}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
+              >
+                답안 입력
+              </button>
+            </div>
+          </div>
+        </header>
+  
+        <div>
+          <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 py-1.5">
             <button
               type="button"
-              onClick={clearDrawing}
-              className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
+              onClick={() => switchViewMode("full")}
+              className={`rounded-full px-3 py-1 text-xs font-medium ${
+                viewMode === "full"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-500 hover:bg-zinc-100"
+              }`}
             >
-              <Trash2 size={14} />
-              전체 지우기
+              전체보기
+            </button>
+            <button
+              type="button"
+              onClick={() => switchViewMode("single")}
+              disabled={!hasQuestionImages}
+              title={
+                hasQuestionImages ? undefined : "문항별 이미지가 아직 등록되지 않았어요"
+              }
+              className={`rounded-full px-3 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+                viewMode === "single"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-500 hover:bg-zinc-100"
+              }`}
+            >
+              문제별 풀기
             </button>
           </div>
         </div>
-      )}
+  
+        {tool !== "move" && (
+          <div>
+            <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-1.5">
+              {tool === "pen" &&
+                PEN_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    aria-label="펜 색상"
+                    onClick={() => setPenColor(color)}
+                    style={{ backgroundColor: color }}
+                    className={`h-5 w-5 rounded-full ${
+                      penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                    }`}
+                  />
+                ))}
+              {tool === "eraser" && (
+                <p className="text-xs text-zinc-400">
+                  드래그한 부분만 지워져요
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={clearDrawing}
+                className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
+              >
+                <Trash2 size={14} />
+                전체 지우기
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* PDF는 파싱/렌더링 비용이 커서 탭을 바꿔도 언마운트하지 않고 숨기기만 한다
           (다시 보일 때마다 처음부터 다시 불러오는 것을 피하기 위함). */}
