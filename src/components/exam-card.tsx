@@ -60,7 +60,7 @@ export function ExamCard({
               title={`${roundTier.name} (${myRoundCount}회독)`}
               className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold ${roundTier.className}`}
             >
-              <span aria-hidden>{roundTier.emoji}</span>
+              <roundTier.icon size={12} />
               {myRoundCount}회독
             </span>
           )
