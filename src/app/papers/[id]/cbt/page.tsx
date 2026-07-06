@@ -76,6 +76,9 @@ export default async function CbtPage({
     questionChoiceCounts[row.question_number] = row.choice_count;
   }
 
+  const defaultViewMode =
+    user.user_metadata?.default_cbt_view_mode === "single" ? "single" : "full";
+
   return (
     <CbtSolver
       paperId={typedPaper.id}
@@ -85,6 +88,7 @@ export default async function CbtPage({
       choiceCount={typedPaper.choice_count}
       questionImages={questionImages}
       questionChoiceCounts={questionChoiceCounts}
+      defaultViewMode={defaultViewMode}
     />
   );
 }

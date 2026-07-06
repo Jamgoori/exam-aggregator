@@ -8,6 +8,8 @@ import {
   Clock,
   Eraser,
   Hand,
+  Lock,
+  LockOpen,
   PenLine,
   Trash2,
   Trophy,
@@ -15,6 +17,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import { setDefaultCbtViewMode } from "@/app/actions";
 import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
 import type { DrawTool } from "@/components/pdf-canvas-viewer";
 import { SingleQuestionView } from "@/components/single-question-view";
@@ -45,6 +48,7 @@ export function CbtSolver({
   choiceCount,
   questionImages = {},
   questionChoiceCounts = {},
+  defaultViewMode = "full",
 }: {
   paperId: string;
   paperTitle: string;
@@ -53,6 +57,7 @@ export function CbtSolver({
   choiceCount: number;
   questionImages?: Record<number, string[]>;
   questionChoiceCounts?: Record<number, number>;
+  defaultViewMode?: "full" | "single";
 }) {
   const [answers, setAnswers] = useState<(number | null)[]>(
     Array(totalQuestions).fill(null),
@@ -71,8 +76,14 @@ export function CbtSolver({
   const [zoom, setZoom] = useState(1);
   const pdfWrapperRef = useRef<HTMLDivElement>(null);
   const hasQuestionImages = Object.keys(questionImages).length > 0;
-  const [viewMode, setViewMode] = useState<"full" | "single">("full");
+  // 계정에 저장된 기본 시작 모드가 "문제별 풀기"여도, 이 문제지에 문항별 이미지가
+  // 아직 없으면 그 탭 자체가 막혀 있으니 전체보기로 시작한다.
+  const [viewMode, setViewMode] = useState<"full" | "single">(
+    defaultViewMode === "single" && hasQuestionImages ? "single" : "full",
+  );
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [savedDefaultViewMode, setSavedDefaultViewMode] = useState(defaultViewMode);
+  const [isSavingDefault, startSavingDefault] = useTransition();
 
   // 페이지에 들어오면 곧바로 재기 시작하는 대신 5초 카운트다운을 보여주고, 그
   // 카운트다운이 끝나는 시점부터 실제 풀이 시간을 잰다.
@@ -127,6 +138,17 @@ export function CbtSolver({
     setViewMode(mode);
   }
 
+  // 자물쇠 아이콘: 지금 보고 있는 모드(전체보기/문제별 풀기)를 계정의 기본 시작
+  // 모드로 저장한다. 다음에 이 계정으로 아무 문제지든 온라인 응시를 시작하면 이
+  // 모드로 곧바로 열린다.
+  function handleSetDefaultViewMode() {
+    if (isSavingDefault) return;
+    startSavingDefault(async () => {
+      const res = await setDefaultCbtViewMode(viewMode);
+      if (!res.error) setSavedDefaultViewMode(viewMode);
+    });
+  }
+
   function zoomIn() {
     setZoom((z) => clampZoom(Math.round((z + ZOOM_STEP) * 100) / 100));
   }
@@ -150,6 +172,46 @@ export function CbtSolver({
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
   }, []);
+
+  // 저장 버튼이 따로 없어서, 채점 전에 페이지를 벗어나면 지금까지 고른 답이 그냥
+  // 사라진다. 새로고침/닫기/주소창 이동은 beforeunload로, 링크 클릭이나(사이트
+  // 헤더의 로고·마이페이지 링크 포함) 로그아웃 폼 제출은 클릭/제출을 가로채 확인
+  // 창을 띄우는 방식으로 막는다. 채점이 끝나면(result) 더 잃을 게 없으니 풀어준다.
+  useEffect(() => {
+    if (result) return;
+
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+
+    function confirmLeave(e: Event) {
+      if (
+        !window.confirm(
+          "지금 나가면 저장되지 않고 풀이 중인 내용이 모두 사라져요. 그래도 나갈까요?",
+        )
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }
+
+    function handleClick(e: MouseEvent) {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const anchor = (e.target as HTMLElement | null)?.closest?.("a");
+      if (!anchor || anchor.target === "_blank") return;
+      confirmLeave(e);
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleClick, true);
+    document.addEventListener("submit", confirmLeave, true);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleClick, true);
+      document.removeEventListener("submit", confirmLeave, true);
+    };
+  }, [result]);
 
   useEffect(() => {
     if (result || countdown > 0) return;
@@ -315,7 +377,7 @@ export function CbtSolver({
             <button
               type="button"
               onClick={() => switchViewMode("full")}
-              className={`rounded-full px-3 py-1 text-xs font-medium ${
+              className={`rounded-full px-3 py-1 text-[15px] font-medium ${
                 viewMode === "full"
                   ? "bg-blue-600 text-white"
                   : "text-zinc-500 hover:bg-zinc-100"
@@ -330,13 +392,39 @@ export function CbtSolver({
               title={
                 hasQuestionImages ? undefined : "문항별 이미지가 아직 등록되지 않았어요"
               }
-              className={`rounded-full px-3 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`rounded-full px-3 py-1 text-[15px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
                 viewMode === "single"
                   ? "bg-blue-600 text-white"
                   : "text-zinc-500 hover:bg-zinc-100"
               }`}
             >
               문제별 풀기
+            </button>
+            <button
+              type="button"
+              onClick={handleSetDefaultViewMode}
+              disabled={isSavingDefault}
+              aria-label={
+                savedDefaultViewMode === viewMode
+                  ? "현재 시작 모드로 저장되어 있어요"
+                  : "이 모드를 시작 모드로 저장"
+              }
+              title={
+                savedDefaultViewMode === viewMode
+                  ? "다음 온라인 응시부터 이 모드로 시작해요"
+                  : "누르면 다음 온라인 응시부터 이 모드로 시작해요"
+              }
+              className={`flex items-center justify-center rounded-full p-1.5 disabled:opacity-50 ${
+                savedDefaultViewMode === viewMode
+                  ? "text-blue-600"
+                  : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+              }`}
+            >
+              {savedDefaultViewMode === viewMode ? (
+                <Lock size={16} />
+              ) : (
+                <LockOpen size={16} />
+              )}
             </button>
           </div>
         </div>
