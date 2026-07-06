@@ -234,7 +234,7 @@ export function CbtSolver({
         </div>
 
         <OmrPanel
-          className="hidden w-[240px] shrink-0 border-l border-zinc-200 lg:flex"
+          className="hidden w-[240px] shrink-0 flex-col border-l border-zinc-200 lg:flex"
           totalQuestions={totalQuestions}
           choiceCount={choiceCount}
           answers={answers}
