@@ -375,20 +375,43 @@ export function CbtSolver({
         )}
       </div>
 
-      {/* PDF는 파싱/렌더링 비용이 커서 탭을 바꿔도 언마운트하지 않고 숨기기만 한다
-          (다시 보일 때마다 처음부터 다시 불러오는 것을 피하기 위함). */}
-      <div
-        className={`min-h-0 flex-1 justify-center ${viewMode === "full" ? "flex" : "hidden"}`}
-      >
+      {/* OMR 패널(데스크톱)은 전체보기/문제별 보기 어느 쪽에 있든 똑같이 붙어 있어야
+          어느 문제를 풀든 바로 전체 채점을 할 수 있다. PDF는 파싱/렌더링 비용이 커서
+          탭을 바꿔도 언마운트하지 않고 숨기기만 한다(다시 보일 때마다 처음부터 다시
+          불러오는 것을 피하기 위함). */}
+      <div className="flex min-h-0 flex-1 justify-center">
         <div className="flex min-h-0 w-full max-w-7xl">
-          <div ref={pdfWrapperRef} className="relative min-w-0 flex-1">
-            <PdfCanvasViewer
-              fileUrl={fileUrl}
-              tool={tool}
-              penColor={penColor}
-              zoom={zoom}
-              onClearReady={registerClearDrawing}
-            />
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            <div
+              ref={pdfWrapperRef}
+              className={`relative min-h-0 flex-1 ${viewMode === "full" ? "block" : "hidden"}`}
+            >
+              <PdfCanvasViewer
+                fileUrl={fileUrl}
+                tool={tool}
+                penColor={penColor}
+                zoom={zoom}
+                onClearReady={registerClearDrawing}
+              />
+            </div>
+
+            {viewMode === "single" && (
+              <SingleQuestionView
+                questionIndex={currentQuestionIndex}
+                totalQuestions={totalQuestions}
+                choiceCount={questionChoiceCounts[currentQuestionIndex + 1] ?? choiceCount}
+                images={questionImages[currentQuestionIndex + 1] ?? []}
+                selected={answers[currentQuestionIndex]}
+                onSelect={(choice) => selectChoice(currentQuestionIndex, choice)}
+                onNavigate={setCurrentQuestionIndex}
+                questionResult={
+                  result ? (resultByQuestion.get(currentQuestionIndex + 1) ?? null) : null
+                }
+                tool={tool}
+                penColor={penColor}
+                onClearReady={registerClearSingleDrawing}
+              />
+            )}
           </div>
 
           <OmrPanel
@@ -405,24 +428,6 @@ export function CbtSolver({
           />
         </div>
       </div>
-
-      {viewMode === "single" && (
-        <SingleQuestionView
-          questionIndex={currentQuestionIndex}
-          totalQuestions={totalQuestions}
-          choiceCount={questionChoiceCounts[currentQuestionIndex + 1] ?? choiceCount}
-          images={questionImages[currentQuestionIndex + 1] ?? []}
-          selected={answers[currentQuestionIndex]}
-          onSelect={(choice) => selectChoice(currentQuestionIndex, choice)}
-          onNavigate={setCurrentQuestionIndex}
-          questionResult={
-            result ? (resultByQuestion.get(currentQuestionIndex + 1) ?? null) : null
-          }
-          tool={tool}
-          penColor={penColor}
-          onClearReady={registerClearSingleDrawing}
-        />
-      )}
 
       {omrOpen && (
         <div className="fixed inset-0 z-40 flex flex-col justify-end lg:hidden">
