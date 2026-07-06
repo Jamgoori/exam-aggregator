@@ -59,6 +59,7 @@ export function CbtSolver({
   );
   const [omrOpen, setOmrOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [countdown, setCountdown] = useState(5);
   const [result, setResult] = useState<CbtSubmitResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -73,9 +74,16 @@ export function CbtSolver({
   const [viewMode, setViewMode] = useState<"full" | "single">("full");
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
+  // 페이지에 들어오면 곧바로 재기 시작하는 대신 5초 카운트다운을 보여주고, 그
+  // 카운트다운이 끝나는 시점부터 실제 풀이 시간을 잰다.
   useEffect(() => {
-    startedAtRef.current = Date.now();
-  }, []);
+    if (countdown <= 0) {
+      startedAtRef.current = Date.now();
+      return;
+    }
+    const timeout = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(timeout);
+  }, [countdown]);
 
   const registerClearDrawing = useCallback((clear: () => void) => {
     clearDrawingRef.current = clear;
@@ -144,12 +152,12 @@ export function CbtSolver({
   }, []);
 
   useEffect(() => {
-    if (result) return;
+    if (result || countdown > 0) return;
     const timer = setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - startedAtRef.current) / 1000));
     }, 1000);
     return () => clearInterval(timer);
-  }, [result]);
+  }, [result, countdown]);
 
   const answeredCount = answers.filter((a) => a !== null).length;
 
@@ -192,8 +200,8 @@ export function CbtSolver({
     setAnswers(Array(totalQuestions).fill(null));
     setResult(null);
     setError(null);
-    startedAtRef.current = Date.now();
     setElapsedSeconds(0);
+    setCountdown(5);
   }
 
   const resultByQuestion = new Map(
@@ -205,10 +213,9 @@ export function CbtSolver({
     // 100dvh는 그 헤더를 포함한 뷰포트 전체 높이라서 그만큼을 빼주지 않으면
     // 화면 하단(OMR 제출 버튼 등)이 잘린다. lg 미만은 헤더가 아예 없으니 그대로 둔다.
     <div className="flex h-[100dvh] flex-col lg:h-[calc(100dvh-65px)]">
-      {/* 헤더/탭/펜 색상 바를 하나의 그룹으로 묶어서, 각 줄마다 진한 구분선이 겹겹이
-          쌓이는 대신 그룹 내부는 옅은 선으로, 콘텐츠와 닿는 맨 아래만 굵은 선으로
-          구분한다. */}
-      <div className="shrink-0 divide-y divide-zinc-100 border-b border-zinc-200 bg-white">
+      {/* 헤더/탭/펜 색상 바를 하나의 그룹으로 묶어서, 각 줄마다 구분선이 겹겹이
+          쌓이지 않게 내부 구분선 없이 콘텐츠와 닿는 맨 아래에만 선을 둔다. */}
+      <div className="shrink-0 border-b border-zinc-200 bg-white">
         <header>
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
             <div className="flex min-w-0 items-center gap-2">
@@ -226,7 +233,7 @@ export function CbtSolver({
             <div className="flex shrink-0 items-center gap-2">
               <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
                 <Clock size={16} />
-                {formatDuration(elapsedSeconds)}
+                {countdown > 0 ? `${countdown}초 후 시작` : formatDuration(elapsedSeconds)}
               </div>
               <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex">
                 <button
