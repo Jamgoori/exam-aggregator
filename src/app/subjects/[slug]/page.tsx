@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { Pagination } from "@/components/pagination";
 import { levelColor, compareLevels } from "@/lib/level-colors";
+import { getMyRoundCounts } from "@/lib/my-round-counts";
 import type { ExamPaper, Subject } from "@/lib/supabase/types";
 import type { Metadata } from "next";
 
@@ -63,13 +64,14 @@ export default async function SubjectPage({
   if (level) papersQuery = papersQuery.eq("level", level);
   const from = (currentPage - 1) * PAGE_SIZE;
 
-  const [{ data: levelRows }, { data: papers, count: filteredCount }] =
+  const [{ data: levelRows }, { data: papers, count: filteredCount }, userResult] =
     await Promise.all([
       supabase.from("exam_papers").select("level").eq("subject_id", subject.id),
       papersQuery
         .order("year", { ascending: false })
         .order("round", { ascending: false })
         .range(from, from + PAGE_SIZE - 1),
+      supabase.auth.getUser(),
     ]);
 
   const availableLevels = [
@@ -79,6 +81,15 @@ export default async function SubjectPage({
   ].sort(compareLevels);
   const filteredPapers = (papers ?? []) as ExamPaper[];
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
+
+  const currentUser = userResult.data.user;
+  const myRoundCounts = currentUser
+    ? await getMyRoundCounts(
+        supabase,
+        currentUser.id,
+        filteredPapers.map((p) => p.id),
+      )
+    : new Map<string, number>();
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-12">
@@ -128,7 +139,12 @@ export default async function SubjectPage({
           </p>
         )}
         {filteredPapers.map((paper) => (
-          <ExamCard key={paper.id} paper={paper} linkLevel={level} />
+          <ExamCard
+            key={paper.id}
+            paper={paper}
+            linkLevel={level}
+            myRoundCount={myRoundCounts.get(paper.id)}
+          />
         ))}
       </div>
 

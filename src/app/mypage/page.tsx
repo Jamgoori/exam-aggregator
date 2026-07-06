@@ -148,7 +148,11 @@ export default async function MyPage({
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {bookmarkedPapers.map((paper) => (
-                <ExamCard key={paper.id} paper={paper} />
+                <ExamCard
+                  key={paper.id}
+                  paper={paper}
+                  myRoundCount={attemptsByPaper.get(paper.id)?.length}
+                />
               ))}
             </div>
           )}

@@ -6,6 +6,7 @@ import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
 import { levelColor } from "@/lib/level-colors";
+import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { isChoseongQuery, matchesChoseong } from "@/lib/hangul";
 import type { ExamPaper, ExamType, Subject } from "@/lib/supabase/types";
 
@@ -75,16 +76,27 @@ export default async function Home({
     mainResult,
     { count: totalCount },
     { data: totalDownloads },
+    userResult,
   ] = await Promise.all([
     supabase.from("exam_types").select("*").order("display_order"),
     skipMainQuery ? Promise.resolve({ data: [], count: 0 }) : query,
     supabase.from("exam_papers").select("*", { count: "exact", head: true }),
     supabase.rpc("total_download_count"),
+    supabase.auth.getUser(),
   ]);
   const { data: papers, count: filteredCount } = mainResult;
 
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
   const latestYear = (papers as ExamPaper[] | null)?.[0]?.year;
+
+  const currentUser = userResult.data.user;
+  const myRoundCounts = currentUser
+    ? await getMyRoundCounts(
+        supabase,
+        currentUser.id,
+        ((papers as ExamPaper[] | null) ?? []).map((p) => p.id),
+      )
+    : new Map<string, number>();
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 py-12">
@@ -179,7 +191,12 @@ export default async function Home({
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {((papers as ExamPaper[] | null) ?? []).map((paper) => (
-            <ExamCard key={paper.id} paper={paper} linkLevel={level} />
+            <ExamCard
+              key={paper.id}
+              paper={paper}
+              linkLevel={level}
+              myRoundCount={myRoundCounts.get(paper.id)}
+            />
           ))}
           {((papers as ExamPaper[] | null) ?? []).length === 0 && (
             <p className="col-span-full py-12 text-center text-zinc-500">

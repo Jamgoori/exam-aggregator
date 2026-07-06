@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ChevronRight, MapPin } from "lucide-react";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor } from "@/lib/level-colors";
+import { roundBadgeColor } from "@/lib/round-colors";
 import { formatCount, formatFileSize } from "@/lib/format";
 import type { ExamPaper } from "@/lib/supabase/types";
 
@@ -9,11 +10,14 @@ export function ExamCard({
   paper,
   isCurrent = false,
   linkLevel,
+  myRoundCount,
 }: {
   paper: ExamPaper;
   isCurrent?: boolean;
   // 상세페이지 하단 "같은 과목 목록"의 급수 탭 상태를 이어서 넘겨주기 위한 값
   linkLevel?: string;
+  // 로그인한 사용자가 이 문제지를 CBT로 몇 번 풀었는지 (없으면 배지 자체를 안 보여줌)
+  myRoundCount?: number;
 }) {
   const subject = paper.subjects;
   const examType = paper.exam_types;
@@ -44,11 +48,19 @@ export function ExamCard({
             </span>
           )}
         </div>
-        {isCurrent && (
+        {isCurrent ? (
           <span className="flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
             <MapPin size={12} />
             현재 보는 중
           </span>
+        ) : (
+          !!myRoundCount && (
+            <span
+              className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${roundBadgeColor(myRoundCount)}`}
+            >
+              {myRoundCount}회독
+            </span>
+          )
         )}
       </div>
 
