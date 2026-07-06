@@ -35,5 +35,10 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|webp)$).*)"],
+  // 정적 자산에는 세션 갱신이 전혀 필요 없는데도 프록시를 태우면 요청마다 Supabase
+  // 쿠키 파싱/검증 비용이 붙는다. 특히 /pdf.worker.min.mjs(1MB+, CBT 진입마다 로드)가
+  // 기존 패턴(svg|png|jpg|jpeg|webp)에 안 걸려서 매번 프록시를 통과하고 있었다.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|mjs|pdf|woff2?|ttf|otf|map|txt|xml|webmanifest)$).*)",
+  ],
 };

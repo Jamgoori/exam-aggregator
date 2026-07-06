@@ -55,6 +55,11 @@ export default async function SubjectPage({
     notFound();
   }
 
+  // 회독 배지용 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — cbt_attempts
+  // 조회 자체가 RLS로 본인 것만 반환되므로 인증 서버 왕복(getUser)이 필요 없다.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims.sub ?? null;
+
   // 급수 탭은 이 과목에 존재하는 급수 종류만 필요하므로, 목록 전체를 받아오는 대신
   // level 컬럼만 가볍게 조회해서 만든다.
   let papersQuery = supabase
@@ -64,14 +69,16 @@ export default async function SubjectPage({
   if (level) papersQuery = papersQuery.eq("level", level);
   const from = (currentPage - 1) * PAGE_SIZE;
 
-  const [{ data: levelRows }, { data: papers, count: filteredCount }, userResult] =
+  const [{ data: levelRows }, { data: papers, count: filteredCount }, myRoundCounts] =
     await Promise.all([
       supabase.from("exam_papers").select("level").eq("subject_id", subject.id),
       papersQuery
         .order("year", { ascending: false })
         .order("round", { ascending: false })
         .range(from, from + PAGE_SIZE - 1),
-      supabase.auth.getUser(),
+      userId
+        ? getMyRoundCounts(supabase, userId)
+        : Promise.resolve(new Map<string, number>()),
     ]);
 
   const availableLevels = [
@@ -81,15 +88,6 @@ export default async function SubjectPage({
   ].sort(compareLevels);
   const filteredPapers = (papers ?? []) as ExamPaper[];
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
-
-  const currentUser = userResult.data.user;
-  const myRoundCounts = currentUser
-    ? await getMyRoundCounts(
-        supabase,
-        currentUser.id,
-        filteredPapers.map((p) => p.id),
-      )
-    : new Map<string, number>();
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-12">
