@@ -350,6 +350,26 @@ export async function setNickname(
   return { success: true };
 }
 
+// CBT 온라인 응시를 시작할 때 "전체보기"/"문제별 풀기" 중 어느 화면으로 열지에 대한
+// 계정별 선호값. 닉네임과 마찬가지로 별도 테이블 없이 user_metadata에 둔다(고유성
+// 검증이나 다른 계정과의 조회가 필요 없는 단순 preference라 profiles 테이블 대상이
+// 아니다).
+export async function setDefaultCbtViewMode(
+  mode: "full" | "single",
+): Promise<{ error?: string; success?: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요해요." };
+
+  const { error } = await supabase.auth.updateUser({
+    data: { default_cbt_view_mode: mode },
+  });
+  if (error) return { error: "저장에 실패했어요." };
+  return { success: true };
+}
+
 export async function updatePassword(formData: FormData) {
   const supabase = await createClient();
   const {
