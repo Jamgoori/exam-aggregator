@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { MessageSquare, Star, Trophy } from "lucide-react";
+import { Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { formatDuration } from "@/lib/format";
@@ -10,7 +10,6 @@ import type { ExamPaper } from "@/lib/supabase/types";
 // 오답노트는 문항별 정답/오답 이미지를 모아 보여줘야 해서 더 큰 작업이라 별도로 남겨둠.
 const TABS = [
   { key: "bookmarks", label: "즐겨찾기" },
-  { key: "comments", label: "내 댓글" },
   { key: "history", label: "내 시험 기록" },
 ] as const;
 
@@ -44,40 +43,26 @@ export default async function MyPage({
     user.email?.split("@")[0] ??
     "회원";
 
-  const [{ data: bookmarkRows }, { data: commentRows }, { data: attemptRows }] =
-    await Promise.all([
-      supabase
-        .from("bookmarks")
-        .select("id, created_at, exam_papers(*, subjects(*), exam_types(*))")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("comments")
-        .select("id, content, created_at, updated_at, exam_papers(id, title)")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("cbt_attempts")
-        .select(
-          "id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, subjects(*), exam_types(*))",
-        )
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false }),
-    ]);
+  const [{ data: bookmarkRows }, { data: attemptRows }] = await Promise.all([
+    supabase
+      .from("bookmarks")
+      .select("id, created_at, exam_papers(*, subjects(*), exam_types(*))")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("cbt_attempts")
+      .select(
+        "id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, subjects(*), exam_types(*))",
+      )
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false }),
+  ]);
 
   const bookmarkedPapers = (
     (bookmarkRows ?? []) as unknown as { exam_papers: ExamPaper | null }[]
   )
     .map((r) => r.exam_papers)
     .filter((p): p is ExamPaper => p !== null);
-
-  const myComments = (commentRows ?? []) as unknown as {
-    id: string;
-    content: string;
-    created_at: string;
-    updated_at: string | null;
-    exam_papers: { id: string; title: string } | null;
-  }[];
 
   const myAttempts = (attemptRows ?? []) as unknown as {
     id: string;
@@ -128,10 +113,6 @@ export default async function MyPage({
           <span className="text-xl font-semibold">{bookmarkedPapers.length}</span>
         </div>
         <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
-          <span className="text-xs text-zinc-500">내 댓글</span>
-          <span className="text-xl font-semibold">{myComments.length}</span>
-        </div>
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
           <span className="text-xs text-zinc-500">CBT 응시</span>
           <span className="text-xl font-semibold">{myAttempts.length}</span>
         </div>
@@ -168,48 +149,6 @@ export default async function MyPage({
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {bookmarkedPapers.map((paper) => (
                 <ExamCard key={paper.id} paper={paper} />
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {activeTab === "comments" && (
-        <section className="flex flex-col gap-4">
-          <h2 className="flex items-center gap-2 text-lg font-semibold">
-            <MessageSquare size={18} className="text-blue-500" />내 댓글 (
-            {myComments.length})
-          </h2>
-          {myComments.length === 0 ? (
-            <p className="py-12 text-center text-sm text-zinc-500">
-              아직 작성한 댓글이 없어요.
-            </p>
-          ) : (
-            <div className="flex flex-col divide-y divide-zinc-100">
-              {myComments.map((c) => (
-                <div key={c.id} className="flex flex-col gap-1 py-4">
-                  <div className="flex items-center justify-between gap-2">
-                    {c.exam_papers ? (
-                      <Link
-                        href={`/papers/${c.exam_papers.id}`}
-                        className="text-sm font-medium text-blue-600 hover:underline"
-                      >
-                        {c.exam_papers.title}
-                      </Link>
-                    ) : (
-                      <span className="text-sm text-zinc-400">
-                        삭제된 문제
-                      </span>
-                    )}
-                    <span className="shrink-0 text-xs text-zinc-400">
-                      {new Date(c.created_at).toLocaleDateString("ko-KR")}
-                      {c.updated_at ? " (수정됨)" : ""}
-                    </span>
-                  </div>
-                  <p className="whitespace-pre-wrap text-sm text-zinc-700">
-                    {c.content}
-                  </p>
-                </div>
               ))}
             </div>
           )}
