@@ -66,6 +66,7 @@ export function CbtSolver({
   const [tool, setTool] = useState<DrawTool>("move");
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
   const clearDrawingRef = useRef<() => void>(() => {});
+  const clearSingleDrawingRef = useRef<() => void>(() => {});
   const [zoom, setZoom] = useState(1);
   const pdfWrapperRef = useRef<HTMLDivElement>(null);
   const hasQuestionImages = Object.keys(questionImages).length > 0;
@@ -80,13 +81,20 @@ export function CbtSolver({
     clearDrawingRef.current = clear;
   }, []);
 
+  const registerClearSingleDrawing = useCallback((clear: () => void) => {
+    clearSingleDrawingRef.current = clear;
+  }, []);
+
   function clearDrawing() {
-    clearDrawingRef.current();
+    if (viewMode === "full") {
+      clearDrawingRef.current();
+    } else {
+      clearSingleDrawingRef.current();
+    }
   }
 
-  // 전체보기(PDF)에는 필기(펜) 레이어가 있는데, 문제별 보기는 크롭 이미지라 그
-  // 좌표계가 전혀 달라 필기를 그대로 옮길 수 없다. 그래서 전체보기를 벗어날 때는
-  // 미리 경고하고 필기를 통째로 지운다.
+  // 전체보기(PDF)와 문제별 보기는 서로 다른 캔버스(좌표계)에 필기를 남기므로, 서로
+  // 오갈 때는 미리 경고하고 필기를 지운다.
   function switchViewMode(mode: "full" | "single") {
     if (mode === viewMode) return;
     if (viewMode === "full" && mode === "single") {
@@ -97,7 +105,16 @@ export function CbtSolver({
       ) {
         return;
       }
-      clearDrawing();
+      clearDrawingRef.current();
+    }
+    if (viewMode === "single" && mode === "full") {
+      if (
+        !window.confirm(
+          "전체보기로 바꾸면 문제별 보기에 그린 필기 내용이 모두 지워져요. 계속할까요?",
+        )
+      ) {
+        return;
+      }
     }
     setViewMode(mode);
   }
@@ -313,7 +330,7 @@ export function CbtSolver({
         </div>
       </div>
 
-      {tool !== "move" && viewMode === "full" && (
+      {tool !== "move" && (
         <div className="shrink-0 border-b border-zinc-200 bg-white">
           <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-1.5">
             {tool === "pen" &&
@@ -389,6 +406,9 @@ export function CbtSolver({
           questionResult={
             result ? (resultByQuestion.get(currentQuestionIndex + 1) ?? null) : null
           }
+          tool={tool}
+          penColor={penColor}
+          onClearReady={registerClearSingleDrawing}
         />
       )}
 
