@@ -23,13 +23,20 @@ function attachDrawing(
   canvas: HTMLCanvasElement,
   toolRef: { current: DrawTool },
   penColorRef: { current: string },
+  zoomRef: { current: number },
 ) {
   let drawing = false;
   let last: { x: number; y: number } | null = null;
 
+  // CSS zoom은 화면에 보이는 크기(getBoundingClientRect)만 확대하고 캔버스의
+  // 실제 좌표계(내부 픽셀 그리드)는 그대로이므로, zoom 배율만큼 나눠줘야
+  // 확대된 상태에서도 클릭한 위치에 정확히 그려진다.
   function getPoint(e: PointerEvent) {
     const rect = canvas.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    return {
+      x: (e.clientX - rect.left) / zoomRef.current,
+      y: (e.clientY - rect.top) / zoomRef.current,
+    };
   }
 
   canvas.addEventListener("pointerdown", (e) => {
@@ -66,11 +73,15 @@ export function PdfCanvasViewer({
   fileUrl,
   tool,
   penColor,
+  zoom = 1,
   onClearReady,
 }: {
   fileUrl: string;
   tool: DrawTool;
   penColor: string;
+  // 시험지(PDF)에만 적용되는 확대 배율. OMR 패널 등 나머지 UI는 이 값과 무관하게
+  // 그대로 유지된다.
+  zoom?: number;
   // next/dynamic(ssr:false)로 불러오는 컴포넌트는 일반 함수 컴포넌트로 감싸져서
   // ref가 전달되지 않으므로(useImperativeHandle을 못 씀), "지우기" 함수를 콜백으로
   // 등록받는 방식으로 부모에게 노출한다.
@@ -80,6 +91,7 @@ export function PdfCanvasViewer({
   const annotationCanvasesRef = useRef<HTMLCanvasElement[]>([]);
   const toolRef = useRef(tool);
   const penColorRef = useRef(penColor);
+  const zoomRef = useRef(zoom);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -93,6 +105,10 @@ export function PdfCanvasViewer({
   useEffect(() => {
     penColorRef.current = penColor;
   }, [penColor]);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
 
   useEffect(() => {
     onClearReady?.(() => {
@@ -185,7 +201,7 @@ export function PdfCanvasViewer({
             toolRef.current === "move" ? "none" : "auto";
           pageWrapper.appendChild(annotationCanvas);
           annotationCanvasesRef.current.push(annotationCanvas);
-          attachDrawing(annotationCanvas, toolRef, penColorRef);
+          attachDrawing(annotationCanvas, toolRef, penColorRef, zoomRef);
 
           container!.appendChild(pageWrapper);
           pendingRenders.push({ contentCanvas, viewport, page });
@@ -243,6 +259,7 @@ export function PdfCanvasViewer({
       <div
         ref={containerRef}
         className="mx-auto flex w-full flex-col items-center py-2"
+        style={{ zoom }}
       />
     </div>
   );

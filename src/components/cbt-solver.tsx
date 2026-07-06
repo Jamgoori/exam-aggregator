@@ -12,6 +12,8 @@ import {
   Trash2,
   Trophy,
   X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
 import type { DrawTool } from "@/components/pdf-canvas-viewer";
@@ -25,6 +27,14 @@ const PdfCanvasViewer = dynamic(
 );
 
 const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
+
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.5;
+const ZOOM_STEP = 0.1;
+
+function clampZoom(zoom: number) {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+}
 
 export function CbtSolver({
   paperId,
@@ -51,6 +61,8 @@ export function CbtSolver({
   const [tool, setTool] = useState<DrawTool>("move");
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
   const clearDrawingRef = useRef<() => void>(() => {});
+  const [zoom, setZoom] = useState(1);
+  const pdfWrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     startedAtRef.current = Date.now();
@@ -63,6 +75,30 @@ export function CbtSolver({
   function clearDrawing() {
     clearDrawingRef.current();
   }
+
+  function zoomIn() {
+    setZoom((z) => clampZoom(Math.round((z + ZOOM_STEP) * 100) / 100));
+  }
+
+  function zoomOut() {
+    setZoom((z) => clampZoom(Math.round((z - ZOOM_STEP) * 100) / 100));
+  }
+
+  // 트랙패드 핀치줌/Ctrl+휠은 브라우저 기본 동작으로는 페이지 전체(시험지+OMR
+  // 패널)를 함께 확대해버린다. 시험지 영역에서만 이 이벤트를 가로채 브라우저 확대를
+  // 막고, 대신 PDF 뷰어에만 걸리는 자체 줌 상태를 조절한다. React의 onWheel은
+  // 리스너가 passive로 등록돼 preventDefault가 무시되므로 네이티브로 직접 등록한다.
+  useEffect(() => {
+    const el = pdfWrapperRef.current;
+    if (!el) return;
+    function handleWheel(e: WheelEvent) {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setZoom((z) => clampZoom(z - e.deltaY * 0.0015));
+    }
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, []);
 
   useEffect(() => {
     if (result) return;
@@ -140,6 +176,29 @@ export function CbtSolver({
           <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
             <Clock size={16} />
             {formatDuration(elapsedSeconds)}
+          </div>
+          <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex">
+            <button
+              type="button"
+              onClick={zoomOut}
+              disabled={zoom <= MIN_ZOOM}
+              aria-label="시험지 축소"
+              className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <ZoomOut size={18} />
+            </button>
+            <span className="w-10 text-center text-xs font-medium text-zinc-500">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={zoomIn}
+              disabled={zoom >= MAX_ZOOM}
+              aria-label="시험지 확대"
+              className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+            >
+              <ZoomIn size={18} />
+            </button>
           </div>
           <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
             <button
@@ -224,11 +283,12 @@ export function CbtSolver({
       )}
 
       <div className="flex min-h-0 flex-1">
-        <div className="relative min-w-0 flex-1">
+        <div ref={pdfWrapperRef} className="relative min-w-0 flex-1">
           <PdfCanvasViewer
             fileUrl={fileUrl}
             tool={tool}
             penColor={penColor}
+            zoom={zoom}
             onClearReady={registerClearDrawing}
           />
         </div>
