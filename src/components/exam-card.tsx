@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ChevronRight, MapPin } from "lucide-react";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor } from "@/lib/level-colors";
-import { roundBadgeColor } from "@/lib/round-colors";
+import { getRoundTier } from "@/lib/round-tier";
 import { formatCount, formatFileSize } from "@/lib/format";
 import type { ExamPaper } from "@/lib/supabase/types";
 
@@ -22,6 +22,7 @@ export function ExamCard({
   const subject = paper.subjects;
   const examType = paper.exam_types;
   const fileSize = formatFileSize(paper.file_size);
+  const roundTier = myRoundCount ? getRoundTier(myRoundCount) : null;
 
   const className = `flex flex-col gap-3 rounded-xl border p-4 transition-colors ${
     isCurrent
@@ -54,10 +55,12 @@ export function ExamCard({
             현재 보는 중
           </span>
         ) : (
-          !!myRoundCount && (
+          roundTier && (
             <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${roundBadgeColor(myRoundCount)}`}
+              title={`${roundTier.name} (${myRoundCount}회독)`}
+              className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold ${roundTier.className}`}
             >
+              <span aria-hidden>{roundTier.emoji}</span>
               {myRoundCount}회독
             </span>
           )
