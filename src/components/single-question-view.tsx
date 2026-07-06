@@ -108,7 +108,7 @@ export function SingleQuestionView({
       >
         <div
           ref={contentRef}
-          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2"
+          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white"
         >
           {images.length === 0 ? (
             <p className="pt-24 text-center text-sm text-zinc-400">
@@ -121,7 +121,7 @@ export function SingleQuestionView({
                 key={i}
                 src={src}
                 alt={`${questionNumber}번 문제 이미지 ${i + 1}`}
-                className="w-full rounded-lg border border-zinc-200 bg-white"
+                className="w-full"
               />
             ))
           )}
