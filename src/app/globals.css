@@ -61,6 +61,29 @@ button:not(:disabled) {
   }
 }
 
+/* 연속적인 shimmer 스윕과는 별개로, 주기마다 한 번씩 확 밝아졌다 돌아오는 "번쩍"
+   포인트를 준다 — 대부분 시간은 그대로 있다가 사이클 끝자락에서만 확 튀도록
+   퍼센트 구간을 뒤쪽에 몰아뒀다. */
+@keyframes badge-flash {
+  0%,
+  82% {
+    filter: brightness(1) saturate(1);
+    transform: scale(1);
+  }
+  88% {
+    filter: brightness(1.6) saturate(1.4);
+    transform: scale(1.08);
+  }
+  94% {
+    filter: brightness(1.1) saturate(1.1);
+    transform: scale(1.02);
+  }
+  100% {
+    filter: brightness(1) saturate(1);
+    transform: scale(1);
+  }
+}
+
 .tier-badge {
   position: relative;
   isolation: isolate;
@@ -82,6 +105,16 @@ button:not(:disabled) {
   animation: badge-shimmer var(--shimmer-duration, 3s) ease-in-out infinite;
 }
 
-.tier-badge.tier-glow {
+.tier-badge.tier-flash {
+  animation: badge-flash var(--flash-duration, 3s) ease-in-out infinite;
+}
+
+.tier-badge.tier-glow:not(.tier-flash) {
   animation: badge-glow var(--glow-duration, 2s) ease-in-out infinite;
+}
+
+.tier-badge.tier-flash.tier-glow {
+  animation:
+    badge-flash var(--flash-duration, 3s) ease-in-out infinite,
+    badge-glow var(--glow-duration, 2s) ease-in-out infinite;
 }
