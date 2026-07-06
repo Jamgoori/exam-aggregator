@@ -20,10 +20,16 @@ export default async function CbtPage({
     redirect(`/login?next=${encodeURIComponent(`/papers/${id}/cbt`)}`);
   }
 
-  const [{ data: paper }, { data: hasAnswers }] = await Promise.all([
-    supabase.from("exam_papers").select("*").eq("id", id).single(),
-    supabase.rpc("has_cbt_answers", { target_paper_id: id }),
-  ]);
+  const [{ data: paper }, { data: hasAnswers }, { data: questionRows }] =
+    await Promise.all([
+      supabase.from("exam_papers").select("*").eq("id", id).single(),
+      supabase.rpc("has_cbt_answers", { target_paper_id: id }),
+      supabase
+        .from("questions")
+        .select("question_number, choice_count, question_images(order_index, image_path)")
+        .eq("paper_id", id)
+        .order("question_number"),
+    ]);
 
   if (!paper) {
     notFound();
@@ -52,6 +58,24 @@ export default async function CbtPage({
     .from("exam-papers")
     .getPublicUrl(typedPaper.file_path);
 
+  // "문제별로 보기" 모드용: 문항별로 잘라둔 이미지가 등록돼 있는 문제지만 지원한다.
+  // 아직 크롭 이미지를 안 올린 문제지는 questionImages가 빈 객체가 되고, 그 경우
+  // CbtSolver가 해당 탭을 비활성화한다.
+  const questionImages: Record<number, string[]> = {};
+  const questionChoiceCounts: Record<number, number> = {};
+  for (const row of questionRows ?? []) {
+    const images = [...(row.question_images ?? [])]
+      .sort((a, b) => a.order_index - b.order_index)
+      .map(
+        (img) =>
+          supabase.storage.from("exam-papers").getPublicUrl(img.image_path).data
+            .publicUrl,
+      );
+    if (images.length === 0) continue;
+    questionImages[row.question_number] = images;
+    questionChoiceCounts[row.question_number] = row.choice_count;
+  }
+
   return (
     <CbtSolver
       paperId={typedPaper.id}
@@ -59,6 +83,8 @@ export default async function CbtPage({
       fileUrl={paperFileUrl.publicUrl}
       totalQuestions={typedPaper.question_count}
       choiceCount={typedPaper.choice_count}
+      questionImages={questionImages}
+      questionChoiceCounts={questionChoiceCounts}
     />
   );
 }
