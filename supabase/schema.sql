@@ -508,6 +508,20 @@ drop policy if exists "insert own cbt attempts" on cbt_attempts;
 create policy "insert own cbt attempts" on cbt_attempts
   for insert to authenticated with check (auth.uid() = user_id);
 
+-- 홈 화면 "실시간 총 응시 수" 집계용: cbt_attempts는 본인 것만 select 가능한 RLS라
+-- 전체 응시 건수를 세려면 security definer로 우회해야 한다.
+create or replace function total_cbt_attempt_count()
+returns bigint
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select count(*) from cbt_attempts;
+$$;
+
+grant execute on function total_cbt_attempt_count() to anon, authenticated;
+
 -- 문항별 응답. selected_choice가 null이면 건너뛴 문제. is_correct는 채점 시점 값을
 -- 그대로 저장해서, 나중에 관리자가 정답을 고쳐도 과거 채점 결과가 뒤바뀌지 않게 한다.
 -- (paper_id, question_number)가 나중에 생길 문항단위 데이터의 조인 키가 된다.
