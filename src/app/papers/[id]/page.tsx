@@ -15,6 +15,7 @@ import {
   type MyCbtRecordItem,
   type RoundAverage,
 } from "@/components/my-cbt-record-modal";
+import { getMyRoundCounts } from "@/lib/my-round-counts";
 import type { AnswerKey, Comment, ExamPaper } from "@/lib/supabase/types";
 import type { Metadata } from "next";
 
@@ -92,7 +93,7 @@ export default async function PaperDetailPage({
   ] = await Promise.all([
     supabase
       .from("comments")
-      .select("id, paper_id, user_id, nickname, content, created_at, updated_at")
+      .select("id, paper_id, user_id, nickname, content, created_at, updated_at, parent_id")
       .eq("paper_id", id)
       .order("created_at", { ascending: true }),
     supabase.from("difficulty_ratings").select("score").eq("paper_id", id),
@@ -188,6 +189,15 @@ export default async function PaperDetailPage({
     totalQuestions: a.total_questions,
     createdAt: a.created_at,
   }));
+
+  // "같은 과목 목록" 카드에 회독 배지를 달아주기 위한 문제지별 응시 횟수.
+  const myRoundCounts = currentUser
+    ? await getMyRoundCounts(
+        supabase,
+        currentUser.id,
+        ((subjectPapers as ExamPaper[] | null) ?? []).map((p) => p.id),
+      )
+    : new Map<string, number>();
 
   const subject = typedPaper.subjects;
   const examType = typedPaper.exam_types;
@@ -404,6 +414,7 @@ export default async function PaperDetailPage({
                       paper={p}
                       isCurrent={p.id === typedPaper.id}
                       linkLevel={level}
+                      myRoundCount={myRoundCounts.get(p.id)}
                     />
                   ))}
                 </div>

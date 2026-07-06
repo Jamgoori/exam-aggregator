@@ -42,6 +42,7 @@ export type Comment = {
   content: string;
   created_at: string;
   updated_at: string | null;
+  parent_id: string | null;
 };
 
 export type DifficultyRating = {

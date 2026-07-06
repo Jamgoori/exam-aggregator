@@ -77,6 +77,7 @@ export async function postComment(input: {
   content: string;
   nickname?: string;
   password?: string;
+  parentId?: string;
 }): Promise<CommentResult> {
   const paperId = String(input.paperId ?? "");
   const content = String(input.content ?? "").trim();
@@ -86,12 +87,28 @@ export async function postComment(input: {
   const contentError = validateContent(content);
   if (contentError) return { error: contentError };
 
+  const admin = createAdminClient();
+
+  // 답글은 같은 문제지의 최상위 댓글에만 달 수 있게 한다 (대댓글의 대댓글 금지).
+  // parentId는 클라이언트가 보내는 값이라 여기서 다시 검증해야 의미가 있다.
+  let parentId: string | null = null;
+  if (input.parentId) {
+    if (!isUuid(input.parentId)) return { error: "잘못된 접근입니다." };
+    const { data: parent } = await admin
+      .from("comments")
+      .select("id, paper_id, parent_id")
+      .eq("id", input.parentId)
+      .maybeSingle();
+    if (!parent || parent.paper_id !== paperId || parent.parent_id !== null) {
+      return { error: "답글을 달 수 없는 댓글이에요." };
+    }
+    parentId = parent.id as string;
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const admin = createAdminClient();
 
   if (user) {
     // 회원: 세션의 닉네임 사용, 비밀번호 불필요
@@ -105,6 +122,7 @@ export async function postComment(input: {
       user_id: user.id,
       nickname: nickname.slice(0, NICKNAME_MAX),
       content,
+      parent_id: parentId,
     });
     if (error) return { error: "댓글 등록에 실패했어요." };
   } else {
@@ -129,6 +147,7 @@ export async function postComment(input: {
       content,
       password_hash: passwordHash,
       ip_address: ip,
+      parent_id: parentId,
     });
     if (error) return { error: "댓글 등록에 실패했어요." };
   }

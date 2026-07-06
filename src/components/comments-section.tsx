@@ -36,8 +36,19 @@ export function CommentsSection({
   const [password, setPassword] = useState("");
   const [content, setContent] = useState("");
 
-  // 편집 중인 댓글
+  // 편집/답글 작성 중인 댓글
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [replyingToId, setReplyingToId] = useState<string | null>(null);
+
+  // 답글은 최상위 댓글에만 달리므로(1단계 깊이 제한), 최상위 댓글별로 답글 목록을 묶어둔다.
+  const topLevelComments = comments.filter((c) => !c.parent_id);
+  const repliesByParent = new Map<string, Comment[]>();
+  for (const c of comments) {
+    if (!c.parent_id) continue;
+    const list = repliesByParent.get(c.parent_id) ?? [];
+    list.push(c);
+    repliesByParent.set(c.parent_id, list);
+  }
 
   function submitNew(e: React.FormEvent) {
     e.preventDefault();
@@ -58,6 +69,42 @@ export function CommentsSection({
         router.refresh();
       }
     });
+  }
+
+  function renderRow(
+    comment: Comment,
+    opts: { canReply: boolean; isReplying: boolean },
+  ) {
+    if (editingId === comment.id) {
+      return (
+        <EditRow
+          comment={comment}
+          requiresPassword={comment.user_id === null}
+          onDone={() => {
+            setEditingId(null);
+            router.refresh();
+          }}
+          onCancel={() => setEditingId(null)}
+        />
+      );
+    }
+    return (
+      <CommentRow
+        comment={comment}
+        canEdit={comment.user_id === null || comment.user_id === currentUserId}
+        canDelete={
+          isAdmin || comment.user_id === null || comment.user_id === currentUserId
+        }
+        isAdmin={isAdmin}
+        onEdit={() => setEditingId(comment.id)}
+        onDeleted={() => router.refresh()}
+        canReply={opts.canReply}
+        isReplying={opts.isReplying}
+        onToggleReply={() =>
+          setReplyingToId((v) => (v === comment.id ? null : comment.id))
+        }
+      />
+    );
   }
 
   return (
@@ -107,41 +154,47 @@ export function CommentsSection({
       </form>
 
       <div className="flex flex-col divide-y divide-zinc-100">
-        {comments.length === 0 && (
+        {topLevelComments.length === 0 && (
           <p className="py-10 text-center text-sm text-zinc-500">
             아직 댓글이 없어요. 첫 댓글을 남겨보세요.
           </p>
         )}
-        {comments.map((comment) =>
-          editingId === comment.id ? (
-            <EditRow
-              key={comment.id}
-              comment={comment}
-              requiresPassword={comment.user_id === null}
-              onDone={() => {
-                setEditingId(null);
-                router.refresh();
-              }}
-              onCancel={() => setEditingId(null)}
-            />
-          ) : (
-            <CommentRow
-              key={comment.id}
-              comment={comment}
-              canEdit={
-                comment.user_id === null || comment.user_id === currentUserId
-              }
-              canDelete={
-                isAdmin ||
-                comment.user_id === null ||
-                comment.user_id === currentUserId
-              }
-              isAdmin={isAdmin}
-              onEdit={() => setEditingId(comment.id)}
-              onDeleted={() => router.refresh()}
-            />
-          ),
-        )}
+        {topLevelComments.map((comment) => {
+          const replies = repliesByParent.get(comment.id) ?? [];
+          return (
+            <div key={comment.id} className="py-5">
+              {renderRow(comment, {
+                canReply: true,
+                isReplying: replyingToId === comment.id,
+              })}
+
+              {replies.length > 0 && (
+                <div className="mt-4 ml-6 flex flex-col gap-4 border-l-2 border-zinc-100 pl-4">
+                  {replies.map((reply) => (
+                    <div key={reply.id}>
+                      {renderRow(reply, { canReply: false, isReplying: false })}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {replyingToId === comment.id && (
+                <div className="mt-4 ml-6 border-l-2 border-zinc-100 pl-4">
+                  <ReplyForm
+                    paperId={paperId}
+                    parentId={comment.id}
+                    loggedIn={loggedIn}
+                    onDone={() => {
+                      setReplyingToId(null);
+                      router.refresh();
+                    }}
+                    onCancel={() => setReplyingToId(null)}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -154,6 +207,9 @@ function CommentRow({
   isAdmin,
   onEdit,
   onDeleted,
+  canReply,
+  isReplying,
+  onToggleReply,
 }: {
   comment: Comment;
   canEdit: boolean;
@@ -161,6 +217,9 @@ function CommentRow({
   isAdmin: boolean;
   onEdit: () => void;
   onDeleted: () => void;
+  canReply: boolean;
+  isReplying: boolean;
+  onToggleReply: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [password, setPassword] = useState("");
@@ -182,7 +241,7 @@ function CommentRow({
   }
 
   return (
-    <div className="flex flex-col gap-1 py-5">
+    <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-bold">{comment.nickname}</span>
@@ -191,8 +250,17 @@ function CommentRow({
             {comment.updated_at ? " (수정됨)" : ""}
           </span>
         </div>
-        {(canEdit || canDelete) && (
+        {(canReply || canEdit || canDelete) && (
           <div className="flex gap-2 text-[11px] text-zinc-400">
+            {canReply && (
+              <button
+                type="button"
+                onClick={onToggleReply}
+                className={isReplying ? "text-blue-600" : "hover:text-blue-600"}
+              >
+                답글
+              </button>
+            )}
             {canEdit && (
               <button
                 type="button"
@@ -254,6 +322,96 @@ function CommentRow({
   );
 }
 
+function ReplyForm({
+  paperId,
+  parentId,
+  loggedIn,
+  onDone,
+  onCancel,
+}: {
+  paperId: string;
+  parentId: string;
+  loggedIn: boolean;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [nickname, setNickname] = useState("");
+  const [password, setPassword] = useState("");
+  const [content, setContent] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    startTransition(async () => {
+      const result = await postComment({
+        paperId,
+        parentId,
+        content,
+        nickname: loggedIn ? undefined : nickname,
+        password: loggedIn ? undefined : password,
+      });
+      if (result.error) setError(result.error);
+      else onDone();
+    });
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-2">
+      {!loggedIn && (
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+            maxLength={NICKNAME_MAX}
+            placeholder={`닉네임 (최대 ${NICKNAME_MAX}자)`}
+            required
+            className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm sm:w-40"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            minLength={PW_MIN}
+            maxLength={PW_MAX}
+            placeholder={`비밀번호 (${PW_MIN}~${PW_MAX}자)`}
+            required
+            className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm sm:w-52"
+          />
+        </div>
+      )}
+      <textarea
+        value={content}
+        onChange={(e) => setContent(e.target.value)}
+        maxLength={CONTENT_MAX}
+        placeholder="답글을 입력해주세요"
+        required
+        rows={2}
+        autoFocus
+        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
+      />
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-700"
+        >
+          취소
+        </button>
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          {pending ? "등록 중..." : "답글 등록"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function EditRow({
   comment,
   requiresPassword,
@@ -284,7 +442,7 @@ function EditRow({
   }
 
   return (
-    <div className="flex flex-col gap-2 py-4">
+    <div className="flex flex-col gap-2">
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}

@@ -98,6 +98,11 @@ create table if not exists comments (
 alter table comments add column if not exists password_hash text;
 alter table comments add column if not exists updated_at timestamptz;
 alter table comments add column if not exists ip_address text;
+-- 답글: null이면 최상위 댓글, 아니면 그 댓글에 달린 답글. 대댓글의 대댓글까지는 허용하지
+-- 않고(서버 액션에서 parent_id가 최상위 댓글인지 검증), 1단계 깊이로만 제한한다.
+alter table comments add column if not exists parent_id uuid references comments(id) on delete cascade;
+
+create index if not exists comments_parent_idx on comments(parent_id) where parent_id is not null;
 
 create index if not exists comments_guest_rate_limit_idx
   on comments(ip_address, created_at desc)
@@ -249,7 +254,7 @@ drop policy if exists "delete own or admin comments" on comments;
 
 -- password_hash 컬럼이 공개 API로 새어나가지 않도록 컬럼 단위 권한으로 제한
 revoke all on comments from anon, authenticated;
-grant select (id, paper_id, user_id, nickname, content, created_at, updated_at)
+grant select (id, paper_id, user_id, nickname, content, created_at, updated_at, parent_id)
   on comments to anon, authenticated;
 
 -- 난이도 평가: 누구나 읽기, 로그인한 본인 명의로만 작성 가능 (비회원 평가는 막음).
