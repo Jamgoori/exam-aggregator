@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
 import type { DrawTool } from "@/components/pdf-canvas-viewer";
+import { SingleQuestionView } from "@/components/single-question-view";
 import { formatDuration } from "@/lib/format";
 
 // pdf.js는 브라우저 전용 API(Worker, canvas 등)에 의존해서 서버에서 미리 렌더링하면
@@ -42,12 +43,16 @@ export function CbtSolver({
   fileUrl,
   totalQuestions,
   choiceCount,
+  questionImages = {},
+  questionChoiceCounts = {},
 }: {
   paperId: string;
   paperTitle: string;
   fileUrl: string;
   totalQuestions: number;
   choiceCount: number;
+  questionImages?: Record<number, string[]>;
+  questionChoiceCounts?: Record<number, number>;
 }) {
   const [answers, setAnswers] = useState<(number | null)[]>(
     Array(totalQuestions).fill(null),
@@ -63,6 +68,9 @@ export function CbtSolver({
   const clearDrawingRef = useRef<() => void>(() => {});
   const [zoom, setZoom] = useState(1);
   const pdfWrapperRef = useRef<HTMLDivElement>(null);
+  const hasQuestionImages = Object.keys(questionImages).length > 0;
+  const [viewMode, setViewMode] = useState<"full" | "single">("full");
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
   useEffect(() => {
     startedAtRef.current = Date.now();
@@ -74,6 +82,24 @@ export function CbtSolver({
 
   function clearDrawing() {
     clearDrawingRef.current();
+  }
+
+  // 전체보기(PDF)에는 필기(펜) 레이어가 있는데, 문제별 보기는 크롭 이미지라 그
+  // 좌표계가 전혀 달라 필기를 그대로 옮길 수 없다. 그래서 전체보기를 벗어날 때는
+  // 미리 경고하고 필기를 통째로 지운다.
+  function switchViewMode(mode: "full" | "single") {
+    if (mode === viewMode) return;
+    if (viewMode === "full" && mode === "single") {
+      if (
+        !window.confirm(
+          "문제별 보기로 바꾸면 전체보기에 그린 필기 내용이 모두 지워져요. 계속할까요?",
+        )
+      ) {
+        return;
+      }
+      clearDrawing();
+    }
+    setViewMode(mode);
   }
 
   function zoomIn() {
@@ -158,7 +184,10 @@ export function CbtSolver({
   );
 
   return (
-    <div className="flex h-[100dvh] flex-col">
+    // SiteHeaderGate가 lg 이상에서는 전역 사이트 헤더(약 65px)를 그대로 보여주는데,
+    // 100dvh는 그 헤더를 포함한 뷰포트 전체 높이라서 그만큼을 빼주지 않으면
+    // 화면 하단(OMR 제출 버튼 등)이 잘린다. lg 미만은 헤더가 아예 없으니 그대로 둔다.
+    <div className="flex h-[100dvh] flex-col lg:h-[calc(100dvh-65px)]">
       <header className="shrink-0 border-b border-zinc-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -253,7 +282,38 @@ export function CbtSolver({
         </div>
       </header>
 
-      {tool !== "move" && (
+      <div className="shrink-0 border-b border-zinc-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 py-1.5">
+          <button
+            type="button"
+            onClick={() => switchViewMode("full")}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${
+              viewMode === "full"
+                ? "bg-blue-600 text-white"
+                : "text-zinc-500 hover:bg-zinc-100"
+            }`}
+          >
+            전체보기
+          </button>
+          <button
+            type="button"
+            onClick={() => switchViewMode("single")}
+            disabled={!hasQuestionImages}
+            title={
+              hasQuestionImages ? undefined : "문항별 이미지가 아직 등록되지 않았어요"
+            }
+            className={`rounded-full px-3 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+              viewMode === "single"
+                ? "bg-blue-600 text-white"
+                : "text-zinc-500 hover:bg-zinc-100"
+            }`}
+          >
+            문제별 풀기
+          </button>
+        </div>
+      </div>
+
+      {tool !== "move" && viewMode === "full" && (
         <div className="shrink-0 border-b border-zinc-200 bg-white">
           <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-1.5">
             {tool === "pen" &&
@@ -286,7 +346,11 @@ export function CbtSolver({
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 justify-center">
+      {/* PDF는 파싱/렌더링 비용이 커서 탭을 바꿔도 언마운트하지 않고 숨기기만 한다
+          (다시 보일 때마다 처음부터 다시 불러오는 것을 피하기 위함). */}
+      <div
+        className={`min-h-0 flex-1 justify-center ${viewMode === "full" ? "flex" : "hidden"}`}
+      >
         <div className="flex min-h-0 w-full max-w-7xl">
           <div ref={pdfWrapperRef} className="relative min-w-0 flex-1">
             <PdfCanvasViewer
@@ -312,6 +376,21 @@ export function CbtSolver({
           />
         </div>
       </div>
+
+      {viewMode === "single" && (
+        <SingleQuestionView
+          questionIndex={currentQuestionIndex}
+          totalQuestions={totalQuestions}
+          choiceCount={questionChoiceCounts[currentQuestionIndex + 1] ?? choiceCount}
+          images={questionImages[currentQuestionIndex + 1] ?? []}
+          selected={answers[currentQuestionIndex]}
+          onSelect={(choice) => selectChoice(currentQuestionIndex, choice)}
+          onNavigate={setCurrentQuestionIndex}
+          questionResult={
+            result ? (resultByQuestion.get(currentQuestionIndex + 1) ?? null) : null
+          }
+        />
+      )}
 
       {omrOpen && (
         <div className="fixed inset-0 z-40 flex flex-col justify-end lg:hidden">
