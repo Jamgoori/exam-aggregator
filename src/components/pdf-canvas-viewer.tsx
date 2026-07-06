@@ -19,7 +19,7 @@ const ERASER_LINE_WIDTH = 24;
 // 커져 저사양 기기에서 메모리 문제가 생길 수 있어 페이지 단위로 나눴다).
 // 지우개는 destination-out으로 그려서, 이 캔버스(필기)에서만 지나간 자리만큼 지워지고
 // 아래 PDF 페이지 캔버스에는 전혀 영향을 주지 않는다.
-function attachDrawing(
+export function attachDrawing(
   canvas: HTMLCanvasElement,
   toolRef: { current: DrawTool },
   penColorRef: { current: string },
