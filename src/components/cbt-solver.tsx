@@ -221,6 +221,22 @@ export function CbtSolver({
     return () => clearInterval(timer);
   }, [result, countdown]);
 
+  // 문제별 보기에서 다음/이전 문항으로 넘어갈 때마다 이미지를 새로 받느라, 상단 번호는
+  // 바로 바뀌는데 문제 사진은 뒤늦게 뜨는 문제가 있었다. 문제별 보기를 처음 켜는
+  // 순간 모든 문항 이미지를 미리 브라우저 캐시에 받아둬서, 이후 이동은 캐시에서 바로
+  // 그려지게 한다(이미 받아둔 이미지는 브라우저가 재요청하지 않는다).
+  const preloadedImagesRef = useRef(false);
+  useEffect(() => {
+    if (viewMode !== "single" || preloadedImagesRef.current) return;
+    preloadedImagesRef.current = true;
+    for (const images of Object.values(questionImages)) {
+      for (const src of images) {
+        const img = new Image();
+        img.src = src;
+      }
+    }
+  }, [viewMode, questionImages]);
+
   const answeredCount = answers.filter((a) => a !== null).length;
 
   function selectChoice(questionIndex: number, choice: number) {
@@ -481,6 +497,28 @@ export function CbtSolver({
                 zoom={zoom}
                 onClearReady={registerClearDrawing}
               />
+              {/* 모바일은 헤더가 좁아 데스크톱용 줌 버튼을 넣기 어려워, 시험지 위에
+                  떠 있는 형태의 줌 컨트롤을 따로 둔다. */}
+              <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-full border border-zinc-200 bg-white/95 shadow-md lg:hidden">
+                <button
+                  type="button"
+                  onClick={zoomIn}
+                  disabled={zoom >= MAX_ZOOM}
+                  aria-label="시험지 확대"
+                  className="flex items-center justify-center p-2.5 text-zinc-600 active:bg-zinc-100 disabled:opacity-30"
+                >
+                  <ZoomIn size={20} />
+                </button>
+                <button
+                  type="button"
+                  onClick={zoomOut}
+                  disabled={zoom <= MIN_ZOOM}
+                  aria-label="시험지 축소"
+                  className="flex items-center justify-center border-t border-zinc-200 p-2.5 text-zinc-600 active:bg-zinc-100 disabled:opacity-30"
+                >
+                  <ZoomOut size={20} />
+                </button>
+              </div>
             </div>
 
             {viewMode === "single" && (
@@ -498,6 +536,10 @@ export function CbtSolver({
                 tool={tool}
                 penColor={penColor}
                 onClearReady={registerClearSingleDrawing}
+                onSubmit={handleSubmit}
+                submitting={isPending}
+                submitted={!!result}
+                answeredCount={answeredCount}
               />
             )}
           </div>
