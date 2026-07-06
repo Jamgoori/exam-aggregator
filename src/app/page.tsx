@@ -37,6 +37,11 @@ export default async function Home({
   const supabase = await createClient();
   const baseParams = { type, level, q };
 
+  // 회독 배지 표시용 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — 실제
+  // cbt_attempts 조회는 RLS가 본인 것만 돌려주므로 인증 서버 왕복(getUser)이 필요 없다.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims.sub ?? null;
+
   // subjects는 7개뿐이라 먼저 가져와서, 초성 검색은 exam_papers 전체를 훑는 대신
   // 이름이 초성에 매치되는 과목의 id만 뽑아 subject_id로 필터링한다.
   const { data: subjects } = await supabase.from("subjects").select("*").order("name");
@@ -77,28 +82,21 @@ export default async function Home({
     { count: totalCount },
     { data: totalDownloads },
     { data: totalAttempts },
-    userResult,
+    myRoundCounts,
   ] = await Promise.all([
     supabase.from("exam_types").select("*").order("display_order"),
     skipMainQuery ? Promise.resolve({ data: [], count: 0 }) : query,
     supabase.from("exam_papers").select("*", { count: "exact", head: true }),
     supabase.rpc("total_download_count"),
     supabase.rpc("total_cbt_attempt_count"),
-    supabase.auth.getUser(),
+    userId
+      ? getMyRoundCounts(supabase, userId)
+      : Promise.resolve(new Map<string, number>()),
   ]);
   const { data: papers, count: filteredCount } = mainResult;
 
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
   const latestYear = (papers as ExamPaper[] | null)?.[0]?.year;
-
-  const currentUser = userResult.data.user;
-  const myRoundCounts = currentUser
-    ? await getMyRoundCounts(
-        supabase,
-        currentUser.id,
-        ((papers as ExamPaper[] | null) ?? []).map((p) => p.id),
-      )
-    : new Map<string, number>();
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 py-12">

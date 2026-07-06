@@ -1,19 +1,8 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { SiteHeaderGate } from "@/components/site-header-gate";
 import { createClient } from "@/lib/supabase/server";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: {
@@ -29,24 +18,24 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // 헤더에 닉네임을 보여주기 위한 용도라 인증 서버까지 왕복하는 getUser() 대신
+  // JWT를 로컬에서 검증하는 getClaims()를 쓴다 (모든 페이지가 이 레이아웃을 거치므로
+  // 페이지마다 인증 서버 왕복이 하나씩 붙는 것을 없애준다). 세션 갱신은 프록시
+  // 미들웨어가 담당하고, 실제 데이터 접근 권한은 각 쿼리의 RLS가 검증한다.
+  const { data } = await supabase.auth.getClaims();
+  const claims = data?.claims;
 
-  const headerUser = user
+  const headerUser = claims
     ? {
         nickname:
-          (user.user_metadata?.nickname as string | undefined) ??
-          user.email?.split("@")[0] ??
+          (claims.user_metadata?.nickname as string | undefined) ??
+          claims.email?.split("@")[0] ??
           "회원",
       }
     : null;
 
   return (
-    <html
-      lang="ko"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="ko" className="h-full antialiased">
       <body className="min-h-full">
         <SiteHeaderGate user={headerUser} />
         {children}

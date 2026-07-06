@@ -24,6 +24,25 @@ export async function logout() {
   redirect("/admin/login");
 }
 
+// 테이블 쓰기는 RLS(is_admin)가 최종 방어선이지만, 업로드 액션은 DB insert 전에
+// Storage 업로드부터 실행하므로 관리자가 아니면 여기서 먼저 끊는다 (일반 계정이
+// 버킷에 파일만 쌓고 가는 것을 방지하는 심층 방어).
+async function requireAdmin(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<
+  | { user: NonNullable<Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"]> }
+  | { error: string }
+> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다." };
+
+  const { data: isAdmin } = await supabase.rpc("is_admin");
+  if (isAdmin !== true) return { error: "관리자만 사용할 수 있어요." };
+  return { user };
+}
+
 export type UploadState = { error?: string; success?: boolean };
 
 export async function uploadExamPaper(
@@ -32,13 +51,11 @@ export async function uploadExamPaper(
 ): Promise<UploadState> {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { error: "로그인이 필요합니다." };
+  const auth = await requireAdmin(supabase);
+  if ("error" in auth) {
+    return { error: auth.error };
   }
+  const { user } = auth;
 
   const file = formData.get("file") as File | null;
   const subjectId = String(formData.get("subject_id") ?? "");
@@ -103,12 +120,9 @@ export async function savePaperAnswers(
 ): Promise<SaveAnswersState> {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { error: "로그인이 필요합니다." };
+  const auth = await requireAdmin(supabase);
+  if ("error" in auth) {
+    return { error: auth.error };
   }
 
   const paperId = String(formData.get("paper_id") ?? "");
