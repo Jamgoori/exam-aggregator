@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileText, ChevronRight, MapPin } from "lucide-react";
+import { ChevronRight, MapPin } from "lucide-react";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor } from "@/lib/level-colors";
 import { formatCount, formatFileSize } from "@/lib/format";
@@ -29,9 +29,6 @@ export function ExamCard({
     <>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
-            <FileText size={16} />
-          </span>
           {paper.level && (
             <span
               className={`rounded px-2 py-0.5 text-xs font-bold ${levelColor(paper.level)}`}
