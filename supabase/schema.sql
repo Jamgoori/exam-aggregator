@@ -638,6 +638,24 @@ $$;
 
 grant execute on function is_nickname_taken(text, uuid) to anon, authenticated;
 
+-- 아이디 중복확인: 아이디는 실제로는 `${username}@users.invalid` 형태의 가짜 이메일로
+-- auth.users에 저장되므로, 그 이메일이 이미 존재하는지로 판별한다. auth 스키마는
+-- 클라이언트에서 직접 조회할 수 없어 위와 같은 이유로 security definer를 쓴다.
+create or replace function is_username_taken(check_username text)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from auth.users
+    where email = lower(check_username) || '@users.invalid'
+  );
+$$;
+
+grant execute on function is_username_taken(text) to anon, authenticated;
+
 -- 문제지 상세페이지 "내 기록보기"에서, 내 점수와 함께 "다른 사람들은 몇 회독에 평균
 -- 몇 점이었는지" 보여주기 위한 집계. cbt_attempts는 본인 것만 select 가능한 RLS라
 -- (다른 사용자 응시 기록은 직접 조회 불가) security definer로 전체를 집계해서

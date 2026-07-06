@@ -51,43 +51,59 @@ async function checkSignupRateLimit(ip: string | null): Promise<string | null> {
   return null;
 }
 
-export async function signUpUser(formData: FormData) {
-  const password = String(formData.get("password") ?? "");
-  const passwordConfirm = String(formData.get("passwordConfirm") ?? "");
-  const captchaToken = String(formData.get("cf-turnstile-response") ?? "");
-  const next = sanitizeNextPath(String(formData.get("next") ?? ""));
-  const nextQuery = `next=${encodeURIComponent(next)}`;
+export type SignupResult =
+  | { success: true; redirectTo: string }
+  | {
+      success: false;
+      field: "username" | "nickname" | "password" | "passwordConfirm" | "general";
+      error: string;
+    };
 
-  const usernameResult = validateUsername(String(formData.get("username") ?? ""));
+// 회원가입 폼은 실패 시 필드별로 빨간 에러 문구를 보여주고 입력값은 그대로 유지해야
+// 해서, 리다이렉트로 결과를 전달하던 다른 폼 액션들과 달리 결과를 그대로 반환한다
+// (클라이언트가 useTransition으로 직접 호출).
+export async function signUpUser(input: {
+  username: string;
+  nickname: string;
+  password: string;
+  passwordConfirm: string;
+  next: string;
+  captchaToken: string;
+}): Promise<SignupResult> {
+  const next = sanitizeNextPath(input.next);
+
+  const usernameResult = validateUsername(input.username);
   if (usernameResult.error !== null) {
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent(usernameResult.error)}`);
+    return { success: false, field: "username", error: usernameResult.error };
   }
   const username = usernameResult.username;
 
-  const nicknameResult = validateNickname(String(formData.get("nickname") ?? ""));
+  const nicknameResult = validateNickname(input.nickname);
   if (nicknameResult.error !== null) {
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent(nicknameResult.error)}`);
+    return { success: false, field: "nickname", error: nicknameResult.error };
   }
   const nickname = nicknameResult.nickname;
 
-  if (password.length < PASSWORD_MIN) {
-    redirect(
-      `/signup?${nextQuery}&error=${encodeURIComponent(`비밀번호는 ${PASSWORD_MIN}자 이상이어야 해요`)}`,
-    );
+  if (input.password.length < PASSWORD_MIN) {
+    return {
+      success: false,
+      field: "password",
+      error: `비밀번호는 ${PASSWORD_MIN}자 이상이어야 해요`,
+    };
   }
 
-  if (password !== passwordConfirm) {
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("비밀번호가 일치하지 않아요")}`);
+  if (input.password !== input.passwordConfirm) {
+    return { success: false, field: "passwordConfirm", error: "비밀번호가 일치하지 않아요" };
   }
 
   // 사이트 키가 설정된 경우에만 캡차를 요구한다 (로컬 개발 중 Turnstile 미설정 시에는 건너뜀).
-  if (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !captchaToken) {
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("캡차 인증을 완료해주세요")}`);
+  if (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY && !input.captchaToken) {
+    return { success: false, field: "general", error: "캡차 인증을 완료해주세요" };
   }
 
   const rateLimitError = await checkSignupRateLimit(await getClientIp());
   if (rateLimitError) {
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent(rateLimitError)}`);
+    return { success: false, field: "general", error: rateLimitError };
   }
 
   const supabase = await createClient();
@@ -99,27 +115,36 @@ export async function signUpUser(formData: FormData) {
     exclude_user_id: null,
   });
   if (taken) {
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("이미 사용 중인 닉네임이에요.")}`);
+    return { success: false, field: "nickname", error: "이미 사용 중인 닉네임이에요." };
   }
 
   // Supabase Auth는 이메일/전화번호 식별자만 지원해서, 아이디를 가짜 이메일로 감싸 저장한다.
   const { data, error } = await supabase.auth.signUp({
     email: usernameToAuthEmail(username),
-    password,
+    password: input.password,
     options: {
       data: { nickname, username },
-      ...(captchaToken ? { captchaToken } : {}),
+      ...(input.captchaToken ? { captchaToken: input.captchaToken } : {}),
     },
   });
 
   if (error) {
-    redirect(
-      `/signup?${nextQuery}&error=${encodeURIComponent("이미 사용 중인 아이디이거나 가입에 실패했어요.")}`,
+    // Supabase는 "이미 가입된 이메일" 상황을 이런 문구로 알려준다. 그 외의 실패는
+    // 원인이 다양해서(캡차 검증 실패 등) 아이디 탓으로 잘못 안내하지 않는다.
+    const isDuplicate = /already registered|already exists|already in use/i.test(
+      error.message,
     );
+    return {
+      success: false,
+      field: isDuplicate ? "username" : "general",
+      error: isDuplicate
+        ? "이미 사용 중인 아이디예요."
+        : "가입에 실패했어요. 잠시 후 다시 시도해주세요.",
+    };
   }
 
   if (!data.user) {
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("가입에 실패했어요.")}`);
+    return { success: false, field: "general", error: "가입에 실패했어요." };
   }
 
   // 닉네임을 profiles에 예약해 둔다. 사전 확인 이후 동시에 같은 닉네임으로 가입한
@@ -132,16 +157,33 @@ export async function signUpUser(formData: FormData) {
 
   if (profileError) {
     await admin.auth.admin.deleteUser(data.user.id);
-    redirect(`/signup?${nextQuery}&error=${encodeURIComponent("이미 사용 중인 닉네임이에요.")}`);
+    return { success: false, field: "nickname", error: "이미 사용 중인 닉네임이에요." };
   }
 
   if (!data.session) {
-    redirect(
-      `/login?${nextQuery}&message=${encodeURIComponent("가입이 완료됐어요. 로그인해주세요")}`,
-    );
+    return {
+      success: true,
+      redirectTo: `/login?next=${encodeURIComponent(next)}&message=${encodeURIComponent("가입이 완료됐어요. 로그인해주세요")}`,
+    };
   }
 
-  redirect(next);
+  return { success: true, redirectTo: next };
+}
+
+// 회원가입 폼의 "중복확인" 버튼에서 직접(폼 제출이 아니라 클라이언트 코드에서) 호출한다.
+export async function checkUsernameAvailable(
+  rawUsername: string,
+): Promise<{ available?: boolean; error?: string }> {
+  const usernameResult = validateUsername(rawUsername);
+  if (usernameResult.error !== null) return { error: usernameResult.error };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("is_username_taken", {
+    check_username: usernameResult.username,
+  });
+
+  if (error) return { error: "중복 확인에 실패했어요." };
+  return { available: !data };
 }
 
 export async function signInWithGoogle(formData: FormData) {

@@ -1,10 +1,9 @@
 import Link from "next/link";
 import Script from "next/script";
-import { signUpUser, signInWithGoogle } from "@/app/actions";
+import { signInWithGoogle } from "@/app/actions";
 import { GoogleIcon } from "@/components/google-icon";
-import { NicknameField } from "@/components/nickname-field";
+import { SignupForm } from "@/components/signup-form";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
-import { USERNAME_MAX, USERNAME_MIN } from "@/lib/username";
 
 export default async function SignupPage({
   searchParams,
@@ -30,71 +29,16 @@ export default async function SignupPage({
         </button>
       </form>
 
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
       <div className="flex items-center gap-3 text-xs text-zinc-400">
         <div className="h-px flex-1 bg-zinc-200" />
         또는
         <div className="h-px flex-1 bg-zinc-200" />
       </div>
 
-      <form action={signUpUser} className="flex flex-col gap-4">
-        <input type="hidden" name="next" value={next} />
-        <div className="flex flex-col gap-1">
-          <label htmlFor="username" className="text-sm text-zinc-600">
-            아이디
-          </label>
-          <input
-            id="username"
-            name="username"
-            required
-            minLength={USERNAME_MIN}
-            maxLength={USERNAME_MAX}
-            pattern="[a-zA-Z0-9_]+"
-            title="영문 소문자, 숫자, _만 사용할 수 있어요"
-            autoComplete="username"
-            className="rounded border border-zinc-300 px-3 py-2"
-          />
-          <p className="text-xs text-zinc-400">
-            영문 소문자, 숫자, _ 조합 {USERNAME_MIN}~{USERNAME_MAX}자
-          </p>
-        </div>
-        <NicknameField mode="signup" />
-        <div className="flex flex-col gap-1">
-          <label htmlFor="password" className="text-sm text-zinc-600">
-            비밀번호 (8자 이상)
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            minLength={8}
-            required
-            className="rounded border border-zinc-300 px-3 py-2"
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="passwordConfirm" className="text-sm text-zinc-600">
-            비밀번호 확인
-          </label>
-          <input
-            id="passwordConfirm"
-            name="passwordConfirm"
-            type="password"
-            minLength={8}
-            required
-            className="rounded border border-zinc-300 px-3 py-2"
-          />
-        </div>
-        {turnstileSiteKey && (
-          <div className="cf-turnstile" data-sitekey={turnstileSiteKey} />
-        )}
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button
-          type="submit"
-          className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
-        >
-          가입하기
-        </button>
-      </form>
+      <SignupForm next={next} turnstileSiteKey={turnstileSiteKey} />
+
       <p className="text-sm text-zinc-500">
         이미 계정이 있나요?{" "}
         <Link
