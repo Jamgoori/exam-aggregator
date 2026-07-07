@@ -18,8 +18,11 @@ const TIERS: { minRound: number; tier: RoundTier }[] = [
     minRound: 10,
     tier: {
       name: "다이아",
+      // 홀로그램처럼 색이 도는 느낌을 주려고 차갑고 화려한 톤(시안→마젠타→인디고)을
+      // 섞고, 링을 두껍게+상시 컬러 글로우(shadow)까지 얹어서 최상위 등급다운
+      // 존재감을 준다. 주기적 흰색 pulse(badge-glow)는 이 상시 글로우 위에 겹친다.
       className:
-        "bg-gradient-to-br from-sky-300 via-blue-400 to-indigo-500 text-white ring-1 ring-inset ring-white/70 shadow-sm",
+        "bg-gradient-to-br from-cyan-300 via-fuchsia-400 to-indigo-500 text-white ring-2 ring-inset ring-white/80 shadow-[0_0_10px_1px_rgba(217,70,239,0.5)]",
       shimmerOpacity: 0.9,
       duration: "2.4s",
       hasFlash: true,

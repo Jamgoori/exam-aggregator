@@ -425,17 +425,6 @@ export function CbtSolver({
           <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 py-1.5">
             <button
               type="button"
-              onClick={() => switchViewMode("full")}
-              className={`rounded-full px-3 py-1 text-[15px] font-medium ${
-                viewMode === "full"
-                  ? "bg-blue-600 text-white"
-                  : "text-zinc-500 hover:bg-zinc-100"
-              }`}
-            >
-              전체보기
-            </button>
-            <button
-              type="button"
               onClick={() => switchViewMode("single")}
               disabled={!hasQuestionImages}
               title={
@@ -448,6 +437,17 @@ export function CbtSolver({
               }`}
             >
               문제별 풀기
+            </button>
+            <button
+              type="button"
+              onClick={() => switchViewMode("full")}
+              className={`rounded-full px-3 py-1 text-[15px] font-medium ${
+                viewMode === "full"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-500 hover:bg-zinc-100"
+              }`}
+            >
+              전체보기
             </button>
             <div className="relative">
               <button
