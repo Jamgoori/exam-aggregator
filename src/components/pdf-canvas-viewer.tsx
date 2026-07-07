@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { GraduationCap } from "lucide-react";
 
 // pdf.js 워커(legacy 빌드)는 node_modules에서 매 설치(postinstall)마다
 // public/pdf.worker.min.mjs로 복사해서 같은 출처(same-origin) 정적 파일로 서빙한다.
@@ -12,6 +13,14 @@ export type DrawTool = "move" | "pen" | "eraser";
 
 const PEN_LINE_WIDTH = 3;
 const ERASER_LINE_WIDTH = 24;
+
+// 로딩 중 순서대로 돌려 보여줄 문구. 사이트 컨셉(공무원 시험 합격 응원)에 맞춰
+// 단순 "불러오는 중" 대신 격려 톤으로 구성했다.
+const LOADING_MESSAGES = [
+  "시험지를 펼치는 중이에요",
+  "문제를 한 장씩 준비하고 있어요",
+  "합격까지 한 걸음, 곧 시작해요",
+];
 
 // 문항 페이지 위에 손글씨로 메모하는 용도의 캔버스. PDF 페이지마다 별도의 주석 캔버스를
 // 페이지 캔버스 바로 위에 겹쳐서, 스크롤해도 필기가 해당 페이지에 그대로 붙어 있게 한다
@@ -106,6 +115,18 @@ export function PdfCanvasViewer({
   // 모바일 화면을 크게 넘치게 나온다("줌이 이상하고 움직이지 않는" 증상). 그래서 실제
   // 폭이 잡히거나(0→표시) 화면 회전/리사이즈로 바뀔 때마다 그 폭으로 (다시) 렌더한다.
   const [renderWidth, setRenderWidth] = useState(0);
+  const [messageIndex, setMessageIndex] = useState(0);
+
+  // 로딩이 길어질 때 문구를 순서대로 바꿔가며 보여준다(고정 문구 하나만 있으면
+  // 멈춘 것처럼 보일 수 있어서). 로딩이 끝나면 인터벌만 멈추고, 다음 로딩 때는
+  // 마지막으로 보여준 문구 다음부터 이어서 돈다.
+  useEffect(() => {
+    if (!loading) return;
+    const id = setInterval(() => {
+      setMessageIndex((i) => (i + 1) % LOADING_MESSAGES.length);
+    }, 2200);
+    return () => clearInterval(id);
+  }, [loading]);
 
   useEffect(() => {
     const el = scrollWrapperRef.current;
@@ -306,7 +327,23 @@ export function PdfCanvasViewer({
       className="relative h-full w-full overflow-auto bg-zinc-200"
     >
       {loading && (
-        <p className="p-4 text-center text-sm text-zinc-500">불러오는 중...</p>
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-gradient-to-b from-blue-50 via-white to-white">
+          <div className="relative flex h-16 w-16 items-center justify-center">
+            <span className="absolute h-16 w-16 animate-ping rounded-full bg-blue-400/30" />
+            <span className="relative flex h-14 w-14 animate-loading-float items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/30">
+              <GraduationCap size={26} />
+            </span>
+          </div>
+          <p
+            key={messageIndex}
+            className="animate-loading-fade-in px-4 text-center text-sm font-medium text-zinc-600"
+          >
+            {LOADING_MESSAGES[messageIndex]}
+          </p>
+          <div className="h-1.5 w-36 overflow-hidden rounded-full bg-blue-100">
+            <div className="h-full w-1/3 animate-loading-bar rounded-full bg-blue-600" />
+          </div>
+        </div>
       )}
       {error && (
         <p className="whitespace-pre-wrap p-4 text-center text-sm text-red-600">
