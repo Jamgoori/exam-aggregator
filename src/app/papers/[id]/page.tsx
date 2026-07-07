@@ -219,7 +219,7 @@ export default async function PaperDetailPage({
     : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-14 px-4 py-12">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-14 px-4 pb-12 pt-6 sm:pt-8">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-14">
       <div className="flex flex-col gap-4">
         <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600">

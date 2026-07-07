@@ -24,6 +24,12 @@ function labelForScore(score: number) {
   return "매우 어려움";
 }
 
+// 평균은 0.5 단위 SCORES 값과 정확히 일치하지 않을 수 있어(예: 3.27), 마커를 올릴
+// 막대를 정하기 위해 가장 가까운 0.5 단위로 반올림한다.
+function nearestScoreStep(avg: number) {
+  return Math.min(5, Math.max(1, Math.round(avg * 2) / 2));
+}
+
 export function DifficultyRating({
   paperId,
   averageScore,
@@ -83,26 +89,59 @@ export function DifficultyRating({
           aria-hidden={!loggedIn}
         >
           <p className="text-sm text-zinc-500">
-            {avg ? `평균 ${avg.toFixed(1)} / 5` : "평가 없음"} · {count}명 참여
+            {avg ? (
+              <>
+                평균{" "}
+                <span className="font-semibold text-blue-600">
+                  {avg.toFixed(1)}
+                </span>{" "}
+                / 5
+              </>
+            ) : (
+              "평가 없음"
+            )}{" "}
+            · {count}명 참여
           </p>
 
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 pt-8">
             <div className="flex items-end gap-1" onMouseLeave={() => setHovered(null)}>
-              {SCORES.map((score, i) => (
-                <button
-                  key={score}
-                  type="button"
-                  disabled={pending || voted}
-                  onClick={() => setSelected(score)}
-                  onMouseEnter={() => setHovered(score)}
-                  aria-label={`난이도 ${score}점`}
-                  aria-pressed={selected === score}
-                  style={{ height: `${14 + i * 3}px` }}
-                  className={`flex-1 rounded-sm transition-colors disabled:cursor-default ${
-                    score <= activeScore ? colorForScore(score) : "bg-zinc-200"
-                  }`}
-                />
-              ))}
+              {SCORES.map((score, i) => {
+                // 막대 채색(내 점수)과 별개로, 평균이 가리키는 막대 위에만 파란색
+                // 콜아웃(라벨+화살표)을 얹어 "평균 위치"를 나타낸다 — 막대를 하나 더
+                // 그리지 않고 같은 게이지 위에서 내 점수와 평균을 동시에 읽을 수 있게
+                // 한다. bottom을 그 막대 자신의 높이가 아니라 고정값으로 둬서, 어느
+                // 막대를 가리키든(막대마다 높이가 다른 계단식이라) 항상 게이지 맨
+                // 위쪽 같은 높이에 뜨게 한다.
+                const isAvgMarker = avg !== null && score === nearestScoreStep(avg);
+                return (
+                  <div key={score} className="relative flex-1">
+                    {isAvgMarker && (
+                      <div
+                        aria-hidden
+                        className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 flex-col items-center text-blue-600"
+                        style={{ bottom: "44px" }}
+                      >
+                        <span className="whitespace-nowrap text-[10px] font-semibold">
+                          평균 체감 난이도
+                        </span>
+                        <span className="text-[10px] leading-none">▼</span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      disabled={pending || voted}
+                      onClick={() => setSelected(score)}
+                      onMouseEnter={() => setHovered(score)}
+                      aria-label={`난이도 ${score}점`}
+                      aria-pressed={selected === score}
+                      style={{ height: `${14 + i * 3}px` }}
+                      className={`w-full rounded-sm transition-colors disabled:cursor-default ${
+                        score <= activeScore ? colorForScore(score) : "bg-zinc-200"
+                      }`}
+                    />
+                  </div>
+                );
+              })}
             </div>
             <div className="flex justify-between text-[11px] text-zinc-400">
               <span>쉬움</span>
