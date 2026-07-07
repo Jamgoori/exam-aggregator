@@ -99,7 +99,7 @@ export default async function Home({
   const latestYear = (papers as ExamPaper[] | null)?.[0]?.year;
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 pt-6 pb-12 sm:pt-12">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 pt-6 pb-12 sm:pt-8">
       <section className="flex flex-col items-start gap-4">
         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600">
           {latestYear
@@ -135,10 +135,13 @@ export default async function Home({
       </section>
 
       <section className="flex flex-col gap-4">
-        <div className="flex flex-wrap gap-2">
+        {/* 시험 종류가 늘어나면서 한 줄로 감싸면(flex-wrap) 4줄까지 늘어져 지저분해져서,
+            2줄 고정 후 가로 스크롤로 바꿨다. grid-flow-col + grid-rows-2가 항목을
+            위→아래가 아니라 왼쪽→오른쪽으로 2개씩 채워서 스크롤 방향과 자연스럽게 맞는다. */}
+        <div className="no-scrollbar grid grid-flow-col grid-rows-2 gap-2 overflow-x-auto pb-1">
           <Link
             href={buildHomeHref({ ...baseParams, type: undefined })}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+            className={`whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium ${
               !type
                 ? "bg-blue-600 text-white"
                 : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
@@ -150,7 +153,7 @@ export default async function Home({
             <Link
               key={t.id}
               href={buildHomeHref({ ...baseParams, type: t.name })}
-              className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+              className={`whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium ${
                 type === t.name
                   ? "bg-blue-600 text-white"
                   : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
