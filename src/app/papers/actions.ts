@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NICKNAME_MAX, validateNickname } from "@/lib/nickname";
+import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
 
 export type CommentResult = { error?: string; success?: boolean };
 
@@ -299,10 +300,33 @@ export type CbtSubmitResult = CommentResult & {
   questionResults?: CbtQuestionResult[];
 };
 
+// 회독 배지가 "제출 횟수"만 세다 보니, 페이지 진입 직후 아무것도 안 풀고 연타로
+// 제출해 회독수만 올리는 게 가능했다. 클라이언트가 보내는 durationSeconds는 조작
+// 가능해서 신뢰할 수 없으므로, startCbtAttempt가 서버에 직접 기록해 둔 시작 시각과
+// 현재 시각의 차이로만 최소 응시시간을 검증한다.
+export async function startCbtAttempt(paperId: string): Promise<CommentResult> {
+  const id = String(paperId ?? "");
+  if (!isUuid(id)) return { error: "잘못된 접근입니다." };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  const { error } = await supabase
+    .from("cbt_attempt_starts")
+    .upsert(
+      { user_id: user.id, paper_id: id, started_at: new Date().toISOString() },
+      { onConflict: "user_id,paper_id" },
+    );
+  if (error) return { error: "시작 기록에 실패했어요." };
+  return { success: true };
+}
+
 export async function submitCbtAttempt(input: {
   paperId: string;
   answers: (number | null)[];
-  durationSeconds: number;
 }): Promise<CbtSubmitResult> {
   const paperId = String(input.paperId ?? "");
   if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
@@ -329,7 +353,29 @@ export async function submitCbtAttempt(input: {
   if (totalQuestions === 0) return { error: "이 문제지는 CBT를 지원하지 않아요." };
 
   const submitted = Array.isArray(input.answers) ? input.answers : [];
-  const durationSeconds = Math.max(0, Math.round(Number(input.durationSeconds) || 0));
+
+  const { data: startRecord } = await supabase
+    .from("cbt_attempt_starts")
+    .select("started_at")
+    .eq("user_id", user.id)
+    .eq("paper_id", paperId)
+    .maybeSingle();
+
+  if (!startRecord) {
+    return { error: "새로고침 후 다시 시작해주세요." };
+  }
+
+  const elapsedSeconds =
+    (Date.now() - new Date(startRecord.started_at).getTime()) / 1000;
+  if (elapsedSeconds < MIN_ATTEMPT_SECONDS) {
+    const waitSeconds = Math.ceil(MIN_ATTEMPT_SECONDS - elapsedSeconds);
+    return {
+      error: `최소 ${MIN_ATTEMPT_SECONDS / 60}분은 풀어야 채점할 수 있어요. ${waitSeconds}초 후에 다시 시도해주세요.`,
+    };
+  }
+
+  // 저장용 duration도 클라이언트 값 대신 서버가 기록한 시작 시각 기준으로 계산한다.
+  const durationSeconds = Math.round(elapsedSeconds);
 
   let score = 0;
   const questionResults: CbtQuestionResult[] = [];
@@ -368,6 +414,14 @@ export async function submitCbtAttempt(input: {
     await supabase.from("cbt_attempts").delete().eq("id", attempt.id);
     return { error: "채점에 실패했어요." };
   }
+
+  // 채점에 성공했으니 시작 기록을 지워, 같은 시작 시각으로 다시 제출(replay)해
+  // 대기 없이 회독을 늘리는 걸 막는다. 다음 응시는 startCbtAttempt가 새로 기록한다.
+  await supabase
+    .from("cbt_attempt_starts")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("paper_id", paperId);
 
   return {
     success: true,

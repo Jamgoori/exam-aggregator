@@ -522,6 +522,37 @@ $$;
 
 grant execute on function total_cbt_attempt_count() to anon, authenticated;
 
+-- CBT 최소 응시시간 강제용: 사용자가 채점 전 실제로 "시작"한 시각을 서버가 직접
+-- 기록해둔다. 클라이언트가 보내는 durationSeconds는 조작 가능해서 신뢰할 수 없으니,
+-- 채점(submitCbtAttempt) 시점에 이 시각과 현재 시각의 차이로만 최소 응시시간을
+-- 검증한다. (user_id, paper_id) 1건만 유지하는 upsert 방식이라 테이블 크기가 무한정
+-- 늘어나지 않고, 채점에 성공하면 즉시 삭제해 같은 시작 기록을 재사용(replay)하지
+-- 못하게 막는다.
+create table if not exists cbt_attempt_starts (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  started_at timestamptz not null default now(),
+  primary key (user_id, paper_id)
+);
+
+alter table cbt_attempt_starts enable row level security;
+
+drop policy if exists "select own cbt attempt starts" on cbt_attempt_starts;
+create policy "select own cbt attempt starts" on cbt_attempt_starts
+  for select to authenticated using (auth.uid() = user_id);
+
+drop policy if exists "upsert own cbt attempt starts" on cbt_attempt_starts;
+create policy "upsert own cbt attempt starts" on cbt_attempt_starts
+  for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "update own cbt attempt starts" on cbt_attempt_starts;
+create policy "update own cbt attempt starts" on cbt_attempt_starts
+  for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "delete own cbt attempt starts" on cbt_attempt_starts;
+create policy "delete own cbt attempt starts" on cbt_attempt_starts
+  for delete to authenticated using (auth.uid() = user_id);
+
 -- 문항별 응답. selected_choice가 null이면 건너뛴 문제. is_correct는 채점 시점 값을
 -- 그대로 저장해서, 나중에 관리자가 정답을 고쳐도 과거 채점 결과가 뒤바뀌지 않게 한다.
 -- (paper_id, question_number)가 나중에 생길 문항단위 데이터의 조인 키가 된다.

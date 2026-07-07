@@ -59,17 +59,11 @@ export function ExamCard({
           roundTier && (
             <span
               title={`${roundTier.name} (${myRoundCount}회독)`}
-              className={`tier-badge shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${roundTier.flashDuration ? "tier-flash" : ""} ${roundTier.glowDuration ? "tier-glow" : ""} ${roundTier.className}`}
+              className={`tier-badge shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${roundTier.hasFlash ? "tier-flash" : ""} ${roundTier.hasGlow ? "tier-glow" : ""} ${roundTier.className}`}
               style={
                 {
                   "--shimmer-opacity": roundTier.shimmerOpacity,
-                  "--shimmer-duration": roundTier.shimmerDuration,
-                  ...(roundTier.flashDuration
-                    ? { "--flash-duration": roundTier.flashDuration }
-                    : {}),
-                  ...(roundTier.glowDuration
-                    ? { "--glow-duration": roundTier.glowDuration }
-                    : {}),
+                  "--badge-duration": roundTier.duration,
                 } as CSSProperties
               }
             >

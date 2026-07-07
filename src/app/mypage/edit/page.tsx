@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { updatePassword } from "@/app/actions";
 import { NicknameField } from "@/components/nickname-field";
+import { CbtViewModeField } from "@/components/cbt-view-mode-field";
 import { accountLabel } from "@/lib/username";
 
 export default async function EditAccountPage({
@@ -31,6 +32,10 @@ export default async function EditAccountPage({
   // 구글 로그인 등 OAuth로만 가입한 계정은 비밀번호 자체가 없으므로 변경 폼을 보여주지 않는다.
   const hasPassword = user.app_metadata?.provider === "email";
   const isUsernameAccount = Boolean(user.user_metadata?.username);
+  // 계정에 명시적으로 잠긴 값이 없으면 사이트 기본값인 "문제별 풀기"를 보여준다
+  // (CbtSolver의 시작 모드 결정 로직과 동일한 기본값).
+  const defaultCbtViewMode =
+    user.user_metadata?.default_cbt_view_mode === "full" ? "full" : "single";
 
   return (
     <div className="mx-auto flex w-full max-w-sm flex-col gap-8 px-4 py-12">
@@ -47,6 +52,11 @@ export default async function EditAccountPage({
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">닉네임</h2>
         <NicknameField mode="edit" defaultValue={nickname} />
+      </section>
+
+      <section className="flex flex-col gap-4 border-t border-zinc-100 pt-6">
+        <h2 className="text-lg font-semibold">CBT 시작 화면</h2>
+        <CbtViewModeField defaultValue={defaultCbtViewMode} />
       </section>
 
       {hasPassword && (

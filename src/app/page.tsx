@@ -2,13 +2,13 @@ import Link from "next/link";
 import { FileStack, Download, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
-import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
+import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { levelColor } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { isChoseongQuery, matchesChoseong } from "@/lib/hangul";
-import type { ExamPaper, ExamType, Subject } from "@/lib/supabase/types";
+import type { ExamPaper, Subject } from "@/lib/supabase/types";
 
 const PAGE_SIZE = 24;
 const LEVELS = ["9급", "7급"];
@@ -26,42 +26,60 @@ export default async function Home({
   searchParams,
 }: {
   searchParams: Promise<{
-    type?: string;
     level?: string;
     q?: string;
     page?: string;
   }>;
 }) {
-  const { type, level, q, page } = await searchParams;
+  const { level, q, page } = await searchParams;
   const currentPage = Math.max(1, Number(page) || 1);
   const supabase = await createClient();
-  const baseParams = { type, level, q };
+  const baseParams = { level, q };
 
-  // subjects는 7개뿐이라 먼저 가져와서, 초성 검색은 exam_papers 전체를 훑는 대신
-  // 이름이 초성에 매치되는 과목의 id만 뽑아 subject_id로 필터링한다.
+  // 회독 배지 표시용 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — 실제
+  // cbt_attempts 조회는 RLS가 본인 것만 돌려주므로 인증 서버 왕복(getUser)이 필요 없다.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims.sub ?? null;
+
+  // subjects는 7개뿐이라 먼저 가져와서, 검색은 exam_papers 전체를 훑는 대신
+  // 이름이 검색어에 매치되는 과목의 id만 뽑아 subject_id로 필터링한다.
   const { data: subjects } = await supabase.from("subjects").select("*").order("name");
 
-  const choseongSearch = !!q && isChoseongQuery(q);
-  const choseongMatchedSubjectIds = choseongSearch
-    ? (subjects ?? [])
-        .filter((s) => matchesChoseong(s.name, q))
-        .map((s) => s.id)
-    : null;
+  const trimmedQuery = q?.trim() ?? "";
+  const isSearching = trimmedQuery.length > 0;
+  const choseongSearch = isSearching && isChoseongQuery(trimmedQuery);
+
+  let matchedSubjectIds: string[] = [];
+  if (choseongSearch) {
+    matchedSubjectIds = (subjects ?? [])
+      .filter((s) => matchesChoseong(s.name, trimmedQuery))
+      .map((s) => s.id);
+  } else if (isSearching) {
+    const lowerQuery = trimmedQuery.toLowerCase();
+    const subjectList = subjects ?? [];
+    // 단어 중간에 우연히 검색어가 들어가는 과목까지 그냥 다 보여주면("국어" 검색
+    // 시 "중국어"까지 나오는 식) 헷갈리니, 이름이 검색어로 시작하는 과목이 하나라도
+    // 있으면 그것만 보여준다. 그런 과목이 하나도 없을 때만("법"으로 형법·민법을
+    // 찾는 경우처럼 검색어가 단어 뒷부분에 있는 경우) 단어 중간 포함까지 넓힌다.
+    const prefixMatches = subjectList.filter((s) =>
+      s.name.toLowerCase().startsWith(lowerQuery),
+    );
+    matchedSubjectIds = (
+      prefixMatches.length > 0
+        ? prefixMatches
+        : subjectList.filter((s) => s.name.toLowerCase().includes(lowerQuery))
+    ).map((s) => s.id);
+  }
 
   let query = supabase
     .from("exam_papers")
     .select("*, subjects!inner(*), exam_types!inner(*)", { count: "exact" });
 
-  if (type) {
-    query = query.eq("exam_types.name", type);
-  }
   if (level) {
     query = query.eq("level", level);
   }
-  if (choseongSearch) {
-    query = query.in("subject_id", choseongMatchedSubjectIds ?? []);
-  } else if (q) {
-    query = query.ilike("subjects.name", `%${q}%`);
+  if (isSearching) {
+    query = query.in("subject_id", matchedSubjectIds);
   }
 
   query = query.order("year", { ascending: false }).order("round", { ascending: false });
@@ -69,39 +87,30 @@ export default async function Home({
   const from = (currentPage - 1) * PAGE_SIZE;
   query = query.range(from, from + PAGE_SIZE - 1);
 
-  const skipMainQuery = choseongSearch && choseongMatchedSubjectIds?.length === 0;
+  const skipMainQuery = isSearching && matchedSubjectIds.length === 0;
 
   const [
-    { data: examTypes },
     mainResult,
     { count: totalCount },
     { data: totalDownloads },
     { data: totalAttempts },
-    userResult,
+    myRoundCounts,
   ] = await Promise.all([
-    supabase.from("exam_types").select("*").order("display_order"),
     skipMainQuery ? Promise.resolve({ data: [], count: 0 }) : query,
     supabase.from("exam_papers").select("*", { count: "exact", head: true }),
     supabase.rpc("total_download_count"),
     supabase.rpc("total_cbt_attempt_count"),
-    supabase.auth.getUser(),
+    userId
+      ? getMyRoundCounts(supabase, userId)
+      : Promise.resolve(new Map<string, number>()),
   ]);
   const { data: papers, count: filteredCount } = mainResult;
 
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
   const latestYear = (papers as ExamPaper[] | null)?.[0]?.year;
 
-  const currentUser = userResult.data.user;
-  const myRoundCounts = currentUser
-    ? await getMyRoundCounts(
-        supabase,
-        currentUser.id,
-        ((papers as ExamPaper[] | null) ?? []).map((p) => p.id),
-      )
-    : new Map<string, number>();
-
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 py-12">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 pt-6 pb-12 sm:pt-8">
       <section className="flex flex-col items-start gap-4">
         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600">
           {latestYear
@@ -120,49 +129,42 @@ export default async function Home({
 
         <SearchInput initialQuery={q} />
 
-        <div className="flex flex-wrap gap-3 text-sm">
-          <div className="flex items-center gap-2 rounded-full border border-zinc-200 px-4 py-2">
-            <FileStack size={16} className="text-blue-500" />총 자료 수{" "}
-            <strong>{totalCount ?? 0}건</strong>
+        {/* pill을 flex-wrap으로 늘어놓으면 좁은 화면에서 한 줄에 안 들어가 3줄로
+            쌓여 지저분해져서, 폭과 무관하게 항상 3칸을 유지하는 스탯 타일로 바꿨다.
+            PC(sm 이상)에서는 search-input과 같은 596px로 맞춰 위 소개 문단 줄 끝과
+            나란히 보이게 한다. mt-4는 section의 gap-4에 더해져서, 그리드 위 여백이
+            아래(섹션 간 gap-8)와 같아지도록 맞춘 값이다. */}
+        <div className="mt-4 grid w-full max-w-xs grid-cols-3 gap-1.5 text-center sm:max-w-[596px] sm:gap-3">
+          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3">
+            <FileStack size={14} className="text-blue-500 sm:size-5" />
+            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:text-sm">
+              총 자료 수
+            </span>
+            <strong className="text-sm tabular-nums sm:text-lg">{totalCount ?? 0}건</strong>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-zinc-200 px-4 py-2">
-            <Download size={16} className="text-blue-500" />
-            누적 다운로드 <strong>{totalDownloads ?? 0}회</strong>
+          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3">
+            <Download size={14} className="text-blue-500 sm:size-5" />
+            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:text-sm">
+              누적 다운로드
+            </span>
+            <strong className="text-sm tabular-nums sm:text-lg">{totalDownloads ?? 0}회</strong>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-zinc-200 px-4 py-2">
-            <Users size={16} className="text-blue-500" />
-            실시간 총 응시 수 <strong>{totalAttempts ?? 0}건</strong>
+          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3">
+            <Users size={14} className="text-blue-500 sm:size-5" />
+            {/* PC에서는 검색창만큼 폭이 넉넉해져 전체 문구가 한 줄로 들어가지만,
+                모바일 좁은 칸에서는 그대로 두면 줄바꿈되니 짧은 문구를 따로 쓴다. */}
+            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:hidden">
+              실시간 응시 수
+            </span>
+            <span className="hidden whitespace-nowrap text-sm font-medium text-zinc-600 sm:inline">
+              실시간 총 응시 수
+            </span>
+            <strong className="text-sm tabular-nums sm:text-lg">{totalAttempts ?? 0}건</strong>
           </div>
         </div>
       </section>
 
       <section className="flex flex-col gap-4">
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href={buildHomeHref({ ...baseParams, type: undefined })}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-              !type
-                ? "bg-blue-600 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
-            }`}
-          >
-            전체
-          </Link>
-          {((examTypes ?? []) as ExamType[]).map((t) => (
-            <Link
-              key={t.id}
-              href={buildHomeHref({ ...baseParams, type: t.name })}
-              className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-                type === t.name
-                  ? "bg-blue-600 text-white"
-                  : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
-              }`}
-            >
-              {t.name}
-            </Link>
-          ))}
-        </div>
-
         <div className="flex flex-wrap gap-2">
           <Link
             href={buildHomeHref({ ...baseParams, level: undefined })}

@@ -14,7 +14,7 @@ export function SubjectIndexTabs({ subjects }: { subjects: Subject[] }) {
 
   return (
     <>
-      <div className="flex flex-wrap gap-2 border-t border-zinc-100 pt-3">
+      <div className="flex flex-wrap gap-x-3 gap-y-2 border-t border-zinc-100 pt-3">
         {CONSONANTS.map((c) => (
           <button
             key={c}

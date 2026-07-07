@@ -70,6 +70,14 @@ export default async function PaperDetailPage({
 
   const typedPaper = paper;
 
+  // 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — 아래의 개인화 쿼리
+  // (북마크/내 평가/내 응시 기록)는 전부 RLS가 본인 것만 돌려주므로 인증 서버
+  // 왕복(getUser) 없이 곧바로 나머지 조회 전체를 한 번에 병렬로 날릴 수 있다
+  // (예전에는 getUser 결과를 기다리는 단계들이 줄줄이 이어져 왕복이 5~6번이었다).
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims.sub ?? null;
+  const loggedIn = !!userId;
+
   let answerKeyQuery = supabase
     .from("answer_keys")
     .select("*")
@@ -82,35 +90,6 @@ export default async function PaperDetailPage({
   answerKeyQuery = typedPaper.track
     ? answerKeyQuery.eq("track", typedPaper.track)
     : answerKeyQuery.is("track", null);
-
-  const [
-    { data: comments },
-    { data: ratings },
-    userResult,
-    { data: answerKey },
-    { data: hasCbtAnswers },
-    { data: roundAverageRows },
-  ] = await Promise.all([
-    supabase
-      .from("comments")
-      .select("id, paper_id, user_id, nickname, content, created_at, updated_at, parent_id")
-      .eq("paper_id", id)
-      .order("created_at", { ascending: true }),
-    supabase.from("difficulty_ratings").select("score").eq("paper_id", id),
-    supabase.auth.getUser(),
-    answerKeyQuery.maybeSingle(),
-    supabase.rpc("has_cbt_answers", { target_paper_id: id }),
-    supabase.rpc("avg_score_by_round", { target_paper_id: id }),
-  ]);
-
-  // 표본 3명 미만인 회차는 DB 함수에서 이미 제외하고 내려주므로 여기서는 그대로 매핑만 한다.
-  const roundAverages: RoundAverage[] = (
-    (roundAverageRows ?? []) as { round: number; avg_pct: number; attempt_count: number }[]
-  ).map((r) => ({
-    round: r.round,
-    avgPct: r.avg_pct,
-    attemptCount: r.attempt_count,
-  }));
 
   // "같은 과목 목록"은 미리보기 성격이라 최근 RELATED_PAPERS_LIMIT개만 보여주고,
   // 전체 목록은 /subjects/[slug] 페이지(페이지네이션 적용됨)로 넘긴다.
@@ -125,52 +104,86 @@ export default async function PaperDetailPage({
     subjectPapersQuery = subjectPapersQuery.eq("level", level);
   }
 
-  const [{ data: subjectPapers }, { data: subjectLevelRows }] = typedPaper.subject_id
-    ? await Promise.all([
-        subjectPapersQuery!
+  const [
+    { data: comments },
+    { data: ratings },
+    { data: answerKey },
+    { data: hasCbtAnswers },
+    { data: roundAverageRows },
+    { data: subjectPapers },
+    { data: subjectLevelRows },
+    { data: isAdminData },
+    { data: bookmarkData },
+    { data: myRatingData },
+    { data: myCbtAttemptRows },
+    myRoundCounts,
+  ] = await Promise.all([
+    supabase
+      .from("comments")
+      .select("id, paper_id, user_id, nickname, content, created_at, updated_at, parent_id")
+      .eq("paper_id", id)
+      .order("created_at", { ascending: true }),
+    supabase.from("difficulty_ratings").select("score").eq("paper_id", id),
+    answerKeyQuery.maybeSingle(),
+    supabase.rpc("has_cbt_answers", { target_paper_id: id }),
+    supabase.rpc("avg_score_by_round", { target_paper_id: id }),
+    subjectPapersQuery
+      ? subjectPapersQuery
           .order("year", { ascending: false })
           .order("round", { ascending: false })
-          .limit(RELATED_PAPERS_LIMIT),
-        supabase
+          .limit(RELATED_PAPERS_LIMIT)
+      : Promise.resolve({ data: null }),
+    typedPaper.subject_id
+      ? supabase
           .from("exam_papers")
           .select("level")
-          .eq("subject_id", typedPaper.subject_id),
-      ])
-    : [{ data: null }, { data: null }];
+          .eq("subject_id", typedPaper.subject_id)
+      : Promise.resolve({ data: null }),
+    loggedIn ? supabase.rpc("is_admin") : Promise.resolve({ data: false }),
+    userId
+      ? supabase
+          .from("bookmarks")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("paper_id", typedPaper.id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    userId
+      ? supabase
+          .from("difficulty_ratings")
+          .select("score")
+          .eq("paper_id", typedPaper.id)
+          .eq("user_id", userId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    userId
+      ? supabase
+          .from("cbt_attempts")
+          .select("id, score, total_questions, created_at")
+          .eq("paper_id", typedPaper.id)
+          .eq("user_id", userId)
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: null }),
+    // "같은 과목 목록" 카드에 회독 배지를 달아주기 위한 문제지별 응시 횟수.
+    userId
+      ? getMyRoundCounts(supabase, userId)
+      : Promise.resolve(new Map<string, number>()),
+  ]);
+
+  // 표본 3명 미만인 회차는 DB 함수에서 이미 제외하고 내려주므로 여기서는 그대로 매핑만 한다.
+  const roundAverages: RoundAverage[] = (
+    (roundAverageRows ?? []) as { round: number; avg_pct: number; attempt_count: number }[]
+  ).map((r) => ({
+    round: r.round,
+    avgPct: r.avg_pct,
+    attemptCount: r.attempt_count,
+  }));
 
   const scores = (ratings ?? []).map((r) => r.score as number);
   const averageScore =
     scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
-  const currentUser = userResult.data.user;
-  const loggedIn = !!currentUser;
-  const { data: isAdminData } = loggedIn
-    ? await supabase.rpc("is_admin")
-    : { data: false };
   const isAdmin = isAdminData === true;
 
-  const [{ data: bookmarkData }, { data: myRatingData }, { data: myCbtAttemptRows }] =
-    currentUser
-      ? await Promise.all([
-          supabase
-            .from("bookmarks")
-            .select("id")
-            .eq("user_id", currentUser.id)
-            .eq("paper_id", typedPaper.id)
-            .maybeSingle(),
-          supabase
-            .from("difficulty_ratings")
-            .select("score")
-            .eq("paper_id", typedPaper.id)
-            .eq("user_id", currentUser.id)
-            .maybeSingle(),
-          supabase
-            .from("cbt_attempts")
-            .select("id, score, total_questions, created_at")
-            .eq("paper_id", typedPaper.id)
-            .eq("user_id", currentUser.id)
-            .order("created_at", { ascending: true }),
-        ])
-      : [{ data: null }, { data: null }, { data: null }];
   const isBookmarked = !!bookmarkData;
   const myScore = myRatingData ? (myRatingData.score as number) : null;
 
@@ -189,15 +202,6 @@ export default async function PaperDetailPage({
     totalQuestions: a.total_questions,
     createdAt: a.created_at,
   }));
-
-  // "같은 과목 목록" 카드에 회독 배지를 달아주기 위한 문제지별 응시 횟수.
-  const myRoundCounts = currentUser
-    ? await getMyRoundCounts(
-        supabase,
-        currentUser.id,
-        ((subjectPapers as ExamPaper[] | null) ?? []).map((p) => p.id),
-      )
-    : new Map<string, number>();
 
   const subject = typedPaper.subjects;
   const examType = typedPaper.exam_types;
@@ -342,7 +346,7 @@ export default async function PaperDetailPage({
       <CommentsSection
         paperId={typedPaper.id}
         comments={(comments ?? []) as Comment[]}
-        currentUserId={currentUser?.id ?? null}
+        currentUserId={userId}
         loggedIn={loggedIn}
         isAdmin={isAdmin}
       />

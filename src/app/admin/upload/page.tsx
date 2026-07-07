@@ -16,6 +16,13 @@ export default async function UploadPage() {
     redirect("/admin/login");
   }
 
+  // 로그인만 한 일반 계정이 관리자 화면을 열어보지 못하게 막는다 (데이터 쓰기는
+  // 어차피 RLS가 막지만, 관리자 UI 자체를 노출할 이유가 없다).
+  const { data: isAdmin } = await supabase.rpc("is_admin");
+  if (isAdmin !== true) {
+    redirect("/");
+  }
+
   const [{ data: subjects }, { data: examTypes }] = await Promise.all([
     supabase.from("subjects").select("*").order("display_order"),
     supabase.from("exam_types").select("*").order("name"),

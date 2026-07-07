@@ -8,6 +8,8 @@ import {
   Clock,
   Eraser,
   Hand,
+  Lock,
+  LockOpen,
   PenLine,
   Trash2,
   Trophy,
@@ -15,9 +17,15 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
+import { setDefaultCbtViewMode } from "@/app/actions";
+import {
+  startCbtAttempt,
+  submitCbtAttempt,
+  type CbtSubmitResult,
+} from "@/app/papers/actions";
 import type { DrawTool } from "@/components/pdf-canvas-viewer";
 import { SingleQuestionView } from "@/components/single-question-view";
+import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
 import { formatDuration } from "@/lib/format";
 
 // pdf.js는 브라우저 전용 API(Worker, canvas 등)에 의존해서 서버에서 미리 렌더링하면
@@ -28,6 +36,11 @@ const PdfCanvasViewer = dynamic(
 );
 
 const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
+
+// 자물쇠 버튼 안내 말풍선을 "다시 보지 않기"로 닫으면 이 기기/브라우저에 그 사실을
+// 남겨두는 키. 계정(user_metadata)이 아니라 로컬에만 남기는 이유는, 이건 실제 설정값이
+// 아니라 UI를 처음 보는 사람에게만 필요한 안내라서 서버 왕복까지 갈 필요가 없어서다.
+const LOCK_HINT_STORAGE_KEY = "cbt-lock-hint-dismissed";
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
@@ -45,6 +58,7 @@ export function CbtSolver({
   choiceCount,
   questionImages = {},
   questionChoiceCounts = {},
+  defaultViewMode = null,
 }: {
   paperId: string;
   paperTitle: string;
@@ -53,12 +67,16 @@ export function CbtSolver({
   choiceCount: number;
   questionImages?: Record<number, string[]>;
   questionChoiceCounts?: Record<number, number>;
+  // 계정에 명시적으로 저장된 시작 모드. 자물쇠를 한 번도 안 눌러본 계정은 null이고,
+  // 그 경우 전체보기로 시작하되 자물쇠는 "잠기지 않은" 상태로 보여준다.
+  defaultViewMode?: "full" | "single" | null;
 }) {
   const [answers, setAnswers] = useState<(number | null)[]>(
     Array(totalQuestions).fill(null),
   );
   const [omrOpen, setOmrOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [countdown, setCountdown] = useState(5);
   const [result, setResult] = useState<CbtSubmitResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -66,27 +84,68 @@ export function CbtSolver({
   const [tool, setTool] = useState<DrawTool>("move");
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
   const clearDrawingRef = useRef<() => void>(() => {});
+  const clearSingleDrawingRef = useRef<() => void>(() => {});
   const [zoom, setZoom] = useState(1);
   const pdfWrapperRef = useRef<HTMLDivElement>(null);
   const hasQuestionImages = Object.keys(questionImages).length > 0;
-  const [viewMode, setViewMode] = useState<"full" | "single">("full");
+  // 사이트 기본값은 "문제별 풀기"다. 계정에 "전체보기"가 명시적으로 잠겨 있으면
+  // 그걸 따르고, 그 외에는(잠긴 게 없거나 "문제별 풀기"로 잠겨 있으면) 문제별
+  // 풀기로 시작한다. 다만 이 문제지에 문항별 이미지가 아직 없으면 그 탭 자체가
+  // 막혀 있으니 전체보기로 시작한다.
+  const [viewMode, setViewMode] = useState<"full" | "single">(
+    defaultViewMode === "full" ? "full" : hasQuestionImages ? "single" : "full",
+  );
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [savedDefaultViewMode, setSavedDefaultViewMode] = useState(defaultViewMode);
+  const [isSavingDefault, startSavingDefault] = useTransition();
+  const [lockHintVisible, setLockHintVisible] = useState(false);
+  const [dontShowLockHint, setDontShowLockHint] = useState(false);
 
+  // 자물쇠 버튼은 아이콘만 봐서는 기능을 짐작하기 어려워서, 처음 들어왔을 때 한 번
+  // 말풍선으로 짚어준다. 로딩 직후 다른 UI와 뒤섞여 나타나지 않게 살짝 지연을 둔다.
   useEffect(() => {
-    startedAtRef.current = Date.now();
+    if (localStorage.getItem(LOCK_HINT_STORAGE_KEY)) return;
+    const timeout = setTimeout(() => setLockHintVisible(true), 600);
+    return () => clearTimeout(timeout);
   }, []);
+
+  function dismissLockHint(persist: boolean) {
+    setLockHintVisible(false);
+    if (persist) localStorage.setItem(LOCK_HINT_STORAGE_KEY, "1");
+  }
+
+  // 페이지에 들어오면 곧바로 재기 시작하는 대신 5초 카운트다운을 보여주고, 그
+  // 카운트다운이 끝나는 시점부터 실제 풀이 시간을 잰다. 동시에 서버에도 시작 시각을
+  // 기록해서(startCbtAttempt), 채점 시 최소 응시시간(3분)을 클라이언트가 조작할 수
+  // 없는 기준으로 검증할 수 있게 한다.
+  useEffect(() => {
+    if (countdown <= 0) {
+      startedAtRef.current = Date.now();
+      startCbtAttempt(paperId);
+      return;
+    }
+    const timeout = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(timeout);
+  }, [countdown, paperId]);
 
   const registerClearDrawing = useCallback((clear: () => void) => {
     clearDrawingRef.current = clear;
   }, []);
 
+  const registerClearSingleDrawing = useCallback((clear: () => void) => {
+    clearSingleDrawingRef.current = clear;
+  }, []);
+
   function clearDrawing() {
-    clearDrawingRef.current();
+    if (viewMode === "full") {
+      clearDrawingRef.current();
+    } else {
+      clearSingleDrawingRef.current();
+    }
   }
 
-  // 전체보기(PDF)에는 필기(펜) 레이어가 있는데, 문제별 보기는 크롭 이미지라 그
-  // 좌표계가 전혀 달라 필기를 그대로 옮길 수 없다. 그래서 전체보기를 벗어날 때는
-  // 미리 경고하고 필기를 통째로 지운다.
+  // 전체보기(PDF)와 문제별 보기는 서로 다른 캔버스(좌표계)에 필기를 남기므로, 서로
+  // 오갈 때는 미리 경고하고 필기를 지운다.
   function switchViewMode(mode: "full" | "single") {
     if (mode === viewMode) return;
     if (viewMode === "full" && mode === "single") {
@@ -97,9 +156,38 @@ export function CbtSolver({
       ) {
         return;
       }
-      clearDrawing();
+      clearDrawingRef.current();
+    }
+    if (viewMode === "single" && mode === "full") {
+      if (
+        !window.confirm(
+          "전체보기로 바꾸면 문제별 보기에 그린 필기 내용이 모두 지워져요. 계속할까요?",
+        )
+      ) {
+        return;
+      }
     }
     setViewMode(mode);
+  }
+
+  // 지금 보고 있는 모드가 이미 저장된 기본 시작 모드와 같으면(자물쇠가 잠긴 상태)
+  // "켜져 있다"는 뜻이다.
+  const isDefaultViewModeLocked = savedDefaultViewMode === viewMode;
+
+  // 자물쇠 아이콘: 지금 보고 있는 모드(전체보기/문제별 풀기)를 계정의 기본 시작
+  // 모드로 저장하는 토글이다. 이미 잠겨 있는 상태에서 다시 누르면 저장된 기본값을
+  // 지워서(null) 잠금을 해제한다 — 그냥 같은 값을 다시 저장만 하면 잠긴 채로
+  // 아무 변화도 안 보여서 껐는지 켰는지 구분이 안 됐다.
+  function handleToggleDefaultViewMode() {
+    if (isSavingDefault) return;
+    // 실제로 눌러봤다는 건 이미 기능을 파악했다는 뜻이므로, 체크 여부와 무관하게
+    // 안내를 다시 띄우지 않는다.
+    if (lockHintVisible) dismissLockHint(true);
+    const nextDefault = isDefaultViewModeLocked ? null : viewMode;
+    startSavingDefault(async () => {
+      const res = await setDefaultCbtViewMode(nextDefault);
+      if (!res.error) setSavedDefaultViewMode(nextDefault);
+    });
   }
 
   function zoomIn() {
@@ -126,13 +214,69 @@ export function CbtSolver({
     return () => el.removeEventListener("wheel", handleWheel);
   }, []);
 
+  // 저장 버튼이 따로 없어서, 채점 전에 페이지를 벗어나면 지금까지 고른 답이 그냥
+  // 사라진다. 새로고침/닫기/주소창 이동은 beforeunload로, 링크 클릭이나(사이트
+  // 헤더의 로고·마이페이지 링크 포함) 로그아웃 폼 제출은 클릭/제출을 가로채 확인
+  // 창을 띄우는 방식으로 막는다. 채점이 끝나면(result) 더 잃을 게 없으니 풀어준다.
   useEffect(() => {
     if (result) return;
+
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+
+    function confirmLeave(e: Event) {
+      if (
+        !window.confirm(
+          "지금 나가면 저장되지 않고 풀이 중인 내용이 모두 사라져요. 그래도 나갈까요?",
+        )
+      ) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }
+
+    function handleClick(e: MouseEvent) {
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const anchor = (e.target as HTMLElement | null)?.closest?.("a");
+      if (!anchor || anchor.target === "_blank") return;
+      confirmLeave(e);
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleClick, true);
+    document.addEventListener("submit", confirmLeave, true);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleClick, true);
+      document.removeEventListener("submit", confirmLeave, true);
+    };
+  }, [result]);
+
+  useEffect(() => {
+    if (result || countdown > 0) return;
     const timer = setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - startedAtRef.current) / 1000));
     }, 1000);
     return () => clearInterval(timer);
-  }, [result]);
+  }, [result, countdown]);
+
+  // 문제별 보기에서 다음/이전 문항으로 넘어갈 때마다 이미지를 새로 받느라, 상단 번호는
+  // 바로 바뀌는데 문제 사진은 뒤늦게 뜨는 문제가 있었다. 문제별 보기를 처음 켜는
+  // 순간 모든 문항 이미지를 미리 브라우저 캐시에 받아둬서, 이후 이동은 캐시에서 바로
+  // 그려지게 한다(이미 받아둔 이미지는 브라우저가 재요청하지 않는다).
+  const preloadedImagesRef = useRef(false);
+  useEffect(() => {
+    if (viewMode !== "single" || preloadedImagesRef.current) return;
+    preloadedImagesRef.current = true;
+    for (const images of Object.values(questionImages)) {
+      for (const src of images) {
+        const img = new Image();
+        img.src = src;
+      }
+    }
+  }, [viewMode, questionImages]);
 
   const answeredCount = answers.filter((a) => a !== null).length;
 
@@ -146,6 +290,12 @@ export function CbtSolver({
 
   function handleSubmit() {
     if (isPending) return;
+    // 실제 최소 응시시간 검증은 서버가 하지만, 3분이 안 지났으면 서버까지 왕복하지
+    // 않고 바로 알려준다 (서버 기준 시각과는 별개로 클라이언트 안내용).
+    if (Date.now() - startedAtRef.current < MIN_ATTEMPT_SECONDS * 1000) {
+      alert("최소 3분은 풀어야 채점할 수 있어요. 조금만 더 풀어보세요!");
+      return;
+    }
     if (
       answeredCount < totalQuestions &&
       !window.confirm(
@@ -160,7 +310,6 @@ export function CbtSolver({
       const res = await submitCbtAttempt({
         paperId,
         answers,
-        durationSeconds: Math.floor((Date.now() - startedAtRef.current) / 1000),
       });
       if (res.error) {
         setError(res.error);
@@ -175,8 +324,8 @@ export function CbtSolver({
     setAnswers(Array(totalQuestions).fill(null));
     setResult(null);
     setError(null);
-    startedAtRef.current = Date.now();
     setElapsedSeconds(0);
+    setCountdown(5);
   }
 
   const resultByQuestion = new Map(
@@ -188,178 +337,288 @@ export function CbtSolver({
     // 100dvh는 그 헤더를 포함한 뷰포트 전체 높이라서 그만큼을 빼주지 않으면
     // 화면 하단(OMR 제출 버튼 등)이 잘린다. lg 미만은 헤더가 아예 없으니 그대로 둔다.
     <div className="flex h-[100dvh] flex-col lg:h-[calc(100dvh-65px)]">
-      <header className="shrink-0 border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <Link
-              href={`/papers/${paperId}`}
-              aria-label="문제지로 돌아가기"
-              className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100"
-            >
-              <ChevronLeft size={20} />
-            </Link>
-            <h1 className="truncate text-sm font-medium text-zinc-700">
-              {paperTitle}
-            </h1>
+      {/* 헤더/탭/펜 색상 바를 하나의 그룹으로 묶어서, 각 줄마다 구분선이 겹겹이
+          쌓이지 않게 내부 구분선 없이 콘텐츠와 닿는 맨 아래에만 선을 둔다. */}
+      <div className="shrink-0 border-b border-zinc-200 bg-white">
+        <header>
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Link
+                href={`/papers/${paperId}`}
+                aria-label="문제지로 돌아가기"
+                className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100"
+              >
+                <ChevronLeft size={20} />
+              </Link>
+              <h1 className="truncate text-sm font-medium text-zinc-700">
+                {paperTitle}
+              </h1>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
+                <Clock size={16} />
+                {countdown > 0 ? `${countdown}초 후 시작` : formatDuration(elapsedSeconds)}
+              </div>
+              <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex">
+                <button
+                  type="button"
+                  onClick={zoomOut}
+                  disabled={zoom <= MIN_ZOOM}
+                  aria-label="시험지 축소"
+                  className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  <ZoomOut size={18} />
+                </button>
+                <span className="w-10 text-center text-xs font-medium text-zinc-500">
+                  {Math.round(zoom * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onClick={zoomIn}
+                  disabled={zoom >= MAX_ZOOM}
+                  aria-label="시험지 확대"
+                  className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  <ZoomIn size={18} />
+                </button>
+              </div>
+              <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setTool("move")}
+                  aria-label="화면 이동"
+                  aria-pressed={tool === "move"}
+                  className={`flex items-center justify-center rounded-md p-1.5 ${
+                    tool === "move"
+                      ? "bg-blue-600 text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                >
+                  <Hand size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTool("pen")}
+                  aria-label="펜"
+                  aria-pressed={tool === "pen"}
+                  className={`flex items-center justify-center rounded-md p-1.5 ${
+                    tool === "pen"
+                      ? "bg-blue-600 text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                >
+                  <PenLine size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTool("eraser")}
+                  aria-label="지우개"
+                  aria-pressed={tool === "eraser"}
+                  className={`flex items-center justify-center rounded-md p-1.5 ${
+                    tool === "eraser"
+                      ? "bg-blue-600 text-white"
+                      : "text-zinc-600 hover:bg-zinc-200"
+                  }`}
+                >
+                  <Eraser size={18} />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOmrOpen(true)}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
+              >
+                답안 입력
+              </button>
+            </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
-              <Clock size={16} />
-              {formatDuration(elapsedSeconds)}
-            </div>
-            <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex">
-              <button
-                type="button"
-                onClick={zoomOut}
-                disabled={zoom <= MIN_ZOOM}
-                aria-label="시험지 축소"
-                className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                <ZoomOut size={18} />
-              </button>
-              <span className="w-10 text-center text-xs font-medium text-zinc-500">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button
-                type="button"
-                onClick={zoomIn}
-                disabled={zoom >= MAX_ZOOM}
-                aria-label="시험지 확대"
-                className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
-              >
-                <ZoomIn size={18} />
-              </button>
-            </div>
-            <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
-              <button
-                type="button"
-                onClick={() => setTool("move")}
-                aria-label="화면 이동"
-                aria-pressed={tool === "move"}
-                className={`flex items-center justify-center rounded-md p-1.5 ${
-                  tool === "move"
-                    ? "bg-blue-600 text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-              >
-                <Hand size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setTool("pen")}
-                aria-label="펜"
-                aria-pressed={tool === "pen"}
-                className={`flex items-center justify-center rounded-md p-1.5 ${
-                  tool === "pen"
-                    ? "bg-blue-600 text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-              >
-                <PenLine size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setTool("eraser")}
-                aria-label="지우개"
-                aria-pressed={tool === "eraser"}
-                className={`flex items-center justify-center rounded-md p-1.5 ${
-                  tool === "eraser"
-                    ? "bg-blue-600 text-white"
-                    : "text-zinc-600 hover:bg-zinc-200"
-                }`}
-              >
-                <Eraser size={18} />
-              </button>
-            </div>
+        </header>
+  
+        <div>
+          <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 py-1.5">
             <button
               type="button"
-              onClick={() => setOmrOpen(true)}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
+              onClick={() => switchViewMode("single")}
+              disabled={!hasQuestionImages}
+              title={
+                hasQuestionImages ? undefined : "문항별 이미지가 아직 등록되지 않았어요"
+              }
+              className={`rounded-full px-3 py-1 text-[15px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+                viewMode === "single"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-500 hover:bg-zinc-100"
+              }`}
             >
-              답안 입력
+              문제별 풀기
             </button>
+            <button
+              type="button"
+              onClick={() => switchViewMode("full")}
+              className={`rounded-full px-3 py-1 text-[15px] font-medium ${
+                viewMode === "full"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-500 hover:bg-zinc-100"
+              }`}
+            >
+              전체보기
+            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={handleToggleDefaultViewMode}
+                disabled={isSavingDefault}
+                aria-pressed={isDefaultViewModeLocked}
+                aria-label={
+                  isDefaultViewModeLocked
+                    ? "저장된 시작 모드 해제하기"
+                    : "이 모드를 시작 모드로 저장"
+                }
+                title={
+                  isDefaultViewModeLocked
+                    ? "다음 온라인 응시부터 이 모드로 시작해요. 누르면 해제해요"
+                    : "누르면 다음 온라인 응시부터 이 모드로 시작해요"
+                }
+                className={`flex items-center justify-center rounded-full p-1.5 disabled:opacity-50 ${
+                  isDefaultViewModeLocked
+                    ? "bg-blue-600 text-white"
+                    : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+                }`}
+              >
+                {isDefaultViewModeLocked ? (
+                  <Lock size={16} />
+                ) : (
+                  <LockOpen size={16} />
+                )}
+              </button>
+
+              {lockHintVisible && (
+                <div className="absolute left-1/2 top-full z-30 mt-2 w-56 -translate-x-1/2 rounded-xl bg-blue-600 p-3 text-white shadow-lg shadow-blue-600/30">
+                  <div className="absolute -top-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 bg-blue-600" />
+                  <button
+                    type="button"
+                    aria-label="안내 닫기"
+                    onClick={() => dismissLockHint(dontShowLockHint)}
+                    className="absolute right-2 top-2 text-blue-200 hover:text-white"
+                  >
+                    <X size={14} />
+                  </button>
+                  <p className="pr-4 text-xs font-medium leading-relaxed">
+                    자물쇠를 누르면 이 모드를 기본값으로 저장해요. 다음
+                    응시부터 바로 이 화면으로 열려요.
+                  </p>
+                  <label className="mt-2 flex items-center gap-1.5 text-[11px] text-blue-100">
+                    <input
+                      type="checkbox"
+                      checked={dontShowLockHint}
+                      onChange={(e) => setDontShowLockHint(e.target.checked)}
+                      className="h-3 w-3 accent-white"
+                    />
+                    다시 보지 않기
+                  </label>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </header>
-
-      <div className="shrink-0 border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 py-1.5">
-          <button
-            type="button"
-            onClick={() => switchViewMode("full")}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${
-              viewMode === "full"
-                ? "bg-blue-600 text-white"
-                : "text-zinc-500 hover:bg-zinc-100"
-            }`}
-          >
-            전체보기
-          </button>
-          <button
-            type="button"
-            onClick={() => switchViewMode("single")}
-            disabled={!hasQuestionImages}
-            title={
-              hasQuestionImages ? undefined : "문항별 이미지가 아직 등록되지 않았어요"
-            }
-            className={`rounded-full px-3 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
-              viewMode === "single"
-                ? "bg-blue-600 text-white"
-                : "text-zinc-500 hover:bg-zinc-100"
-            }`}
-          >
-            문제별 풀기
-          </button>
-        </div>
+  
+        {tool !== "move" && (
+          <div>
+            <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-1.5">
+              {tool === "pen" &&
+                PEN_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    type="button"
+                    aria-label="펜 색상"
+                    onClick={() => setPenColor(color)}
+                    style={{ backgroundColor: color }}
+                    className={`h-5 w-5 rounded-full ${
+                      penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                    }`}
+                  />
+                ))}
+              {tool === "eraser" && (
+                <p className="text-xs text-zinc-400">
+                  드래그한 부분만 지워져요
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={clearDrawing}
+                className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
+              >
+                <Trash2 size={14} />
+                전체 지우기
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {tool !== "move" && viewMode === "full" && (
-        <div className="shrink-0 border-b border-zinc-200 bg-white">
-          <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-1.5">
-            {tool === "pen" &&
-              PEN_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  aria-label="펜 색상"
-                  onClick={() => setPenColor(color)}
-                  style={{ backgroundColor: color }}
-                  className={`h-5 w-5 rounded-full ${
-                    penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
-                  }`}
-                />
-              ))}
-            {tool === "eraser" && (
-              <p className="text-xs text-zinc-400">
-                드래그한 부분만 지워져요
-              </p>
-            )}
-            <button
-              type="button"
-              onClick={clearDrawing}
-              className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
-            >
-              <Trash2 size={14} />
-              전체 지우기
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* PDF는 파싱/렌더링 비용이 커서 탭을 바꿔도 언마운트하지 않고 숨기기만 한다
-          (다시 보일 때마다 처음부터 다시 불러오는 것을 피하기 위함). */}
-      <div
-        className={`min-h-0 flex-1 justify-center ${viewMode === "full" ? "flex" : "hidden"}`}
-      >
+      {/* OMR 패널(데스크톱)은 전체보기/문제별 보기 어느 쪽에 있든 똑같이 붙어 있어야
+          어느 문제를 풀든 바로 전체 채점을 할 수 있다. PDF는 파싱/렌더링 비용이 커서
+          탭을 바꿔도 언마운트하지 않고 숨기기만 한다(다시 보일 때마다 처음부터 다시
+          불러오는 것을 피하기 위함). */}
+      <div className="flex min-h-0 flex-1 justify-center">
         <div className="flex min-h-0 w-full max-w-7xl">
-          <div ref={pdfWrapperRef} className="relative min-w-0 flex-1">
-            <PdfCanvasViewer
-              fileUrl={fileUrl}
-              tool={tool}
-              penColor={penColor}
-              zoom={zoom}
-              onClearReady={registerClearDrawing}
-            />
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            <div
+              ref={pdfWrapperRef}
+              className={`relative min-h-0 flex-1 ${viewMode === "full" ? "block" : "hidden"}`}
+            >
+              <PdfCanvasViewer
+                fileUrl={fileUrl}
+                tool={tool}
+                penColor={penColor}
+                zoom={zoom}
+                onClearReady={registerClearDrawing}
+              />
+              {/* 모바일은 헤더가 좁아 데스크톱용 줌 버튼을 넣기 어려워, 시험지 위에
+                  떠 있는 형태의 줌 컨트롤을 따로 둔다. */}
+              <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-full border border-zinc-200 bg-white/95 shadow-md lg:hidden">
+                <button
+                  type="button"
+                  onClick={zoomIn}
+                  disabled={zoom >= MAX_ZOOM}
+                  aria-label="시험지 확대"
+                  className="flex items-center justify-center p-2.5 text-zinc-600 active:bg-zinc-100 disabled:opacity-30"
+                >
+                  <ZoomIn size={20} />
+                </button>
+                <button
+                  type="button"
+                  onClick={zoomOut}
+                  disabled={zoom <= MIN_ZOOM}
+                  aria-label="시험지 축소"
+                  className="flex items-center justify-center border-t border-zinc-200 p-2.5 text-zinc-600 active:bg-zinc-100 disabled:opacity-30"
+                >
+                  <ZoomOut size={20} />
+                </button>
+              </div>
+            </div>
+
+            {viewMode === "single" && (
+              <SingleQuestionView
+                questionIndex={currentQuestionIndex}
+                totalQuestions={totalQuestions}
+                choiceCount={questionChoiceCounts[currentQuestionIndex + 1] ?? choiceCount}
+                images={questionImages[currentQuestionIndex + 1] ?? []}
+                selected={answers[currentQuestionIndex]}
+                onSelect={(choice) => selectChoice(currentQuestionIndex, choice)}
+                onNavigate={setCurrentQuestionIndex}
+                questionResult={
+                  result ? (resultByQuestion.get(currentQuestionIndex + 1) ?? null) : null
+                }
+                tool={tool}
+                penColor={penColor}
+                onClearReady={registerClearSingleDrawing}
+                onSubmit={handleSubmit}
+                submitting={isPending}
+                submitted={!!result}
+                answeredCount={answeredCount}
+                error={error}
+              />
+            )}
           </div>
 
           <OmrPanel
@@ -376,21 +635,6 @@ export function CbtSolver({
           />
         </div>
       </div>
-
-      {viewMode === "single" && (
-        <SingleQuestionView
-          questionIndex={currentQuestionIndex}
-          totalQuestions={totalQuestions}
-          choiceCount={questionChoiceCounts[currentQuestionIndex + 1] ?? choiceCount}
-          images={questionImages[currentQuestionIndex + 1] ?? []}
-          selected={answers[currentQuestionIndex]}
-          onSelect={(choice) => selectChoice(currentQuestionIndex, choice)}
-          onNavigate={setCurrentQuestionIndex}
-          questionResult={
-            result ? (resultByQuestion.get(currentQuestionIndex + 1) ?? null) : null
-          }
-        />
-      )}
 
       {omrOpen && (
         <div className="fixed inset-0 z-40 flex flex-col justify-end lg:hidden">

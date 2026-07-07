@@ -2,13 +2,15 @@
 // 게임식 랭크 배지. 등급을 아이콘으로 구분하는 대신, 배지 자체가 등급이 오를수록 점점
 // 더 반짝이도록 애니메이션 강도만 키운다: shimmer(연속 스윕) → flash(주기적으로 확
 // 밝아지는 번쩍임) → glow(은은한 광택 링)까지 상위 등급일수록 더 많이 겹쳐진다.
+// 이 세 효과는 전부 같은 duration 하나를 공유해서 한 사이클 안에서 항상 같은 순서
+// (sweep → flash → glow)로 겹치지 않게 지나간다 — globals.css의 keyframe 구간 참고.
 export type RoundTier = {
   name: string;
   className: string;
   shimmerOpacity: number;
-  shimmerDuration: string;
-  flashDuration: string | null;
-  glowDuration: string | null;
+  duration: string;
+  hasFlash: boolean;
+  hasGlow: boolean;
 };
 
 const TIERS: { minRound: number; tier: RoundTier }[] = [
@@ -16,12 +18,15 @@ const TIERS: { minRound: number; tier: RoundTier }[] = [
     minRound: 10,
     tier: {
       name: "다이아",
+      // 홀로그램처럼 색이 도는 느낌을 주려고 차갑고 화려한 톤(시안→마젠타→인디고)을
+      // 섞고, 링을 두껍게+상시 컬러 글로우(shadow)까지 얹어서 최상위 등급다운
+      // 존재감을 준다. 주기적 흰색 pulse(badge-glow)는 이 상시 글로우 위에 겹친다.
       className:
-        "bg-gradient-to-br from-sky-300 via-blue-400 to-indigo-500 text-white ring-1 ring-inset ring-white/70 shadow-sm",
+        "bg-gradient-to-br from-cyan-300 via-fuchsia-400 to-indigo-500 text-white ring-2 ring-inset ring-white/80 shadow-[0_0_10px_1px_rgba(217,70,239,0.5)]",
       shimmerOpacity: 0.9,
-      shimmerDuration: "1.2s",
-      flashDuration: "1s",
-      glowDuration: "1.4s",
+      duration: "2.4s",
+      hasFlash: true,
+      hasGlow: true,
     },
   },
   {
@@ -30,9 +35,9 @@ const TIERS: { minRound: number; tier: RoundTier }[] = [
       name: "플래티넘",
       className: "bg-gradient-to-br from-teal-200 to-cyan-400 text-teal-900",
       shimmerOpacity: 0.65,
-      shimmerDuration: "1.8s",
-      flashDuration: "1.8s",
-      glowDuration: "2.2s",
+      duration: "2.8s",
+      hasFlash: true,
+      hasGlow: true,
     },
   },
   {
@@ -41,9 +46,9 @@ const TIERS: { minRound: number; tier: RoundTier }[] = [
       name: "골드",
       className: "bg-gradient-to-br from-yellow-200 to-amber-400 text-amber-900",
       shimmerOpacity: 0.45,
-      shimmerDuration: "2.4s",
-      flashDuration: "2.6s",
-      glowDuration: null,
+      duration: "3.2s",
+      hasFlash: true,
+      hasGlow: false,
     },
   },
   {
@@ -52,9 +57,9 @@ const TIERS: { minRound: number; tier: RoundTier }[] = [
       name: "실버",
       className: "bg-gradient-to-br from-slate-200 to-slate-400 text-slate-800",
       shimmerOpacity: 0.25,
-      shimmerDuration: "3.2s",
-      flashDuration: null,
-      glowDuration: null,
+      duration: "3.2s",
+      hasFlash: false,
+      hasGlow: false,
     },
   },
   {
@@ -63,9 +68,9 @@ const TIERS: { minRound: number; tier: RoundTier }[] = [
       name: "브론즈",
       className: "bg-gradient-to-br from-orange-200 to-orange-400 text-orange-900",
       shimmerOpacity: 0,
-      shimmerDuration: "3.5s",
-      flashDuration: null,
-      glowDuration: null,
+      duration: "3.5s",
+      hasFlash: false,
+      hasGlow: false,
     },
   },
 ];
