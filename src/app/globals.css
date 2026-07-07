@@ -37,6 +37,53 @@ button:not(:disabled) {
   cursor: pointer;
 }
 
+/* 시험지 로딩 화면: 아이콘이 살짝 떠오르는 느낌, 문구가 바뀔 때 자연스럽게
+   페이드인, 진행 막대가 좌우로 흐르는 인디케이터. */
+@keyframes loading-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes loading-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes loading-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(60%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+.animate-loading-float {
+  animation: loading-float 2.2s ease-in-out infinite;
+}
+
+.animate-loading-fade-in {
+  animation: loading-fade-in 0.35s ease-out;
+}
+
+.animate-loading-bar {
+  animation: loading-bar 1.6s ease-in-out infinite;
+}
+
 /* 회독 랭크 배지: 등급이 오를수록 반짝이는 효과가 강해지도록, 배지마다
    --shimmer-opacity/--badge-duration을 인라인 스타일로 다르게 넣어서 이 공통
    애니메이션 강도만 조절한다. shimmer/flash/glow가 전부 같은 --badge-duration
