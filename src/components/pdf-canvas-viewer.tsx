@@ -297,6 +297,12 @@ export function PdfCanvasViewer({
     // 오른쪽 부분까지 밀어서 볼 수 있다(모바일에서 "움직이지 않는다"던 증상).
     <div
       ref={scrollWrapperRef}
+      // scrollbar-gutter: stable — 세로 스크롤바 자리를 항상 예약해둔다. 이게 없으면
+      // 렌더 때 컨테이너를 비웠다 채우는 순간 스크롤바가 사라졌다 나타나며 clientWidth가
+      // 폭만큼 출렁이고, 그 변화를 ResizeObserver가 잡아 renderWidth를 갱신 → 재렌더 →
+      // 다시 clientWidth 변화로 이어지는 무한 루프(전체보기 "깜빡이며 무한 로딩")가 됐다.
+      // 공간을 차지하는 클래식 스크롤바(대부분의 Windows Chrome)에서만 나던 문제다.
+      style={{ scrollbarGutter: "stable" }}
       className="relative h-full w-full overflow-auto bg-zinc-200"
     >
       {loading && (
