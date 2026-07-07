@@ -76,8 +76,14 @@ export default async function CbtPage({
     questionChoiceCounts[row.question_number] = row.choice_count;
   }
 
-  const defaultViewMode =
-    user.user_metadata?.default_cbt_view_mode === "single" ? "single" : "full";
+  // 명시적으로 저장된 값이 없으면(한 번도 자물쇠를 잠근 적 없음) null로 구분해서
+  // 넘긴다 — 전체보기로 "시작"하는 것과 전체보기를 "기본값으로 잠가둔 것"은
+  // 자물쇠 아이콘 표시상 서로 다른 상태라 여기서 뭉개면 안 된다.
+  const rawDefaultViewMode = user.user_metadata?.default_cbt_view_mode;
+  const defaultViewMode: "full" | "single" | null =
+    rawDefaultViewMode === "single" || rawDefaultViewMode === "full"
+      ? rawDefaultViewMode
+      : null;
 
   return (
     <CbtSolver

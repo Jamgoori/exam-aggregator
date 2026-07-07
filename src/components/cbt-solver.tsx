@@ -53,7 +53,7 @@ export function CbtSolver({
   choiceCount,
   questionImages = {},
   questionChoiceCounts = {},
-  defaultViewMode = "full",
+  defaultViewMode = null,
 }: {
   paperId: string;
   paperTitle: string;
@@ -62,7 +62,9 @@ export function CbtSolver({
   choiceCount: number;
   questionImages?: Record<number, string[]>;
   questionChoiceCounts?: Record<number, number>;
-  defaultViewMode?: "full" | "single";
+  // 계정에 명시적으로 저장된 시작 모드. 자물쇠를 한 번도 안 눌러본 계정은 null이고,
+  // 그 경우 전체보기로 시작하되 자물쇠는 "잠기지 않은" 상태로 보여준다.
+  defaultViewMode?: "full" | "single" | null;
 }) {
   const [answers, setAnswers] = useState<(number | null)[]>(
     Array(totalQuestions).fill(null),
@@ -158,17 +160,23 @@ export function CbtSolver({
     setViewMode(mode);
   }
 
+  // 지금 보고 있는 모드가 이미 저장된 기본 시작 모드와 같으면(자물쇠가 잠긴 상태)
+  // "켜져 있다"는 뜻이다.
+  const isDefaultViewModeLocked = savedDefaultViewMode === viewMode;
+
   // 자물쇠 아이콘: 지금 보고 있는 모드(전체보기/문제별 풀기)를 계정의 기본 시작
-  // 모드로 저장한다. 다음에 이 계정으로 아무 문제지든 온라인 응시를 시작하면 이
-  // 모드로 곧바로 열린다.
-  function handleSetDefaultViewMode() {
+  // 모드로 저장하는 토글이다. 이미 잠겨 있는 상태에서 다시 누르면 저장된 기본값을
+  // 지워서(null) 잠금을 해제한다 — 그냥 같은 값을 다시 저장만 하면 잠긴 채로
+  // 아무 변화도 안 보여서 껐는지 켰는지 구분이 안 됐다.
+  function handleToggleDefaultViewMode() {
     if (isSavingDefault) return;
     // 실제로 눌러봤다는 건 이미 기능을 파악했다는 뜻이므로, 체크 여부와 무관하게
     // 안내를 다시 띄우지 않는다.
     if (lockHintVisible) dismissLockHint(true);
+    const nextDefault = isDefaultViewModeLocked ? null : viewMode;
     startSavingDefault(async () => {
-      const res = await setDefaultCbtViewMode(viewMode);
-      if (!res.error) setSavedDefaultViewMode(viewMode);
+      const res = await setDefaultCbtViewMode(nextDefault);
+      if (!res.error) setSavedDefaultViewMode(nextDefault);
     });
   }
 
@@ -442,25 +450,26 @@ export function CbtSolver({
             <div className="relative">
               <button
                 type="button"
-                onClick={handleSetDefaultViewMode}
+                onClick={handleToggleDefaultViewMode}
                 disabled={isSavingDefault}
+                aria-pressed={isDefaultViewModeLocked}
                 aria-label={
-                  savedDefaultViewMode === viewMode
-                    ? "현재 시작 모드로 저장되어 있어요"
+                  isDefaultViewModeLocked
+                    ? "저장된 시작 모드 해제하기"
                     : "이 모드를 시작 모드로 저장"
                 }
                 title={
-                  savedDefaultViewMode === viewMode
-                    ? "다음 온라인 응시부터 이 모드로 시작해요"
+                  isDefaultViewModeLocked
+                    ? "다음 온라인 응시부터 이 모드로 시작해요. 누르면 해제해요"
                     : "누르면 다음 온라인 응시부터 이 모드로 시작해요"
                 }
                 className={`flex items-center justify-center rounded-full p-1.5 disabled:opacity-50 ${
-                  savedDefaultViewMode === viewMode
-                    ? "text-blue-600"
+                  isDefaultViewModeLocked
+                    ? "bg-blue-600 text-white"
                     : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
                 }`}
               >
-                {savedDefaultViewMode === viewMode ? (
+                {isDefaultViewModeLocked ? (
                   <Lock size={16} />
                 ) : (
                   <LockOpen size={16} />
