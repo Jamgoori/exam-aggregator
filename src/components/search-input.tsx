@@ -44,7 +44,7 @@ export function SearchInput({ initialQuery }: { initialQuery?: string }) {
   }
 
   return (
-    <div className="flex w-full max-w-2xl items-center gap-3 rounded-2xl border-2 border-zinc-200 bg-white px-5 py-4 shadow-sm transition-colors focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-100">
+    <div className="flex w-full max-w-xl items-center gap-3 rounded-2xl border-2 border-zinc-200 bg-white px-5 py-4 shadow-sm transition-colors focus-within:border-blue-400 focus-within:ring-4 focus-within:ring-blue-100">
       <Search size={22} className="shrink-0 text-blue-400" />
       <input
         value={value}

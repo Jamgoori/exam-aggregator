@@ -120,7 +120,7 @@ export default async function Home({
 
         {/* pill을 flex-wrap으로 늘어놓으면 좁은 화면에서 한 줄에 안 들어가 3줄로
             쌓여 지저분해져서, 폭과 무관하게 항상 3칸을 유지하는 스탯 타일로 바꿨다. */}
-        <div className="grid w-full max-w-xs grid-cols-3 gap-1.5 text-center sm:max-w-2xl sm:gap-3">
+        <div className="grid w-full max-w-xs grid-cols-3 gap-1.5 text-center sm:max-w-xl sm:gap-3">
           <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3">
             <FileStack size={14} className="text-blue-500 sm:size-5" />
             <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:text-sm">
