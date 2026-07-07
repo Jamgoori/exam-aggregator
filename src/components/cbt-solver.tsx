@@ -32,6 +32,11 @@ const PdfCanvasViewer = dynamic(
 
 const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
 
+// 자물쇠 버튼 안내 말풍선을 "다시 보지 않기"로 닫으면 이 기기/브라우저에 그 사실을
+// 남겨두는 키. 계정(user_metadata)이 아니라 로컬에만 남기는 이유는, 이건 실제 설정값이
+// 아니라 UI를 처음 보는 사람에게만 필요한 안내라서 서버 왕복까지 갈 필요가 없어서다.
+const LOCK_HINT_STORAGE_KEY = "cbt-lock-hint-dismissed";
+
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 2.5;
 const ZOOM_STEP = 0.1;
@@ -84,6 +89,21 @@ export function CbtSolver({
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [savedDefaultViewMode, setSavedDefaultViewMode] = useState(defaultViewMode);
   const [isSavingDefault, startSavingDefault] = useTransition();
+  const [lockHintVisible, setLockHintVisible] = useState(false);
+  const [dontShowLockHint, setDontShowLockHint] = useState(false);
+
+  // 자물쇠 버튼은 아이콘만 봐서는 기능을 짐작하기 어려워서, 처음 들어왔을 때 한 번
+  // 말풍선으로 짚어준다. 로딩 직후 다른 UI와 뒤섞여 나타나지 않게 살짝 지연을 둔다.
+  useEffect(() => {
+    if (localStorage.getItem(LOCK_HINT_STORAGE_KEY)) return;
+    const timeout = setTimeout(() => setLockHintVisible(true), 600);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  function dismissLockHint(persist: boolean) {
+    setLockHintVisible(false);
+    if (persist) localStorage.setItem(LOCK_HINT_STORAGE_KEY, "1");
+  }
 
   // 페이지에 들어오면 곧바로 재기 시작하는 대신 5초 카운트다운을 보여주고, 그
   // 카운트다운이 끝나는 시점부터 실제 풀이 시간을 잰다.
@@ -143,6 +163,9 @@ export function CbtSolver({
   // 모드로 곧바로 열린다.
   function handleSetDefaultViewMode() {
     if (isSavingDefault) return;
+    // 실제로 눌러봤다는 건 이미 기능을 파악했다는 뜻이므로, 체크 여부와 무관하게
+    // 안내를 다시 띄우지 않는다.
+    if (lockHintVisible) dismissLockHint(true);
     startSavingDefault(async () => {
       const res = await setDefaultCbtViewMode(viewMode);
       if (!res.error) setSavedDefaultViewMode(viewMode);
@@ -416,32 +439,61 @@ export function CbtSolver({
             >
               문제별 풀기
             </button>
-            <button
-              type="button"
-              onClick={handleSetDefaultViewMode}
-              disabled={isSavingDefault}
-              aria-label={
-                savedDefaultViewMode === viewMode
-                  ? "현재 시작 모드로 저장되어 있어요"
-                  : "이 모드를 시작 모드로 저장"
-              }
-              title={
-                savedDefaultViewMode === viewMode
-                  ? "다음 온라인 응시부터 이 모드로 시작해요"
-                  : "누르면 다음 온라인 응시부터 이 모드로 시작해요"
-              }
-              className={`flex items-center justify-center rounded-full p-1.5 disabled:opacity-50 ${
-                savedDefaultViewMode === viewMode
-                  ? "text-blue-600"
-                  : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
-              }`}
-            >
-              {savedDefaultViewMode === viewMode ? (
-                <Lock size={16} />
-              ) : (
-                <LockOpen size={16} />
+            <div className="relative">
+              <button
+                type="button"
+                onClick={handleSetDefaultViewMode}
+                disabled={isSavingDefault}
+                aria-label={
+                  savedDefaultViewMode === viewMode
+                    ? "현재 시작 모드로 저장되어 있어요"
+                    : "이 모드를 시작 모드로 저장"
+                }
+                title={
+                  savedDefaultViewMode === viewMode
+                    ? "다음 온라인 응시부터 이 모드로 시작해요"
+                    : "누르면 다음 온라인 응시부터 이 모드로 시작해요"
+                }
+                className={`flex items-center justify-center rounded-full p-1.5 disabled:opacity-50 ${
+                  savedDefaultViewMode === viewMode
+                    ? "text-blue-600"
+                    : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+                }`}
+              >
+                {savedDefaultViewMode === viewMode ? (
+                  <Lock size={16} />
+                ) : (
+                  <LockOpen size={16} />
+                )}
+              </button>
+
+              {lockHintVisible && (
+                <div className="absolute left-1/2 top-full z-30 mt-2 w-56 -translate-x-1/2 rounded-xl bg-blue-600 p-3 text-white shadow-lg shadow-blue-600/30">
+                  <div className="absolute -top-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 bg-blue-600" />
+                  <button
+                    type="button"
+                    aria-label="안내 닫기"
+                    onClick={() => dismissLockHint(dontShowLockHint)}
+                    className="absolute right-2 top-2 text-blue-200 hover:text-white"
+                  >
+                    <X size={14} />
+                  </button>
+                  <p className="pr-4 text-xs font-medium leading-relaxed">
+                    자물쇠를 누르면 이 모드를 기본값으로 저장해요. 다음
+                    응시부터 바로 이 화면으로 열려요.
+                  </p>
+                  <label className="mt-2 flex items-center gap-1.5 text-[11px] text-blue-100">
+                    <input
+                      type="checkbox"
+                      checked={dontShowLockHint}
+                      onChange={(e) => setDontShowLockHint(e.target.checked)}
+                      className="h-3 w-3 accent-white"
+                    />
+                    다시 보지 않기
+                  </label>
+                </div>
               )}
-            </button>
+            </div>
           </div>
         </div>
   
