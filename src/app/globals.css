@@ -37,6 +37,17 @@ button:not(:disabled) {
   cursor: pointer;
 }
 
+/* 가로 스크롤 필터 목록(예: 홈 화면 시험 종류 필터)에서 스크롤바를 안 보이게 한다.
+   스크롤 자체는 그대로 동작하고, 시각적으로만 숨긴다. */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* 회독 랭크 배지: 등급이 오를수록 반짝이는 효과가 강해지도록, 배지마다
    --shimmer-opacity/--badge-duration을 인라인 스타일로 다르게 넣어서 이 공통
    애니메이션 강도만 조절한다. shimmer/flash/glow가 전부 같은 --badge-duration
