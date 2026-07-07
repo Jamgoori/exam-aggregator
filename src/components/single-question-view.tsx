@@ -20,6 +20,7 @@ export function SingleQuestionView({
   submitting,
   submitted,
   answeredCount,
+  error,
 }: {
   questionIndex: number;
   totalQuestions: number;
@@ -36,6 +37,7 @@ export function SingleQuestionView({
   submitting: boolean;
   submitted: boolean;
   answeredCount: number;
+  error?: string | null;
 }) {
   const questionNumber = questionIndex + 1;
   const graded = !!questionResult;
@@ -156,6 +158,11 @@ export function SingleQuestionView({
       </div>
 
       <div className="shrink-0 border-t border-zinc-200 bg-white px-3 py-3">
+        {error && (
+          <p className="mx-auto mb-2 max-w-2xl text-center text-xs text-red-600">
+            {error}
+          </p>
+        )}
         <div className="mx-auto flex max-w-2xl items-center gap-2">
           <button
             type="button"

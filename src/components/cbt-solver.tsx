@@ -25,6 +25,7 @@ import {
 } from "@/app/papers/actions";
 import type { DrawTool } from "@/components/pdf-canvas-viewer";
 import { SingleQuestionView } from "@/components/single-question-view";
+import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
 import { formatDuration } from "@/lib/format";
 
 // pdf.js는 브라우저 전용 API(Worker, canvas 등)에 의존해서 서버에서 미리 렌더링하면
@@ -289,6 +290,12 @@ export function CbtSolver({
 
   function handleSubmit() {
     if (isPending) return;
+    // 실제 최소 응시시간 검증은 서버가 하지만, 3분이 안 지났으면 서버까지 왕복하지
+    // 않고 바로 알려준다 (서버 기준 시각과는 별개로 클라이언트 안내용).
+    if (Date.now() - startedAtRef.current < MIN_ATTEMPT_SECONDS * 1000) {
+      alert("최소 3분은 풀어야 채점할 수 있어요. 조금만 더 풀어보세요!");
+      return;
+    }
     if (
       answeredCount < totalQuestions &&
       !window.confirm(
@@ -609,6 +616,7 @@ export function CbtSolver({
                 submitting={isPending}
                 submitted={!!result}
                 answeredCount={answeredCount}
+                error={error}
               />
             )}
           </div>
