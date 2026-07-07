@@ -110,7 +110,7 @@ export default async function Home({
   const latestYear = (papers as ExamPaper[] | null)?.[0]?.year;
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 pt-6 pb-12 sm:pt-8">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 pt-6 pb-12 sm:pt-8">
       <section className="flex flex-col items-start gap-4">
         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600">
           {latestYear
@@ -132,8 +132,9 @@ export default async function Home({
         {/* pill을 flex-wrap으로 늘어놓으면 좁은 화면에서 한 줄에 안 들어가 3줄로
             쌓여 지저분해져서, 폭과 무관하게 항상 3칸을 유지하는 스탯 타일로 바꿨다.
             PC(sm 이상)에서는 search-input과 같은 596px로 맞춰 위 소개 문단 줄 끝과
-            나란히 보이게 한다. */}
-        <div className="grid w-full max-w-xs grid-cols-3 gap-1.5 text-center sm:max-w-[596px] sm:gap-3">
+            나란히 보이게 한다. mt-4는 section의 gap-4에 더해져서, 그리드 위 여백이
+            아래(섹션 간 gap-8)와 같아지도록 맞춘 값이다. */}
+        <div className="mt-4 grid w-full max-w-xs grid-cols-3 gap-1.5 text-center sm:max-w-[596px] sm:gap-3">
           <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3">
             <FileStack size={14} className="text-blue-500 sm:size-5" />
             <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:text-sm">
