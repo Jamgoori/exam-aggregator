@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NICKNAME_MAX, validateNickname } from "@/lib/nickname";
+import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
 
 export type CommentResult = { error?: string; success?: boolean };
 
@@ -303,8 +304,6 @@ export type CbtSubmitResult = CommentResult & {
 // 제출해 회독수만 올리는 게 가능했다. 클라이언트가 보내는 durationSeconds는 조작
 // 가능해서 신뢰할 수 없으므로, startCbtAttempt가 서버에 직접 기록해 둔 시작 시각과
 // 현재 시각의 차이로만 최소 응시시간을 검증한다.
-const MIN_ATTEMPT_SECONDS = 180;
-
 export async function startCbtAttempt(paperId: string): Promise<CommentResult> {
   const id = String(paperId ?? "");
   if (!isUuid(id)) return { error: "잘못된 접근입니다." };
