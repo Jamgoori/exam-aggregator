@@ -1,4 +1,4 @@
-export const CONSONANTS = [
+const CONSONANTS = [
   "ㄱ",
   "ㄴ",
   "ㄷ",
@@ -43,10 +43,6 @@ function choseongOf(char: string) {
   if (code < 0 || code > 11171) return null;
   const choseongIndex = Math.floor(code / (21 * 28));
   return CHOSEONG_TO_BASE[choseongIndex] ?? null;
-}
-
-export function initialConsonant(text: string) {
-  return choseongOf(text.trim().charAt(0));
 }
 
 // 완성된 한글 음절만 초성으로 치환하고 그 외 문자(공백, 숫자, 영문 등)는 버린다.
