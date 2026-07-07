@@ -2,13 +2,12 @@ import Link from "next/link";
 import { FileStack, Download, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
-import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
 import { levelColor } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { isChoseongQuery, matchesChoseong } from "@/lib/hangul";
-import type { ExamPaper, ExamType, Subject } from "@/lib/supabase/types";
+import type { ExamPaper, ExamType } from "@/lib/supabase/types";
 
 const PAGE_SIZE = 24;
 const LEVELS = ["9급", "7급"];
@@ -42,16 +41,35 @@ export default async function Home({
   const { data: claimsData } = await supabase.auth.getClaims();
   const userId = claimsData?.claims.sub ?? null;
 
-  // subjects는 7개뿐이라 먼저 가져와서, 초성 검색은 exam_papers 전체를 훑는 대신
-  // 이름이 초성에 매치되는 과목의 id만 뽑아 subject_id로 필터링한다.
+  // subjects는 7개뿐이라 먼저 가져와서, 검색은 exam_papers 전체를 훑는 대신
+  // 이름이 검색어에 매치되는 과목의 id만 뽑아 subject_id로 필터링한다.
   const { data: subjects } = await supabase.from("subjects").select("*").order("name");
 
-  const choseongSearch = !!q && isChoseongQuery(q);
-  const choseongMatchedSubjectIds = choseongSearch
-    ? (subjects ?? [])
-        .filter((s) => matchesChoseong(s.name, q))
-        .map((s) => s.id)
-    : null;
+  const trimmedQuery = q?.trim() ?? "";
+  const isSearching = trimmedQuery.length > 0;
+  const choseongSearch = isSearching && isChoseongQuery(trimmedQuery);
+
+  let matchedSubjectIds: string[] = [];
+  if (choseongSearch) {
+    matchedSubjectIds = (subjects ?? [])
+      .filter((s) => matchesChoseong(s.name, trimmedQuery))
+      .map((s) => s.id);
+  } else if (isSearching) {
+    const lowerQuery = trimmedQuery.toLowerCase();
+    const subjectList = subjects ?? [];
+    // 단어 중간에 우연히 검색어가 들어가는 과목까지 그냥 다 보여주면("국어" 검색
+    // 시 "중국어"까지 나오는 식) 헷갈리니, 이름이 검색어로 시작하는 과목이 하나라도
+    // 있으면 그것만 보여준다. 그런 과목이 하나도 없을 때만("법"으로 형법·민법을
+    // 찾는 경우처럼 검색어가 단어 뒷부분에 있는 경우) 단어 중간 포함까지 넓힌다.
+    const prefixMatches = subjectList.filter((s) =>
+      s.name.toLowerCase().startsWith(lowerQuery),
+    );
+    matchedSubjectIds = (
+      prefixMatches.length > 0
+        ? prefixMatches
+        : subjectList.filter((s) => s.name.toLowerCase().includes(lowerQuery))
+    ).map((s) => s.id);
+  }
 
   let query = supabase
     .from("exam_papers")
@@ -63,10 +81,8 @@ export default async function Home({
   if (level) {
     query = query.eq("level", level);
   }
-  if (choseongSearch) {
-    query = query.in("subject_id", choseongMatchedSubjectIds ?? []);
-  } else if (q) {
-    query = query.ilike("subjects.name", `%${q}%`);
+  if (isSearching) {
+    query = query.in("subject_id", matchedSubjectIds);
   }
 
   query = query.order("year", { ascending: false }).order("round", { ascending: false });
@@ -74,7 +90,7 @@ export default async function Home({
   const from = (currentPage - 1) * PAGE_SIZE;
   query = query.range(from, from + PAGE_SIZE - 1);
 
-  const skipMainQuery = choseongSearch && choseongMatchedSubjectIds?.length === 0;
+  const skipMainQuery = isSearching && matchedSubjectIds.length === 0;
 
   const [
     { data: examTypes },
@@ -207,8 +223,6 @@ export default async function Home({
             </Link>
           ))}
         </div>
-
-        <SubjectIndexTabs subjects={(subjects ?? []) as Subject[]} />
 
         <p className="text-sm text-zinc-500">
           총 {filteredCount ?? 0}개의 자료
