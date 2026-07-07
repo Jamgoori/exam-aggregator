@@ -120,21 +120,21 @@ export default async function Home({
 
         {/* pill을 flex-wrap으로 늘어놓으면 좁은 화면에서 한 줄에 안 들어가 3줄로
             쌓여 지저분해져서, 폭과 무관하게 항상 3칸을 유지하는 스탯 타일로 바꿨다. */}
-        <div className="grid w-full max-w-sm grid-cols-3 gap-2 text-center">
-          <div className="flex flex-col items-center gap-1 rounded-2xl border border-zinc-200 px-2 py-3">
-            <FileStack size={16} className="text-blue-500" />
-            <span className="text-[11px] text-zinc-500">총 자료 수</span>
-            <strong className="text-base tabular-nums">{totalCount ?? 0}건</strong>
+        <div className="grid w-full max-w-xs grid-cols-3 gap-1.5 text-center">
+          <div className="flex flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2">
+            <FileStack size={14} className="text-blue-500" />
+            <span className="text-[10px] text-zinc-500">총 자료 수</span>
+            <strong className="text-sm tabular-nums">{totalCount ?? 0}건</strong>
           </div>
-          <div className="flex flex-col items-center gap-1 rounded-2xl border border-zinc-200 px-2 py-3">
-            <Download size={16} className="text-blue-500" />
-            <span className="text-[11px] text-zinc-500">누적 다운로드</span>
-            <strong className="text-base tabular-nums">{totalDownloads ?? 0}회</strong>
+          <div className="flex flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2">
+            <Download size={14} className="text-blue-500" />
+            <span className="text-[10px] text-zinc-500">누적 다운로드</span>
+            <strong className="text-sm tabular-nums">{totalDownloads ?? 0}회</strong>
           </div>
-          <div className="flex flex-col items-center gap-1 rounded-2xl border border-zinc-200 px-2 py-3">
-            <Users size={16} className="text-blue-500" />
-            <span className="text-[11px] text-zinc-500">실시간 응시 수</span>
-            <strong className="text-base tabular-nums">{totalAttempts ?? 0}건</strong>
+          <div className="flex flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2">
+            <Users size={14} className="text-blue-500" />
+            <span className="text-[10px] text-zinc-500">실시간 응시 수</span>
+            <strong className="text-sm tabular-nums">{totalAttempts ?? 0}건</strong>
           </div>
         </div>
       </section>
