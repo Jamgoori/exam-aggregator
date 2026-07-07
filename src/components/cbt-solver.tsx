@@ -18,7 +18,11 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { setDefaultCbtViewMode } from "@/app/actions";
-import { submitCbtAttempt, type CbtSubmitResult } from "@/app/papers/actions";
+import {
+  startCbtAttempt,
+  submitCbtAttempt,
+  type CbtSubmitResult,
+} from "@/app/papers/actions";
 import type { DrawTool } from "@/components/pdf-canvas-viewer";
 import { SingleQuestionView } from "@/components/single-question-view";
 import { formatDuration } from "@/lib/format";
@@ -110,15 +114,18 @@ export function CbtSolver({
   }
 
   // 페이지에 들어오면 곧바로 재기 시작하는 대신 5초 카운트다운을 보여주고, 그
-  // 카운트다운이 끝나는 시점부터 실제 풀이 시간을 잰다.
+  // 카운트다운이 끝나는 시점부터 실제 풀이 시간을 잰다. 동시에 서버에도 시작 시각을
+  // 기록해서(startCbtAttempt), 채점 시 최소 응시시간(3분)을 클라이언트가 조작할 수
+  // 없는 기준으로 검증할 수 있게 한다.
   useEffect(() => {
     if (countdown <= 0) {
       startedAtRef.current = Date.now();
+      startCbtAttempt(paperId);
       return;
     }
     const timeout = setTimeout(() => setCountdown((c) => c - 1), 1000);
     return () => clearTimeout(timeout);
-  }, [countdown]);
+  }, [countdown, paperId]);
 
   const registerClearDrawing = useCallback((clear: () => void) => {
     clearDrawingRef.current = clear;
@@ -296,7 +303,6 @@ export function CbtSolver({
       const res = await submitCbtAttempt({
         paperId,
         answers,
-        durationSeconds: Math.floor((Date.now() - startedAtRef.current) / 1000),
       });
       if (res.error) {
         setError(res.error);
