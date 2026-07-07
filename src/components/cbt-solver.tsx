@@ -571,6 +571,7 @@ export function CbtSolver({
                 tool={tool}
                 penColor={penColor}
                 zoom={zoom}
+                active={viewMode === "full"}
                 onClearReady={registerClearDrawing}
               />
               {/* 모바일은 헤더가 좁아 데스크톱용 줌 버튼을 넣기 어려워, 시험지 위에

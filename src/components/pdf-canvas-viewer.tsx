@@ -74,6 +74,7 @@ export function PdfCanvasViewer({
   tool,
   penColor,
   zoom = 1,
+  active = true,
   onClearReady,
 }: {
   fileUrl: string;
@@ -82,6 +83,11 @@ export function PdfCanvasViewer({
   // 시험지(PDF)에만 적용되는 확대 배율. OMR 패널 등 나머지 UI는 이 값과 무관하게
   // 그대로 유지된다.
   zoom?: number;
+  // 이 뷰어가 지금 화면에 보이는지(전체보기 탭인지). 문제별 풀기 탭에서는 부모가
+  // display:none으로 감춰두는데, 그 상태에서 전체보기로 전환될 때 조상의 display
+  // 토글을 ResizeObserver가 놓치는 경우가 있어("불러오는 중"에서 멈춤), 보이게 되는
+  // 순간 직접 폭을 재서 렌더를 트리거하기 위한 값이다.
+  active?: boolean;
   // next/dynamic(ssr:false)로 불러오는 컴포넌트는 일반 함수 컴포넌트로 감싸져서
   // ref가 전달되지 않으므로(useImperativeHandle을 못 씀), "지우기" 함수를 콜백으로
   // 등록받는 방식으로 부모에게 노출한다.
@@ -115,6 +121,23 @@ export function PdfCanvasViewer({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  // 문제별 풀기 → 전체보기로 전환돼 이 뷰어가 다시 보이게 되는 순간, ResizeObserver가
+  // 조상의 display:none→block 토글을 놓쳐 renderWidth가 0에 머무는 경우가 있다. 그러면
+  // 렌더 이펙트가 계속 early-return 해서 "불러오는 중"에서 멈춘다. 보이게 되는 시점에
+  // 직접 폭을 한 번 재서 렌더를 트리거해, ResizeObserver 발화 여부와 무관하게 그린다.
+  useEffect(() => {
+    if (!active) return;
+    const el = scrollWrapperRef.current;
+    if (!el) return;
+    const raf = requestAnimationFrame(() => {
+      const width = el.clientWidth;
+      if (width > 0) {
+        setRenderWidth((prev) => (Math.abs(prev - width) > 1 ? width : prev));
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [active]);
 
   useEffect(() => {
     toolRef.current = tool;
