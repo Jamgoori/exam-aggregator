@@ -83,10 +83,12 @@ export function CbtSolver({
   const [zoom, setZoom] = useState(1);
   const pdfWrapperRef = useRef<HTMLDivElement>(null);
   const hasQuestionImages = Object.keys(questionImages).length > 0;
-  // 계정에 저장된 기본 시작 모드가 "문제별 풀기"여도, 이 문제지에 문항별 이미지가
-  // 아직 없으면 그 탭 자체가 막혀 있으니 전체보기로 시작한다.
+  // 사이트 기본값은 "문제별 풀기"다. 계정에 "전체보기"가 명시적으로 잠겨 있으면
+  // 그걸 따르고, 그 외에는(잠긴 게 없거나 "문제별 풀기"로 잠겨 있으면) 문제별
+  // 풀기로 시작한다. 다만 이 문제지에 문항별 이미지가 아직 없으면 그 탭 자체가
+  // 막혀 있으니 전체보기로 시작한다.
   const [viewMode, setViewMode] = useState<"full" | "single">(
-    defaultViewMode === "single" && hasQuestionImages ? "single" : "full",
+    defaultViewMode === "full" ? "full" : hasQuestionImages ? "single" : "full",
   );
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [savedDefaultViewMode, setSavedDefaultViewMode] = useState(defaultViewMode);
