@@ -4,10 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { Pagination } from "@/components/pagination";
 import { SearchInput } from "@/components/search-input";
+import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { levelColor } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { isChoseongQuery, matchesChoseong } from "@/lib/hangul";
-import type { ExamPaper, ExamType } from "@/lib/supabase/types";
+import type { ExamPaper, Subject } from "@/lib/supabase/types";
 
 const PAGE_SIZE = 24;
 const LEVELS = ["9급", "7급"];
@@ -25,16 +26,15 @@ export default async function Home({
   searchParams,
 }: {
   searchParams: Promise<{
-    type?: string;
     level?: string;
     q?: string;
     page?: string;
   }>;
 }) {
-  const { type, level, q, page } = await searchParams;
+  const { level, q, page } = await searchParams;
   const currentPage = Math.max(1, Number(page) || 1);
   const supabase = await createClient();
-  const baseParams = { type, level, q };
+  const baseParams = { level, q };
 
   // 회독 배지 표시용 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — 실제
   // cbt_attempts 조회는 RLS가 본인 것만 돌려주므로 인증 서버 왕복(getUser)이 필요 없다.
@@ -75,9 +75,6 @@ export default async function Home({
     .from("exam_papers")
     .select("*, subjects!inner(*), exam_types!inner(*)", { count: "exact" });
 
-  if (type) {
-    query = query.eq("exam_types.name", type);
-  }
   if (level) {
     query = query.eq("level", level);
   }
@@ -93,14 +90,12 @@ export default async function Home({
   const skipMainQuery = isSearching && matchedSubjectIds.length === 0;
 
   const [
-    { data: examTypes },
     mainResult,
     { count: totalCount },
     { data: totalDownloads },
     { data: totalAttempts },
     myRoundCounts,
   ] = await Promise.all([
-    supabase.from("exam_types").select("*").order("display_order"),
     skipMainQuery ? Promise.resolve({ data: [], count: 0 }) : query,
     supabase.from("exam_papers").select("*", { count: "exact", head: true }),
     supabase.rpc("total_download_count"),
@@ -169,35 +164,6 @@ export default async function Home({
       </section>
 
       <section className="flex flex-col gap-4">
-        {/* 시험 종류가 늘어나면서 한 줄로 감싸면(flex-wrap) 4줄까지 늘어져 지저분해져서,
-            2줄 고정 후 가로 스크롤로 바꿨다. grid-flow-col + grid-rows-2가 항목을
-            위→아래가 아니라 왼쪽→오른쪽으로 2개씩 채워서 스크롤 방향과 자연스럽게 맞는다. */}
-        <div className="no-scrollbar grid grid-flow-col grid-rows-2 gap-2 overflow-x-auto pb-1">
-          <Link
-            href={buildHomeHref({ ...baseParams, type: undefined })}
-            className={`whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium ${
-              !type
-                ? "bg-blue-600 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
-            }`}
-          >
-            전체
-          </Link>
-          {((examTypes ?? []) as ExamType[]).map((t) => (
-            <Link
-              key={t.id}
-              href={buildHomeHref({ ...baseParams, type: t.name })}
-              className={`whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium ${
-                type === t.name
-                  ? "bg-blue-600 text-white"
-                  : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
-              }`}
-            >
-              {t.name}
-            </Link>
-          ))}
-        </div>
-
         <div className="flex flex-wrap gap-2">
           <Link
             href={buildHomeHref({ ...baseParams, level: undefined })}
@@ -223,6 +189,8 @@ export default async function Home({
             </Link>
           ))}
         </div>
+
+        <SubjectIndexTabs subjects={(subjects ?? []) as Subject[]} />
 
         <p className="text-sm text-zinc-500">
           총 {filteredCount ?? 0}개의 자료
