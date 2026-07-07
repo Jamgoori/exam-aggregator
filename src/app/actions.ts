@@ -134,6 +134,11 @@ export async function signUpUser(input: {
     const isDuplicate = /already registered|already exists|already in use/i.test(
       error.message,
     );
+    // 사용자에게는 뭉뚱그린 안내만 보여주지만, 실제 원인(이메일 확인 메일 발송 실패,
+    // 유출 비밀번호 차단, rate limit 등)은 서버 로그로 남겨서 대시보드 설정을 추적할 수 있게 한다.
+    if (!isDuplicate) {
+      console.error("signUpUser: supabase.auth.signUp failed", error);
+    }
     return {
       success: false,
       field: isDuplicate ? "username" : "general",
