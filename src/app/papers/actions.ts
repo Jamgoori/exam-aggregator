@@ -331,6 +331,42 @@ export async function submitCbtAttempt(input: {
   const submitted = Array.isArray(input.answers) ? input.answers : [];
   const durationSeconds = Math.max(0, Math.round(Number(input.durationSeconds) || 0));
 
+  // 회독 배지가 "제출 횟수"만 세다 보니, 한 문제도 안 고르고 연타로 제출해 회독수만
+  // 올리는 게 가능했다. 두 가지로 막는다: (1) 아예 아무것도 안 고른 제출은 거부,
+  // (2) 같은 문제지를 너무 빨리 다시 채점하는 것도 문항 수에 비례한 최소 간격으로
+  // 막는다 — durationSeconds는 클라이언트가 보내는 값이라 조작될 수 있으므로, 서버가
+  // 직접 기록한 cbt_attempts.created_at(직전 제출 시각)을 기준으로 판단한다.
+  const answeredCount = submitted.filter((a) => typeof a === "number").length;
+  if (answeredCount === 0) {
+    return { error: "적어도 한 문제는 답을 골라야 채점할 수 있어요." };
+  }
+
+  const MIN_COOLDOWN_SECONDS = 15;
+  const SECONDS_PER_QUESTION = 2;
+  const cooldownSeconds = Math.max(
+    MIN_COOLDOWN_SECONDS,
+    totalQuestions * SECONDS_PER_QUESTION,
+  );
+  const { data: lastAttempt } = await supabase
+    .from("cbt_attempts")
+    .select("created_at")
+    .eq("user_id", user.id)
+    .eq("paper_id", paperId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lastAttempt) {
+    const elapsedSeconds =
+      (Date.now() - new Date(lastAttempt.created_at).getTime()) / 1000;
+    if (elapsedSeconds < cooldownSeconds) {
+      const waitSeconds = Math.ceil(cooldownSeconds - elapsedSeconds);
+      return {
+        error: `너무 빨리 다시 채점하려고 해요. ${waitSeconds}초 후에 다시 시도해주세요.`,
+      };
+    }
+  }
+
   let score = 0;
   const questionResults: CbtQuestionResult[] = [];
   for (let i = 0; i < totalQuestions; i++) {
