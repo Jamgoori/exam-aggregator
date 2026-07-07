@@ -99,7 +99,7 @@ export default async function Home({
   const latestYear = (papers as ExamPaper[] | null)?.[0]?.year;
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 py-12">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-10 px-4 pt-6 pb-12 sm:pt-12">
       <section className="flex flex-col items-start gap-4">
         <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600">
           {latestYear
