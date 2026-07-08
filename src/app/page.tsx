@@ -4,7 +4,7 @@ import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getAllCbtAvailability } from "@/lib/cbt-availability";
 import { getHomeStats } from "@/lib/home-stats";
-import type { LightPaper } from "@/lib/paper-search";
+import { fetchAllExamPapers } from "@/lib/all-papers";
 import type { Subject } from "@/lib/supabase/types";
 
 export default async function Home({
@@ -30,18 +30,14 @@ export default async function Home({
   // 필터링에 충분하다 — 1900여 건이라 gzip 후 수백KB 이내라 부담 없다).
   const [
     { data: subjects },
-    { data: allPapersRaw },
+    allPapers,
     homeStats,
     myRoundCounts,
     bookmarkedIds,
     cbtAvailability,
   ] = await Promise.all([
     supabase.from("subjects").select("*").order("name"),
-    supabase
-      .from("exam_papers")
-      .select("id, title, level, year, round, subject_id, subjects(id, name, slug)")
-      .order("year", { ascending: false })
-      .order("round", { ascending: false }),
+    fetchAllExamPapers(supabase),
     getHomeStats(),
     userId
       ? getMyRoundCounts(supabase, userId)
@@ -53,7 +49,6 @@ export default async function Home({
   ]);
   const { totalCount, totalDownloads, totalAttempts } = homeStats;
 
-  const allPapers = (allPapersRaw ?? []) as unknown as LightPaper[];
   const latestYear = allPapers[0]?.year;
 
   return (
