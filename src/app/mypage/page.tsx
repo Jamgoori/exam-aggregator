@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@/lib/format";
-import { accountLabel } from "@/lib/username";
 import type { ExamPaper } from "@/lib/supabase/types";
 
 // 오답노트는 문항별 정답/오답 이미지를 모아 보여줘야 해서 더 큰 작업이라 별도로 남겨둠.
@@ -106,7 +105,6 @@ export default async function MyPage({
         </Link>
         <h1 className="mt-2 text-3xl font-semibold">{nickname}님의 마이페이지</h1>
         <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500">
-          <span>{accountLabel(user)}</span>
           <Link href="/mypage/edit" className="text-blue-600 hover:underline">
             내 정보 수정
           </Link>
@@ -114,10 +112,6 @@ export default async function MyPage({
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
-          <span className="text-xs text-zinc-500">즐겨찾기</span>
-          <span className="text-xl font-semibold">{bookmarkedPapers.length}</span>
-        </div>
         <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
           <span className="text-xs text-zinc-500">CBT 응시</span>
           <span className="text-xl font-semibold">{myAttempts.length}</span>
