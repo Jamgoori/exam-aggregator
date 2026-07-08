@@ -11,6 +11,7 @@ export type LightPaper = {
   year: number;
   round: number;
   subject_id: string;
+  exam_type_id: string;
   subjects: { id: string; name: string; slug: string } | null;
 };
 

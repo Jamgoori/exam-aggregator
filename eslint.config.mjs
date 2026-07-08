@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // 정적 에셋 디렉터리. pdf.worker.min.mjs 등 외부에서 그대로 가져온(vendored)
+    // 미니파이 파일이 들어있어 린트 대상이 아니다.
+    "public/**",
   ]),
 ]);
 
