@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 
 export async function login(formData: FormData) {
@@ -109,6 +109,9 @@ export async function uploadExamPaper(
   }
 
   revalidatePath("/", "layout");
+  // 홈의 전역 데이터 캐시(문제지 목록 등)를 갱신해 새 업로드가 반영되게 한다.
+  // "max" = stale-while-revalidate (예전 값을 즉시 주고 뒤에서 새로 받아 교체).
+  revalidateTag("home-data", "max");
   return { success: true };
 }
 
@@ -173,5 +176,7 @@ export async function savePaperAnswers(
 
   revalidatePath(`/admin/answers/${paperId}`);
   revalidatePath("/admin/answers");
+  // 정답이 새로 생기면 홈의 "바로 풀기"(CBT 가능) 목록이 바뀌므로 홈 캐시도 갱신.
+  revalidateTag("home-data", "max");
   return { success: true };
 }
