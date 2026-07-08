@@ -386,6 +386,21 @@ $$;
 
 grant execute on function has_cbt_answers_bulk(uuid[]) to anon, authenticated;
 
+-- 홈 화면 검색을 서버 왕복 없이 클라이언트에서 즉시 필터링하도록 바꾸면서, 화면에
+-- 보이는 문제지 id를 미리 알 수 없어졌다(필터링 자체가 클라이언트에서 일어나므로).
+-- 그래서 "바로 풀기" 가능 여부를 문제지 전체에 대해 한 번에 다 받아둔다.
+create or replace function has_cbt_answers_all()
+returns table (paper_id uuid)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select paper_answers.paper_id from paper_answers;
+$$;
+
+grant execute on function has_cbt_answers_all() to anon, authenticated;
+
 -- 공통 지문(예: "다음 글을 읽고 5~7번에 답하시오"): 문제 여러 개가 지문 하나를 공유할 때,
 -- 지문 이미지를 문제마다 중복 저장하지 않고 한 번만 저장해서 questions.passage_id로 참조한다.
 create table if not exists question_passages (
