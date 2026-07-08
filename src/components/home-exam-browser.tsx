@@ -109,7 +109,22 @@ export function HomeExamBrowser({
 }) {
   const [query, setQuery] = useState(initialQuery);
   const [level, setLevel] = useState(initialLevel);
-  const [page, setPage] = useState(initialPage);
+  // 페이지 이동은 서버 왕복을 피하려고 라우터 대신 history.replaceState로만 URL을
+  // 바꾼다(아래 useEffect). 그래서 Next 라우터는 page 값을 모르고, 카드 → 문제
+  // 상세로 갔다가 뒤로 오면 이 컴포넌트가 다시 마운트되면서 서버가 넘겨준
+  // initialPage(캐시상 보통 1)로 되돌아가 버렸다. 브라우저는 뒤로가기 때 그 히스토리
+  // 항목의 URL(?page=3)을 복원해주므로, 마운트 시 실제 URL의 page를 먼저 읽어
+  // 원래 보던 페이지로 복귀시킨다. (SSR 최초 로드 땐 URL과 initialPage가 같은
+  // searchParams에서 나오므로 하이드레이션 불일치가 없다.)
+  const [page, setPage] = useState(() => {
+    if (typeof window !== "undefined") {
+      const fromUrl = Number(
+        new URLSearchParams(window.location.search).get("page"),
+      );
+      if (Number.isInteger(fromUrl) && fromUrl > 0) return fromUrl;
+    }
+    return initialPage;
+  });
 
   const bookmarkedSet = useMemo(() => new Set(bookmarkedIds), [bookmarkedIds]);
   const cbtAvailableSet = useMemo(() => new Set(cbtAvailableIds), [cbtAvailableIds]);
