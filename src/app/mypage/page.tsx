@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
+import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@/lib/format";
 import { accountLabel } from "@/lib/username";
 import type { ExamPaper } from "@/lib/supabase/types";
@@ -63,6 +64,11 @@ export default async function MyPage({
   )
     .map((r) => r.exam_papers)
     .filter((p): p is ExamPaper => p !== null);
+
+  const cbtAvailability = await getCbtAvailability(
+    supabase,
+    bookmarkedPapers.map((p) => p.id),
+  );
 
   const myAttempts = (attemptRows ?? []) as unknown as {
     id: string;
@@ -152,6 +158,9 @@ export default async function MyPage({
                   key={paper.id}
                   paper={paper}
                   myRoundCount={attemptsByPaper.get(paper.id)?.length}
+                  isBookmarked
+                  loggedIn
+                  hasCbtAnswers={cbtAvailability.has(paper.id)}
                 />
               ))}
             </div>
