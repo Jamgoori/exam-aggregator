@@ -39,7 +39,14 @@ const PdfCanvasViewer = dynamic(
   { ssr: false },
 );
 
-const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
+const PEN_COLORS = [
+  "#111827",
+  "#ef4444",
+  "#2563eb",
+  "#166534",
+  "#1e3a8a",
+  "#78350f",
+];
 
 // 자물쇠 버튼 안내 말풍선을 "다시 보지 않기"로 닫으면 이 기기/브라우저에 그 사실을
 // 남겨두는 키. 계정(user_metadata)이 아니라 로컬에만 남기는 이유는, 이건 실제 설정값이
@@ -535,7 +542,7 @@ export function CbtSolver({
   
         {tool !== "move" && (
           <div>
-            <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-1.5">
+            <div className="mx-auto flex max-w-7xl items-center gap-2 overflow-x-auto px-4 py-1.5">
               {tool === "pen" &&
                 PEN_COLORS.map((color) => (
                   <button
@@ -544,13 +551,13 @@ export function CbtSolver({
                     aria-label="펜 색상"
                     onClick={() => setPenColor(color)}
                     style={{ backgroundColor: color }}
-                    className={`h-5 w-5 rounded-full ${
+                    className={`h-5 w-5 shrink-0 rounded-full ${
                       penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
                     }`}
                   />
                 ))}
               {tool === "pen" && (
-                <div className="flex items-center gap-0.5 border-l border-zinc-200 pl-2">
+                <div className="flex shrink-0 items-center gap-0.5 border-l border-zinc-200 pl-2">
                   {PEN_WIDTH_PRESETS.map((width) => (
                     <button
                       key={width}
@@ -558,7 +565,7 @@ export function CbtSolver({
                       aria-label={`펜 굵기 ${width}`}
                       aria-pressed={penWidth === width}
                       onClick={() => setPenWidth(width)}
-                      className={`flex h-6 w-6 items-center justify-center rounded-full ${
+                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
                         penWidth === width ? "bg-zinc-200" : "hover:bg-zinc-100"
                       }`}
                     >
@@ -575,17 +582,18 @@ export function CbtSolver({
                 </div>
               )}
               {tool === "eraser" && (
-                <p className="text-xs text-zinc-400">
+                <p className="shrink-0 text-xs text-zinc-400">
                   드래그한 부분만 지워져요
                 </p>
               )}
               <button
                 type="button"
                 onClick={clearDrawing}
-                className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
+                aria-label="전체 지우기"
+                className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-zinc-500 hover:text-zinc-700"
               >
                 <Trash2 size={14} />
-                전체 지우기
+                <span className="hidden sm:inline">전체 지우기</span>
               </button>
             </div>
           </div>
