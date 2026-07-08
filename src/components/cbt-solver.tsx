@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
+  ChevronDown,
   ChevronLeft,
   Clock,
   Eraser,
@@ -599,11 +600,15 @@ export function CbtSolver({
                     aria-label="펜 굵기 선택"
                     aria-expanded={widthMenuOpen}
                     onClick={() => setWidthMenuOpen((v) => !v)}
-                    className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-zinc-100"
+                    className="flex h-6 items-center gap-0.5 rounded-full px-1 hover:bg-zinc-100"
                   >
                     <span
                       className="rounded-full bg-zinc-500"
                       style={{ width: penWidth + 2, height: penWidth + 2 }}
+                    />
+                    <ChevronDown
+                      size={12}
+                      className={`text-zinc-400 transition-transform ${widthMenuOpen ? "rotate-180" : ""}`}
                     />
                   </button>
                   {widthMenuOpen && (
