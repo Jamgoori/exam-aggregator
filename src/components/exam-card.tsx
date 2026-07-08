@@ -111,8 +111,8 @@ export function ExamCard({
       <p className="font-medium leading-snug">{paper.title}</p>
 
       {!isCurrent && (
-        <div className="mt-auto flex items-center justify-end border-t border-zinc-100 pt-3 text-xs">
-          {hasCbtAnswers ? (
+        <div className="mt-auto flex items-center border-t border-zinc-100 pt-3 text-xs">
+          {hasCbtAnswers && (
             // 카드 전체 링크(상세페이지)와 다른 목적지로 가야 해서 z-10으로 그
             // 위에서 따로 클릭되게 한다. "자세히 보기"는 목적지가 같으므로
             // 그대로 아래 카드 전체 링크에 맡긴다.
@@ -123,12 +123,11 @@ export function ExamCard({
               <Monitor size={14} />
               바로 풀기
             </Link>
-          ) : (
-            <span className="flex items-center gap-1 font-medium text-blue-600">
-              자세히 보기
-              <ChevronRight size={14} />
-            </span>
           )}
+          <span className="ml-auto flex items-center gap-1 font-medium text-blue-600">
+            자세히 보기
+            <ChevronRight size={14} />
+          </span>
         </div>
       )}
     </div>
