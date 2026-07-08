@@ -7,6 +7,8 @@ import { SearchInput } from "@/components/search-input";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { levelColor } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
+import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
+import { getCbtAvailability } from "@/lib/cbt-availability";
 import { isChoseongQuery, matchesChoseong } from "@/lib/hangul";
 import type { ExamPaper, Subject } from "@/lib/supabase/types";
 
@@ -106,6 +108,17 @@ export default async function Home({
   ]);
   const { data: papers, count: filteredCount } = mainResult;
 
+  // 카드 목록이 정해진 뒤에야 그 문제지들의 id를 알 수 있어서(북마크/CBT 가능
+  // 여부는 화면에 보이는 문제지 범위로만 배치 조회한다), 메인 조회와 병렬로
+  // 묶지 않고 그 다음 단계에서 한 번 더 병렬 조회한다.
+  const paperIds = ((papers as ExamPaper[] | null) ?? []).map((p) => p.id);
+  const [bookmarkedIds, cbtAvailability] = await Promise.all([
+    userId
+      ? getMyBookmarkedPaperIds(supabase, userId, paperIds)
+      : Promise.resolve(new Set<string>()),
+    getCbtAvailability(supabase, paperIds),
+  ]);
+
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
   const latestYear = (papers as ExamPaper[] | null)?.[0]?.year;
 
@@ -204,6 +217,9 @@ export default async function Home({
               paper={paper}
               linkLevel={level}
               myRoundCount={myRoundCounts.get(paper.id)}
+              isBookmarked={bookmarkedIds.has(paper.id)}
+              loggedIn={!!userId}
+              hasCbtAnswers={cbtAvailability.has(paper.id)}
             />
           ))}
           {((papers as ExamPaper[] | null) ?? []).length === 0 && (

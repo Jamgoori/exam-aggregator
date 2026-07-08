@@ -369,6 +369,23 @@ $$;
 
 grant execute on function has_cbt_answers(uuid) to anon, authenticated;
 
+-- 문제지 목록(홈/과목별/즐겨찾기/같은 과목 목록) 카드에서 "바로 풀기" 버튼을 보여줄지
+-- 한 번에 판단하기 위한 배치 버전. 화면에 보이는 문제지 id들만 넘겨 그중 CBT 정답이
+-- 있는 것만 돌려준다(전체 paper_answers를 스캔하지 않음).
+create or replace function has_cbt_answers_bulk(target_paper_ids uuid[])
+returns table (paper_id uuid)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select paper_answers.paper_id
+  from paper_answers
+  where paper_answers.paper_id = any(target_paper_ids);
+$$;
+
+grant execute on function has_cbt_answers_bulk(uuid[]) to anon, authenticated;
+
 -- 공통 지문(예: "다음 글을 읽고 5~7번에 답하시오"): 문제 여러 개가 지문 하나를 공유할 때,
 -- 지문 이미지를 문제마다 중복 저장하지 않고 한 번만 저장해서 questions.passage_id로 참조한다.
 create table if not exists question_passages (

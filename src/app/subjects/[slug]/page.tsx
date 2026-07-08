@@ -6,6 +6,8 @@ import { ExamCard } from "@/components/exam-card";
 import { Pagination } from "@/components/pagination";
 import { levelColor, compareLevels } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
+import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
+import { getCbtAvailability } from "@/lib/cbt-availability";
 import type { ExamPaper, Subject } from "@/lib/supabase/types";
 import type { Metadata } from "next";
 
@@ -87,6 +89,16 @@ export default async function SubjectPage({
     ),
   ].sort(compareLevels);
   const filteredPapers = (papers ?? []) as ExamPaper[];
+
+  // 카드 목록이 정해진 뒤에야 그 문제지들의 id를 알 수 있어서, 메인 조회와
+  // 병렬로 묶지 않고 그 다음 단계에서 한 번 더 병렬 조회한다.
+  const filteredPaperIds = filteredPapers.map((p) => p.id);
+  const [bookmarkedIds, cbtAvailability] = await Promise.all([
+    userId
+      ? getMyBookmarkedPaperIds(supabase, userId, filteredPaperIds)
+      : Promise.resolve(new Set<string>()),
+    getCbtAvailability(supabase, filteredPaperIds),
+  ]);
   const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
 
   return (
@@ -142,6 +154,9 @@ export default async function SubjectPage({
             paper={paper}
             linkLevel={level}
             myRoundCount={myRoundCounts.get(paper.id)}
+            isBookmarked={bookmarkedIds.has(paper.id)}
+            loggedIn={!!userId}
+            hasCbtAnswers={cbtAvailability.has(paper.id)}
           />
         ))}
       </div>

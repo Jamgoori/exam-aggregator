@@ -16,6 +16,8 @@ import {
   type RoundAverage,
 } from "@/components/my-cbt-record-modal";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
+import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
+import { getCbtAvailability } from "@/lib/cbt-availability";
 import type { AnswerKey, Comment, ExamPaper } from "@/lib/supabase/types";
 import type { Metadata } from "next";
 
@@ -206,6 +208,19 @@ export default async function PaperDetailPage({
   const subject = typedPaper.subjects;
   const examType = typedPaper.exam_types;
   const fileSize = formatFileSize(typedPaper.file_size);
+
+  // "같은 과목 목록" 카드에 북마크/바로풀기를 달아주기 위한 배치 조회. subjectPapers의
+  // id는 위 Promise.all이 끝나야 알 수 있어서 그 안에 묶지 못하고 여기서 한 번 더
+  // 병렬 조회한다(현재 보는 문제지 자신은 카드에서 두 기능 다 안 쓰니 제외).
+  const subjectPaperIds = ((subjectPapers as ExamPaper[] | null) ?? [])
+    .map((p) => p.id)
+    .filter((pid) => pid !== typedPaper.id);
+  const [subjectBookmarkedIds, subjectCbtAvailability] = await Promise.all([
+    userId
+      ? getMyBookmarkedPaperIds(supabase, userId, subjectPaperIds)
+      : Promise.resolve(new Set<string>()),
+    getCbtAvailability(supabase, subjectPaperIds),
+  ]);
 
   // "열기"는 브라우저 내장 뷰어로 바로 보여주는 원본 URL (다운로드 카운트 미반영),
   // "다운로드"는 /download 라우트를 거쳐 실제 파일 저장 + 카운트 반영
@@ -419,6 +434,9 @@ export default async function PaperDetailPage({
                       isCurrent={p.id === typedPaper.id}
                       linkLevel={level}
                       myRoundCount={myRoundCounts.get(p.id)}
+                      isBookmarked={subjectBookmarkedIds.has(p.id)}
+                      loggedIn={loggedIn}
+                      hasCbtAnswers={subjectCbtAvailability.has(p.id)}
                     />
                   ))}
                 </div>
