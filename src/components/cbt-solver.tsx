@@ -12,7 +12,6 @@ import {
   Lock,
   LockOpen,
   PenLine,
-  Plus,
   Trash2,
   Trophy,
   X,
@@ -66,6 +65,29 @@ const PALETTE_PRESETS = [
   "#1e3a8a",
   "#6b7280",
 ];
+
+// 팔레트의 색상환+명도 슬라이더에서 고른 값을 hex로 바꾼다. 네이티브 OS 색상
+// 선택창(input type=color)은 기기마다 생김새가 완전히 달라 사이트 디자인과 안
+// 어울려서, 그 자리를 이 자체 제작 피커로 대신한다.
+function hsvToHex(h: number, s: number, v: number): string {
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const toHex = (n: number) =>
+    Math.round((n + m) * 255)
+      .toString(16)
+      .padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
 
 // 자물쇠 버튼 안내 말풍선을 "다시 보지 않기"로 닫으면 이 기기/브라우저에 그 사실을
 // 남겨두는 키. 계정(user_metadata)이 아니라 로컬에만 남기는 이유는, 이건 실제 설정값이
@@ -122,6 +144,43 @@ export function CbtSolver({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const widthMenuRef = useRef<HTMLDivElement>(null);
   const paletteMenuRef = useRef<HTMLDivElement>(null);
+  // 팔레트의 색상환(채도/명도 사각형 + 색상 슬라이더) 상태. customColor는 여기서
+  // 나온 hex 결과값만 반영하고, 되돌아왔을 때 손잡이 위치를 이어가려고 hue/채도/
+  // 명도를 따로 들고 있는다.
+  const [pickerHue, setPickerHue] = useState(265);
+  const [pickerSat, setPickerSat] = useState(0.7);
+  const [pickerVal, setPickerVal] = useState(0.85);
+  const svSquareRef = useRef<HTMLDivElement>(null);
+  const hueSliderRef = useRef<HTMLDivElement>(null);
+
+  function applyPickerColor(hue: number, sat: number, val: number) {
+    const hex = hsvToHex(hue, sat, val);
+    setCustomColor(hex);
+    setPenColor(hex);
+  }
+
+  function updateFromSquare(clientX: number, clientY: number) {
+    const el = svSquareRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (clientY - rect.top) / rect.height));
+    const nextSat = x;
+    const nextVal = 1 - y;
+    setPickerSat(nextSat);
+    setPickerVal(nextVal);
+    applyPickerColor(pickerHue, nextSat, nextVal);
+  }
+
+  function updateFromHueSlider(clientX: number) {
+    const el = hueSliderRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const nextHue = x * 360;
+    setPickerHue(nextHue);
+    applyPickerColor(nextHue, pickerSat, pickerVal);
+  }
 
   // 굵기/팔레트 드롭다운이 열려 있을 때 바깥을 누르면 닫는다.
   useEffect(() => {
@@ -640,41 +699,83 @@ export function CbtSolver({
                     )}
                   </button>
                   {paletteOpen && (
-                    <div className="absolute left-0 top-full z-30 mt-1 grid w-48 grid-cols-6 gap-2 rounded-xl border border-zinc-200 bg-white p-3 shadow-lg">
-                      {PALETTE_PRESETS.map((color) => (
-                        <button
-                          key={color}
-                          type="button"
-                          aria-label="팔레트 색상"
-                          aria-pressed={customColor === color}
-                          onClick={() => {
-                            setCustomColor(color);
-                            setPenColor(color);
-                            setPaletteOpen(false);
+                    <div className="absolute left-0 top-full z-30 mt-1 w-52 rounded-xl border border-zinc-200 bg-white p-3 shadow-lg">
+                      <div className="grid grid-cols-7 gap-1.5">
+                        {PALETTE_PRESETS.map((color) => (
+                          <button
+                            key={color}
+                            type="button"
+                            aria-label="팔레트 색상"
+                            aria-pressed={customColor === color}
+                            onClick={() => {
+                              setCustomColor(color);
+                              setPenColor(color);
+                              setPaletteOpen(false);
+                            }}
+                            style={{ backgroundColor: color }}
+                            className={`h-5 w-5 rounded-full ${
+                              customColor === color
+                                ? "ring-2 ring-offset-1 ring-zinc-400"
+                                : ""
+                            }`}
+                          />
+                        ))}
+                      </div>
+
+                      {/* 네이티브 OS 색상 선택창은 기기마다 생김새가 완전히 달라
+                          사이트 디자인과 어울리지 않아서, 채도/명도 사각형 + 색상
+                          슬라이더를 직접 구현했다. Pointer Capture로 손가락이
+                          사각형/슬라이더 밖으로 나가도 계속 그 조작으로 잡아둔다. */}
+                      <div
+                        ref={svSquareRef}
+                        onPointerDown={(e) => {
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                          updateFromSquare(e.clientX, e.clientY);
+                        }}
+                        onPointerMove={(e) => {
+                          if (e.buttons !== 1) return;
+                          updateFromSquare(e.clientX, e.clientY);
+                        }}
+                        style={{
+                          backgroundColor: `hsl(${pickerHue}, 100%, 50%)`,
+                          backgroundImage:
+                            "linear-gradient(to top, #000, transparent), linear-gradient(to right, #fff, transparent)",
+                        }}
+                        className="relative mt-3 h-28 w-full touch-none rounded-lg"
+                      >
+                        <span
+                          className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow"
+                          style={{
+                            left: `${pickerSat * 100}%`,
+                            top: `${(1 - pickerVal) * 100}%`,
+                            backgroundColor: customColor ?? PEN_COLORS[0],
                           }}
-                          style={{ backgroundColor: color }}
-                          className={`h-6 w-6 rounded-full ${
-                            customColor === color
-                              ? "ring-2 ring-offset-1 ring-zinc-400"
-                              : ""
-                          }`}
                         />
-                      ))}
-                      <div className="relative h-6 w-6">
-                        <input
-                          type="color"
-                          aria-label="색상 직접 선택"
-                          value={customColor ?? "#000000"}
-                          onChange={(e) => {
-                            setCustomColor(e.target.value);
-                            setPenColor(e.target.value);
-                            setPaletteOpen(false);
+                      </div>
+
+                      <div
+                        ref={hueSliderRef}
+                        onPointerDown={(e) => {
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                          updateFromHueSlider(e.clientX);
+                        }}
+                        onPointerMove={(e) => {
+                          if (e.buttons !== 1) return;
+                          updateFromHueSlider(e.clientX);
+                        }}
+                        style={{
+                          background:
+                            "linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)",
+                        }}
+                        className="relative mt-3 h-3 w-full touch-none rounded-full"
+                      >
+                        <span
+                          className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow"
+                          style={{
+                            left: `${(pickerHue / 360) * 100}%`,
+                            backgroundColor: `hsl(${pickerHue}, 100%, 50%)`,
                           }}
-                          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                         />
-                        <span className="pointer-events-none flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-zinc-300 text-zinc-400">
-                          <Plus size={12} />
-                        </span>
                       </div>
                     </div>
                   )}
