@@ -304,10 +304,14 @@ export function CbtSolver({
     // 실제로 눌러봤다는 건 이미 기능을 파악했다는 뜻이므로, 체크 여부와 무관하게
     // 안내를 다시 띄우지 않는다.
     if (lockHintVisible) dismissLockHint(true);
+    const previousDefault = savedDefaultViewMode;
     const nextDefault = isDefaultViewModeLocked ? null : viewMode;
+    // 서버 응답을 기다리지 않고 즉시 아이콘부터 바꾼다(낙관적 업데이트). 실패하면
+    // 원래 상태로 되돌린다.
+    setSavedDefaultViewMode(nextDefault);
     startSavingDefault(async () => {
       const res = await setDefaultCbtViewMode(nextDefault);
-      if (!res.error) setSavedDefaultViewMode(nextDefault);
+      if (res.error) setSavedDefaultViewMode(previousDefault);
     });
   }
 

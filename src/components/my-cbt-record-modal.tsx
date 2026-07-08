@@ -111,7 +111,7 @@ export function MyCbtRecordModal({
                           </span>
                         </>
                       ) : (
-                        <span className="text-zinc-400">
+                        <span className="ml-auto text-zinc-400">
                           경쟁자 {a.round}회독 평균 데이터 수집중
                         </span>
                       )}

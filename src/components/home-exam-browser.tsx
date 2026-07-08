@@ -202,7 +202,7 @@ export function HomeExamBrowser({
             {/* PC에서는 검색창만큼 폭이 넉넉해져 전체 문구가 한 줄로 들어가지만,
                 모바일 좁은 칸에서는 그대로 두면 줄바꿈되니 짧은 문구를 따로 쓴다. */}
             <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:hidden">
-              실시간 응시 수
+              실시간 총 응시수
             </span>
             <span className="hidden whitespace-nowrap text-sm font-medium text-zinc-600 sm:inline">
               실시간 총 응시 수

@@ -5,7 +5,6 @@ import { Download, ExternalLink, Monitor } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor, compareLevels } from "@/lib/level-colors";
-import { formatCount, formatFileSize } from "@/lib/format";
 import { DifficultyRating } from "@/components/difficulty-rating";
 import { CommentsSection } from "@/components/comments-section";
 import { ExamCard } from "@/components/exam-card";
@@ -207,7 +206,6 @@ export default async function PaperDetailPage({
 
   const subject = typedPaper.subjects;
   const examType = typedPaper.exam_types;
-  const fileSize = formatFileSize(typedPaper.file_size);
 
   // "같은 과목 목록" 카드에 북마크/바로풀기를 달아주기 위한 배치 조회. subjectPapers의
   // id는 위 Promise.all이 끝나야 알 수 있어서 그 안에 묶지 못하고 여기서 한 번 더
@@ -339,15 +337,11 @@ export default async function PaperDetailPage({
           </Link>
         )}
 
-        <div className="mt-1 flex items-center justify-between gap-2 text-xs text-zinc-400">
-          <span>
-            다운로드 {formatCount(typedPaper.download_count)}회
-            {fileSize ? ` · ${fileSize}` : ""}
-          </span>
-          {myCbtRecordItems.length > 0 && (
+        {myCbtRecordItems.length > 0 && (
+          <div className="mt-1 flex items-center justify-end gap-2 text-xs text-zinc-400">
             <MyCbtRecordModal attempts={myCbtRecordItems} roundAverages={roundAverages} />
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <DifficultyRating
