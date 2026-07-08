@@ -7,6 +7,26 @@
 
 import { createClient } from "@supabase/supabase-js";
 
+// PostgREST는 range()를 안 주면 한 번에 최대 1000행까지만 돌려준다(db.max_rows).
+// exam_papers와 has_cbt_answers_all()이 이미 1900여 건/1000여 건을 넘어서기 때문에,
+// 이 한도에 걸리면 뒷부분이 조용히 잘려서 이미 입력된 정답도 "미입력"으로 오판된다.
+// 1000건씩 끝까지 이어받아 진짜 전체를 모은다.
+const BATCH_SIZE = 1000;
+
+async function fetchAll(queryFn) {
+  const rows = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await queryFn().range(from, from + BATCH_SIZE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    if (data.length < BATCH_SIZE) break;
+    from += BATCH_SIZE;
+  }
+  return rows;
+}
+
 async function main() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -20,20 +40,19 @@ async function main() {
 
   const supabase = createClient(supabaseUrl, anonKey);
 
-  const [{ data: answerKeys, error: akError }, { data: papers, error: papersError }, { data: examTypes, error: etError }, { data: answeredRows, error: aError }] =
+  const [answerKeys, papers, { data: examTypes, error: etError }, answeredRows] =
     await Promise.all([
-      supabase.from("answer_keys").select("*"),
-      supabase
-        .from("exam_papers")
-        .select("id, title, exam_type_id, year, level, round, track, subjects(name)"),
+      fetchAll(() => supabase.from("answer_keys").select("*")),
+      fetchAll(() =>
+        supabase
+          .from("exam_papers")
+          .select("id, title, exam_type_id, year, level, round, track, subjects(name)"),
+      ),
       supabase.from("exam_types").select("id, name"),
-      supabase.rpc("has_cbt_answers_all"),
+      fetchAll(() => supabase.rpc("has_cbt_answers_all")),
     ]);
 
-  if (akError) throw akError;
-  if (papersError) throw papersError;
   if (etError) throw etError;
-  if (aError) throw aError;
 
   const examTypeById = new Map(examTypes.map((t) => [t.id, t.name]));
   const answeredPaperIds = new Set((answeredRows ?? []).map((r) => r.paper_id));
