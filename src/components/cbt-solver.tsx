@@ -12,6 +12,7 @@ import {
   Lock,
   LockOpen,
   PenLine,
+  Plus,
   Trash2,
   Trophy,
   X,
@@ -41,7 +42,30 @@ const PdfCanvasViewer = dynamic(
 );
 
 const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
-const DEFAULT_CUSTOM_COLOR = "#7c3aed";
+
+// 팔레트 트리거 아이콘의 무지개 링(아직 고른 색이 없을 때는 링 없이 이 그러데이션
+// 자체를 꽉 채워서 "눌러서 색을 골라보라"는 신호로 쓴다).
+const RAINBOW_GRADIENT =
+  "conic-gradient(from 0deg, #ef4444, #f97316, #eab308, #22c55e, #06b6d4, #6366f1, #ec4899, #ef4444)";
+
+// 검빨파 기본 3색 외에 팔레트에서 바로 고를 수 있는 색상들. 무지개 색상환을 고루
+// 훑도록 골랐고, 맨 끝의 "+"로 그 외의 임의의 색도 직접 지정할 수 있다.
+const PALETTE_PRESETS = [
+  "#f97316",
+  "#eab308",
+  "#84cc16",
+  "#16a34a",
+  "#0d9488",
+  "#0ea5e9",
+  "#4f46e5",
+  "#7c3aed",
+  "#a855f7",
+  "#ec4899",
+  "#f43f5e",
+  "#78350f",
+  "#1e3a8a",
+  "#6b7280",
+];
 
 // 자물쇠 버튼 안내 말풍선을 "다시 보지 않기"로 닫으면 이 기기/브라우저에 그 사실을
 // 남겨두는 키. 계정(user_metadata)이 아니라 로컬에만 남기는 이유는, 이건 실제 설정값이
@@ -89,13 +113,17 @@ export function CbtSolver({
   const startedAtRef = useRef(0);
   const [tool, setTool] = useState<DrawTool>("move");
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
-  // 기본 3색 외에 직접 고를 수 있는 색(팔레트 스와치에 마지막으로 고른 값을 보여준다).
-  const [customColor, setCustomColor] = useState(DEFAULT_CUSTOM_COLOR);
+  // 기본 3색 외에 팔레트에서 고른 색. 아직 한 번도 안 골랐으면 null이고, 트리거
+  // 아이콘은 그동안 무지개색 그대로 보여준다(첫 사용자에게 "여기서 더 고를 수
+  // 있다"는 신호). 한 번 고르고 나면 그 색을 계속 기억해서 다시 보여준다.
+  const [customColor, setCustomColor] = useState<string | null>(null);
   const [penWidth, setPenWidth] = useState(DEFAULT_PEN_WIDTH);
   const [widthMenuOpen, setWidthMenuOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const widthMenuRef = useRef<HTMLDivElement>(null);
+  const paletteMenuRef = useRef<HTMLDivElement>(null);
 
-  // 굵기 드롭다운이 열려 있을 때 바깥을 누르면 닫는다.
+  // 굵기/팔레트 드롭다운이 열려 있을 때 바깥을 누르면 닫는다.
   useEffect(() => {
     if (!widthMenuOpen) return;
     function handleClickOutside(e: MouseEvent) {
@@ -106,6 +134,17 @@ export function CbtSolver({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [widthMenuOpen]);
+
+  useEffect(() => {
+    if (!paletteOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (paletteMenuRef.current && !paletteMenuRef.current.contains(e.target as Node)) {
+        setPaletteOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [paletteOpen]);
   const clearDrawingRef = useRef<() => void>(() => {});
   const clearSingleDrawingRef = useRef<() => void>(() => {});
   const [zoom, setZoom] = useState(1);
@@ -568,26 +607,77 @@ export function CbtSolver({
                   />
                 ))}
               {tool === "pen" && (
-                // 기본 3색 외의 색은 여기서 직접 골라 쓴다. 네이티브 컬러피커(input
-                // type=color)를 스와치 위에 투명하게 겹쳐서, 스와치를 누르면 바로
-                // OS 색상 선택 UI가 뜨고 고른 색이 곧 펜 색이 된다.
-                <div className="relative h-5 w-5 shrink-0">
-                  <input
-                    type="color"
-                    aria-label="펜 사용자 지정 색상"
-                    value={customColor}
-                    onChange={(e) => {
-                      setCustomColor(e.target.value);
-                      setPenColor(e.target.value);
-                    }}
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                  />
-                  <span
-                    style={{ backgroundColor: customColor }}
-                    className={`pointer-events-none flex h-5 w-5 items-center justify-center rounded-full border border-zinc-300 ${
-                      penColor === customColor ? "ring-2 ring-offset-1 ring-zinc-400" : ""
-                    }`}
-                  />
+                // 기본 3색 외의 색은 여기 팔레트에서 고른다. 아직 안 골랐으면 트리거
+                // 아이콘 전체가 무지개색이라 "눌러서 더 골라보라"는 신호가 되고, 한 번
+                // 고르고 나면 그 색을 채운 원 + 무지개 테두리로 바뀐다(그림 3 참고).
+                <div ref={paletteMenuRef} className="relative shrink-0">
+                  <button
+                    type="button"
+                    aria-label="펜 팔레트 색상 선택"
+                    aria-expanded={paletteOpen}
+                    onClick={() => setPaletteOpen((v) => !v)}
+                    className="flex h-5 w-5 items-center justify-center rounded-full"
+                  >
+                    {customColor ? (
+                      <span
+                        style={{ background: RAINBOW_GRADIENT }}
+                        className={`flex h-5 w-5 items-center justify-center rounded-full p-[2px] ${
+                          penColor === customColor
+                            ? "ring-2 ring-offset-1 ring-zinc-400"
+                            : ""
+                        }`}
+                      >
+                        <span
+                          style={{ backgroundColor: customColor }}
+                          className="h-full w-full rounded-full border border-white"
+                        />
+                      </span>
+                    ) : (
+                      <span
+                        style={{ background: RAINBOW_GRADIENT }}
+                        className="h-5 w-5 rounded-full"
+                      />
+                    )}
+                  </button>
+                  {paletteOpen && (
+                    <div className="absolute left-0 top-full z-30 mt-1 grid w-48 grid-cols-6 gap-2 rounded-xl border border-zinc-200 bg-white p-3 shadow-lg">
+                      {PALETTE_PRESETS.map((color) => (
+                        <button
+                          key={color}
+                          type="button"
+                          aria-label="팔레트 색상"
+                          aria-pressed={customColor === color}
+                          onClick={() => {
+                            setCustomColor(color);
+                            setPenColor(color);
+                            setPaletteOpen(false);
+                          }}
+                          style={{ backgroundColor: color }}
+                          className={`h-6 w-6 rounded-full ${
+                            customColor === color
+                              ? "ring-2 ring-offset-1 ring-zinc-400"
+                              : ""
+                          }`}
+                        />
+                      ))}
+                      <div className="relative h-6 w-6">
+                        <input
+                          type="color"
+                          aria-label="색상 직접 선택"
+                          value={customColor ?? "#000000"}
+                          onChange={(e) => {
+                            setCustomColor(e.target.value);
+                            setPenColor(e.target.value);
+                            setPaletteOpen(false);
+                          }}
+                          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        />
+                        <span className="pointer-events-none flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-zinc-300 text-zinc-400">
+                          <Plus size={12} />
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {tool === "pen" && (
