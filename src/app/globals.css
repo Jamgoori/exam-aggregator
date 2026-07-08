@@ -168,3 +168,34 @@ button:not(:disabled) {
     badge-flash var(--badge-duration, 3s) ease-in-out infinite,
     badge-glow var(--badge-duration, 3s) ease-in-out infinite;
 }
+
+/* 페이지 전환 스켈레톤: 실제 콘텐츠와 같은 모양의 회색 블록 위로 옅은 파란빛
+   하이라이트가 대각선으로 훑고 지나가며 "곧 채워질 자리"라는 느낌을 준다.
+   순수 회색 sweep보다 사이트 브랜드 컬러(blue-600)와 이어지게 살짝 파란 톤을 섞었다. */
+@keyframes skeleton-sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #e4e4e7;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(219, 234, 254, 0.9) 48%,
+    rgba(255, 255, 255, 0.95) 52%,
+    rgba(219, 234, 254, 0.9) 56%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: skeleton-sweep 1.8s ease-in-out infinite;
+}
