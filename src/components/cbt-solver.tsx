@@ -23,7 +23,11 @@ import {
   submitCbtAttempt,
   type CbtSubmitResult,
 } from "@/app/papers/actions";
-import type { DrawTool } from "@/components/pdf-canvas-viewer";
+import {
+  DEFAULT_PEN_WIDTH,
+  PEN_WIDTH_PRESETS,
+  type DrawTool,
+} from "@/components/pdf-canvas-viewer";
 import { SingleQuestionView } from "@/components/single-question-view";
 import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
 import { formatDuration } from "@/lib/format";
@@ -83,6 +87,7 @@ export function CbtSolver({
   const startedAtRef = useRef(0);
   const [tool, setTool] = useState<DrawTool>("move");
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
+  const [penWidth, setPenWidth] = useState(DEFAULT_PEN_WIDTH);
   const clearDrawingRef = useRef<() => void>(() => {});
   const clearSingleDrawingRef = useRef<() => void>(() => {});
   const [zoom, setZoom] = useState(1);
@@ -196,6 +201,13 @@ export function CbtSolver({
 
   function zoomOut() {
     setZoom((z) => clampZoom(Math.round((z - ZOOM_STEP) * 100) / 100));
+  }
+
+  // 펜/지우개 도구 중에도 모바일에서 두 손가락으로 짚으면(핀치) 필기 대신 이
+  // 배율을 조절한다. factor는 PdfCanvasViewer가 넘겨주는, 직전 대비 손가락 간격
+  // 변화 비율이라 그대로 곱해서 반영한다.
+  function handlePinchZoom(factor: number) {
+    setZoom((z) => clampZoom(Math.round(z * factor * 100) / 100));
   }
 
   // 트랙패드 핀치줌/Ctrl+휠은 브라우저 기본 동작으로는 페이지 전체(시험지+OMR
@@ -537,6 +549,31 @@ export function CbtSolver({
                     }`}
                   />
                 ))}
+              {tool === "pen" && (
+                <div className="flex items-center gap-0.5 border-l border-zinc-200 pl-2">
+                  {PEN_WIDTH_PRESETS.map((width) => (
+                    <button
+                      key={width}
+                      type="button"
+                      aria-label={`펜 굵기 ${width}`}
+                      aria-pressed={penWidth === width}
+                      onClick={() => setPenWidth(width)}
+                      className={`flex h-6 w-6 items-center justify-center rounded-full ${
+                        penWidth === width ? "bg-zinc-200" : "hover:bg-zinc-100"
+                      }`}
+                    >
+                      <span
+                        className="rounded-full"
+                        style={{
+                          width: width + 2,
+                          height: width + 2,
+                          backgroundColor: penColor,
+                        }}
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
               {tool === "eraser" && (
                 <p className="text-xs text-zinc-400">
                   드래그한 부분만 지워져요
@@ -570,7 +607,9 @@ export function CbtSolver({
                 fileUrl={fileUrl}
                 tool={tool}
                 penColor={penColor}
+                penWidth={penWidth}
                 zoom={zoom}
+                onZoomChange={handlePinchZoom}
                 active={viewMode === "full"}
                 onClearReady={registerClearDrawing}
               />
@@ -612,6 +651,7 @@ export function CbtSolver({
                 }
                 tool={tool}
                 penColor={penColor}
+                penWidth={penWidth}
                 onClearReady={registerClearSingleDrawing}
                 onSubmit={handleSubmit}
                 submitting={isPending}
