@@ -39,14 +39,8 @@ const PdfCanvasViewer = dynamic(
   { ssr: false },
 );
 
-const PEN_COLORS = [
-  "#111827",
-  "#ef4444",
-  "#2563eb",
-  "#166534",
-  "#1e3a8a",
-  "#78350f",
-];
+const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
+const DEFAULT_CUSTOM_COLOR = "#7c3aed";
 
 // 자물쇠 버튼 안내 말풍선을 "다시 보지 않기"로 닫으면 이 기기/브라우저에 그 사실을
 // 남겨두는 키. 계정(user_metadata)이 아니라 로컬에만 남기는 이유는, 이건 실제 설정값이
@@ -94,7 +88,23 @@ export function CbtSolver({
   const startedAtRef = useRef(0);
   const [tool, setTool] = useState<DrawTool>("move");
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
+  // 기본 3색 외에 직접 고를 수 있는 색(팔레트 스와치에 마지막으로 고른 값을 보여준다).
+  const [customColor, setCustomColor] = useState(DEFAULT_CUSTOM_COLOR);
   const [penWidth, setPenWidth] = useState(DEFAULT_PEN_WIDTH);
+  const [widthMenuOpen, setWidthMenuOpen] = useState(false);
+  const widthMenuRef = useRef<HTMLDivElement>(null);
+
+  // 굵기 드롭다운이 열려 있을 때 바깥을 누르면 닫는다.
+  useEffect(() => {
+    if (!widthMenuOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (widthMenuRef.current && !widthMenuRef.current.contains(e.target as Node)) {
+        setWidthMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [widthMenuOpen]);
   const clearDrawingRef = useRef<() => void>(() => {});
   const clearSingleDrawingRef = useRef<() => void>(() => {});
   const [zoom, setZoom] = useState(1);
@@ -542,7 +552,7 @@ export function CbtSolver({
   
         {tool !== "move" && (
           <div>
-            <div className="mx-auto flex max-w-7xl items-center gap-2 overflow-x-auto px-4 py-1.5">
+            <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-1.5">
               {tool === "pen" &&
                 PEN_COLORS.map((color) => (
                   <button
@@ -557,24 +567,69 @@ export function CbtSolver({
                   />
                 ))}
               {tool === "pen" && (
-                <div className="flex shrink-0 items-center gap-1.5 border-l border-zinc-200 pl-2">
-                  {PEN_WIDTH_PRESETS.map((width) => (
-                    <button
-                      key={width}
-                      type="button"
-                      aria-label={`펜 굵기 ${width}`}
-                      aria-pressed={penWidth === width}
-                      onClick={() => setPenWidth(width)}
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                    >
-                      <span
-                        className={`rounded-full bg-zinc-500 ${
-                          penWidth === width ? "ring-2 ring-offset-1 ring-zinc-400" : ""
-                        }`}
-                        style={{ width: width + 2, height: width + 2 }}
-                      />
-                    </button>
-                  ))}
+                // 기본 3색 외의 색은 여기서 직접 골라 쓴다. 네이티브 컬러피커(input
+                // type=color)를 스와치 위에 투명하게 겹쳐서, 스와치를 누르면 바로
+                // OS 색상 선택 UI가 뜨고 고른 색이 곧 펜 색이 된다.
+                <div className="relative h-5 w-5 shrink-0">
+                  <input
+                    type="color"
+                    aria-label="펜 사용자 지정 색상"
+                    value={customColor}
+                    onChange={(e) => {
+                      setCustomColor(e.target.value);
+                      setPenColor(e.target.value);
+                    }}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  />
+                  <span
+                    style={{ backgroundColor: customColor }}
+                    className={`pointer-events-none flex h-5 w-5 items-center justify-center rounded-full border border-zinc-300 ${
+                      penColor === customColor ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                    }`}
+                  />
+                </div>
+              )}
+              {tool === "pen" && (
+                <div
+                  ref={widthMenuRef}
+                  className="relative shrink-0 border-l border-zinc-200 pl-2"
+                >
+                  <button
+                    type="button"
+                    aria-label="펜 굵기 선택"
+                    aria-expanded={widthMenuOpen}
+                    onClick={() => setWidthMenuOpen((v) => !v)}
+                    className="flex h-6 w-6 items-center justify-center rounded-full hover:bg-zinc-100"
+                  >
+                    <span
+                      className="rounded-full bg-zinc-500"
+                      style={{ width: penWidth + 2, height: penWidth + 2 }}
+                    />
+                  </button>
+                  {widthMenuOpen && (
+                    <div className="absolute left-1/2 top-full z-30 mt-1 flex -translate-x-1/2 flex-col items-center gap-1 rounded-full border border-zinc-200 bg-white p-1.5 shadow-lg">
+                      {PEN_WIDTH_PRESETS.map((width) => (
+                        <button
+                          key={width}
+                          type="button"
+                          aria-label={`펜 굵기 ${width}`}
+                          aria-pressed={penWidth === width}
+                          onClick={() => {
+                            setPenWidth(width);
+                            setWidthMenuOpen(false);
+                          }}
+                          className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-zinc-100"
+                        >
+                          <span
+                            className={`rounded-full bg-zinc-500 ${
+                              penWidth === width ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                            }`}
+                            style={{ width: width + 2, height: width + 2 }}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {tool === "eraser" && (
