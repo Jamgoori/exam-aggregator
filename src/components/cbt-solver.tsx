@@ -557,7 +557,7 @@ export function CbtSolver({
                   />
                 ))}
               {tool === "pen" && (
-                <div className="flex shrink-0 items-center gap-0.5 border-l border-zinc-200 pl-2">
+                <div className="flex shrink-0 items-center gap-1.5 border-l border-zinc-200 pl-2">
                   {PEN_WIDTH_PRESETS.map((width) => (
                     <button
                       key={width}
@@ -565,17 +565,13 @@ export function CbtSolver({
                       aria-label={`펜 굵기 ${width}`}
                       aria-pressed={penWidth === width}
                       onClick={() => setPenWidth(width)}
-                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                        penWidth === width ? "bg-zinc-200" : "hover:bg-zinc-100"
-                      }`}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
                     >
                       <span
-                        className="rounded-full"
-                        style={{
-                          width: width + 2,
-                          height: width + 2,
-                          backgroundColor: penColor,
-                        }}
+                        className={`rounded-full bg-zinc-500 ${
+                          penWidth === width ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                        }`}
+                        style={{ width: width + 2, height: width + 2 }}
                       />
                     </button>
                   ))}
