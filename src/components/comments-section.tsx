@@ -2,18 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  postComment,
-  updateComment,
-  deleteComment,
-} from "@/app/papers/actions";
+import { postComment } from "@/app/papers/actions";
+import { CommentRow } from "@/components/comment-row";
+import { EditRow } from "@/components/comment-edit-row";
+import { ReplyForm } from "@/components/comment-reply-form";
+import { CommentGuestFields } from "@/components/comment-guest-fields";
+import { COMMENT_CONTENT_MAX } from "@/lib/comment-constraints";
 import type { Comment } from "@/lib/supabase/types";
 
-const NICKNAME_MAX = 10;
-const CONTENT_MAX = 2000;
-const PW_MIN = 4;
-const PW_MAX = 16;
-
+// 댓글 영역 전체의 오케스트레이터: 새 댓글 폼 + 댓글/답글 목록을 그리고,
+// 어떤 댓글이 편집 중인지/어디에 답글을 다는 중인지 상태를 관리한다.
+// 개별 줄의 표시·수정·삭제·답글 UI는 각각 CommentRow/EditRow/ReplyForm 담당.
 export function CommentsSection({
   paperId,
   comments,
@@ -114,30 +113,18 @@ export function CommentsSection({
       <form onSubmit={submitNew} className="flex flex-col gap-3">
         {!loggedIn && (
           <div className="flex flex-col gap-3 sm:flex-row">
-            <input
-              value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
-              maxLength={NICKNAME_MAX}
-              placeholder={`닉네임 (최대 ${NICKNAME_MAX}자)`}
-              required
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm sm:w-40"
-            />
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              minLength={PW_MIN}
-              maxLength={PW_MAX}
-              placeholder={`비밀번호 (${PW_MIN}~${PW_MAX}자)`}
-              required
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm sm:w-52"
+            <CommentGuestFields
+              nickname={nickname}
+              password={password}
+              onNicknameChange={setNickname}
+              onPasswordChange={setPassword}
             />
           </div>
         )}
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          maxLength={CONTENT_MAX}
+          maxLength={COMMENT_CONTENT_MAX}
           placeholder="이 시험에 대한 의견을 남겨주세요"
           required
           rows={3}
@@ -197,286 +184,5 @@ export function CommentsSection({
         })}
       </div>
     </section>
-  );
-}
-
-function CommentRow({
-  comment,
-  canEdit,
-  canDelete,
-  isAdmin,
-  onEdit,
-  onDeleted,
-  canReply,
-  isReplying,
-  onToggleReply,
-}: {
-  comment: Comment;
-  canEdit: boolean;
-  canDelete: boolean;
-  isAdmin: boolean;
-  onEdit: () => void;
-  onDeleted: () => void;
-  canReply: boolean;
-  isReplying: boolean;
-  onToggleReply: () => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  const requiresPassword = comment.user_id === null && !isAdmin;
-
-  function doDelete() {
-    setError(null);
-    startTransition(async () => {
-      const result = await deleteComment({
-        commentId: comment.id,
-        password: requiresPassword ? password : undefined,
-      });
-      if (result.error) setError(result.error);
-      else onDeleted();
-    });
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <div className="flex items-baseline gap-2">
-          <span className="text-sm font-bold">{comment.nickname}</span>
-          <span className="text-[11px] text-zinc-400">
-            {new Date(comment.created_at).toLocaleDateString("ko-KR")}
-            {comment.updated_at ? " (수정됨)" : ""}
-          </span>
-        </div>
-        {(canReply || canEdit || canDelete) && (
-          <div className="flex gap-2 text-[11px] text-zinc-400">
-            {canReply && (
-              <button
-                type="button"
-                onClick={onToggleReply}
-                className={isReplying ? "text-blue-600" : "hover:text-blue-600"}
-              >
-                답글
-              </button>
-            )}
-            {canEdit && (
-              <button
-                type="button"
-                onClick={onEdit}
-                className="hover:text-blue-600"
-              >
-                수정
-              </button>
-            )}
-            {canDelete && (
-              <button
-                type="button"
-                onClick={() => setConfirming((v) => !v)}
-                className="hover:text-red-600"
-              >
-                삭제
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      <p className="whitespace-pre-wrap text-sm text-zinc-700">
-        {comment.content}
-      </p>
-
-      {confirming && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-zinc-50 p-3">
-          {requiresPassword && (
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="비밀번호"
-              className="rounded border border-zinc-300 px-2 py-1 text-sm"
-            />
-          )}
-          <button
-            type="button"
-            onClick={doDelete}
-            disabled={pending}
-            className="rounded bg-red-600 px-3 py-1 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
-          >
-            삭제 확인
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setConfirming(false);
-              setError(null);
-            }}
-            className="text-sm text-zinc-500"
-          >
-            취소
-          </button>
-          {error && <p className="w-full text-sm text-red-600">{error}</p>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ReplyForm({
-  paperId,
-  parentId,
-  loggedIn,
-  onDone,
-  onCancel,
-}: {
-  paperId: string;
-  parentId: string;
-  loggedIn: boolean;
-  onDone: () => void;
-  onCancel: () => void;
-}) {
-  const [nickname, setNickname] = useState("");
-  const [password, setPassword] = useState("");
-  const [content, setContent] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    startTransition(async () => {
-      const result = await postComment({
-        paperId,
-        parentId,
-        content,
-        nickname: loggedIn ? undefined : nickname,
-        password: loggedIn ? undefined : password,
-      });
-      if (result.error) setError(result.error);
-      else onDone();
-    });
-  }
-
-  return (
-    <form onSubmit={submit} className="flex flex-col gap-2">
-      {!loggedIn && (
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            value={nickname}
-            onChange={(e) => setNickname(e.target.value)}
-            maxLength={NICKNAME_MAX}
-            placeholder={`닉네임 (최대 ${NICKNAME_MAX}자)`}
-            required
-            className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm sm:w-40"
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            minLength={PW_MIN}
-            maxLength={PW_MAX}
-            placeholder={`비밀번호 (${PW_MIN}~${PW_MAX}자)`}
-            required
-            className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm sm:w-52"
-          />
-        </div>
-      )}
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        maxLength={CONTENT_MAX}
-        placeholder="답글을 입력해주세요"
-        required
-        rows={2}
-        autoFocus
-        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
-      />
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-700"
-        >
-          취소
-        </button>
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {pending ? "등록 중..." : "답글 등록"}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-function EditRow({
-  comment,
-  requiresPassword,
-  onDone,
-  onCancel,
-}: {
-  comment: Comment;
-  requiresPassword: boolean;
-  onDone: () => void;
-  onCancel: () => void;
-}) {
-  const [content, setContent] = useState(comment.content);
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  function save() {
-    setError(null);
-    startTransition(async () => {
-      const result = await updateComment({
-        commentId: comment.id,
-        content,
-        password: requiresPassword ? password : undefined,
-      });
-      if (result.error) setError(result.error);
-      else onDone();
-    });
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        maxLength={CONTENT_MAX}
-        rows={3}
-        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
-      />
-      <div className="flex flex-wrap items-center gap-2">
-        {requiresPassword && (
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="비밀번호"
-            className="rounded border border-zinc-300 px-2 py-1 text-sm"
-          />
-        )}
-        <button
-          type="button"
-          onClick={save}
-          disabled={pending}
-          className="rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          저장
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="text-sm text-zinc-500"
-        >
-          취소
-        </button>
-        {error && <p className="w-full text-sm text-red-600">{error}</p>}
-      </div>
-    </div>
   );
 }

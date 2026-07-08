@@ -1,29 +1,23 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import bcrypt from "bcryptjs";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getSessionUser } from "@/lib/supabase/session";
+import { getClientIp } from "@/lib/client-ip";
 import { NICKNAME_MAX, validateNickname } from "@/lib/nickname";
+import {
+  COMMENT_CONTENT_MAX,
+  COMMENT_PW_MIN,
+  COMMENT_PW_MAX,
+} from "@/lib/comment-constraints";
 import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
 
 export type CommentResult = { error?: string; success?: boolean };
 
-const CONTENT_MAX = 2000;
-const PW_MIN = 4;
-const PW_MAX = 16;
-
 // 비회원 댓글 도배 방지 기준
 const GUEST_COOLDOWN_MS = 10_000; // 같은 IP에서 연속 작성 시 최소 간격
 const GUEST_HOURLY_LIMIT = 20; // 같은 IP에서 1시간 내 허용하는 최대 개수
-
-async function getClientIp(): Promise<string | null> {
-  const h = await headers();
-  const forwarded = h.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return h.get("x-real-ip");
-}
 
 // 비회원 댓글만 대상으로 IP 기반 도배 방지. 계정 없이도 작성 가능한 경로라
 // 로그인한 회원 댓글보다 스팸에 취약해서 이 경로에만 적용한다.
@@ -62,14 +56,14 @@ function isUuid(v: string) {
 
 function validateContent(content: string): string | null {
   if (!content) return "내용을 입력해주세요.";
-  if (content.length > CONTENT_MAX)
-    return `내용은 ${CONTENT_MAX}자 이하로 입력해주세요.`;
+  if (content.length > COMMENT_CONTENT_MAX)
+    return `내용은 ${COMMENT_CONTENT_MAX}자 이하로 입력해주세요.`;
   return null;
 }
 
 function validatePassword(pw: string): string | null {
-  if (pw.length < PW_MIN || pw.length > PW_MAX)
-    return `비밀번호는 ${PW_MIN}~${PW_MAX}자로 입력해주세요.`;
+  if (pw.length < COMMENT_PW_MIN || pw.length > COMMENT_PW_MAX)
+    return `비밀번호는 ${COMMENT_PW_MIN}~${COMMENT_PW_MAX}자로 입력해주세요.`;
   return null;
 }
 
@@ -106,10 +100,7 @@ export async function postComment(input: {
     parentId = parent.id as string;
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { user } = await getSessionUser();
 
   if (user) {
     // 회원: 세션의 닉네임 사용, 비밀번호 불필요
@@ -171,10 +162,7 @@ async function authorizeComment(commentId: string, password?: string) {
 
   if (!comment) return { error: "댓글을 찾을 수 없어요." };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getSessionUser();
 
   let isAdmin = false;
   if (user) {
@@ -253,10 +241,7 @@ export async function postRating(
   if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
   if (!VALID_SCORES.includes(score)) return { error: "잘못된 점수입니다." };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
   const { error } = await supabase.from("difficulty_ratings").insert({
@@ -308,10 +293,7 @@ export async function startCbtAttempt(paperId: string): Promise<CommentResult> {
   const id = String(paperId ?? "");
   if (!isUuid(id)) return { error: "잘못된 접근입니다." };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
   const { error } = await supabase
@@ -331,10 +313,7 @@ export async function submitCbtAttempt(input: {
   const paperId = String(input.paperId ?? "");
   if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
   // 정답은 anon/authenticated에 전혀 노출하지 않으므로 service role로만 조회한다.
@@ -439,11 +418,7 @@ export type BookmarkResult = CommentResult & { bookmarked?: boolean };
 export async function toggleBookmark(paperId: string): Promise<BookmarkResult> {
   if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
+  const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인이 필요해요." };
 
   const { data: existing } = await supabase
