@@ -11,8 +11,15 @@ const WORKER_SRC = "/pdf.worker.min.mjs";
 
 export type DrawTool = "move" | "pen" | "eraser";
 
-const PEN_LINE_WIDTH = 3;
+export const DEFAULT_PEN_WIDTH = 3;
+export const PEN_WIDTH_PRESETS = [2, 4, 7];
 const ERASER_LINE_WIDTH = 24;
+
+type Point = { x: number; y: number };
+
+function midPoint(a: Point, b: Point): Point {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
 
 // 로딩 중 순서대로 돌려 보여줄 문구. 사이트 컨셉(공무원 시험 합격 응원)에 맞춰
 // 단순 "불러오는 중" 대신 격려 톤으로 구성했다.
@@ -33,14 +40,26 @@ export function attachDrawing(
   toolRef: { current: DrawTool },
   penColorRef: { current: string },
   zoomRef: { current: number },
+  penWidthRef: { current: number },
+  // 두 손가락으로 동시에 짚으면(핀치) 필기 대신 확대/축소로 처리하기 위한 콜백.
+  // factor는 직전 프레임 대비 손가락 사이 거리 변화 비율(예: 1.02 = 2% 더 벌어짐)이라,
+  // 호출하는 쪽에서 현재 zoom에 그대로 곱해주면 된다. 없으면(문제별 보기처럼 줌 개념이
+  // 없는 화면) 두 손가락이 닿아도 그냥 무시한다.
+  onPinchZoom?: (factor: number) => void,
 ) {
   let drawing = false;
-  let last: { x: number; y: number } | null = null;
+  let p0: Point | null = null;
+  let p1: Point | null = null;
+
+  // 화면(clientX/Y) 기준 좌표로 손가락 두 개의 간격을 추적한다. CSS zoom과 무관하게
+  // 항상 실제 보이는 간격이라, 비율만 보면 되고 별도 배율 보정이 필요 없다.
+  const activePointers = new Map<number, Point>();
+  let lastPinchDistance: number | null = null;
 
   // CSS zoom은 화면에 보이는 크기(getBoundingClientRect)만 확대하고 캔버스의
   // 실제 좌표계(내부 픽셀 그리드)는 그대로이므로, zoom 배율만큼 나눠줘야
   // 확대된 상태에서도 클릭한 위치에 정확히 그려진다.
-  function getPoint(e: PointerEvent) {
+  function getPoint(e: PointerEvent): Point {
     const rect = canvas.getBoundingClientRect();
     return {
       x: (e.clientX - rect.left) / zoomRef.current,
@@ -48,50 +67,114 @@ export function attachDrawing(
     };
   }
 
+  function pinchDistance(): number | null {
+    const pts = [...activePointers.values()];
+    if (pts.length < 2) return null;
+    const [a, b] = pts;
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
   canvas.addEventListener("pointerdown", (e) => {
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointers.size >= 2) {
+      // 두 번째 손가락이 닿는 순간부터 핀치 제스처로 취급하고, 진행 중이던
+      // 한 손가락 필기는 어중간한 획으로 남지 않게 취소한다.
+      drawing = false;
+      p0 = null;
+      p1 = null;
+      lastPinchDistance = pinchDistance();
+      return;
+    }
+
     if (toolRef.current === "move") return;
     drawing = true;
-    last = getPoint(e);
+    p0 = getPoint(e);
+    p1 = null;
   });
+
   canvas.addEventListener("pointermove", (e) => {
-    if (toolRef.current === "move" || !drawing || !last) return;
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointers.size >= 2) {
+      const distance = pinchDistance();
+      if (onPinchZoom && distance && lastPinchDistance) {
+        onPinchZoom(distance / lastPinchDistance);
+      }
+      lastPinchDistance = distance;
+      return;
+    }
+
+    if (toolRef.current === "move" || !drawing || !p0) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const isEraser = toolRef.current === "eraser";
     const point = getPoint(e);
     ctx.globalCompositeOperation = isEraser ? "destination-out" : "source-over";
     ctx.strokeStyle = penColorRef.current;
-    ctx.lineWidth = isEraser ? ERASER_LINE_WIDTH : PEN_LINE_WIDTH;
+    ctx.lineWidth = isEraser ? ERASER_LINE_WIDTH : penWidthRef.current;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+
+    if (!p1) {
+      // 점이 아직 두 개뿐이라 곡선을 만들 수 없어 직선으로 잇는다.
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(point.x, point.y);
+      ctx.stroke();
+      p1 = point;
+      return;
+    }
+
+    // 매 이동마다 직선으로만 이으면 빠르게 그을 때 각져 보인다("펜촉이 거칠다").
+    // 최근 세 점의 중점 두 개를 곡선으로 이어서 부드럽게 그린다.
+    const mid1 = midPoint(p0, p1);
+    const mid2 = midPoint(p1, point);
     ctx.beginPath();
-    ctx.moveTo(last.x, last.y);
-    ctx.lineTo(point.x, point.y);
+    ctx.moveTo(mid1.x, mid1.y);
+    ctx.quadraticCurveTo(p1.x, p1.y, mid2.x, mid2.y);
     ctx.stroke();
-    last = point;
+    p0 = p1;
+    p1 = point;
   });
-  const stop = () => {
-    drawing = false;
-    last = null;
-  };
+
+  function stop(e: PointerEvent) {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size < 2) lastPinchDistance = null;
+    if (activePointers.size === 0) {
+      drawing = false;
+      p0 = null;
+      p1 = null;
+    }
+  }
   canvas.addEventListener("pointerup", stop);
   canvas.addEventListener("pointerleave", stop);
+  canvas.addEventListener("pointercancel", stop);
 }
 
 export function PdfCanvasViewer({
   fileUrl,
   tool,
   penColor,
+  penWidth = DEFAULT_PEN_WIDTH,
   zoom = 1,
+  onZoomChange,
   active = true,
   onClearReady,
 }: {
   fileUrl: string;
   tool: DrawTool;
   penColor: string;
+  // 펜 굵기(px, CSS zoom 배율과 무관한 캔버스 좌표계 기준)
+  penWidth?: number;
   // 시험지(PDF)에만 적용되는 확대 배율. OMR 패널 등 나머지 UI는 이 값과 무관하게
   // 그대로 유지된다.
   zoom?: number;
+  // 펜/지우개 도구 중에도 두 손가락으로 짚으면 필기 대신 확대/축소가 되도록, 그
+  // 배율 변화를 부모(zoom state 보유)에 전달하는 콜백. factor는 직전 대비 배율(예:
+  // 1.02)이라 호출하는 쪽에서 현재 zoom에 곱해 적용한다.
+  onZoomChange?: (factor: number) => void;
   // 이 뷰어가 지금 화면에 보이는지(전체보기 탭인지). 문제별 풀기 탭에서는 부모가
   // display:none으로 감춰두는데, 그 상태에서 전체보기로 전환될 때 조상의 display
   // 토글을 ResizeObserver가 놓치는 경우가 있어("불러오는 중"에서 멈춤), 보이게 되는
@@ -108,6 +191,8 @@ export function PdfCanvasViewer({
   const toolRef = useRef(tool);
   const penColorRef = useRef(penColor);
   const zoomRef = useRef(zoom);
+  const penWidthRef = useRef(penWidth);
+  const onZoomChangeRef = useRef(onZoomChange);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // 렌더링에 쓸 실제 폭. 문제별 보기 탭일 때 이 뷰어는 display:none이라 clientWidth가
@@ -174,6 +259,14 @@ export function PdfCanvasViewer({
   useEffect(() => {
     zoomRef.current = zoom;
   }, [zoom]);
+
+  useEffect(() => {
+    penWidthRef.current = penWidth;
+  }, [penWidth]);
+
+  useEffect(() => {
+    onZoomChangeRef.current = onZoomChange;
+  }, [onZoomChange]);
 
   useEffect(() => {
     onClearReady?.(() => {
@@ -268,7 +361,14 @@ export function PdfCanvasViewer({
             toolRef.current === "move" ? "none" : "auto";
           pageWrapper.appendChild(annotationCanvas);
           annotationCanvasesRef.current.push(annotationCanvas);
-          attachDrawing(annotationCanvas, toolRef, penColorRef, zoomRef);
+          attachDrawing(
+            annotationCanvas,
+            toolRef,
+            penColorRef,
+            zoomRef,
+            penWidthRef,
+            (factor) => onZoomChangeRef.current?.(factor),
+          );
 
           container!.appendChild(pageWrapper);
           pendingRenders.push({ contentCanvas, viewport, page });

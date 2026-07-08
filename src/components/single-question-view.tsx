@@ -2,7 +2,11 @@
 
 import { useEffect, useRef } from "react";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
-import { attachDrawing, type DrawTool } from "@/components/pdf-canvas-viewer";
+import {
+  attachDrawing,
+  DEFAULT_PEN_WIDTH,
+  type DrawTool,
+} from "@/components/pdf-canvas-viewer";
 
 export function SingleQuestionView({
   questionIndex,
@@ -15,6 +19,7 @@ export function SingleQuestionView({
   questionResult,
   tool,
   penColor,
+  penWidth = DEFAULT_PEN_WIDTH,
   onClearReady,
   onSubmit,
   submitting,
@@ -32,6 +37,7 @@ export function SingleQuestionView({
   questionResult: { selected_choice: number | null; is_correct: boolean } | null;
   tool: DrawTool;
   penColor: string;
+  penWidth?: number;
   onClearReady?: (clear: () => void) => void;
   onSubmit: () => void;
   submitting: boolean;
@@ -48,6 +54,7 @@ export function SingleQuestionView({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const toolRef = useRef(tool);
   const penColorRef = useRef(penColor);
+  const penWidthRef = useRef(penWidth);
   // 문제별 보기는 전체보기의 확대/축소(zoom)와 무관하게 항상 원본 배율로 그린다.
   const zoomRef = useRef(1);
 
@@ -61,6 +68,10 @@ export function SingleQuestionView({
   useEffect(() => {
     penColorRef.current = penColor;
   }, [penColor]);
+
+  useEffect(() => {
+    penWidthRef.current = penWidth;
+  }, [penWidth]);
 
   useEffect(() => {
     onClearReady?.(() => {
@@ -79,7 +90,7 @@ export function SingleQuestionView({
     const canvas = canvasRef.current;
     if (!scrollArea || !content || !canvas) return;
 
-    attachDrawing(canvas, toolRef, penColorRef, zoomRef);
+    attachDrawing(canvas, toolRef, penColorRef, zoomRef, penWidthRef);
 
     function syncSize() {
       const width = content!.clientWidth;

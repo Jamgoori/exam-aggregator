@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
+  ChevronDown,
   ChevronLeft,
   Clock,
   Eraser,
@@ -23,7 +24,11 @@ import {
   submitCbtAttempt,
   type CbtSubmitResult,
 } from "@/app/papers/actions";
-import type { DrawTool } from "@/components/pdf-canvas-viewer";
+import {
+  DEFAULT_PEN_WIDTH,
+  PEN_WIDTH_PRESETS,
+  type DrawTool,
+} from "@/components/pdf-canvas-viewer";
 import { SingleQuestionView } from "@/components/single-question-view";
 import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
 import { formatDuration } from "@/lib/format";
@@ -36,6 +41,7 @@ const PdfCanvasViewer = dynamic(
 );
 
 const PEN_COLORS = ["#111827", "#ef4444", "#2563eb"];
+const DEFAULT_CUSTOM_COLOR = "#7c3aed";
 
 // 자물쇠 버튼 안내 말풍선을 "다시 보지 않기"로 닫으면 이 기기/브라우저에 그 사실을
 // 남겨두는 키. 계정(user_metadata)이 아니라 로컬에만 남기는 이유는, 이건 실제 설정값이
@@ -83,6 +89,23 @@ export function CbtSolver({
   const startedAtRef = useRef(0);
   const [tool, setTool] = useState<DrawTool>("move");
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
+  // 기본 3색 외에 직접 고를 수 있는 색(팔레트 스와치에 마지막으로 고른 값을 보여준다).
+  const [customColor, setCustomColor] = useState(DEFAULT_CUSTOM_COLOR);
+  const [penWidth, setPenWidth] = useState(DEFAULT_PEN_WIDTH);
+  const [widthMenuOpen, setWidthMenuOpen] = useState(false);
+  const widthMenuRef = useRef<HTMLDivElement>(null);
+
+  // 굵기 드롭다운이 열려 있을 때 바깥을 누르면 닫는다.
+  useEffect(() => {
+    if (!widthMenuOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (widthMenuRef.current && !widthMenuRef.current.contains(e.target as Node)) {
+        setWidthMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [widthMenuOpen]);
   const clearDrawingRef = useRef<() => void>(() => {});
   const clearSingleDrawingRef = useRef<() => void>(() => {});
   const [zoom, setZoom] = useState(1);
@@ -196,6 +219,13 @@ export function CbtSolver({
 
   function zoomOut() {
     setZoom((z) => clampZoom(Math.round((z - ZOOM_STEP) * 100) / 100));
+  }
+
+  // 펜/지우개 도구 중에도 모바일에서 두 손가락으로 짚으면(핀치) 필기 대신 이
+  // 배율을 조절한다. factor는 PdfCanvasViewer가 넘겨주는, 직전 대비 손가락 간격
+  // 변화 비율이라 그대로 곱해서 반영한다.
+  function handlePinchZoom(factor: number) {
+    setZoom((z) => clampZoom(Math.round(z * factor * 100) / 100));
   }
 
   // 트랙패드 핀치줌/Ctrl+휠은 브라우저 기본 동작으로는 페이지 전체(시험지+OMR
@@ -532,23 +562,94 @@ export function CbtSolver({
                     aria-label="펜 색상"
                     onClick={() => setPenColor(color)}
                     style={{ backgroundColor: color }}
-                    className={`h-5 w-5 rounded-full ${
+                    className={`h-5 w-5 shrink-0 rounded-full ${
                       penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
                     }`}
                   />
                 ))}
+              {tool === "pen" && (
+                // 기본 3색 외의 색은 여기서 직접 골라 쓴다. 네이티브 컬러피커(input
+                // type=color)를 스와치 위에 투명하게 겹쳐서, 스와치를 누르면 바로
+                // OS 색상 선택 UI가 뜨고 고른 색이 곧 펜 색이 된다.
+                <div className="relative h-5 w-5 shrink-0">
+                  <input
+                    type="color"
+                    aria-label="펜 사용자 지정 색상"
+                    value={customColor}
+                    onChange={(e) => {
+                      setCustomColor(e.target.value);
+                      setPenColor(e.target.value);
+                    }}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  />
+                  <span
+                    style={{ backgroundColor: customColor }}
+                    className={`pointer-events-none flex h-5 w-5 items-center justify-center rounded-full border border-zinc-300 ${
+                      penColor === customColor ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                    }`}
+                  />
+                </div>
+              )}
+              {tool === "pen" && (
+                <div
+                  ref={widthMenuRef}
+                  className="relative shrink-0 border-l border-zinc-200 pl-2"
+                >
+                  <button
+                    type="button"
+                    aria-label="펜 굵기 선택"
+                    aria-expanded={widthMenuOpen}
+                    onClick={() => setWidthMenuOpen((v) => !v)}
+                    className="flex h-6 items-center gap-0.5 rounded-full px-1 hover:bg-zinc-100"
+                  >
+                    <span
+                      className="rounded-full bg-zinc-500"
+                      style={{ width: penWidth + 2, height: penWidth + 2 }}
+                    />
+                    <ChevronDown
+                      size={12}
+                      className={`text-zinc-400 transition-transform ${widthMenuOpen ? "rotate-180" : ""}`}
+                    />
+                  </button>
+                  {widthMenuOpen && (
+                    <div className="absolute left-1/2 top-full z-30 mt-1 flex -translate-x-1/2 flex-col items-center gap-1 rounded-full border border-zinc-200 bg-white p-1.5 shadow-lg">
+                      {PEN_WIDTH_PRESETS.map((width) => (
+                        <button
+                          key={width}
+                          type="button"
+                          aria-label={`펜 굵기 ${width}`}
+                          aria-pressed={penWidth === width}
+                          onClick={() => {
+                            setPenWidth(width);
+                            setWidthMenuOpen(false);
+                          }}
+                          className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-zinc-100"
+                        >
+                          <span
+                            className={`rounded-full bg-zinc-500 ${
+                              penWidth === width ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                            }`}
+                            style={{ width: width + 2, height: width + 2 }}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {tool === "eraser" && (
-                <p className="text-xs text-zinc-400">
+                <p className="shrink-0 text-xs text-zinc-400">
                   드래그한 부분만 지워져요
                 </p>
               )}
               <button
                 type="button"
                 onClick={clearDrawing}
-                className="ml-auto flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-700"
+                aria-label="전체 지우기"
+                className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-zinc-500 hover:text-zinc-700"
               >
                 <Trash2 size={14} />
-                전체 지우기
+                <span className="hidden sm:inline">전체 지우기</span>
               </button>
             </div>
           </div>
@@ -570,7 +671,9 @@ export function CbtSolver({
                 fileUrl={fileUrl}
                 tool={tool}
                 penColor={penColor}
+                penWidth={penWidth}
                 zoom={zoom}
+                onZoomChange={handlePinchZoom}
                 active={viewMode === "full"}
                 onClearReady={registerClearDrawing}
               />
@@ -612,6 +715,7 @@ export function CbtSolver({
                 }
                 tool={tool}
                 penColor={penColor}
+                penWidth={penWidth}
                 onClearReady={registerClearSingleDrawing}
                 onSubmit={handleSubmit}
                 submitting={isPending}
