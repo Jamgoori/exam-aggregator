@@ -12,7 +12,8 @@
     "upload-answer": "node --env-file=.env.local scripts/upload-answer-key.mjs",
     "extract-answers": "node --env-file=.env.local scripts/extract-answer-keys.mjs",
     "list-pending-answers": "node --env-file=.env.local scripts/list-pending-answer-keys.mjs",
-    "crop-questions": "node --env-file=.env.local scripts/crop-question-images.mjs"
+    "crop-questions": "node --env-file=.env.local scripts/crop-question-images.mjs",
+    "migrate-question-images": "node --env-file=.env.local scripts/migrate-question-images-to-webp.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
