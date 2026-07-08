@@ -114,7 +114,7 @@ export function ExamCard({
             // 그대로 아래 카드 전체 링크에 맡긴다.
             <Link
               href={`/papers/${paper.id}/cbt`}
-              className="relative z-10 flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 font-semibold text-white shadow-sm shadow-blue-600/30 hover:bg-blue-700"
+              className="relative z-10 flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 font-semibold text-blue-700 hover:bg-blue-100"
             >
               <Monitor size={12} />
               바로 풀기
