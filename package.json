@@ -13,7 +13,8 @@
     "extract-answers": "node --env-file=.env.local scripts/extract-answer-keys.mjs",
     "list-pending-answers": "node --env-file=.env.local scripts/list-pending-answer-keys.mjs",
     "crop-questions": "node --env-file=.env.local scripts/crop-question-images.mjs",
-    "migrate-question-images": "node --env-file=.env.local scripts/migrate-question-images-to-webp.mjs"
+    "migrate-question-images": "node --env-file=.env.local scripts/migrate-question-images-to-webp.mjs",
+    "migrate-pdfs": "node --env-file=.env.local scripts/migrate-pdfs-optimize.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
@@ -24,6 +25,7 @@
     "bcryptjs": "^3.0.3",
     "lucide-react": "^1.22.0",
     "next": "16.2.9",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.1.200",
     "react": "19.2.4",
     "react-dom": "19.2.4",

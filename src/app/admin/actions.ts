@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { optimizePdf } from "@/lib/optimize-pdf";
 
 export async function login(formData: FormData) {
   const email = String(formData.get("email") ?? "");
@@ -76,9 +77,15 @@ export async function uploadExamPaper(
 
   const filePath = `${year}/${crypto.randomUUID()}.pdf`;
 
+  // object stream으로 구조만 정리하는 무손실 최적화 — 실패해도 원본 그대로
+  // 업로드되니 여기서 막힐 일은 없다.
+  const optimizedBuffer = await optimizePdf(Buffer.from(await file.arrayBuffer()));
+
   const { error: uploadError } = await supabase.storage
     .from("exam-papers")
-    .upload(filePath, file, { contentType: file.type || "application/pdf" });
+    .upload(filePath, optimizedBuffer, {
+      contentType: file.type || "application/pdf",
+    });
 
   if (uploadError) {
     return { error: `업로드 실패: ${uploadError.message}` };
@@ -99,7 +106,7 @@ export async function uploadExamPaper(
     tags,
     file_path: filePath,
     file_name: file.name,
-    file_size: file.size,
+    file_size: optimizedBuffer.byteLength,
     uploaded_by: user.id,
   });
 
