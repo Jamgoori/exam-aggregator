@@ -5,19 +5,14 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getSessionUser } from "@/lib/supabase/session";
+import { getClientIp } from "@/lib/client-ip";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
 import { validateNickname } from "@/lib/nickname";
 import { usernameToAuthEmail, validateUsername } from "@/lib/username";
 
 const PASSWORD_MIN = 8;
 const SIGNUP_HOURLY_LIMIT = 5; // 같은 IP에서 1시간 내 허용하는 최대 가입 시도 횟수
-
-async function getClientIp(): Promise<string | null> {
-  const h = await headers();
-  const forwarded = h.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return h.get("x-real-ip");
-}
 
 async function getOrigin(): Promise<string> {
   const h = await headers();
@@ -282,10 +277,7 @@ async function persistNickname(
 // updateNickname(폼 제출 → 리다이렉트)은 구글 로그인 온보딩 화면에서 쓰고, 마이페이지
 // "내 정보 수정"의 중복확인 버튼은 아래 setNickname(리다이렉트 없이 결과만 반환)을 쓴다.
 export async function updateNickname(formData: FormData) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getSessionUser();
 
   const formPath = sanitizeNextPath(String(formData.get("formPath") ?? "/mypage/edit"));
   const successPath = sanitizeNextPath(String(formData.get("successPath") ?? formPath));
@@ -322,10 +314,7 @@ export async function checkNicknameAvailable(
   const nicknameResult = validateNickname(rawNickname);
   if (nicknameResult.error !== null) return { error: nicknameResult.error };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getSessionUser();
 
   const { data, error } = await supabase.rpc("is_nickname_taken", {
     check_nickname: nicknameResult.nickname,
@@ -341,10 +330,7 @@ export async function checkNicknameAvailable(
 export async function setNickname(
   rawNickname: string,
 ): Promise<{ error?: string; success?: boolean }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인이 필요해요." };
 
   const nicknameResult = validateNickname(rawNickname);
@@ -364,10 +350,7 @@ export async function setNickname(
 export async function setDefaultCbtViewMode(
   mode: "full" | "single" | null,
 ): Promise<{ error?: string; success?: boolean }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인이 필요해요." };
 
   const { error } = await supabase.auth.updateUser({
@@ -378,10 +361,7 @@ export async function setDefaultCbtViewMode(
 }
 
 export async function updatePassword(formData: FormData) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await getSessionUser();
 
   if (!user) {
     redirect("/login?next=%2Fmypage%2Fedit");

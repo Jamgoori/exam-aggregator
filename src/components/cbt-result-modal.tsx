@@ -1,0 +1,61 @@
+"use client";
+
+import Link from "next/link";
+import { Trophy } from "lucide-react";
+import type { CbtSubmitResult } from "@/app/papers/actions";
+import { formatDuration } from "@/lib/format";
+
+// 채점이 끝나면 화면 전체를 덮고 점수/정답률/풀이시간을 보여주는 결과 모달.
+export function CbtResultModal({
+  result,
+  paperId,
+  onRetry,
+}: {
+  result: CbtSubmitResult;
+  paperId: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+      <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl bg-white p-8 text-center shadow-xl">
+        <Trophy size={40} className="text-amber-500" />
+        <h2 className="text-lg font-semibold">채점 결과</h2>
+        <p className="text-3xl font-bold text-blue-600">
+          {result.score} / {result.totalQuestions}
+        </p>
+        <div className="flex w-full divide-x divide-zinc-100 rounded-xl border border-zinc-100">
+          <div className="flex-1 py-3">
+            <p className="text-xs text-zinc-400">정답률</p>
+            <p className="mt-1 font-semibold text-zinc-700">
+              {Math.round(
+                ((result.score ?? 0) / (result.totalQuestions || 1)) * 100,
+              )}
+              %
+            </p>
+          </div>
+          <div className="flex-1 py-3">
+            <p className="text-xs text-zinc-400">풀이시간</p>
+            <p className="mt-1 font-semibold text-zinc-700">
+              {formatDuration(result.durationSeconds ?? 0)}
+            </p>
+          </div>
+        </div>
+        <div className="flex w-full gap-2">
+          <Link
+            href={`/papers/${paperId}`}
+            className="flex-1 rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+          >
+            문제지로
+          </Link>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            다시 풀기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
