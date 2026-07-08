@@ -54,7 +54,7 @@ export function ExamCard({
       )}
 
       <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {paper.level && (
             <span
               className={`rounded px-2 py-0.5 text-xs font-bold ${levelColor(paper.level)}`}
@@ -69,43 +69,39 @@ export function ExamCard({
               {subject.name}
             </span>
           )}
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1.5">
-          {isCurrent ? (
-            <span className="flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
-              <MapPin size={12} />
-              현재 보는 중
+          {!isCurrent && roundTier && (
+            <span
+              title={`${roundTier.name} (${myRoundCount}회독)`}
+              className={`tier-badge shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${roundTier.hasFlash ? "tier-flash" : ""} ${roundTier.hasGlow ? "tier-glow" : ""} ${roundTier.className}`}
+              style={
+                {
+                  "--shimmer-opacity": roundTier.shimmerOpacity,
+                  "--badge-duration": roundTier.duration,
+                } as CSSProperties
+              }
+            >
+              {myRoundCount}회독
             </span>
-          ) : (
-            <>
-              {/* 배지/필처럼 클릭 동작이 없는 형제와 달리, 이 버튼은 카드 전체
-                  링크보다 위에서 따로 클릭돼야 해서 z-10을 준다. */}
-              <span className="relative z-10">
-                <BookmarkButton
-                  paperId={paper.id}
-                  initialBookmarked={isBookmarked}
-                  loggedIn={loggedIn}
-                  size="sm"
-                />
-              </span>
-              {roundTier && (
-                <span
-                  title={`${roundTier.name} (${myRoundCount}회독)`}
-                  className={`tier-badge shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${roundTier.hasFlash ? "tier-flash" : ""} ${roundTier.hasGlow ? "tier-glow" : ""} ${roundTier.className}`}
-                  style={
-                    {
-                      "--shimmer-opacity": roundTier.shimmerOpacity,
-                      "--badge-duration": roundTier.duration,
-                    } as CSSProperties
-                  }
-                >
-                  {myRoundCount}회독
-                </span>
-              )}
-            </>
           )}
         </div>
+
+        {isCurrent ? (
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
+            <MapPin size={12} />
+            현재 보는 중
+          </span>
+        ) : (
+          // 배지처럼 클릭 동작이 없는 형제와 달리, 이 버튼은 카드 전체 링크보다
+          // 위에서 따로 클릭돼야 해서 z-10을 준다.
+          <span className="relative z-10 shrink-0">
+            <BookmarkButton
+              paperId={paper.id}
+              initialBookmarked={isBookmarked}
+              loggedIn={loggedIn}
+              size="sm"
+            />
+          </span>
+        )}
       </div>
 
       <p className="font-medium leading-snug">{paper.title}</p>
@@ -118,9 +114,9 @@ export function ExamCard({
             // 그대로 아래 카드 전체 링크에 맡긴다.
             <Link
               href={`/papers/${paper.id}/cbt`}
-              className="relative z-10 flex items-center gap-1 font-medium text-blue-600 hover:underline"
+              className="relative z-10 flex items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 font-semibold text-white shadow-sm shadow-blue-600/30 hover:bg-blue-700"
             >
-              <Monitor size={14} />
+              <Monitor size={12} />
               바로 풀기
             </Link>
           )}
