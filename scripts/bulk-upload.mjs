@@ -9,8 +9,9 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
+import { optimizePdf } from "./lib/optimize-pdf.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -132,10 +133,8 @@ async function main() {
     }
 
     const filePath = path.join(dir, filename);
-    const [fileBuffer, fileStat] = await Promise.all([
-      readFile(filePath),
-      stat(filePath),
-    ]);
+    const rawBuffer = await readFile(filePath);
+    const fileBuffer = await optimizePdf(rawBuffer);
     const storagePath = `${year}/${randomUUID()}.pdf`;
 
     const { error: uploadError } = await supabase.storage
@@ -159,7 +158,7 @@ async function main() {
       title,
       file_path: storagePath,
       file_name: filename,
-      file_size: fileStat.size,
+      file_size: fileBuffer.byteLength,
     });
 
     if (insertError) {
