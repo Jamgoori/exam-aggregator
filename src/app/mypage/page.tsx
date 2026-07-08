@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@/lib/format";
+import { computeStreakDays, streakTier } from "@/lib/streak";
 import type { ExamPaper } from "@/lib/supabase/types";
 
 // 오답노트는 문항별 정답/오답 이미지를 모아 보여줘야 해서 더 큰 작업이라 별도로 남겨둠.
@@ -97,6 +98,9 @@ export default async function MyPage({
       .forEach((a, i) => roundNumberByAttemptId.set(a.id, i + 1));
   }
 
+  const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
+  const tier = streakTier(streakDays);
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-12">
       <div>
@@ -115,6 +119,19 @@ export default async function MyPage({
         <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
           <span className="text-xs text-zinc-500">CBT 응시</span>
           <span className="text-xl font-semibold">{myAttempts.length}</span>
+        </div>
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
+          <span className="text-xs text-zinc-500">연속 학습</span>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-xl font-semibold">{streakDays}일</span>
+            {tier && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${tier.className}`}
+              >
+                {tier.label}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
