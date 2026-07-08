@@ -9,6 +9,7 @@ import { levelColor } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getCbtAvailability } from "@/lib/cbt-availability";
+import { getHomeStats } from "@/lib/home-stats";
 import { isChoseongQuery, matchesChoseong } from "@/lib/hangul";
 import type { ExamPaper, Subject } from "@/lib/supabase/types";
 
@@ -43,9 +44,17 @@ export default async function Home({
   const { data: claimsData } = await supabase.auth.getClaims();
   const userId = claimsData?.claims.sub ?? null;
 
-  // subjects는 7개뿐이라 먼저 가져와서, 검색은 exam_papers 전체를 훑는 대신
-  // 이름이 검색어에 매치되는 과목의 id만 뽑아 subject_id로 필터링한다.
-  const { data: subjects } = await supabase.from("subjects").select("*").order("name");
+  // subjects(7개뿐)는 검색어 매칭에, 나머지 둘은 검색어와 무관한 값이라 여기서
+  // 한 번에 병렬로 받아둔다. 예전에는 subjects만 먼저 기다렸다가 그 다음에야
+  // 나머지를 조회해서, 검색창에 한 글자 칠 때마다 왕복이 하나 더 끼어들었다.
+  const [{ data: subjects }, homeStats, myRoundCounts] = await Promise.all([
+    supabase.from("subjects").select("*").order("name"),
+    getHomeStats(),
+    userId
+      ? getMyRoundCounts(supabase, userId)
+      : Promise.resolve(new Map<string, number>()),
+  ]);
+  const { totalCount, totalDownloads, totalAttempts } = homeStats;
 
   const trimmedQuery = q?.trim() ?? "";
   const isSearching = trimmedQuery.length > 0;
@@ -91,21 +100,9 @@ export default async function Home({
 
   const skipMainQuery = isSearching && matchedSubjectIds.length === 0;
 
-  const [
-    mainResult,
-    { count: totalCount },
-    { data: totalDownloads },
-    { data: totalAttempts },
-    myRoundCounts,
-  ] = await Promise.all([
-    skipMainQuery ? Promise.resolve({ data: [], count: 0 }) : query,
-    supabase.from("exam_papers").select("*", { count: "exact", head: true }),
-    supabase.rpc("total_download_count"),
-    supabase.rpc("total_cbt_attempt_count"),
-    userId
-      ? getMyRoundCounts(supabase, userId)
-      : Promise.resolve(new Map<string, number>()),
-  ]);
+  const mainResult = skipMainQuery
+    ? { data: [] as ExamPaper[], count: 0 }
+    : await query;
   const { data: papers, count: filteredCount } = mainResult;
 
   // 카드 목록이 정해진 뒤에야 그 문제지들의 id를 알 수 있어서(북마크/CBT 가능
