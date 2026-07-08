@@ -95,9 +95,15 @@ export function SingleQuestionView({
     function syncSize() {
       const width = content!.clientWidth;
       const height = Math.max(content!.clientHeight, scrollArea!.clientHeight);
-      if (canvas!.width !== width || canvas!.height !== height) {
-        canvas!.width = width;
-        canvas!.height = height;
+      // 필기 캔버스 버퍼를 화면 배율(dpr)만큼 더 촘촘하게 만들어야 고해상도 화면에서
+      // 획이 흐릿하게 늘어나 보이지 않는다(attachDrawing이 좌표/선굵기에 같은 dpr을
+      // 곱해 그린다). CSS 크기는 그대로 두고 내부 픽셀 버퍼만 dpr배로 키운다.
+      const dpr = window.devicePixelRatio || 1;
+      const pixelWidth = Math.round(width * dpr);
+      const pixelHeight = Math.round(height * dpr);
+      if (canvas!.width !== pixelWidth || canvas!.height !== pixelHeight) {
+        canvas!.width = pixelWidth;
+        canvas!.height = pixelHeight;
         canvas!.style.width = `${width}px`;
         canvas!.style.height = `${height}px`;
       }

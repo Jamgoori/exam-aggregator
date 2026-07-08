@@ -11,8 +11,8 @@ const WORKER_SRC = "/pdf.worker.min.mjs";
 
 export type DrawTool = "move" | "pen" | "eraser";
 
-export const DEFAULT_PEN_WIDTH = 3;
-export const PEN_WIDTH_PRESETS = [2, 4, 7];
+export const DEFAULT_PEN_WIDTH = 1.5;
+export const PEN_WIDTH_PRESETS = [1, 2, 3.5];
 const ERASER_LINE_WIDTH = 24;
 
 type Point = { x: number; y: number };
@@ -56,14 +56,20 @@ export function attachDrawing(
   const activePointers = new Map<number, Point>();
   let lastPinchDistance: number | null = null;
 
+  // 캔버스의 실제 픽셀 버퍼(canvas.width/height)는 화면 배율(devicePixelRatio)만큼
+  // CSS 크기보다 더 촘촘하게 만들어져 있다(모바일 고해상도 화면에서 이 배율을 안 곱해주면
+  // 브라우저가 저해상도 버퍼를 늘려 그리면서 획이 흐릿하고 연필처럼 번져 보였다).
+  // 그만큼 좌표와 선 굵기 모두 곱해줘야 CSS 픽셀 기준으로 또렷하게 그려진다.
+  const dpr = window.devicePixelRatio || 1;
+
   // CSS zoom은 화면에 보이는 크기(getBoundingClientRect)만 확대하고 캔버스의
   // 실제 좌표계(내부 픽셀 그리드)는 그대로이므로, zoom 배율만큼 나눠줘야
   // 확대된 상태에서도 클릭한 위치에 정확히 그려진다.
   function getPoint(e: PointerEvent): Point {
     const rect = canvas.getBoundingClientRect();
     return {
-      x: (e.clientX - rect.left) / zoomRef.current,
-      y: (e.clientY - rect.top) / zoomRef.current,
+      x: ((e.clientX - rect.left) / zoomRef.current) * dpr,
+      y: ((e.clientY - rect.top) / zoomRef.current) * dpr,
     };
   }
 
@@ -113,7 +119,7 @@ export function attachDrawing(
     const point = getPoint(e);
     ctx.globalCompositeOperation = isEraser ? "destination-out" : "source-over";
     ctx.strokeStyle = penColorRef.current;
-    ctx.lineWidth = isEraser ? ERASER_LINE_WIDTH : penWidthRef.current;
+    ctx.lineWidth = (isEraser ? ERASER_LINE_WIDTH : penWidthRef.current) * dpr;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
@@ -349,8 +355,11 @@ export function PdfCanvasViewer({
           pageWrapper.appendChild(contentCanvas);
 
           const annotationCanvas = document.createElement("canvas");
-          annotationCanvas.width = cssWidth;
-          annotationCanvas.height = cssHeight;
+          // 필기 캔버스는 화면 배율(dpr)만큼 더 촘촘한 버퍼로 만들어야 고해상도
+          // 화면에서 획이 흐릿하게 늘어나 보이지 않는다(attachDrawing이 좌표/선굵기에
+          // 같은 dpr을 곱해 그린다).
+          annotationCanvas.width = cssWidth * dpr;
+          annotationCanvas.height = cssHeight * dpr;
           annotationCanvas.style.width = `${cssWidth}px`;
           annotationCanvas.style.height = `${cssHeight}px`;
           annotationCanvas.style.position = "absolute";
