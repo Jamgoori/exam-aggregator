@@ -2,10 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { HomeExamBrowser } from "@/components/home-exam-browser";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
-import { getAllCbtAvailability } from "@/lib/cbt-availability";
 import { getHomeStats } from "@/lib/home-stats";
-import { fetchAllExamPapers } from "@/lib/all-papers";
-import type { Subject } from "@/lib/supabase/types";
+import { getCachedHomeData } from "@/lib/home-data";
 
 export default async function Home({
   searchParams,
@@ -25,19 +23,17 @@ export default async function Home({
   const { data: claimsData } = await supabase.auth.getClaims();
   const userId = claimsData?.claims.sub ?? null;
 
-  // 검색을 서버 왕복 없이 즉시(클라이언트) 필터링으로 바꾸면서, 문제지 전체를
-  // 가벼운 필드만 골라 한 번에 받아둔다(제목/과목 정도만 있으면 카드 렌더링과
-  // 필터링에 충분하다 — 1900여 건이라 gzip 후 수백KB 이내라 부담 없다).
+  // 전역 데이터(문제지 전체·과목·CBT 가능 목록)는 로그인 여부와 무관하게 모두에게
+  // 같은 값이라 캐싱해서 받는다(getCachedHomeData). 매 접속마다 1861건을 새로 조인해
+  // 받던 무거운 조회(실측 1.5~3초)를 대부분 캐시 히트로 없앤다. 반면 회독수·즐겨찾기는
+  // 사용자별 값이라 요청마다 그때그때 조회한다(작고 인덱스로 빨라 캐싱 불필요).
   const [
-    { data: subjects },
-    allPapers,
+    { subjects, allPapers, cbtAvailableIds },
     homeStats,
     myRoundCounts,
     bookmarkedIds,
-    cbtAvailability,
   ] = await Promise.all([
-    supabase.from("subjects").select("*").order("name"),
-    fetchAllExamPapers(supabase),
+    getCachedHomeData(),
     getHomeStats(),
     userId
       ? getMyRoundCounts(supabase, userId)
@@ -45,7 +41,6 @@ export default async function Home({
     userId
       ? getAllMyBookmarkedPaperIds(supabase, userId)
       : Promise.resolve(new Set<string>()),
-    getAllCbtAvailability(supabase),
   ]);
   const { totalCount, totalDownloads, totalAttempts } = homeStats;
 
@@ -73,12 +68,12 @@ export default async function Home({
           </>
         }
         allPapers={allPapers}
-        subjects={(subjects ?? []) as Subject[]}
+        subjects={subjects}
         initialQuery={q ?? ""}
         initialLevel={level}
         initialPage={currentPage}
         bookmarkedIds={[...bookmarkedIds]}
-        cbtAvailableIds={[...cbtAvailability]}
+        cbtAvailableIds={cbtAvailableIds}
         myRoundCounts={Object.fromEntries(myRoundCounts)}
         loggedIn={!!userId}
         totalCount={totalCount}
