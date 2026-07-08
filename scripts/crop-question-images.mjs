@@ -133,16 +133,18 @@ async function cropQuestionsFromPage(page, scale) {
       // extract()는 마커 간격 기준의 넉넉한 영역이라 마지막 문제(단 하단)는 흰
       // 여백이 크게 남는다. trim()으로 흰 여백을 걷어낸 뒤 보기 좋게 약간만 다시
       // 패딩한다. (내용이 거의 없어 trim이 실패하는 경우 원본을 그대로 쓴다.)
+      // 최종 저장은 WebP 무손실로 — 문제 이미지는 사진이 아니라 흰 배경+얇은
+      // 텍스트/선 위주라 PNG보다 60%대로 작아지면서 화질 손실은 없다(실측 결과).
       const pad = Math.round(8 * scale);
       let cropped;
       try {
         cropped = await sharp(extracted)
           .trim({ background: "#ffffff", threshold: 10 })
           .extend({ top: pad, bottom: pad, left: pad, right: pad, background: "#ffffff" })
-          .png()
+          .webp({ lossless: true })
           .toBuffer();
       } catch {
-        cropped = extracted;
+        cropped = await sharp(extracted).webp({ lossless: true }).toBuffer();
       }
 
       results.push({ number: row.number, image: cropped });
@@ -228,7 +230,7 @@ async function main() {
     const outDir = path.join(process.cwd(), "uploads", "crop-preview", paperId);
     await mkdir(outDir, { recursive: true });
     for (const c of cropped) {
-      await writeFile(path.join(outDir, `${String(c.number).padStart(2, "0")}.png`), c.image);
+      await writeFile(path.join(outDir, `${String(c.number).padStart(2, "0")}.webp`), c.image);
     }
     console.log(`\n[dry-run] ${cropped.length}개 이미지를 ${outDir} 에 저장했습니다. DB/Storage는 건드리지 않았습니다.`);
     return;
@@ -236,11 +238,11 @@ async function main() {
 
   let uploaded = 0;
   for (const c of cropped) {
-    const storagePath = `questions/${paperId}/${String(c.number).padStart(2, "0")}.png`;
+    const storagePath = `questions/${paperId}/${String(c.number).padStart(2, "0")}.webp`;
 
     const { error: uploadError } = await supabase.storage
       .from("exam-papers")
-      .upload(storagePath, c.image, { contentType: "image/png", upsert: true });
+      .upload(storagePath, c.image, { contentType: "image/webp", upsert: true });
     if (uploadError) {
       console.error(`문제 ${c.number}: 업로드 실패 - ${uploadError.message}`);
       continue;
