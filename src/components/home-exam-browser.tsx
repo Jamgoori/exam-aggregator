@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState, useEffect, type ReactNode } from "react";
-import { FileStack, Download, Users } from "lucide-react";
+import { useRouter, usePathname } from "next/navigation";
+import { FileStack, Download, Users, Star } from "lucide-react";
 import { ExamCard } from "@/components/exam-card";
 import { SearchInput } from "@/components/search-input";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
@@ -15,6 +16,8 @@ const LEVELS = ["9급", "7급"];
 // 브라우저 히스토리 갱신(URL 공유용)은 타이핑 자체를 막지 않도록 아주 살짝만
 // 늦춘다 — 실제 필터링은 이 지연과 무관하게 매 입력마다 즉시 일어난다.
 const URL_SYNC_DEBOUNCE_MS = 200;
+// "즐겨찾기한 과목만 보기" 설정을 다음 방문에도 기억해두기 위한 로컬 저장소 키.
+const FAV_ONLY_STORAGE_KEY = "examAggregator:favOnly";
 
 // 페이지 번호 묶음(1~5, 6~10 ...)을 계산하는 로직은 components/pagination.tsx와
 // 같은 규칙이지만, 그쪽은 Link 기반 네비게이션이라 여기서는 버튼 기반으로 따로 둔다.
@@ -109,8 +112,18 @@ export function HomeExamBrowser({
   totalDownloads: number | null;
   totalAttempts: number | null;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [query, setQuery] = useState(initialQuery);
   const [level, setLevel] = useState(initialLevel);
+  // URL(?fav=1)을 우선하고, 없으면 지난번에 저장해둔 로컬 설정을 따른다.
+  const [favOnly, setFavOnly] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const fromUrl = new URLSearchParams(window.location.search).get("fav");
+    if (fromUrl === "1") return true;
+    if (fromUrl === "0") return false;
+    return window.localStorage.getItem(FAV_ONLY_STORAGE_KEY) === "1";
+  });
   // 페이지 이동은 서버 왕복을 피하려고 라우터 대신 history.replaceState로만 URL을
   // 바꾼다(아래 useEffect). 그래서 Next 라우터는 page 값을 모르고, 카드 → 문제
   // 상세로 갔다가 뒤로 오면 이 컴포넌트가 다시 마운트되면서 서버가 넘겨준
@@ -134,6 +147,8 @@ export function HomeExamBrowser({
     [bookmarkedSubjectIds],
   );
   const cbtAvailableSet = useMemo(() => new Set(cbtAvailableIds), [cbtAvailableIds]);
+  // 로그아웃 상태에서는 로컬에 저장된 favOnly 값이 남아있어도 필터를 걸지 않는다.
+  const effectiveFavOnly = favOnly && loggedIn;
 
   const isSearching = query.trim().length > 0;
   const matchedSubjectIds = useMemo(
@@ -141,8 +156,15 @@ export function HomeExamBrowser({
     [subjects, query],
   );
   const filtered = useMemo(
-    () => filterPapers(allPapers, { level, matchedSubjectIds, isSearching }),
-    [allPapers, level, matchedSubjectIds, isSearching],
+    () =>
+      filterPapers(allPapers, {
+        level,
+        matchedSubjectIds,
+        isSearching,
+        favOnly: effectiveFavOnly,
+        bookmarkedSubjectIds: bookmarkedSubjectSet,
+      }),
+    [allPapers, level, matchedSubjectIds, isSearching, effectiveFavOnly, bookmarkedSubjectSet],
   );
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -161,6 +183,16 @@ export function HomeExamBrowser({
     setLevel(next);
     setPage(1);
   }
+  function handleToggleFavOnly() {
+    if (!loggedIn) {
+      router.push(`/login?next=${encodeURIComponent(pathname || "/")}`);
+      return;
+    }
+    const next = !favOnly;
+    setFavOnly(next);
+    setPage(1);
+    window.localStorage.setItem(FAV_ONLY_STORAGE_KEY, next ? "1" : "0");
+  }
 
   // 주소창 URL은 공유/새로고침용으로만 갱신한다 — 여기서 서버를 다시 부르지
   // 않도록 Next 라우터 대신 history API를 직접 쓴다.
@@ -169,12 +201,13 @@ export function HomeExamBrowser({
       const usp = new URLSearchParams();
       if (query) usp.set("q", query);
       if (level) usp.set("level", level);
+      if (effectiveFavOnly) usp.set("fav", "1");
       if (safePage > 1) usp.set("page", String(safePage));
       const qs = usp.toString();
       window.history.replaceState(null, "", qs ? `/?${qs}` : "/");
     }, URL_SYNC_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
-  }, [query, level, safePage]);
+  }, [query, level, effectiveFavOnly, safePage]);
 
   return (
     <>
@@ -216,6 +249,21 @@ export function HomeExamBrowser({
             <strong className="text-sm tabular-nums sm:text-lg">{totalAttempts ?? 0}건</strong>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={handleToggleFavOnly}
+          aria-pressed={effectiveFavOnly}
+          title={loggedIn ? undefined : "로그인 후 이용할 수 있어요"}
+          className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium ${
+            effectiveFavOnly
+              ? "border border-amber-300 bg-amber-50 text-amber-600"
+              : "border border-zinc-200 text-zinc-600 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600"
+          }`}
+        >
+          <Star size={14} fill={effectiveFavOnly ? "currentColor" : "none"} />
+          즐겨찾기한 과목만 보기
+        </button>
       </section>
 
       <section className="flex flex-col gap-4">
@@ -269,7 +317,9 @@ export function HomeExamBrowser({
           ))}
           {visiblePapers.length === 0 && (
             <p className="col-span-full py-12 text-center text-zinc-500">
-              조건에 맞는 기출문제가 없습니다.
+              {effectiveFavOnly && bookmarkedSubjectSet.size === 0
+                ? "아직 즐겨찾기한 과목이 없어요. 과목 옆의 별 아이콘을 눌러 추가해보세요."
+                : "조건에 맞는 기출문제가 없습니다."}
             </p>
           )}
         </div>

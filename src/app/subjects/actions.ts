@@ -36,7 +36,7 @@ export async function toggleSubjectBookmark(
       .eq("id", existing.id);
     if (error) return { error: "즐겨찾기 해제에 실패했어요." };
 
-    revalidatePath("/bookmarks");
+    revalidatePath("/");
     return { success: true, bookmarked: false };
   }
 
@@ -45,6 +45,6 @@ export async function toggleSubjectBookmark(
     .insert({ user_id: user.id, subject_id: subjectId });
   if (error) return { error: "즐겨찾기에 실패했어요." };
 
-  revalidatePath("/bookmarks");
+  revalidatePath("/");
   return { success: true, bookmarked: true };
 }
