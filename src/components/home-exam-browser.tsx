@@ -83,6 +83,7 @@ export function HomeExamBrowser({
   initialLevel,
   initialPage,
   bookmarkedIds,
+  bookmarkedSubjectIds,
   cbtAvailableIds,
   myRoundCounts,
   loggedIn,
@@ -100,6 +101,7 @@ export function HomeExamBrowser({
   initialLevel?: string;
   initialPage: number;
   bookmarkedIds: string[];
+  bookmarkedSubjectIds: string[];
   cbtAvailableIds: string[];
   myRoundCounts: Record<string, number>;
   loggedIn: boolean;
@@ -127,6 +129,10 @@ export function HomeExamBrowser({
   });
 
   const bookmarkedSet = useMemo(() => new Set(bookmarkedIds), [bookmarkedIds]);
+  const bookmarkedSubjectSet = useMemo(
+    () => new Set(bookmarkedSubjectIds),
+    [bookmarkedSubjectIds],
+  );
   const cbtAvailableSet = useMemo(() => new Set(cbtAvailableIds), [cbtAvailableIds]);
 
   const isSearching = query.trim().length > 0;
@@ -241,7 +247,11 @@ export function HomeExamBrowser({
           ))}
         </div>
 
-        <SubjectIndexTabs subjects={subjects} />
+        <SubjectIndexTabs
+          subjects={subjects}
+          bookmarkedSubjectIds={bookmarkedSubjectSet}
+          loggedIn={loggedIn}
+        />
 
         <p className="text-sm text-zinc-500">총 {filtered.length}개의 자료</p>
 
