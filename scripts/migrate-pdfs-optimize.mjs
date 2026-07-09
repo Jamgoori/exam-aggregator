@@ -8,6 +8,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { optimizePdf } from "./lib/optimize-pdf.mjs";
+import { fetchAllRows } from "./lib/fetch-all.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -91,8 +92,10 @@ async function runPool(items, concurrency, worker) {
 }
 
 async function migrateTable(supabase, table, dryRun, concurrency) {
-  const { data: rows, error } = await supabase.from(table).select("id, file_path");
-  if (error) {
+  let rows;
+  try {
+    rows = await fetchAllRows(() => supabase.from(table).select("id, file_path"));
+  } catch (error) {
     console.error(`${table} 조회 실패: ${error.message}`);
     return { succeeded: [], errors: [] };
   }

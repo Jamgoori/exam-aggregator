@@ -10,6 +10,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import sharp from "sharp";
+import { fetchAllRows } from "./lib/fetch-all.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -121,12 +122,12 @@ async function main() {
   }
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-  const { data: rows, error } = await supabase
-    .from("question_images")
-    .select("id, image_path")
-    .ilike("image_path", "%.png");
-
-  if (error) {
+  let rows;
+  try {
+    rows = await fetchAllRows(() =>
+      supabase.from("question_images").select("id, image_path").ilike("image_path", "%.png"),
+    );
+  } catch (error) {
     console.error(`question_images 조회 실패: ${error.message}`);
     process.exit(1);
   }
