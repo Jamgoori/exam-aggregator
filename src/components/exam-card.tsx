@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { ChevronRight, MapPin, Monitor } from "lucide-react";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor } from "@/lib/level-colors";
+import { examTypeColor } from "@/lib/exam-type-colors";
 import { getRoundTier } from "@/lib/round-tier";
 import { BookmarkButton } from "@/components/bookmark-button";
 import type { ExamPaper } from "@/lib/supabase/types";
@@ -29,6 +30,7 @@ export function ExamCard({
   hasCbtAnswers?: boolean;
 }) {
   const subject = paper.subjects;
+  const examType = paper.exam_types;
   const roundTier = myRoundCount ? getRoundTier(myRoundCount) : null;
   const href = linkLevel
     ? `/papers/${paper.id}?level=${encodeURIComponent(linkLevel)}`
@@ -60,6 +62,13 @@ export function ExamCard({
               className={`rounded px-2 py-0.5 text-xs font-bold ${levelColor(paper.level)}`}
             >
               {paper.level}
+            </span>
+          )}
+          {examType && (
+            <span
+              className={`rounded px-2 py-0.5 text-xs font-bold ${examTypeColor(examType.name)}`}
+            >
+              {examType.name}
             </span>
           )}
           {subject && (

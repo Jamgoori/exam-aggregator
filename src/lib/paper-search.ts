@@ -13,6 +13,7 @@ export type LightPaper = {
   subject_id: string;
   exam_type_id: string;
   subjects: { id: string; name: string; slug: string } | null;
+  exam_types: { id: string; name: string } | null;
 };
 
 // 검색어와 매치되는 과목 id 목록을 계산한다. 서버(page.tsx)와 클라이언트

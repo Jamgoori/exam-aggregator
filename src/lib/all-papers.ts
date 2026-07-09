@@ -47,7 +47,7 @@ export async function fetchAllExamPapers(
     const { data, error } = await supabase
       .from("exam_papers")
       .select(
-        "id, title, level, year, round, subject_id, exam_type_id, subjects(id, name, slug)",
+        "id, title, level, year, round, subject_id, exam_type_id, subjects(id, name, slug), exam_types(id, name)",
       )
       .order("year", { ascending: false })
       .order("round", { ascending: false })

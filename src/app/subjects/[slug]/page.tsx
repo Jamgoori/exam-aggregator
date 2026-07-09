@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { Pagination } from "@/components/pagination";
 import { levelColor, compareLevels } from "@/lib/level-colors";
+import { examTypeTabColor } from "@/lib/exam-type-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
@@ -46,10 +47,13 @@ export default async function SubjectPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ level?: string; page?: string }>;
+  searchParams: Promise<{ level?: string; examTypes?: string; page?: string }>;
 }) {
   const { slug } = await params;
-  const { level, page } = await searchParams;
+  const { level, examTypes: examTypesParam, page } = await searchParams;
+  const selectedExamTypeIds = new Set(
+    (examTypesParam ?? "").split(",").filter(Boolean),
+  );
   const currentPage = Math.max(1, Number(page) || 1);
   const supabase = await createClient();
 
@@ -71,15 +75,23 @@ export default async function SubjectPage({
     .select("*, subjects(*), exam_types(*)", { count: "exact" })
     .eq("subject_id", subject.id);
   if (level) papersQuery = papersQuery.eq("level", level);
+  if (selectedExamTypeIds.size > 0)
+    papersQuery = papersQuery.in("exam_type_id", [...selectedExamTypeIds]);
   const from = (currentPage - 1) * PAGE_SIZE;
 
   const [
     { data: levelRows },
+    { data: examTypeRows },
     { data: papers, count: filteredCount },
     myRoundCounts,
     bookmarkedSubjectIds,
   ] = await Promise.all([
     supabase.from("exam_papers").select("level").eq("subject_id", subject.id),
+    // 직렬 탭도 급수 탭과 같은 이유로, 이 과목에 실제 존재하는 직렬만 가볍게 조회한다.
+    supabase
+      .from("exam_papers")
+      .select("exam_type_id, exam_types(id, name, display_order)")
+      .eq("subject_id", subject.id),
     papersQuery
       .order("year", { ascending: false })
       .order("round", { ascending: false })
@@ -97,7 +109,36 @@ export default async function SubjectPage({
       (levelRows ?? []).map((r) => r.level).filter((l): l is string => !!l),
     ),
   ].sort(compareLevels);
+
+  const examTypeById = new Map<
+    string,
+    { id: string; name: string; display_order: number }
+  >();
+  for (const row of examTypeRows ?? []) {
+    const et = row.exam_types as unknown as
+      | { id: string; name: string; display_order: number }
+      | null;
+    if (et) examTypeById.set(et.id, et);
+  }
+  const availableExamTypes = [...examTypeById.values()].sort(
+    (a, b) => a.display_order - b.display_order,
+  );
+
   const filteredPapers = (papers ?? []) as ExamPaper[];
+
+  // 급수 탭·직렬 탭이 서로의 선택 상태를 지우지 않도록, 두 탭 모두 이 헬퍼로
+  // href를 만든다 — 인자로 넘긴 값만 바꾸고 나머지는 현재 선택을 그대로 유지한다.
+  function buildFilterHref(
+    nextLevel: string | undefined,
+    nextExamTypeIds: Set<string>,
+  ) {
+    const usp = new URLSearchParams();
+    if (nextLevel) usp.set("level", nextLevel);
+    if (nextExamTypeIds.size > 0)
+      usp.set("examTypes", [...nextExamTypeIds].join(","));
+    const qs = usp.toString();
+    return qs ? `/subjects/${slug}?${qs}` : `/subjects/${slug}`;
+  }
 
   // 카드 목록이 정해진 뒤에야 그 문제지들의 id를 알 수 있어서, 메인 조회와
   // 병렬로 묶지 않고 그 다음 단계에서 한 번 더 병렬 조회한다.
@@ -129,7 +170,7 @@ export default async function SubjectPage({
       {availableLevels.length > 1 && (
         <div className="flex flex-wrap gap-2">
           <Link
-            href={`/subjects/${slug}`}
+            href={buildFilterHref(undefined, selectedExamTypeIds)}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               !level
                 ? "bg-zinc-800 text-white"
@@ -141,7 +182,7 @@ export default async function SubjectPage({
           {availableLevels.map((lv) => (
             <Link
               key={lv}
-              href={`/subjects/${slug}?level=${encodeURIComponent(lv)}`}
+              href={buildFilterHref(lv, selectedExamTypeIds)}
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 level === lv
                   ? levelColor(lv)
@@ -154,12 +195,50 @@ export default async function SubjectPage({
         </div>
       )}
 
+      {/* 직렬(국가직/지방직/지역인재 등)은 여러 개를 동시에 켤 수 있는 다중 선택
+          탭이라, 한 번 눌러도 급수 탭처럼 다른 선택지가 꺼지지 않고 눌린 것만
+          토글된다. */}
+      {availableExamTypes.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={buildFilterHref(level, new Set())}
+            className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+              selectedExamTypeIds.size === 0
+                ? "bg-zinc-800 text-white"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+            }`}
+          >
+            전체
+          </Link>
+          {availableExamTypes.map((et) => {
+            const isSelected = selectedExamTypeIds.has(et.id);
+            const nextExamTypeIds = new Set(selectedExamTypeIds);
+            if (isSelected) nextExamTypeIds.delete(et.id);
+            else nextExamTypeIds.add(et.id);
+            return (
+              <Link
+                key={et.id}
+                href={buildFilterHref(level, nextExamTypeIds)}
+                aria-pressed={isSelected}
+                className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+                  isSelected
+                    ? examTypeTabColor(et.name)
+                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                }`}
+              >
+                {et.name}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filteredPapers.length === 0 && (
           <p className="col-span-full py-12 text-center text-zinc-500">
             {(levelRows ?? []).length === 0
               ? "아직 업로드된 기출문제가 없습니다."
-              : "해당 급수의 기출문제가 없습니다."}
+              : "조건에 맞는 기출문제가 없습니다."}
           </p>
         )}
         {filteredPapers.map((paper) => (
@@ -178,7 +257,10 @@ export default async function SubjectPage({
       <Pagination
         currentPage={currentPage}
         totalPages={totalPages}
-        params={{ level }}
+        params={{
+          level,
+          examTypes: selectedExamTypeIds.size > 0 ? [...selectedExamTypeIds].join(",") : undefined,
+        }}
         basePath={`/subjects/${slug}`}
       />
     </div>

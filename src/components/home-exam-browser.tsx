@@ -202,17 +202,34 @@ export function HomeExamBrowser({
     [allPapers, level, matchedSubjectIds, isSearching, effectiveFavOnly, bookmarkedSubjectSet],
   );
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // 즐겨찾기 모드는 "연도별 → 과목별" 구조로 보여주지만, 여러 과목을 즐겨찾기해
+  // 두면 목록이 길어질 수 있어 일반 모드와 같은 페이지 크기로 페이지네이션한다.
+  // groupByYearAndSubject가 이미 연도 내림차순·과목명순으로 정렬해주니, 그
+  // 결과를 그대로 펼쳐서(flat) 자르면 일반 목록과 같은 순서의 페이지가 된다.
+  const favSortedPapers = useMemo(() => {
+    if (!effectiveFavOnly) return [];
+    const grouped = groupByYearAndSubject(filtered);
+    const flat: LightPaper[] = [];
+    for (const bySubject of grouped.values()) {
+      for (const papers of bySubject.values()) flat.push(...papers);
+    }
+    return flat;
+  }, [effectiveFavOnly, filtered]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil((effectiveFavOnly ? favSortedPapers.length : filtered.length) / PAGE_SIZE),
+  );
   const safePage = Math.min(page, totalPages);
-  const visiblePapers = filtered.slice(
+  const visiblePapers = (effectiveFavOnly ? favSortedPapers : filtered).slice(
     (safePage - 1) * PAGE_SIZE,
     safePage * PAGE_SIZE,
   );
-  // 즐겨찾기 모드는 결과가 보통 적은 데다 "연도별 → 과목별" 구조로 보는 게
-  // 목적이라, 페이지네이션 없이 연도/과목으로 묶어서 한 번에 보여준다.
+  // 현재 페이지에 보이는 문제지만 다시 연도/과목으로 묶어서, 페이지를 넘겨도
+  // 그 페이지 안에서는 여전히 연도별 소제목이 붙어 보인다.
   const groupedByYear = useMemo(
-    () => (effectiveFavOnly ? groupByYearAndSubject(filtered) : null),
-    [effectiveFavOnly, filtered],
+    () => (effectiveFavOnly ? groupByYearAndSubject(visiblePapers) : null),
+    [effectiveFavOnly, visiblePapers],
   );
 
   // 검색어/급수를 바꾸면 이전 페이지 번호가 새 결과 범위를 벗어날 수 있어 1로 되돌린다.
@@ -401,44 +418,42 @@ export function HomeExamBrowser({
             ))}
           </div>
         ) : (
-          <>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {visiblePapers.map((paper) => (
-                <ExamCard
-                  key={paper.id}
-                  paper={paper as unknown as ExamPaper}
-                  linkLevel={level}
-                  myRoundCount={myRoundCounts[paper.id]}
-                  isBookmarked={bookmarkedSet.has(paper.id)}
-                  loggedIn={loggedIn}
-                  hasCbtAnswers={cbtAvailableSet.has(paper.id)}
-                />
-              ))}
-              {visiblePapers.length === 0 && (
-                <p className="col-span-full py-12 text-center text-zinc-500">
-                  조건에 맞는 기출문제가 없습니다.
-                </p>
-              )}
-            </div>
-
-            {totalPages > 1 && (
-              <>
-                <PageButtons
-                  currentPage={safePage}
-                  totalPages={totalPages}
-                  blockSize={5}
-                  onNavigate={handlePageChange}
-                  className="flex sm:hidden"
-                />
-                <PageButtons
-                  currentPage={safePage}
-                  totalPages={totalPages}
-                  blockSize={10}
-                  onNavigate={handlePageChange}
-                  className="hidden sm:flex"
-                />
-              </>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {visiblePapers.map((paper) => (
+              <ExamCard
+                key={paper.id}
+                paper={paper as unknown as ExamPaper}
+                linkLevel={level}
+                myRoundCount={myRoundCounts[paper.id]}
+                isBookmarked={bookmarkedSet.has(paper.id)}
+                loggedIn={loggedIn}
+                hasCbtAnswers={cbtAvailableSet.has(paper.id)}
+              />
+            ))}
+            {visiblePapers.length === 0 && (
+              <p className="col-span-full py-12 text-center text-zinc-500">
+                조건에 맞는 기출문제가 없습니다.
+              </p>
             )}
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <>
+            <PageButtons
+              currentPage={safePage}
+              totalPages={totalPages}
+              blockSize={5}
+              onNavigate={handlePageChange}
+              className="flex sm:hidden"
+            />
+            <PageButtons
+              currentPage={safePage}
+              totalPages={totalPages}
+              blockSize={10}
+              onNavigate={handlePageChange}
+              className="hidden sm:flex"
+            />
           </>
         )}
       </section>
