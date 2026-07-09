@@ -228,13 +228,22 @@ export function HomeExamBrowser({
   // 많은 페이지로 갈 때, 스크롤을 많이 내려둔 상태였다면 문서 높이가 줄어드는
   // 순간 브라우저가 스크롤 위치를 새 최대치로 강제로 당겨 올린다 — 그 바람에
   // 화면이 위로 튀면서 마우스 아래 있던 카드가 바뀌어 엉뚱한 곳이 눌리는 사고가
-  // 났다. 페이지 번호를 누르면 항상 결과 영역 맨 위로 스크롤해 이 강제 클램핑
-  // 자체가 일어나지 않게 한다.
+  // 났다. 예전엔 이걸 막으려고 페이지 번호를 누를 때마다 결과 영역 맨 위로
+  // 강제로 스크롤시켰는데, 그러면 클릭할 때마다(문서 높이가 줄지 않는 경우까지)
+  // 화면이 확 튀어서 바로 이어지는 클릭이 옮겨간 카드 위에서 발생하는 같은 문제를
+  // 더 자주 일으켰다. 대신 클릭 시점엔 결과 영역에 이전 높이만큼 min-height를
+  // 잠깐 걸어 문서가 줄어드는 걸 막아 클릭 처리 중엔 스크롤이 전혀 변하지 않게
+  // 하고, 클릭이 끝난 뒤(다음 렌더 시점)에만 min-height를 풀어준다.
   const resultsSectionRef = useRef<HTMLElement>(null);
   function handlePageChange(next: number) {
+    const el = resultsSectionRef.current;
+    if (el) el.style.minHeight = `${el.offsetHeight}px`;
     setPage(next);
-    resultsSectionRef.current?.scrollIntoView({ block: "start" });
   }
+  useEffect(() => {
+    const el = resultsSectionRef.current;
+    if (el) el.style.minHeight = "";
+  }, [safePage]);
 
   // 주소창 URL은 공유/새로고침용으로만 갱신한다 — 여기서 서버를 다시 부르지
   // 않도록 Next 라우터 대신 history API를 직접 쓴다.
