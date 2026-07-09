@@ -7,7 +7,12 @@ import { ExamCard } from "@/components/exam-card";
 import { SearchInput } from "@/components/search-input";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { levelColor } from "@/lib/level-colors";
-import { filterPapers, matchSubjectIds, type LightPaper } from "@/lib/paper-search";
+import {
+  filterPapers,
+  matchSubjectIds,
+  groupByYearAndSubject,
+  type LightPaper,
+} from "@/lib/paper-search";
 import type { Subject } from "@/lib/supabase/types";
 import type { ExamPaper } from "@/lib/supabase/types";
 
@@ -173,6 +178,12 @@ export function HomeExamBrowser({
     (safePage - 1) * PAGE_SIZE,
     safePage * PAGE_SIZE,
   );
+  // 즐겨찾기 모드는 결과가 보통 적은 데다 "연도별 → 과목별" 구조로 보는 게
+  // 목적이라, 페이지네이션 없이 연도/과목으로 묶어서 한 번에 보여준다.
+  const groupedByYear = useMemo(
+    () => (effectiveFavOnly ? groupByYearAndSubject(filtered) : null),
+    [effectiveFavOnly, filtered],
+  );
 
   // 검색어/급수를 바꾸면 이전 페이지 번호가 새 결과 범위를 벗어날 수 있어 1로 되돌린다.
   function handleQueryChange(next: string) {
@@ -303,43 +314,80 @@ export function HomeExamBrowser({
 
         <p className="text-sm text-zinc-500">총 {filtered.length}개의 자료</p>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {visiblePapers.map((paper) => (
-            <ExamCard
-              key={paper.id}
-              paper={paper as unknown as ExamPaper}
-              linkLevel={level}
-              myRoundCount={myRoundCounts[paper.id]}
-              isBookmarked={bookmarkedSet.has(paper.id)}
-              loggedIn={loggedIn}
-              hasCbtAnswers={cbtAvailableSet.has(paper.id)}
-            />
-          ))}
-          {visiblePapers.length === 0 && (
-            <p className="col-span-full py-12 text-center text-zinc-500">
-              {effectiveFavOnly && bookmarkedSubjectSet.size === 0
-                ? "아직 즐겨찾기한 과목이 없어요. 과목 옆의 별 아이콘을 눌러 추가해보세요."
-                : "조건에 맞는 기출문제가 없습니다."}
-            </p>
-          )}
-        </div>
-
-        {totalPages > 1 && (
+        {groupedByYear ? (
+          <div className="flex flex-col gap-8">
+            {filtered.length === 0 && (
+              <p className="py-12 text-center text-zinc-500">
+                {bookmarkedSubjectSet.size === 0
+                  ? "아직 즐겨찾기한 과목이 없어요. 과목 옆의 별 아이콘을 눌러 추가해보세요."
+                  : "조건에 맞는 기출문제가 없습니다."}
+              </p>
+            )}
+            {[...groupedByYear.entries()].map(([year, bySubject]) => (
+              <div key={year} className="flex flex-col gap-6">
+                <h2 className="text-lg font-bold">{year}년</h2>
+                {[...bySubject.entries()].map(([subjectName, papers]) => (
+                  <div key={subjectName} className="flex flex-col gap-3">
+                    <h3 className="text-sm font-semibold text-zinc-500">
+                      {subjectName}
+                    </h3>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {papers.map((paper) => (
+                        <ExamCard
+                          key={paper.id}
+                          paper={paper as unknown as ExamPaper}
+                          linkLevel={level}
+                          myRoundCount={myRoundCounts[paper.id]}
+                          isBookmarked={bookmarkedSet.has(paper.id)}
+                          loggedIn={loggedIn}
+                          hasCbtAnswers={cbtAvailableSet.has(paper.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : (
           <>
-            <PageButtons
-              currentPage={safePage}
-              totalPages={totalPages}
-              blockSize={5}
-              onNavigate={setPage}
-              className="flex sm:hidden"
-            />
-            <PageButtons
-              currentPage={safePage}
-              totalPages={totalPages}
-              blockSize={10}
-              onNavigate={setPage}
-              className="hidden sm:flex"
-            />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {visiblePapers.map((paper) => (
+                <ExamCard
+                  key={paper.id}
+                  paper={paper as unknown as ExamPaper}
+                  linkLevel={level}
+                  myRoundCount={myRoundCounts[paper.id]}
+                  isBookmarked={bookmarkedSet.has(paper.id)}
+                  loggedIn={loggedIn}
+                  hasCbtAnswers={cbtAvailableSet.has(paper.id)}
+                />
+              ))}
+              {visiblePapers.length === 0 && (
+                <p className="col-span-full py-12 text-center text-zinc-500">
+                  조건에 맞는 기출문제가 없습니다.
+                </p>
+              )}
+            </div>
+
+            {totalPages > 1 && (
+              <>
+                <PageButtons
+                  currentPage={safePage}
+                  totalPages={totalPages}
+                  blockSize={5}
+                  onNavigate={setPage}
+                  className="flex sm:hidden"
+                />
+                <PageButtons
+                  currentPage={safePage}
+                  totalPages={totalPages}
+                  blockSize={10}
+                  onNavigate={setPage}
+                  className="hidden sm:flex"
+                />
+              </>
+            )}
           </>
         )}
       </section>
