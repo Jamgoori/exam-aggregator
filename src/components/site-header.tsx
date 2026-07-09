@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { GraduationCap } from "lucide-react";
+import { GraduationCap, Star } from "lucide-react";
 import { signOutUser } from "@/app/actions";
 import { SignOutButton } from "@/components/sign-out-button";
 import { LoginLink } from "@/components/login-link";
@@ -20,6 +20,16 @@ export function SiteHeader({
         </Link>
 
         <div className="flex items-center gap-3">
+          {/* 로그인 여부와 무관하게 항상 노출해 기능 발견성을 높인다.
+              비로그인 상태로 눌러도 /bookmarks가 자체적으로 로그인 유도 화면을 보여준다. */}
+          <Link
+            href="/bookmarks"
+            className="flex items-center gap-1 text-sm text-zinc-600 hover:text-blue-600 hover:underline"
+          >
+            <Star size={16} />
+            즐겨찾기
+          </Link>
+
           {user ? (
             <div className="flex items-center gap-2">
               <Link

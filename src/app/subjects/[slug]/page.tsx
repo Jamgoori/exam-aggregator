@@ -7,7 +7,9 @@ import { Pagination } from "@/components/pagination";
 import { levelColor, compareLevels } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
+import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
 import { getCbtAvailability } from "@/lib/cbt-availability";
+import { SubjectBookmarkButton } from "@/components/subject-bookmark-button";
 import type { ExamPaper, Subject } from "@/lib/supabase/types";
 import type { Metadata } from "next";
 
@@ -71,17 +73,24 @@ export default async function SubjectPage({
   if (level) papersQuery = papersQuery.eq("level", level);
   const from = (currentPage - 1) * PAGE_SIZE;
 
-  const [{ data: levelRows }, { data: papers, count: filteredCount }, myRoundCounts] =
-    await Promise.all([
-      supabase.from("exam_papers").select("level").eq("subject_id", subject.id),
-      papersQuery
-        .order("year", { ascending: false })
-        .order("round", { ascending: false })
-        .range(from, from + PAGE_SIZE - 1),
-      userId
-        ? getMyRoundCounts(supabase, userId)
-        : Promise.resolve(new Map<string, number>()),
-    ]);
+  const [
+    { data: levelRows },
+    { data: papers, count: filteredCount },
+    myRoundCounts,
+    bookmarkedSubjectIds,
+  ] = await Promise.all([
+    supabase.from("exam_papers").select("level").eq("subject_id", subject.id),
+    papersQuery
+      .order("year", { ascending: false })
+      .order("round", { ascending: false })
+      .range(from, from + PAGE_SIZE - 1),
+    userId
+      ? getMyRoundCounts(supabase, userId)
+      : Promise.resolve(new Map<string, number>()),
+    userId
+      ? getMyBookmarkedSubjectIds(supabase, userId)
+      : Promise.resolve(new Set<string>()),
+  ]);
 
   const availableLevels = [
     ...new Set(
@@ -107,9 +116,14 @@ export default async function SubjectPage({
         <Link href="/" className="text-sm text-zinc-500 underline">
           ← 홈으로
         </Link>
-        <h1 className="mt-2 text-3xl font-semibold">
-          {subject.name}
-        </h1>
+        <div className="mt-2 flex items-center gap-2">
+          <h1 className="text-3xl font-semibold">{subject.name}</h1>
+          <SubjectBookmarkButton
+            subjectId={subject.id}
+            initialBookmarked={bookmarkedSubjectIds.has(subject.id)}
+            loggedIn={!!userId}
+          />
+        </div>
       </div>
 
       {availableLevels.length > 1 && (

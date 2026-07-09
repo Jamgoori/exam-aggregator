@@ -319,6 +319,33 @@ drop policy if exists "delete own bookmarks" on bookmarks;
 create policy "delete own bookmarks" on bookmarks
   for delete to authenticated using (auth.uid() = user_id);
 
+-- 과목 즐겨찾기: 공시생은 보통 본인이 응시하는 과목 몇 개만 반복해서 보므로, 문제지
+-- 단위 북마크(bookmarks)와 별개로 "관심 과목" 자체를 저장해 /bookmarks에서 그 과목들의
+-- 문제지만 모아 볼 수 있게 한다.
+create table if not exists subject_bookmarks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  subject_id uuid not null references subjects(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (user_id, subject_id)
+);
+
+create index if not exists subject_bookmarks_user_idx on subject_bookmarks(user_id, created_at desc);
+
+alter table subject_bookmarks enable row level security;
+
+drop policy if exists "select own subject bookmarks" on subject_bookmarks;
+create policy "select own subject bookmarks" on subject_bookmarks
+  for select to authenticated using (auth.uid() = user_id);
+
+drop policy if exists "insert own subject bookmarks" on subject_bookmarks;
+create policy "insert own subject bookmarks" on subject_bookmarks
+  for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "delete own subject bookmarks" on subject_bookmarks;
+create policy "delete own subject bookmarks" on subject_bookmarks
+  for delete to authenticated using (auth.uid() = user_id);
+
 -- CBT 자동채점용 문항별 정답 배열. 기존 answer_keys(직렬+연도+급수+회차 전체가 공유하는
 -- 정답지 PDF)와 달리, exam_papers(과목별 문제지) 1건당 정답 배열 1건을 구조화된 값으로
 -- 저장한다. 문항 본문/보기까지 디지털화하기 전에도 채점만은 가능하게 하려는 임시 구조이고,
