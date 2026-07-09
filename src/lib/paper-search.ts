@@ -49,11 +49,21 @@ export function filterPapers(
     level,
     matchedSubjectIds,
     isSearching,
-  }: { level?: string; matchedSubjectIds: string[]; isSearching: boolean },
+    favOnly,
+    bookmarkedSubjectIds,
+  }: {
+    level?: string;
+    matchedSubjectIds: string[];
+    isSearching: boolean;
+    // "즐겨찾기한 과목만 보기" 토글 상태. true면 즐겨찾기한 과목의 문제지만 남긴다.
+    favOnly?: boolean;
+    bookmarkedSubjectIds?: Set<string>;
+  },
 ): LightPaper[] {
   return papers.filter((p) => {
     if (level && p.level !== level) return false;
     if (isSearching && !matchedSubjectIds.includes(p.subject_id)) return false;
+    if (favOnly && !bookmarkedSubjectIds?.has(p.subject_id)) return false;
     return true;
   });
 }
