@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { HomeExamBrowser } from "@/components/home-exam-browser";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
+import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
 import { getHomeStats } from "@/lib/home-stats";
 import { getCachedHomeData } from "@/lib/home-data";
 
@@ -32,6 +33,7 @@ export default async function Home({
     homeStats,
     myRoundCounts,
     bookmarkedIds,
+    bookmarkedSubjectIds,
   ] = await Promise.all([
     getCachedHomeData(),
     getHomeStats(),
@@ -40,6 +42,9 @@ export default async function Home({
       : Promise.resolve(new Map<string, number>()),
     userId
       ? getAllMyBookmarkedPaperIds(supabase, userId)
+      : Promise.resolve(new Set<string>()),
+    userId
+      ? getMyBookmarkedSubjectIds(supabase, userId)
       : Promise.resolve(new Set<string>()),
   ]);
   const { totalCount, totalDownloads, totalAttempts } = homeStats;
@@ -73,6 +78,7 @@ export default async function Home({
         initialLevel={level}
         initialPage={currentPage}
         bookmarkedIds={[...bookmarkedIds]}
+        bookmarkedSubjectIds={[...bookmarkedSubjectIds]}
         cbtAvailableIds={cbtAvailableIds}
         myRoundCounts={Object.fromEntries(myRoundCounts)}
         loggedIn={!!userId}

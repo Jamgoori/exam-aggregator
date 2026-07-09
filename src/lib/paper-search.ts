@@ -49,11 +49,43 @@ export function filterPapers(
     level,
     matchedSubjectIds,
     isSearching,
-  }: { level?: string; matchedSubjectIds: string[]; isSearching: boolean },
+    favOnly,
+    bookmarkedSubjectIds,
+  }: {
+    level?: string;
+    matchedSubjectIds: string[];
+    isSearching: boolean;
+    // "즐겨찾기한 과목만 보기" 토글 상태. true면 즐겨찾기한 과목의 문제지만 남긴다.
+    favOnly?: boolean;
+    bookmarkedSubjectIds?: Set<string>;
+  },
 ): LightPaper[] {
   return papers.filter((p) => {
     if (level && p.level !== level) return false;
     if (isSearching && !matchedSubjectIds.includes(p.subject_id)) return false;
+    if (favOnly && !bookmarkedSubjectIds?.has(p.subject_id)) return false;
     return true;
   });
+}
+
+// "즐겨찾기한 과목만 보기" 화면은 연도 내림차순 → 같은 연도 안에서는 과목명
+// 가나다순으로 묶어서 보여준다. 같은 연도·과목 안에서는 papers가 이미 정렬돼
+// 들어온 순서(fetchAllExamPapers의 시행 시기 순)를 그대로 유지한다(안정 정렬).
+export function groupByYearAndSubject(
+  papers: LightPaper[],
+): Map<number, Map<string, LightPaper[]>> {
+  const sorted = [...papers].sort((a, b) => {
+    if (a.year !== b.year) return b.year - a.year;
+    return (a.subjects?.name ?? "").localeCompare(b.subjects?.name ?? "", "ko");
+  });
+
+  const byYear = new Map<number, Map<string, LightPaper[]>>();
+  for (const paper of sorted) {
+    if (!byYear.has(paper.year)) byYear.set(paper.year, new Map());
+    const bySubject = byYear.get(paper.year)!;
+    const subjectName = paper.subjects?.name ?? "기타";
+    if (!bySubject.has(subjectName)) bySubject.set(subjectName, []);
+    bySubject.get(subjectName)!.push(paper);
+  }
+  return byYear;
 }

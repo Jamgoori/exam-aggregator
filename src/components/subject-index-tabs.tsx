@@ -3,9 +3,19 @@
 import { useState } from "react";
 import Link from "next/link";
 import { CONSONANTS, initialConsonant } from "@/lib/hangul";
+import { SubjectBookmarkButton } from "@/components/subject-bookmark-button";
 import type { Subject } from "@/lib/supabase/types";
 
-export function SubjectIndexTabs({ subjects }: { subjects: Subject[] }) {
+export function SubjectIndexTabs({
+  subjects,
+  bookmarkedSubjectIds = new Set(),
+  loggedIn = false,
+}: {
+  subjects: Subject[];
+  // 로그인한 사용자가 즐겨찾기한 과목 id들 (별 아이콘 초기 상태 표시용)
+  bookmarkedSubjectIds?: Set<string>;
+  loggedIn?: boolean;
+}) {
   const [active, setActive] = useState<string | null>(null);
 
   const filtered = active
@@ -53,14 +63,24 @@ export function SubjectIndexTabs({ subjects }: { subjects: Subject[] }) {
             ) : (
               <div className="grid grid-cols-2 gap-2">
                 {filtered.map((s) => (
-                  <Link
+                  <div
                     key={s.id}
-                    href={`/subjects/${s.slug}`}
-                    onClick={() => setActive(null)}
-                    className="rounded-lg border border-zinc-200 px-3 py-2 text-center text-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+                    className="flex items-center gap-1 rounded-lg border border-zinc-200 pl-3 pr-1.5 py-1 text-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
                   >
-                    {s.name}
-                  </Link>
+                    <Link
+                      href={`/subjects/${s.slug}`}
+                      onClick={() => setActive(null)}
+                      className="flex-1 py-1 text-center"
+                    >
+                      {s.name}
+                    </Link>
+                    <SubjectBookmarkButton
+                      subjectId={s.id}
+                      initialBookmarked={bookmarkedSubjectIds.has(s.id)}
+                      loggedIn={loggedIn}
+                      size="sm"
+                    />
+                  </div>
                 ))}
               </div>
             )}

@@ -61,6 +61,13 @@ export type Bookmark = {
   created_at: string;
 };
 
+export type SubjectBookmark = {
+  id: string;
+  user_id: string;
+  subject_id: string;
+  created_at: string;
+};
+
 export type AnswerKey = {
   id: string;
   exam_type_id: string;
