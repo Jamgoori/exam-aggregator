@@ -107,6 +107,9 @@ export async function uploadExamPaper(
     file_path: filePath,
     file_name: file.name,
     file_size: optimizedBuffer.byteLength,
+    // 업로드 시점에 이미 위에서 최적화를 마쳤으니, 크론(/api/cron/optimize-storage)의
+    // "아직 처리 안 된 기존 파일" 백로그 대상에서 곧바로 제외되게 지금 기록해둔다.
+    pdf_optimized_at: new Date().toISOString(),
     uploaded_by: user.id,
   });
 

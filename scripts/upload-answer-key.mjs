@@ -155,6 +155,7 @@ async function main() {
           file_path: storagePath,
           file_name: filename,
           file_size: fileBuffer.byteLength,
+          pdf_optimized_at: new Date().toISOString(),
         },
         { onConflict: "exam_type_id,year,level,round,track" },
       );

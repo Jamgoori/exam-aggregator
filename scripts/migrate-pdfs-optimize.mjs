@@ -42,6 +42,11 @@ async function migrateOne(supabase, table, row, dryRun) {
   const optimized = await optimizePdf(original);
 
   if (optimized.byteLength >= original.byteLength) {
+    // 더 줄어들진 않지만 "확인은 끝났다"는 표시는 남겨서, 다음 실행(재실행이든
+    // 크론이든)이 이 파일을 또 내려받아 다시 확인하지 않게 한다.
+    if (!dryRun) {
+      await supabase.from(table).update({ pdf_optimized_at: new Date().toISOString() }).eq("id", row.id);
+    }
     return { skipped: true, id: row.id, path: row.file_path, originalSize: original.byteLength };
   }
 
@@ -63,7 +68,7 @@ async function migrateOne(supabase, table, row, dryRun) {
 
   const { error: updateError } = await supabase
     .from(table)
-    .update({ file_size: optimized.byteLength })
+    .update({ file_size: optimized.byteLength, pdf_optimized_at: new Date().toISOString() })
     .eq("id", row.id);
   if (updateError) {
     return { error: `DB 갱신 실패: ${updateError.message}`, id: row.id, path: row.file_path };
@@ -94,7 +99,9 @@ async function runPool(items, concurrency, worker) {
 async function migrateTable(supabase, table, dryRun, concurrency) {
   let rows;
   try {
-    rows = await fetchAllRows(() => supabase.from(table).select("id, file_path"));
+    rows = await fetchAllRows(() =>
+      supabase.from(table).select("id, file_path").is("pdf_optimized_at", null),
+    );
   } catch (error) {
     console.error(`${table} 조회 실패: ${error.message}`);
     return { succeeded: [], errors: [] };

@@ -52,6 +52,11 @@ alter table exam_papers add column if not exists track text;
 -- 선지 수. 대부분 4지선다지만 경찰/소방 등 일부 직렬은 5지선다라 CBT 화면에서
 -- 몇 번까지 버튼을 보여줄지 이 값으로 결정한다. 정답이 아니라 형식 정보라 공개해도 무방.
 alter table exam_papers add column if not exists choice_count smallint not null default 4;
+-- PDF 무손실 최적화(pdf-lib object stream 재정리) 처리 시각. null이면 아직 처리
+-- 전(업로드 시점 자동 최적화 이전의 기존 파일이거나, 아직 못 돈 것). 크론
+-- (/api/cron/optimize-storage)이 이 값이 null인 행만 배치로 골라 처리하고, 더
+-- 줄어들지 않는 경우도 "확인은 끝남" 표시로 시각을 채워 매번 다시 시도하지 않게 한다.
+alter table exam_papers add column if not exists pdf_optimized_at timestamptz;
 
 create index if not exists exam_papers_subject_idx on exam_papers(subject_id);
 create index if not exists exam_papers_exam_type_idx on exam_papers(exam_type_id);
@@ -169,6 +174,8 @@ create table if not exists answer_keys (
 
 -- 기존 설치본 대비: track 컬럼 추가 + 기존 4컬럼 unique 제약을 track 포함 5컬럼으로 교체
 alter table answer_keys add column if not exists track text;
+-- exam_papers.pdf_optimized_at과 동일한 용도.
+alter table answer_keys add column if not exists pdf_optimized_at timestamptz;
 
 do $$
 declare
