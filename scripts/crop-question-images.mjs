@@ -78,15 +78,29 @@ const BARE_NUMBER_RE = /^(?:문\s*)?(\d{1,3})$/;
 // "N." 형태가 그대로 들어있어 진짜 마커와 똑같이 매치되니, 이 줄(y, 칼럼 동일)에
 // 서는 숫자 마커 후보를 아예 인정하지 않는다 — 2단 조판이라 왼쪽 칼럼의 진짜
 // 마커와 오른쪽 칼럼의 안내문이 페이지 맨 위 등에서 우연히 같은 y에 놓일 수
-// 있으므로, y뿐 아니라 같은 칼럼(좌/우)인지까지 같이 봐야 한다.
-const ANNOTATION_RANGE_RE = /\[\s*(?:문\s*)?(\d{1,3})\s*\.?\s*[～~]\s*(?:문\s*)?(\d{1,3})\s*\.?\s*\]/;
+// 있으므로, y뿐 아니라 같은 칼럼(좌/우)인지까지 같이 봐야 한다. 물결표(～/~)는
+// 일부 PDF에서 폰트에 유니코드 매핑이 없어 텍스트로 아예 추출되지 않는 경우가
+// 있어(예: "[문 11. 문 12.]"로 물결표 없이 두 조각만 남음) 필수로 두면 그 줄의
+// 안내문 인식 자체가 통째로 실패해 "문 11."이 실제 마커로 오인된다 — 선택으로
+// 완화한다.
+const ANNOTATION_RANGE_RE = /\[\s*(?:문\s*)?(\d{1,3})\s*\.?\s*[～~]?\s*(?:문\s*)?(\d{1,3})\s*\.?\s*\]/;
+
+// 같은 시각적 줄에 있어도 글자마다(특히 대괄호·물결표 같은 특수 글리프) y가
+// 소수점 단위로 미세하게 흔들릴 수 있다. 원시 y를 그대로 키로 쓰면 그 흔들림
+//때문에 한 줄이 여러 조각으로 쪼개져 안내문 정규식이 매치되지 않고, 그 결과
+// 안내문 속 "문 11." 같은 텍스트가 제외되지 않은 채 진짜 마커로 오인된다.
+// 정수로 반올림해 묶으면(줄 간격은 보통 수십 pt라 오인식 위험은 없다) 이 문제가
+// 없어진다.
+function lineKey(y, col) {
+  return `${Math.round(y)}|${col}`;
+}
 
 function findAnnotationLines(items, half) {
   const lines = new Map();
   for (const item of items) {
     const [, , , , x, y] = item.transform;
     const col = x < half ? "L" : "R";
-    const key = `${y}|${col}`;
+    const key = lineKey(y, col);
     if (!lines.has(key)) lines.set(key, { y, col, parts: [] });
     lines.get(key).parts.push({ x, str: item.str });
   }
@@ -119,7 +133,7 @@ async function findQuestionMarkers(page) {
     const str = item.str.trim();
     if (!str) continue;
     const [, , , , itemX, itemY] = item.transform;
-    if (annotationKeys.has(`${itemY}|${itemX < half ? "L" : "R"}`)) continue;
+    if (annotationKeys.has(lineKey(itemY, itemX < half ? "L" : "R"))) continue;
 
     const match = QUESTION_MARKER_RE.exec(str);
     if (match) {
@@ -236,9 +250,16 @@ async function stackVertically(topBuffer, bottomBuffer) {
     .toBuffer();
 }
 
-async function cropQuestionsFromPage(page, scale) {
+// carriedStrips: 이전 페이지에서 넘어온, 아직 어떤 문제에도 붙지 못한 안내문
+// 스트립(번호 → 이미지 버퍼). 세트가 페이지 경계를 걸치면(예: 안내문+9번은
+// 페이지1, 10~11번은 페이지2) findQuestionMarkers가 페이지 단위로만 동작해
+// 10, 11번은 이 페이지의 groups에 안내문이 없어 스트립을 못 만든다. 그래서
+// 페이지1에서 만든 9~11용 스트립 중 9번만 쓰고 남은 10, 11번 몫을 다음 페이지
+// 호출로 이어받는다. 반환하는 pendingStrips는 이번 페이지에서도 못 쓴(3페이지
+// 이상 걸치는 등) 스트립을 그다음 페이지로 다시 넘기기 위한 것이다.
+async function cropQuestionsFromPage(page, scale, carriedStrips = new Map()) {
   const { markers, groups, pageWidthPt, pageHeightPt } = await findQuestionMarkers(page);
-  if (markers.length === 0) return [];
+  if (markers.length === 0) return { results: [], pendingStrips: carriedStrips };
 
   const { left, right, half } = splitIntoColumns(markers, pageWidthPt);
   const { buffer: pageImage, width: pageWidthPx, height: pageHeightPx } =
@@ -337,12 +358,13 @@ async function cropQuestionsFromPage(page, scale) {
     });
   }
 
-  const stripByNumber = new Map();
+  const stripByNumber = new Map(carriedStrips);
   for (const s of stripRegions) {
     const buffer = await extractRegion(s.colDef, s.top, s.bottom);
     if (!buffer) continue;
     for (const n of s.memberNumbers) stripByNumber.set(n, buffer);
   }
+  const consumedNumbers = new Set();
 
   const results = [];
 
@@ -373,12 +395,20 @@ async function cropQuestionsFromPage(page, scale) {
         continue;
       }
       const strip = stripByNumber.get(marker.number);
-      if (strip) raw = await stackVertically(strip, raw);
+      if (strip) {
+        raw = await stackVertically(strip, raw);
+        consumedNumbers.add(marker.number);
+      }
       results.push({ number: marker.number, image: await finalizeQuestionImage(raw, scale) });
     }
   }
 
-  return results;
+  const pendingStrips = new Map();
+  for (const [number, buffer] of stripByNumber) {
+    if (!consumedNumbers.has(number)) pendingStrips.set(number, buffer);
+  }
+
+  return { results, pendingStrips };
 }
 
 // PDF 버퍼 전체를 문항별로 잘라 { number, image } 목록을 반환한다. 페이지 순회,
@@ -389,9 +419,11 @@ export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage } =
   const pdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
 
   const cropped = [];
+  let carriedStrips = new Map();
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
-    const pageResults = await cropQuestionsFromPage(page, scale);
+    const { results: pageResults, pendingStrips } = await cropQuestionsFromPage(page, scale, carriedStrips);
+    carriedStrips = pendingStrips;
     cropped.push(...pageResults);
     onPage?.(p, pageResults);
   }
