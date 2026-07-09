@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect, type ReactNode } from "react";
+import { useMemo, useState, useEffect, useDeferredValue, useRef, type ReactNode } from "react";
 import { FileStack, Download, Users } from "lucide-react";
 import { ExamCard } from "@/components/exam-card";
 import { SearchInput } from "@/components/search-input";
@@ -107,15 +107,28 @@ export function HomeExamBrowser({
   totalDownloads: number | null;
   totalAttempts: number | null;
 }) {
-  const [query, setQuery] = useState(initialQuery);
-  const [level, setLevel] = useState(initialLevel);
-  // 페이지 이동은 서버 왕복을 피하려고 라우터 대신 history.replaceState로만 URL을
-  // 바꾼다(아래 useEffect). 그래서 Next 라우터는 page 값을 모르고, 카드 → 문제
-  // 상세로 갔다가 뒤로 오면 이 컴포넌트가 다시 마운트되면서 서버가 넘겨준
-  // initialPage(캐시상 보통 1)로 되돌아가 버렸다. 브라우저는 뒤로가기 때 그 히스토리
-  // 항목의 URL(?page=3)을 복원해주므로, 마운트 시 실제 URL의 page를 먼저 읽어
-  // 원래 보던 페이지로 복귀시킨다. (SSR 최초 로드 땐 URL과 initialPage가 같은
-  // searchParams에서 나오므로 하이드레이션 불일치가 없다.)
+  // 검색/급수/페이지 이동은 서버 왕복을 피하려고 라우터 대신 history.replaceState로만
+  // URL을 바꾼다(아래 useEffect). 그래서 Next 라우터는 이 변경들을 모르고, 카드 → 문제
+  // 상세로 갔다가 뒤로 오면 이 컴포넌트가 Next가 캐시해둔(검색 전) 트리로 다시
+  // 마운트되면서 서버가 넘겨준 initialQuery/initialLevel/initialPage(검색 전 값)로
+  // 되돌아가 버렸다. 브라우저는 뒤로가기 때 그 히스토리 항목의 URL(?q=…&page=3)을
+  // 복원해주므로, 마운트 시 실제 URL을 먼저 읽어 원래 보던 상태로 복귀시킨다.
+  // (SSR 최초 로드 땐 URL과 initial* 값이 같은 searchParams에서 나오므로 하이드레이션
+  // 불일치가 없다.)
+  const [query, setQuery] = useState(() => {
+    if (typeof window !== "undefined") {
+      const fromUrl = new URLSearchParams(window.location.search).get("q");
+      if (fromUrl) return fromUrl;
+    }
+    return initialQuery;
+  });
+  const [level, setLevel] = useState(() => {
+    if (typeof window !== "undefined") {
+      const fromUrl = new URLSearchParams(window.location.search).get("level");
+      if (fromUrl) return fromUrl;
+    }
+    return initialLevel;
+  });
   const [page, setPage] = useState(() => {
     if (typeof window !== "undefined") {
       const fromUrl = Number(
@@ -129,10 +142,16 @@ export function HomeExamBrowser({
   const bookmarkedSet = useMemo(() => new Set(bookmarkedIds), [bookmarkedIds]);
   const cbtAvailableSet = useMemo(() => new Set(cbtAvailableIds), [cbtAvailableIds]);
 
-  const isSearching = query.trim().length > 0;
+  // 카드 목록을 매 키 입력마다 즉시 다시 그리면, 마지막 글자를 치자마자 카드
+  // 배치가 바뀌는 순간과 클릭이 겹칠 때 손가락/마우스 아래 있던 카드가 슬쩍
+  // 바뀌어 엉뚱한 문제가 눌리는 사고가 났다. 입력창 자체(query)는 즉시 반응하되,
+  // 카드 목록을 다시 그리는 데 쓰는 값만 한 박자 늦춰(useDeferredValue) 리액트가
+  // 클릭 같은 다급한 이벤트를 이 재배치보다 먼저 처리하게 한다.
+  const deferredQuery = useDeferredValue(query);
+  const isSearching = deferredQuery.trim().length > 0;
   const matchedSubjectIds = useMemo(
-    () => matchSubjectIds(subjects, query),
-    [subjects, query],
+    () => matchSubjectIds(subjects, deferredQuery),
+    [subjects, deferredQuery],
   );
   const filtered = useMemo(
     () => filterPapers(allPapers, { level, matchedSubjectIds, isSearching }),
@@ -154,6 +173,18 @@ export function HomeExamBrowser({
   function handleLevelChange(next: string | undefined) {
     setLevel(next);
     setPage(1);
+  }
+
+  // 뒤쪽 페이지(카드 수가 적어 문서 높이가 짧음)를 보다가 앞쪽 페이지처럼 카드가
+  // 많은 페이지로 갈 때, 스크롤을 많이 내려둔 상태였다면 문서 높이가 줄어드는
+  // 순간 브라우저가 스크롤 위치를 새 최대치로 강제로 당겨 올린다 — 그 바람에
+  // 화면이 위로 튀면서 마우스 아래 있던 카드가 바뀌어 엉뚱한 곳이 눌리는 사고가
+  // 났다. 페이지 번호를 누르면 항상 결과 영역 맨 위로 스크롤해 이 강제 클램핑
+  // 자체가 일어나지 않게 한다.
+  const resultsSectionRef = useRef<HTMLElement>(null);
+  function handlePageChange(next: number) {
+    setPage(next);
+    resultsSectionRef.current?.scrollIntoView({ block: "start" });
   }
 
   // 주소창 URL은 공유/새로고침용으로만 갱신한다 — 여기서 서버를 다시 부르지
@@ -212,7 +243,7 @@ export function HomeExamBrowser({
         </div>
       </section>
 
-      <section className="flex flex-col gap-4">
+      <section ref={resultsSectionRef} className="flex flex-col gap-4">
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -270,14 +301,14 @@ export function HomeExamBrowser({
               currentPage={safePage}
               totalPages={totalPages}
               blockSize={5}
-              onNavigate={setPage}
+              onNavigate={handlePageChange}
               className="flex sm:hidden"
             />
             <PageButtons
               currentPage={safePage}
               totalPages={totalPages}
               blockSize={10}
-              onNavigate={setPage}
+              onNavigate={handlePageChange}
               className="hidden sm:flex"
             />
           </>

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { SiteHeaderGate } from "@/components/site-header-gate";
 import { createClient } from "@/lib/supabase/server";
@@ -10,6 +10,15 @@ export const metadata: Metadata = {
     template: "%s | 공모아",
   },
   description: "공무원 시험 기출문제 아그리게이터",
+};
+
+// 기본값(resizes-content)은 모바일 키보드가 열고 닫힐 때 레이아웃 뷰포트 자체의
+// 높이를 바꿔 페이지가 다시 리플로우/스크롤된다 — 검색창에 포커스가 남은 채로
+// 카드를 탭하면, 탭 도중 키보드가 닫히며 화면이 밀려 올라가 손가락 아래
+// 엉뚱한 카드가 눌리는 사고가 난다. resizes-visual로 바꾸면 키보드는 시각
+// 뷰포트만 가리고 레이아웃은 그대로 유지되어 이 리플로우 자체가 없어진다.
+export const viewport: Viewport = {
+  interactiveWidget: "resizes-visual",
 };
 
 export default async function RootLayout({
