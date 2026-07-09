@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Download, ExternalLink, Monitor } from "lucide-react";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor } from "@/lib/level-colors";
+import { examTypeTabColor } from "@/lib/exam-type-colors";
 import { DifficultyRating } from "@/components/difficulty-rating";
 import { CommentsSection } from "@/components/comments-section";
 import { ExamCard } from "@/components/exam-card";
@@ -36,10 +37,13 @@ export default async function PaperDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ level?: string }>;
+  searchParams: Promise<{ level?: string; examTypes?: string }>;
 }) {
   const { id } = await params;
-  const { level } = await searchParams;
+  const { level, examTypes: examTypesParam } = await searchParams;
+  const selectedExamTypeIds = new Set(
+    (examTypesParam ?? "").split(",").filter(Boolean),
+  );
 
   const paper = await getPaper(id);
 
@@ -61,13 +65,14 @@ export default async function PaperDetailPage({
     myCbtRecordItems,
     subjectPapers,
     availableLevels,
+    availableExamTypes,
     myRoundCounts,
     subjectBookmarkedIds,
     subjectCbtAvailability,
     paperFileUrl,
     answerKey,
     answerKeyFileUrl,
-  } = await getPaperDetailData(paper, level);
+  } = await getPaperDetailData(paper, level, selectedExamTypeIds);
 
   const subject = paper.subjects;
   const examType = paper.exam_types;
@@ -208,6 +213,8 @@ export default async function PaperDetailPage({
           papers={subjectPapers}
           availableLevels={availableLevels}
           level={level}
+          availableExamTypes={availableExamTypes}
+          selectedExamTypeIds={selectedExamTypeIds}
           currentPaperId={paper.id}
           myRoundCounts={myRoundCounts}
           bookmarkedIds={subjectBookmarkedIds}
@@ -226,6 +233,8 @@ function RelatedPapersSection({
   papers,
   availableLevels,
   level,
+  availableExamTypes,
+  selectedExamTypeIds,
   currentPaperId,
   myRoundCounts,
   bookmarkedIds,
@@ -236,12 +245,28 @@ function RelatedPapersSection({
   papers: ExamPaper[];
   availableLevels: string[];
   level?: string;
+  availableExamTypes: { id: string; name: string; display_order: number }[];
+  selectedExamTypeIds: Set<string>;
   currentPaperId: string;
   myRoundCounts: Map<string, number>;
   bookmarkedIds: Set<string>;
   cbtAvailability: Set<string>;
   loggedIn: boolean;
 }) {
+  // 급수 탭·직렬 탭이 서로의 선택 상태를 지우지 않도록, 두 탭 모두 이 헬퍼로
+  // href를 만든다 — 인자로 넘긴 값만 바꾸고 나머지는 현재 선택을 그대로 유지한다.
+  function buildFilterHref(
+    nextLevel: string | undefined,
+    nextExamTypeIds: Set<string>,
+  ) {
+    const usp = new URLSearchParams();
+    if (nextLevel) usp.set("level", nextLevel);
+    if (nextExamTypeIds.size > 0)
+      usp.set("examTypes", [...nextExamTypeIds].join(","));
+    const qs = usp.toString();
+    return qs ? `/papers/${currentPaperId}?${qs}` : `/papers/${currentPaperId}`;
+  }
+
   return (
     <div className="flex flex-col gap-4 border-t border-zinc-100 pt-14">
       <div className="flex items-center justify-between gap-4">
@@ -259,7 +284,7 @@ function RelatedPapersSection({
       {availableLevels.length > 1 && (
         <div className="flex flex-wrap gap-2">
           <Link
-            href={`/papers/${currentPaperId}`}
+            href={buildFilterHref(undefined, selectedExamTypeIds)}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               !level
                 ? "bg-zinc-800 text-white"
@@ -271,7 +296,7 @@ function RelatedPapersSection({
           {availableLevels.map((lv) => (
             <Link
               key={lv}
-              href={`/papers/${currentPaperId}?level=${encodeURIComponent(lv)}`}
+              href={buildFilterHref(lv, selectedExamTypeIds)}
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 level === lv
                   ? levelColor(lv)
@@ -284,10 +309,48 @@ function RelatedPapersSection({
         </div>
       )}
 
+      {/* 직렬(국가직/지방직/지역인재 등)은 여러 개를 동시에 켤 수 있는 다중 선택
+          탭이라, 한 번 눌러도 급수 탭처럼 다른 선택지가 꺼지지 않고 눌린 것만
+          토글된다. */}
+      {availableExamTypes.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={buildFilterHref(level, new Set())}
+            className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+              selectedExamTypeIds.size === 0
+                ? "bg-zinc-800 text-white"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+            }`}
+          >
+            전체
+          </Link>
+          {availableExamTypes.map((et) => {
+            const isSelected = selectedExamTypeIds.has(et.id);
+            const nextExamTypeIds = new Set(selectedExamTypeIds);
+            if (isSelected) nextExamTypeIds.delete(et.id);
+            else nextExamTypeIds.add(et.id);
+            return (
+              <Link
+                key={et.id}
+                href={buildFilterHref(level, nextExamTypeIds)}
+                aria-pressed={isSelected}
+                className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+                  isSelected
+                    ? examTypeTabColor(et.name)
+                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                }`}
+              >
+                {et.name}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {papers.length === 0 && (
           <p className="col-span-full py-8 text-center text-zinc-500">
-            해당 급수의 기출문제가 없습니다.
+            조건에 맞는 기출문제가 없습니다.
           </p>
         )}
         {papers.map((p) => (

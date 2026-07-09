@@ -27,7 +27,11 @@ export const getPaper = cache(async (id: string) => {
 // 상세페이지 렌더링에 필요한 모든 데이터를 모아서 돌려준다. 어떤 쿼리를 어떻게
 // 묶어서 날리는지(왕복 횟수)는 전부 여기서 결정하고, 페이지 컴포넌트는 받은 값을
 // 그리기만 한다.
-export async function getPaperDetailData(paper: ExamPaper, level?: string) {
+export async function getPaperDetailData(
+  paper: ExamPaper,
+  level?: string,
+  examTypeIds?: Set<string>,
+) {
   const supabase = await createClient();
 
   // 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — 아래의 개인화 쿼리
@@ -63,6 +67,9 @@ export async function getPaperDetailData(paper: ExamPaper, level?: string) {
   if (subjectPapersQuery && level) {
     subjectPapersQuery = subjectPapersQuery.eq("level", level);
   }
+  if (subjectPapersQuery && examTypeIds && examTypeIds.size > 0) {
+    subjectPapersQuery = subjectPapersQuery.in("exam_type_id", [...examTypeIds]);
+  }
 
   const [
     { data: comments },
@@ -72,6 +79,7 @@ export async function getPaperDetailData(paper: ExamPaper, level?: string) {
     { data: roundAverageRows },
     { data: subjectPapers },
     { data: subjectLevelRows },
+    { data: subjectExamTypeRows },
     { data: isAdminData },
     { data: bookmarkData },
     { data: myRatingData },
@@ -97,6 +105,13 @@ export async function getPaperDetailData(paper: ExamPaper, level?: string) {
       ? supabase
           .from("exam_papers")
           .select("level")
+          .eq("subject_id", paper.subject_id)
+      : Promise.resolve({ data: null }),
+    // 직렬 탭도 급수 탭과 같은 이유로, 이 과목에 실제 존재하는 직렬만 가볍게 조회한다.
+    paper.subject_id
+      ? supabase
+          .from("exam_papers")
+          .select("exam_type_id, exam_types(id, name, display_order)")
           .eq("subject_id", paper.subject_id)
       : Promise.resolve({ data: null }),
     loggedIn ? supabase.rpc("is_admin") : Promise.resolve({ data: false }),
@@ -168,6 +183,21 @@ export async function getPaperDetailData(paper: ExamPaper, level?: string) {
     ),
   ].sort(compareLevels);
 
+  // 직렬 탭에는 이 과목에 실제로 존재하는 직렬만 보여준다.
+  const examTypeById = new Map<
+    string,
+    { id: string; name: string; display_order: number }
+  >();
+  for (const row of subjectExamTypeRows ?? []) {
+    const et = row.exam_types as unknown as
+      | { id: string; name: string; display_order: number }
+      | null;
+    if (et) examTypeById.set(et.id, et);
+  }
+  const availableExamTypes = [...examTypeById.values()].sort(
+    (a, b) => a.display_order - b.display_order,
+  );
+
   // "같은 과목 목록" 카드에 북마크/바로풀기를 달아주기 위한 배치 조회. subjectPapers의
   // id는 위 Promise.all이 끝나야 알 수 있어서 그 안에 묶지 못하고 여기서 한 번 더
   // 병렬 조회한다(현재 보는 문제지 자신은 카드에서 두 기능 다 안 쓰니 제외).
@@ -206,6 +236,7 @@ export async function getPaperDetailData(paper: ExamPaper, level?: string) {
     myCbtRecordItems,
     subjectPapers: subjectPapers as ExamPaper[] | null,
     availableLevels,
+    availableExamTypes,
     myRoundCounts,
     subjectBookmarkedIds,
     subjectCbtAvailability,

@@ -334,7 +334,7 @@ export function HomeExamBrowser({
           onClick={handleToggleFavOnly}
           aria-pressed={effectiveFavOnly}
           title={loggedIn ? undefined : "로그인 후 이용할 수 있어요"}
-          className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium ${
+          className={`mt-2 flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium ${
             effectiveFavOnly
               ? "border border-amber-300 bg-amber-50 text-amber-600"
               : "border border-zinc-200 text-zinc-600 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600"

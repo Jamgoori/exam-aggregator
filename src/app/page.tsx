@@ -52,7 +52,7 @@ export default async function Home({
   const latestYear = allPapers[0]?.year;
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 pt-6 pb-12 sm:pt-8">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
       <HomeExamBrowser
         heroText={
           <>
