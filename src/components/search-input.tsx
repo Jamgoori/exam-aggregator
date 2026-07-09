@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Search } from "lucide-react";
 
 // 예전엔 이 컴포넌트가 직접 라우팅(router.push)까지 담당해서, 입력할 때마다
@@ -13,6 +14,28 @@ export function SearchInput({
   value: string;
   onChange: (next: string) => void;
 }) {
+  // 한글은 마지막 글자의 IME 조합이 열린 채로 남는데, 이 상태로 스크롤을 내려
+  // 화면 아래쪽(페이지 버튼 등)을 클릭하면 마우스를 누르는 순간 조합이 확정되고,
+  // Chromium이 mousedown 이벤트를 보내기도 전에 이 검색창을 화면 안으로 강제
+  // 스크롤한다 — 화면이 통째로 위로 튀고, 클릭은 원래 누르려던 자리로 올라온
+  // 엉뚱한 카드에 떨어졌다. 조합 확정(compositionend) 시점에 스크롤이 직전
+  // 위치에서 급격히 벗어나 있으면 즉시 되돌린다. 이 복원은 mousedown이 발생하기
+  // 전에 실행되므로 클릭도 의도한 자리에 정확히 떨어진다. 문턱(150px)을 둔 것은
+  // 조합 중 사용자가 직접 굴린 소소한 스크롤까지 되감지 않기 위해서다.
+  const lastScrollY = useRef(0);
+  useEffect(() => {
+    lastScrollY.current = window.scrollY;
+    const onScroll = () => {
+      lastScrollY.current = window.scrollY;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  function undoImeScrollJump() {
+    const y = lastScrollY.current;
+    if (Math.abs(window.scrollY - y) > 150) window.scrollTo(0, y);
+  }
+
   return (
     // 596px는 위 소개 문단("국가직·지방직·서울시 ... 정리했어요.")이 한 줄로
     // 렌더링됐을 때 폭과 맞춘 값이라, 그 줄 끝과 오른쪽 끝이 나란해 보인다.
@@ -23,6 +46,7 @@ export function SearchInput({
         aria-label="과목명으로 검색"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onCompositionEnd={undoImeScrollJump}
         placeholder="과목명으로 검색..."
         className="w-full text-base outline-none placeholder:text-zinc-400"
       />
