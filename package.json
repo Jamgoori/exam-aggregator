@@ -13,6 +13,7 @@
     "extract-answers": "node --env-file=.env.local scripts/extract-answer-keys.mjs",
     "list-pending-answers": "node --env-file=.env.local scripts/list-pending-answer-keys.mjs",
     "crop-questions": "node --env-file=.env.local scripts/crop-question-images.mjs",
+    "batch-crop-questions": "node --env-file=.env.local scripts/batch-crop-questions.mjs",
     "migrate-question-images": "node --env-file=.env.local scripts/migrate-question-images-to-webp.mjs",
     "migrate-pdfs": "node --env-file=.env.local scripts/migrate-pdfs-optimize.mjs"
   },

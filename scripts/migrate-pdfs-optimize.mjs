@@ -90,9 +90,27 @@ async function runPool(items, concurrency, worker) {
   return results;
 }
 
+// PostgREST 기본 응답 제한(1000행)에 걸리지 않도록 range()로 나눠 전부 받아온다.
+async function fetchAllRows(supabase, table, columns, pageSize = 1000) {
+  const rows = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    if (data.length < pageSize) break;
+  }
+  return rows;
+}
+
 async function migrateTable(supabase, table, dryRun, concurrency) {
-  const { data: rows, error } = await supabase.from(table).select("id, file_path");
-  if (error) {
+  let rows;
+  try {
+    rows = await fetchAllRows(supabase, table, "id, file_path");
+  } catch (error) {
     console.error(`${table} 조회 실패: ${error.message}`);
     return { succeeded: [], errors: [] };
   }
