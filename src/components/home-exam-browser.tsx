@@ -47,10 +47,19 @@ function PageButtons({
   const pages = [];
   for (let p = blockStart; p <= blockEnd; p++) pages.push(p);
 
+  // 한글 검색어를 친 직후엔 마지막 글자의 IME 조합이 아직 열려 있는데, 그 상태로
+  // 페이지 버튼을 클릭하면 검색창이 포커스를 잃으면서 조합이 확정되고, 이때
+  // 브라우저(Chromium/Edge)가 그 검색창을 화면 안으로 보이게 강제 스크롤해서
+  // 화면이 통째로 맨 위로 튀었다. mousedown의 기본 동작(클릭 대상으로 포커스
+  // 이동)을 막으면 검색창이 포커스를 유지해 이 확정→강제 스크롤이 아예 일어나지
+  // 않는다. 클릭 이벤트 자체는 그대로 발생하므로 페이지 이동은 정상 동작한다.
+  const keepFocus = (e: React.MouseEvent) => e.preventDefault();
+
   return (
     <nav className={`items-center justify-center gap-1 pt-4 ${className}`}>
       <button
         type="button"
+        onMouseDown={keepFocus}
         onClick={() => onNavigate(Math.max(1, prevBlockPage))}
         disabled={prevBlockPage < 1}
         className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600 disabled:pointer-events-none disabled:opacity-40"
@@ -61,6 +70,7 @@ function PageButtons({
         <button
           key={p}
           type="button"
+          onMouseDown={keepFocus}
           onClick={() => onNavigate(p)}
           className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium ${
             p === currentPage
@@ -73,6 +83,7 @@ function PageButtons({
       ))}
       <button
         type="button"
+        onMouseDown={keepFocus}
         onClick={() => onNavigate(Math.min(totalPages, nextBlockPage))}
         disabled={nextBlockPage > totalPages}
         className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600 disabled:pointer-events-none disabled:opacity-40"
