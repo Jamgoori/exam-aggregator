@@ -8,15 +8,22 @@ import {
   type DrawTool,
 } from "@/components/pdf-canvas-viewer";
 
+type QuestionAnswerState = {
+  number: number;
+  choiceCount: number;
+  selected: number | null;
+  onSelect: (choice: number) => void;
+  questionResult: { selected_choice: number | null; is_correct: boolean } | null;
+};
+
 export function SingleQuestionView({
   questionIndex,
   totalQuestions,
-  choiceCount,
+  questions,
   images,
-  selected,
-  onSelect,
+  prevIndex,
+  nextIndex,
   onNavigate,
-  questionResult,
   tool,
   penColor,
   penWidth = DEFAULT_PEN_WIDTH,
@@ -29,12 +36,13 @@ export function SingleQuestionView({
 }: {
   questionIndex: number;
   totalQuestions: number;
-  choiceCount: number;
+  // 공통지문 세트문제는 화면 하나에 여러 문제가 같이 보이므로, 답 선택 줄도
+  // 세트에 속한 번호 수만큼 나온다(보통은 원소 1개).
+  questions: QuestionAnswerState[];
   images: string[];
-  selected: number | null;
-  onSelect: (choice: number) => void;
+  prevIndex: number | null;
+  nextIndex: number | null;
   onNavigate: (index: number) => void;
-  questionResult: { selected_choice: number | null; is_correct: boolean } | null;
   tool: DrawTool;
   penColor: string;
   penWidth?: number;
@@ -45,9 +53,9 @@ export function SingleQuestionView({
   answeredCount: number;
   error?: string | null;
 }) {
-  const questionNumber = questionIndex + 1;
-  const graded = !!questionResult;
-  const isLast = questionIndex === totalQuestions - 1;
+  const firstNumber = questions[0]?.number ?? questionIndex + 1;
+  const lastNumber = questions[questions.length - 1]?.number ?? firstNumber;
+  const isLast = nextIndex === null;
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -127,7 +135,9 @@ export function SingleQuestionView({
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2">
         <div>
-          <span className="text-sm font-bold text-zinc-800">{questionNumber}번</span>
+          <span className="text-sm font-bold text-zinc-800">
+            {firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`}
+          </span>
           <span className="text-sm text-zinc-400"> / {totalQuestions}</span>
         </div>
         {/* 문제별 풀기 도중에도 언제든 전체 채점할 수 있도록 상단에 제출 버튼을 둔다. */}
@@ -161,7 +171,7 @@ export function SingleQuestionView({
               <img
                 key={i}
                 src={src}
-                alt={`${questionNumber}번 문제 이미지 ${i + 1}`}
+                alt={`${firstNumber}번 문제 이미지 ${i + 1}`}
                 className="w-full"
               />
             ))
@@ -184,36 +194,54 @@ export function SingleQuestionView({
           <button
             type="button"
             aria-label="이전 문제"
-            disabled={questionIndex === 0}
-            onClick={() => onNavigate(questionIndex - 1)}
+            disabled={prevIndex === null}
+            onClick={() => prevIndex !== null && onNavigate(prevIndex)}
             className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <ChevronLeft size={22} />
           </button>
 
-          <div className="flex flex-1 justify-center gap-2">
-            {Array.from({ length: choiceCount }, (_, c) => c + 1).map((choice) => {
-              const isSelected = selected === choice;
-              const isCorrectChoice = graded && questionResult?.is_correct && isSelected;
-              const isWrongChoice = graded && !questionResult?.is_correct && isSelected;
+          {/* 세트문제는 번호마다 줄을 따로 두고, 줄 앞에 번호 배지를 붙여 어느
+              문제의 선지인지 헷갈리지 않게 한다(줄이 하나뿐이면 배지도 숨긴다). */}
+          <div className="flex flex-1 flex-col gap-2">
+            {questions.map((q) => {
+              const graded = submitted;
               return (
-                <button
-                  key={choice}
-                  type="button"
-                  disabled={graded}
-                  onClick={() => onSelect(choice)}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${
-                    isCorrectChoice
-                      ? "bg-emerald-500 text-white"
-                      : isWrongChoice
-                        ? "bg-red-500 text-white"
-                        : isSelected
-                          ? "bg-blue-600 text-white"
-                          : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
-                  } disabled:cursor-default`}
-                >
-                  {choice}
-                </button>
+                <div key={q.number} className="flex items-center justify-center gap-2">
+                  {questions.length > 1 && (
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white">
+                      {q.number}
+                    </span>
+                  )}
+                  <div className="flex justify-center gap-2">
+                    {Array.from({ length: q.choiceCount }, (_, c) => c + 1).map((choice) => {
+                      const isSelected = q.selected === choice;
+                      const isCorrectChoice =
+                        graded && q.questionResult?.is_correct && isSelected;
+                      const isWrongChoice =
+                        graded && q.questionResult && !q.questionResult.is_correct && isSelected;
+                      return (
+                        <button
+                          key={choice}
+                          type="button"
+                          disabled={graded}
+                          onClick={() => q.onSelect(choice)}
+                          className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold ${
+                            isCorrectChoice
+                              ? "bg-emerald-500 text-white"
+                              : isWrongChoice
+                                ? "bg-red-500 text-white"
+                                : isSelected
+                                  ? "bg-blue-600 text-white"
+                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+                          } disabled:cursor-default`}
+                        >
+                          {choice}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -234,8 +262,8 @@ export function SingleQuestionView({
             <button
               type="button"
               aria-label="다음 문제"
-              disabled={isLast}
-              onClick={() => onNavigate(questionIndex + 1)}
+              disabled={nextIndex === null}
+              onClick={() => nextIndex !== null && onNavigate(nextIndex)}
               className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
             >
               <ChevronRight size={22} />

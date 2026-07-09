@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useTransition,
@@ -233,6 +234,33 @@ export function CbtSolver({
   );
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
+  // 세트문제(공통지문 공유)는 연속된 문제번호가 완전히 같은 이미지 경로를
+  // 가리킨다(크롭 스크립트가 그렇게 저장한다) — 바이트를 다시 비교할 필요 없이
+  // 이미지 배열이 같은지만 보고 같은 세트로 묶는다. 문제별 보기에서 이 세트에
+  // 속한 어느 번호로 들어오든 화면에는 세트 전체 번호가 같이 보여야 한다.
+  const questionGroups = useMemo(() => {
+    const groups = new Map<number, number[]>();
+    let i = 1;
+    while (i <= totalQuestions) {
+      const images = questionImages[i] ?? [];
+      let end = i;
+      if (images.length > 0) {
+        while (
+          end + 1 <= totalQuestions &&
+          questionImages[end + 1]?.length === images.length &&
+          questionImages[end + 1]?.every((src, idx) => src === images[idx])
+        ) {
+          end++;
+        }
+      }
+      const numbers: number[] = [];
+      for (let n = i; n <= end; n++) numbers.push(n);
+      for (const n of numbers) groups.set(n, numbers);
+      i = end + 1;
+    }
+    return groups;
+  }, [questionImages, totalQuestions]);
+
   const { countdown, elapsedSeconds, startedAtRef, resetTimer } = useCbtTimer(
     paperId,
     !result,
@@ -334,6 +362,20 @@ export function CbtSolver({
   const resultByQuestion = new Map(
     (result?.questionResults ?? []).map((q) => [q.question_number, q]),
   );
+
+  // 세트로 묶인 문제는 이전/다음 이동도 개별 번호가 아니라 세트 단위로 건너뛴다
+  // (세트 안 다른 번호로 옮겨봐야 화면에 보이는 이미지가 똑같기 때문).
+  const currentGroupNumbers = questionGroups.get(currentQuestionIndex + 1) ?? [
+    currentQuestionIndex + 1,
+  ];
+  const groupFirstNumber = currentGroupNumbers[0];
+  const groupLastNumber = currentGroupNumbers[currentGroupNumbers.length - 1];
+  const prevNumber = groupFirstNumber > 1 ? groupFirstNumber - 1 : null;
+  const prevGroupNumbers = prevNumber
+    ? (questionGroups.get(prevNumber) ?? [prevNumber])
+    : null;
+  const prevQuestionIndex = prevGroupNumbers ? prevGroupNumbers[0] - 1 : null;
+  const nextQuestionIndex = groupLastNumber < totalQuestions ? groupLastNumber : null;
 
   return (
     // SiteHeaderGate가 lg 이상에서는 전역 사이트 헤더(약 65px)를 그대로 보여주는데,
@@ -531,14 +573,17 @@ export function CbtSolver({
               <SingleQuestionView
                 questionIndex={currentQuestionIndex}
                 totalQuestions={totalQuestions}
-                choiceCount={questionChoiceCounts[currentQuestionIndex + 1] ?? choiceCount}
+                questions={currentGroupNumbers.map((number) => ({
+                  number,
+                  choiceCount: questionChoiceCounts[number] ?? choiceCount,
+                  selected: answers[number - 1],
+                  onSelect: (choice: number) => selectChoice(number - 1, choice),
+                  questionResult: result ? (resultByQuestion.get(number) ?? null) : null,
+                }))}
                 images={questionImages[currentQuestionIndex + 1] ?? []}
-                selected={answers[currentQuestionIndex]}
-                onSelect={(choice) => selectChoice(currentQuestionIndex, choice)}
+                prevIndex={prevQuestionIndex}
+                nextIndex={nextQuestionIndex}
                 onNavigate={setCurrentQuestionIndex}
-                questionResult={
-                  result ? (resultByQuestion.get(currentQuestionIndex + 1) ?? null) : null
-                }
                 tool={tool}
                 penColor={penColor}
                 penWidth={penWidth}

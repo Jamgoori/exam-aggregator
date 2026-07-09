@@ -70,17 +70,24 @@ async function cropOnePaper(supabase, paper, { dryRun, scale }) {
     return { paper, cropped: cropped.length, warning, dryRun: true };
   }
 
+  // 세트문제(공통지문 병합)는 그룹의 첫 번호 경로 하나에만 실제로 업로드하고,
+  // 나머지 번호들은 question_images.image_path를 그 경로로 같이 가리키게 한다.
+  const uploadedPaths = new Set();
   let uploaded = 0;
   const uploadErrors = [];
   for (const c of cropped) {
-    const storagePath = `questions/${paper.id}/${String(c.number).padStart(2, "0")}.webp`;
+    const groupStart = Math.min(...(c.groupNumbers ?? [c.number]));
+    const storagePath = `questions/${paper.id}/${String(groupStart).padStart(2, "0")}.webp`;
 
-    const { error: uploadError } = await supabase.storage
-      .from("exam-papers")
-      .upload(storagePath, c.image, { contentType: "image/webp", upsert: true });
-    if (uploadError) {
-      uploadErrors.push(`${c.number}번 업로드 실패: ${uploadError.message}`);
-      continue;
+    if (!uploadedPaths.has(storagePath)) {
+      const { error: uploadError } = await supabase.storage
+        .from("exam-papers")
+        .upload(storagePath, c.image, { contentType: "image/webp", upsert: true });
+      if (uploadError) {
+        uploadErrors.push(`${c.number}번 업로드 실패: ${uploadError.message}`);
+        continue;
+      }
+      uploadedPaths.add(storagePath);
     }
 
     const { data: questionRow, error: questionError } = await supabase
@@ -105,6 +112,14 @@ async function cropOnePaper(supabase, paper, { dryRun, scale }) {
     if (imageError) {
       uploadErrors.push(`${c.number}번 question_images upsert 실패: ${imageError.message}`);
       continue;
+    }
+
+    // 예전 실행이 이 번호 몫으로 올려뒀던 개별 파일이 있다면(이번에 세트 병합으로
+    // 공유 경로를 쓰게 된 경우) 지워서 고아 오브젝트를 남기지 않는다.
+    if (c.groupNumbers && c.number !== groupStart) {
+      await supabase.storage
+        .from("exam-papers")
+        .remove([`questions/${paper.id}/${String(c.number).padStart(2, "0")}.webp`]);
     }
 
     uploaded++;

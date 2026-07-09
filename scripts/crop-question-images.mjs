@@ -6,7 +6,9 @@
 // questions/question_images 테이블에 등록한다 (재실행 시 upsert로 덮어씀).
 //
 // 이 스크립트는 "좌우 2단 조판 + 문제 번호가 각 단 왼쪽 여백에 붙는" 표준 공무원
-// 시험 PDF 레이아웃을 가정한다. 다른 레이아웃(1단, 3단, 공통지문 등)은 지원하지 않는다.
+// 시험 PDF 레이아웃을 가정한다. "[N~M]" 안내문이 걸린 세트문제는 공통지문형이면
+// 한 덩어리로 병합하고, 지시문 재사용형이면 안내문 줄을 각 문제 위에 이어붙인다
+// (아래 cropQuestionsFromPage 참고). 그 밖의 레이아웃(1단, 3단)은 지원하지 않는다.
 
 import { createClient } from "@supabase/supabase-js";
 import { createCanvas } from "@napi-rs/canvas";
@@ -176,55 +178,62 @@ function splitIntoColumns(markers, pageWidthPt) {
 // 보니 두 가지 서로 다른 관례가 섞여 있다:
 //   - "다음 글을 읽고 물음에 답하시오. [7~8]" 같은 진짜 공통지문형은 안내문과
 //     첫 문제(N) 마커 사이에 지문 전체가 끼어 있어 그 간격이 아주 크다(실측
-//     약 590pt). N~M 사이 각 문제 자체는 지문 없이 짧다.
-//   - "밑줄 친 부분에 들어갈 말로 가장 적절한 것을 고르시오. [2~4]" 같은
+//     460~590pt). N~M 사이 각 문제 자체는 지문 없이 짧다.
+//   - "밑줄 친 부분에 들어갈 말로 가장 적절한 것을 고르시오. [1~5]" 같은
 //     지시문 재사용형은 안내문 바로 다음 줄에 곧장 N번 마커가 오고(실측
 //     12~21pt), N~M 각 문제가 저마다 자기 지문/보기를 따로 갖는다.
 // 이 둘을 안내문 문구만으로는 구분할 수 없어(둘 다 "다음 글을..."로 시작할 수
 // 있음), "안내문→첫 마커 간격"과 "문제 사이 평균 간격"을 실제로 재서 비교한다.
-// 앞이 뒤보다 압도적으로 크면(지문이 낀 것) 그때만 통째로 묶는다 — 아니면
-// 개별로 잘랐을 때 이미 각 문제가 자기 내용을 온전히 담고 있으므로 손대지 않는다.
+//   - 공통지문형 → 안내문+지문+문제들을 한 덩어리로 병합하고 그룹 전원이 같은
+//     이미지를 공유한다(문제별 보기에서 세트로 묶여 답 선택 줄이 여러 개 나온다).
+//   - 지시문 재사용형 → 각 문제를 따로 자르되, 안내문 줄을 얇게 떼어(스트립)
+//     그룹 전원의 크롭 위에 이어붙인다. 안 붙이면 "밑줄 친 부분에 들어갈 말로..."
+//     같은 발문이 모든 문제에서 잘려나가 무엇을 묻는지 알 수 없게 된다.
 const GROUP_GAP_RATIO = 2.5;
 const GROUP_MIN_GAP_PT = 150;
+// 안내문 스트립의 아래 경계는 안내문 baseline(y)보다 살짝 아래로 내려잡아야
+// 한글 받침/디센더가 잘리지 않는다.
+const STRIP_DESCENT_PAD = 4;
 
-// 각 마커에 대해 [top, bottom] (PDF pt, y가 큰 쪽이 위) 크롭 영역을 계산한다.
-function computeRowsForColumn(column, pageHeightPt, groups) {
-  const rows = [];
-  let i = 0;
-  while (i < column.length) {
-    const marker = column[i];
-    const group = groups.find((g) => g.start === marker.number);
-    if (group) {
-      let j = i;
-      while (j < column.length && column[j].number <= group.end) j++;
-      const lastConsumed = column[j - 1];
-      // 그룹 끝 번호가 이 칼럼 안에서 실제로 발견됐을 때만(칼럼 경계를 넘지
-      // 않을 때만) 병합을 고려한다.
-      if (lastConsumed && lastConsumed.number === group.end && j - i >= 2) {
-        const gapBeforeFirst = group.y - marker.y;
-        const gapsBetween = [];
-        for (let k = i; k < j - 1; k++) gapsBetween.push(column[k].y - column[k + 1].y);
-        const avgBetween = gapsBetween.reduce((a, b) => a + b, 0) / gapsBetween.length;
-        const isSharedPassage = gapBeforeFirst >= GROUP_MIN_GAP_PT && gapBeforeFirst >= avgBetween * GROUP_GAP_RATIO;
-        if (isSharedPassage) {
-          const afterGroup = column[j];
-          const top = Math.min(pageHeightPt, group.y + TOP_PAD);
-          const bottom = afterGroup ? afterGroup.y + TOP_PAD : BOTTOM_MARGIN;
-          const groupNumbers = [];
-          for (let n = group.start; n <= group.end; n++) groupNumbers.push(n);
-          rows.push({ number: group.start, groupNumbers, top, bottom });
-          i = j;
-          continue;
-        }
-      }
-    }
-    const next = column[i + 1];
-    const top = Math.min(pageHeightPt, marker.y + marker.height + TOP_PAD);
-    const bottom = next ? next.y + TOP_PAD : BOTTOM_MARGIN;
-    rows.push({ number: marker.number, top, bottom });
-    i++;
+// trim()으로 가장자리 흰 여백을 걷어낸 뒤 보기 좋게 약간만 다시 패딩한다.
+// (내용이 거의 없어 trim이 실패하면 원본을 그대로 쓴다.) 최종 저장은 WebP
+// 무손실로 — 문제 이미지는 사진이 아니라 흰 배경+얇은 텍스트/선 위주라 PNG보다
+// 60%대로 작아지면서 화질 손실은 없다(실측 결과).
+async function finalizeQuestionImage(rawPng, scale) {
+  const pad = Math.round(8 * scale);
+  try {
+    return await sharp(rawPng)
+      .trim({ background: "#ffffff", threshold: 10 })
+      .extend({ top: pad, bottom: pad, left: pad, right: pad, background: "#ffffff" })
+      .webp({ lossless: true })
+      .toBuffer();
+  } catch {
+    return sharp(rawPng).webp({ lossless: true }).toBuffer();
   }
-  return rows;
+}
+
+// 안내문 스트립과 문제 본문 크롭을 위아래로 이어붙인다. 둘 다 같은 배율의 칼럼
+// 폭 크롭이라 너비가 사실상 같지만, 반올림 오차나 좌우 칼럼 폭 차이에 대비해
+// 넓은 쪽에 맞추고 빈 자리는 흰색으로 채운다.
+async function stackVertically(topBuffer, bottomBuffer) {
+  const [topMeta, bottomMeta] = await Promise.all([
+    sharp(topBuffer).metadata(),
+    sharp(bottomBuffer).metadata(),
+  ]);
+  return sharp({
+    create: {
+      width: Math.max(topMeta.width, bottomMeta.width),
+      height: topMeta.height + bottomMeta.height,
+      channels: 3,
+      background: "#ffffff",
+    },
+  })
+    .composite([
+      { input: topBuffer, top: 0, left: 0 },
+      { input: bottomBuffer, top: topMeta.height, left: 0 },
+    ])
+    .png()
+    .toBuffer();
 }
 
 async function cropQuestionsFromPage(page, scale) {
@@ -235,57 +244,137 @@ async function cropQuestionsFromPage(page, scale) {
   const { buffer: pageImage, width: pageWidthPx, height: pageHeightPx } =
     await renderPageToPng(page, scale);
 
-  const leftGroups = groups.filter((g) => g.col === "L");
-  const rightGroups = groups.filter((g) => g.col === "R");
-
-  const results = [];
-  const columns = [
-    { rows: computeRowsForColumn(left, pageHeightPt, leftGroups), xLeftPt: PAGE_MARGIN_X, xRightPt: half - COLUMN_GAP },
-    { rows: computeRowsForColumn(right, pageHeightPt, rightGroups), xLeftPt: half + COLUMN_GAP, xRightPt: pageWidthPt - PAGE_MARGIN_X },
+  const columnDefs = [
+    { key: "L", markers: left, xLeftPt: PAGE_MARGIN_X, xRightPt: half - COLUMN_GAP },
+    { key: "R", markers: right, xLeftPt: half + COLUMN_GAP, xRightPt: pageWidthPt - PAGE_MARGIN_X },
   ];
 
-  for (const col of columns) {
-    for (const row of col.rows) {
-      const leftPx = Math.max(0, Math.round(col.xLeftPt * scale));
-      const rightPx = Math.min(pageWidthPx, Math.round(col.xRightPt * scale));
-      // PDF는 y가 위로 갈수록 커지므로, 이미지 좌표(y가 아래로 갈수록 커짐)로 뒤집는다.
-      const topPx = Math.max(0, Math.round((pageHeightPt - row.top) * scale));
-      const bottomPx = Math.min(pageHeightPx, Math.round((pageHeightPt - row.bottom) * scale));
+  // (top, bottom)은 PDF 좌표(pt, y가 클수록 위)를 받아 이미지 좌표(y가 아래로
+  // 갈수록 커짐)로 뒤집어 잘라낸다. 영역이 비면 null.
+  async function extractRegion(colDef, topPt, bottomPt) {
+    const leftPx = Math.max(0, Math.round(colDef.xLeftPt * scale));
+    const rightPx = Math.min(pageWidthPx, Math.round(colDef.xRightPt * scale));
+    const topPx = Math.max(0, Math.round((pageHeightPt - topPt) * scale));
+    const bottomPx = Math.min(pageHeightPx, Math.round((pageHeightPt - bottomPt) * scale));
+    const width = rightPx - leftPx;
+    const height = bottomPx - topPx;
+    if (width <= 0 || height <= 0) return null;
+    return sharp(pageImage).extract({ left: leftPx, top: topPx, width, height }).png().toBuffer();
+  }
 
-      const width = rightPx - leftPx;
-      const height = bottomPx - topPx;
-      if (width <= 0 || height <= 0) {
-        console.warn(`문제 ${row.number}: 잘라낼 영역이 비어있어 건너뜀`);
+  // fromY보다 아래(같은 칼럼)에서 크롭을 끊을 y — 다음 마커와 다음 안내문 중 더
+  // 위에 있는 쪽. 안내문을 경계로 안 삼으면 위 문제의 크롭이 다음 세트의
+  // 안내문·지문까지 집어삼킨다(예: 5번 크롭에 "[6~7] 다음 글을..."과 그 지문이
+  // 통째로 딸려 들어가는 문제).
+  function findBottomBoundary(colDef, fromY) {
+    const nextMarker = colDef.markers.find((m) => m.y < fromY);
+    let bottomY = nextMarker ? nextMarker.y : null;
+    for (const g of groups) {
+      if (g.col !== colDef.key) continue;
+      if (g.y < fromY && (bottomY === null || g.y > bottomY)) bottomY = g.y;
+    }
+    return bottomY;
+  }
+
+  const mergedSets = []; // { colDef, numbers, top, bottom }
+  const mergedNumbers = new Set();
+  const stripRegions = []; // { colDef, top, bottom, memberNumbers }
+  const topOverrideByNumber = new Map();
+
+  for (const g of groups) {
+    const colDef = columnDefs.find((c) => c.key === g.col);
+    const below = colDef.markers.filter((m) => m.y < g.y);
+    const members = below.filter((m) => m.number >= g.start && m.number <= g.end);
+
+    // 공통지문형 병합은 그룹 전원이 안내문과 같은 칼럼에 있을 때만 가능하다
+    // (칼럼을 넘으면 한 사각형으로 잘라낼 수 없다).
+    if (members.length === g.end - g.start + 1 && members.length >= 2) {
+      const gapBeforeFirst = g.y - members[0].y;
+      const gapsBetween = [];
+      for (let k = 0; k < members.length - 1; k++) {
+        gapsBetween.push(members[k].y - members[k + 1].y);
+      }
+      const avgBetween = gapsBetween.reduce((a, b) => a + b, 0) / gapsBetween.length;
+      if (gapBeforeFirst >= GROUP_MIN_GAP_PT && gapBeforeFirst >= avgBetween * GROUP_GAP_RATIO) {
+        const bottomY = findBottomBoundary(colDef, members[members.length - 1].y);
+        mergedSets.push({
+          colDef,
+          numbers: members.map((m) => m.number),
+          top: Math.min(pageHeightPt, g.y + TOP_PAD),
+          bottom: bottomY !== null ? bottomY + TOP_PAD : BOTTOM_MARGIN,
+        });
+        for (const m of members) mergedNumbers.add(m.number);
         continue;
       }
+    }
 
-      const extracted = await sharp(pageImage)
-        .extract({ left: leftPx, top: topPx, width, height })
-        .png()
-        .toBuffer();
+    // 지시문 재사용형(또는 칼럼을 넘는 세트): 안내문을 스트립으로 뗀다.
+    const memberNumbers = [];
+    for (let n = g.start; n <= g.end; n++) memberNumbers.push(n);
+    const firstBelow = below[0];
+    let stripBottom;
+    if (!firstBelow) {
+      // 안내문 아래에 이 칼럼 마커가 하나도 없으면(세트가 다음 칼럼으로 넘어감)
+      // 칼럼 끝까지가 스트립이다 — 사이에 지문이 있으면 지문째 담긴다.
+      stripBottom = BOTTOM_MARGIN;
+    } else if (firstBelow.number === g.start && g.y - firstBelow.y < GROUP_MIN_GAP_PT) {
+      // 안내문 바로 아래에 첫 문제가 붙어 있는 표준형: 스트립은 안내문 줄만.
+      // 바로 아래 문제의 크롭 시작점(topOverride)도 같은 경계로 맞춰야, 첫
+      // 문제에 스트립을 이어붙였을 때 원본 지면과 똑같아진다(경계가 어긋나면
+      // 안내문 아랫부분이 잘리거나 얇게 두 번 보인다).
+      stripBottom = g.y - STRIP_DESCENT_PAD;
+      topOverrideByNumber.set(firstBelow.number, stripBottom);
+    } else {
+      // 안내문과 첫 문제 사이가 먼데(지문이 낀 것) 병합 조건을 못 채운 경우
+      // (그룹 일부만 이 칼럼에 있는 등): 지문까지 스트립에 담아 전원 앞에 붙인다.
+      stripBottom = firstBelow.y + firstBelow.height + TOP_PAD;
+    }
+    stripRegions.push({
+      colDef,
+      top: Math.min(pageHeightPt, g.y + TOP_PAD),
+      bottom: stripBottom,
+      memberNumbers,
+    });
+  }
 
-      // extract()는 마커 간격 기준의 넉넉한 영역이라 마지막 문제(단 하단)는 흰
-      // 여백이 크게 남는다. trim()으로 흰 여백을 걷어낸 뒤 보기 좋게 약간만 다시
-      // 패딩한다. (내용이 거의 없어 trim이 실패하는 경우 원본을 그대로 쓴다.)
-      // 최종 저장은 WebP 무손실로 — 문제 이미지는 사진이 아니라 흰 배경+얇은
-      // 텍스트/선 위주라 PNG보다 60%대로 작아지면서 화질 손실은 없다(실측 결과).
-      const pad = Math.round(8 * scale);
-      let cropped;
-      try {
-        cropped = await sharp(extracted)
-          .trim({ background: "#ffffff", threshold: 10 })
-          .extend({ top: pad, bottom: pad, left: pad, right: pad, background: "#ffffff" })
-          .webp({ lossless: true })
-          .toBuffer();
-      } catch {
-        cropped = await sharp(extracted).webp({ lossless: true }).toBuffer();
+  const stripByNumber = new Map();
+  for (const s of stripRegions) {
+    const buffer = await extractRegion(s.colDef, s.top, s.bottom);
+    if (!buffer) continue;
+    for (const n of s.memberNumbers) stripByNumber.set(n, buffer);
+  }
+
+  const results = [];
+
+  for (const set of mergedSets) {
+    const raw = await extractRegion(set.colDef, set.top, set.bottom);
+    if (!raw) continue;
+    const image = await finalizeQuestionImage(raw, scale);
+    // 그룹 전원이 같은 이미지를 공유한다 — 업로드 단계는 groupNumbers를 보고 첫
+    // 번호 경로 하나에만 저장하고 나머지 번호는 그 경로를 가리키게 하며, 프런트는
+    // image_path가 같은 연속 번호를 세트로 묶어 답 선택 줄을 여러 개 그린다.
+    for (const number of set.numbers) {
+      results.push({ number, image, groupNumbers: set.numbers });
+    }
+  }
+
+  for (const colDef of columnDefs) {
+    for (const marker of colDef.markers) {
+      if (mergedNumbers.has(marker.number)) continue;
+      const top =
+        topOverrideByNumber.get(marker.number) ??
+        Math.min(pageHeightPt, marker.y + marker.height + TOP_PAD);
+      const bottomY = findBottomBoundary(colDef, marker.y);
+      const bottom = bottomY !== null ? bottomY + TOP_PAD : BOTTOM_MARGIN;
+
+      let raw = await extractRegion(colDef, top, bottom);
+      if (!raw) {
+        console.warn(`문제 ${marker.number}: 잘라낼 영역이 비어있어 건너뜀`);
+        continue;
       }
-
-      // 공통지문형으로 병합된 행은 그룹에 속한 모든 번호에 같은 이미지를
-      // 그대로 등록한다 — 어느 번호로 들어가든 지문+전체 문제가 함께 보이게.
-      for (const number of row.groupNumbers ?? [row.number]) {
-        results.push({ number, image: cropped });
-      }
+      const strip = stripByNumber.get(marker.number);
+      if (strip) raw = await stackVertically(strip, raw);
+      results.push({ number: marker.number, image: await finalizeQuestionImage(raw, scale) });
     }
   }
 
@@ -393,16 +482,25 @@ async function main() {
     return;
   }
 
+  // 세트문제(공통지문 병합)는 그룹의 첫 번호 경로 하나에만 실제로 업로드하고,
+  // 나머지 번호들은 question_images.image_path를 그 경로로 같이 가리키게 한다 —
+  // 똑같은 바이트를 번호 수만큼 중복 저장하지 않고, 프런트에서도 image_path가
+  // 같은지만 비교하면(바이트를 다시 안 받아도) 세트 여부를 알 수 있다.
+  const uploadedPaths = new Set();
   let uploaded = 0;
   for (const c of cropped) {
-    const storagePath = `questions/${paperId}/${String(c.number).padStart(2, "0")}.webp`;
+    const groupStart = Math.min(...(c.groupNumbers ?? [c.number]));
+    const storagePath = `questions/${paperId}/${String(groupStart).padStart(2, "0")}.webp`;
 
-    const { error: uploadError } = await supabase.storage
-      .from("exam-papers")
-      .upload(storagePath, c.image, { contentType: "image/webp", upsert: true });
-    if (uploadError) {
-      console.error(`문제 ${c.number}: 업로드 실패 - ${uploadError.message}`);
-      continue;
+    if (!uploadedPaths.has(storagePath)) {
+      const { error: uploadError } = await supabase.storage
+        .from("exam-papers")
+        .upload(storagePath, c.image, { contentType: "image/webp", upsert: true });
+      if (uploadError) {
+        console.error(`문제 ${c.number}: 업로드 실패 - ${uploadError.message}`);
+        continue;
+      }
+      uploadedPaths.add(storagePath);
     }
 
     const { data: questionRow, error: questionError } = await supabase
@@ -437,6 +535,14 @@ async function main() {
     if (imageError) {
       console.error(`문제 ${c.number}: question_images upsert 실패 - ${imageError.message}`);
       continue;
+    }
+
+    // 예전 실행이 이 번호 몫으로 올려뒀던 개별 파일이 있다면(이번에 세트 병합으로
+    // 공유 경로를 쓰게 된 경우) 지워서 고아 오브젝트를 남기지 않는다.
+    if (c.groupNumbers && c.number !== groupStart) {
+      await supabase.storage
+        .from("exam-papers")
+        .remove([`questions/${paperId}/${String(c.number).padStart(2, "0")}.webp`]);
     }
 
     uploaded++;
