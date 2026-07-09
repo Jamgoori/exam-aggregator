@@ -29,12 +29,17 @@ export function BookmarkButton({
       return;
     }
     setError(null);
+    // 서버 응답을 기다리지 않고 즉시 아이콘부터 바꾼다(낙관적 업데이트). 실패하면
+    // 원래 상태로 되돌린다.
+    const next = !bookmarked;
+    setBookmarked(next);
     startTransition(async () => {
       const result = await toggleBookmark(paperId);
       if (result.error) {
         setError(result.error);
-      } else {
-        setBookmarked(result.bookmarked ?? !bookmarked);
+        setBookmarked(!next);
+      } else if (typeof result.bookmarked === "boolean") {
+        setBookmarked(result.bookmarked);
       }
     });
   }

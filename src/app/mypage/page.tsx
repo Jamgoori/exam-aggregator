@@ -3,18 +3,14 @@ import { redirect } from "next/navigation";
 import { Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
+import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@/lib/format";
 import { computeStreakDays, streakTier } from "@/lib/streak";
 import type { ExamPaper } from "@/lib/supabase/types";
 
 // 오답노트는 문항별 정답/오답 이미지를 모아 보여줘야 해서 더 큰 작업이라 별도로 남겨둠.
-const TABS = [
-  { key: "bookmarks", label: "즐겨찾기" },
-  { key: "history", label: "내 시험 기록" },
-] as const;
-
-type TabKey = (typeof TABS)[number]["key"];
+const TAB_KEYS: MyPageTabKey[] = ["bookmarks", "history"];
 
 type MyAttempt = {
   id: string;
@@ -66,8 +62,8 @@ export default async function MyPage({
     );
   }
 
-  const activeTab: TabKey = TABS.some((t) => t.key === tab)
-    ? (tab as TabKey)
+  const initialTab: MyPageTabKey = TAB_KEYS.includes(tab as MyPageTabKey)
+    ? (tab as MyPageTabKey)
     : "bookmarks";
 
   const nickname =
@@ -141,36 +137,22 @@ export default async function MyPage({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-3">
-        {TABS.map((t) => (
-          <Link
-            key={t.key}
-            href={`/mypage?tab=${t.key}`}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-              activeTab === t.key
-                ? "bg-blue-600 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
-            }`}
-          >
-            {t.label}
-          </Link>
-        ))}
-      </div>
-
-      {activeTab === "bookmarks" && (
-        <BookmarksTab
-          papers={bookmarkedPapers}
-          attemptsByPaper={attemptsByPaper}
-          cbtAvailability={cbtAvailability}
-        />
-      )}
-
-      {activeTab === "history" && (
-        <HistoryTab
-          attempts={myAttempts}
-          roundNumberByAttemptId={roundNumberByAttemptId}
-        />
-      )}
+      <MyPageTabs
+        initialTab={initialTab}
+        bookmarks={
+          <BookmarksTab
+            papers={bookmarkedPapers}
+            attemptsByPaper={attemptsByPaper}
+            cbtAvailability={cbtAvailability}
+          />
+        }
+        history={
+          <HistoryTab
+            attempts={myAttempts}
+            roundNumberByAttemptId={roundNumberByAttemptId}
+          />
+        }
+      />
     </div>
   );
 }
