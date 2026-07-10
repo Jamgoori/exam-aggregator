@@ -792,3 +792,126 @@ as $$
 $$;
 
 grant execute on function avg_score_by_round(uuid) to anon, authenticated;
+
+-- ============================================================================
+-- 문항 해설(AI 생성) 배치 작업
+-- ============================================================================
+
+-- 해설 배치 작업 전용 최소권한 계정 화이트리스트. admins와 일부러 분리한다 —
+-- 이 계정 자격증명이 무인 배치 세션 환경변수에 상시 상주해야 해서, admins에 그대로
+-- 등록하면(=전체 관리자 권한) 유출 시 문제지/정답지 삭제 등까지 가능해진다. 이
+-- 화이트리스트는 question_explanations 쓰기 + verify_question_answer() 호출만
+-- 허용하는 용도로 좁혀서 blast radius를 줄인다.
+create table if not exists explanation_bots (
+  email text primary key
+);
+
+alter table explanation_bots enable row level security;
+-- admins와 마찬가지로 explanation_bots 자체는 클라이언트에서 직접 못 읽음 (is_explanation_bot()으로만 검사)
+
+create or replace function is_explanation_bot()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from explanation_bots where email = auth.jwt()->>'email'
+  );
+$$;
+
+grant execute on function is_explanation_bot() to anon, authenticated;
+
+-- 문항 해설: questions 1건당 1건. 요청 형식(핵심 키워드/개념 설명 → 선지별 해설)대로
+-- 구조화해서 저장한다. verified는 저장 시점에 verify_question_answer()로 대조한
+-- 결과이고, 정답 자체는 여기 저장하지 않는다(paper_answers 유출 방지 원칙 유지 —
+-- 이 테이블은 public read이므로 정답 값을 직접 담으면 채점 의미가 사라진다).
+create table if not exists question_explanations (
+  id uuid primary key default gen_random_uuid(),
+  question_id uuid not null unique references questions(id) on delete cascade,
+  keyword_summary text not null,
+  choice_explanations jsonb not null,
+  verified boolean not null default false,
+  model_version text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table question_explanations enable row level security;
+
+drop policy if exists "public read question_explanations" on question_explanations;
+create policy "public read question_explanations" on question_explanations for select using (true);
+
+drop policy if exists "admin insert question_explanations" on question_explanations;
+create policy "admin insert question_explanations" on question_explanations
+  for insert to authenticated with check (is_admin() or is_explanation_bot());
+
+drop policy if exists "admin update question_explanations" on question_explanations;
+create policy "admin update question_explanations" on question_explanations
+  for update to authenticated using (is_admin() or is_explanation_bot());
+
+drop policy if exists "admin delete question_explanations" on question_explanations;
+create policy "admin delete question_explanations" on question_explanations
+  for delete to authenticated using (is_admin());
+
+-- 해설 배치가 산출한 정답을 실제 정답표와 대조하는 함수. paper_answers는 정답이
+-- 그대로 노출되면 채점 의미가 사라지는 테이블이라, 이 함수도 실제 정답값을 반환하지
+-- 않고 "일치 여부"만 boolean으로 돌려준다(has_cbt_answers와 같은 원칙). 전항정답
+-- 처리된 문항(voided_questions)은 어떤 답을 내든 무조건 일치로 처리한다.
+create or replace function verify_question_answer(target_question_id uuid, proposed_answer smallint)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select case
+    when q.question_number = any(pa.voided_questions) then true
+    else pa.answers[q.question_number] = proposed_answer
+  end
+  from questions q
+  join paper_answers pa on pa.paper_id = q.paper_id
+  where q.id = target_question_id
+$$;
+
+grant execute on function verify_question_answer(uuid, smallint) to authenticated;
+
+-- 해설 배치 처리 순서. exam_type_id+level 조합별 우선순위(낮을수록 먼저 처리).
+-- 나중에 새 시험 종류(경찰/군무원 등)가 들어오면 이 테이블에 행만 추가하면 되고
+-- 배치 로직/스크립트는 건드릴 필요가 없다.
+create table if not exists explanation_batch_priority (
+  exam_type_id uuid not null references exam_types(id) on delete cascade,
+  level text not null,
+  priority int not null,
+  unique (exam_type_id, level)
+);
+
+alter table explanation_batch_priority enable row level security;
+
+drop policy if exists "read explanation_batch_priority" on explanation_batch_priority;
+create policy "read explanation_batch_priority" on explanation_batch_priority
+  for select to authenticated using (is_admin() or is_explanation_bot());
+
+drop policy if exists "admin insert explanation_batch_priority" on explanation_batch_priority;
+create policy "admin insert explanation_batch_priority" on explanation_batch_priority
+  for insert to authenticated with check (is_admin());
+
+drop policy if exists "admin update explanation_batch_priority" on explanation_batch_priority;
+create policy "admin update explanation_batch_priority" on explanation_batch_priority
+  for update to authenticated using (is_admin());
+
+drop policy if exists "admin delete explanation_batch_priority" on explanation_batch_priority;
+create policy "admin delete explanation_batch_priority" on explanation_batch_priority
+  for delete to authenticated using (is_admin());
+
+-- 초기 처리 순서: 지방직9급 → 국가직9급 → 국가직7급 → 지방직7급 → 경력경쟁9급 →
+-- 지역인재9급 → 국가직5급. exam_type_id는 exam_types 시드 데이터 기준 고정값.
+insert into explanation_batch_priority (exam_type_id, level, priority) values
+  ('e559e2bc-0569-4259-8885-0ca61a898f15', '9급', 1), -- 지방직 9급
+  ('9e1b59ea-9e39-4ae0-97db-7004654b5f69', '9급', 2), -- 국가직 9급
+  ('9e1b59ea-9e39-4ae0-97db-7004654b5f69', '7급', 3), -- 국가직 7급
+  ('e559e2bc-0569-4259-8885-0ca61a898f15', '7급', 4), -- 지방직 7급
+  ('5c5ea694-7d22-4852-b1c6-b3a8c2d0e8b3', '9급', 5), -- 경력경쟁 9급
+  ('d5f53459-a4ac-4d90-b2cd-be5673a03752', '9급', 6), -- 지역인재 9급
+  ('9e1b59ea-9e39-4ae0-97db-7004654b5f69', '5급', 7)  -- 국가직 5급
+on conflict (exam_type_id, level) do update set priority = excluded.priority;
