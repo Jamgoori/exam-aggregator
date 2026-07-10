@@ -70,6 +70,13 @@ async function cropOnePaper(supabase, paper, { dryRun, scale }) {
     return { paper, cropped: cropped.length, warning, dryRun: true };
   }
 
+  // 개수가 안 맞으면 레이아웃을 잘못 읽었다는 뜻이라(이번 세션에서 실제로 겪은
+  // 사례 전부 이랬다 — 정규식 버그, 1단 레이아웃 등), 절반만 맞는 이미지를
+  // 올리느니 아예 안 올리고 수동 확인 대상으로 돌린다.
+  if (warning) {
+    return { paper, error: warning };
+  }
+
   // 세트문제(공통지문 병합)는 그룹의 첫 번호 경로 하나에만 실제로 업로드하고,
   // 나머지 번호들은 question_images.image_path를 그 경로로 같이 가리키게 한다.
   const uploadedPaths = new Set();

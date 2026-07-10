@@ -65,10 +65,13 @@ async function renderPageToPng(page, scale) {
   return { buffer: canvas.toBuffer("image/png"), width: viewport.width, height: viewport.height };
 }
 
-// 숫자만 있는 조각("19")과 마침표만 있는 조각(".")이 완전히 따로 떨어져 나오는
+// 숫자(또는 "문 15")만 있는 조각과 마침표로 시작하는 조각이 따로 떨어져 나오는
 // PDF도 있다 — 이 경우 QUESTION_MARKER_RE가 어느 조각에도 안 걸려 마커를 통째로
-// 놓친다. 같은 줄(y 거의 동일)에서 숫자 조각 바로 다음에 마침표 조각이 가깝게
-// (폭 20pt 이내) 붙어 있으면 같은 마커로 합쳐 인식한다.
+// 놓친다. 마침표 조각은 "."만 있을 때도 있고(예: "19"+"."), 마침표 뒤에 문제
+// 본문이 그대로 붙어 나올 때도 있다(예: "문 15"+". 조류인플루엔자..."). 같은
+// 줄(y 거의 동일)에서 숫자 조각 바로 다음 조각이 "."로 시작하고, 그 조각의
+// 시작 x가 숫자 조각이 끝나는 지점(x+width) 가까이(20pt 이내) 붙어 있으면 같은
+// 마커로 합쳐 인식한다.
 const BARE_NUMBER_RE = /^(?:문\s*)?(\d{1,3})$/;
 
 // "[문 2.～문 4.] 밑줄 친 부분에 들어갈 말로..." / "[7～8] 다음 글을 읽고 물음에
@@ -81,9 +84,16 @@ const BARE_NUMBER_RE = /^(?:문\s*)?(\d{1,3})$/;
 // 있으므로, y뿐 아니라 같은 칼럼(좌/우)인지까지 같이 봐야 한다. 물결표(～/~)는
 // 일부 PDF에서 폰트에 유니코드 매핑이 없어 텍스트로 아예 추출되지 않는 경우가
 // 있어(예: "[문 11. 문 12.]"로 물결표 없이 두 조각만 남음) 필수로 두면 그 줄의
-// 안내문 인식 자체가 통째로 실패해 "문 11."이 실제 마커로 오인된다 — 선택으로
-// 완화한다.
-const ANNOTATION_RANGE_RE = /\[\s*(?:문\s*)?(\d{1,3})\s*\.?\s*[～~]?\s*(?:문\s*)?(\d{1,3})\s*\.?\s*\]/;
+// 안내문 인식 자체가 통째로 실패해 "문 11."이 실제 마커로 오인된다 — 그렇다고
+// 완전히 선택으로 풀면(둘 다 생략 가능) "a[30]"처럼 배열/인덱스 표기가 흔한
+// 과목(자료구조론 등)에서 숫자 "30"이 "3"과 "0"으로 쪼개져 가짜 범위 [3~0]으로
+// 오매치되고, 그 줄 전체가 안내문 취급되어 진짜 문제 마커가 통째로 사라진다
+// (실측: 2018/2014 국가직 7급 자료구조론에서 13번 마커 소실). 두 숫자 사이에
+// 물결표나 "문" 둘 중 하나는 반드시 있어야 진짜 구분자로 인정한다 — 순수하게
+// 붙어있는 숫자(구분자 0글자)는 걸러진다. 물결표는 PDF마다 다른 유니코드로
+// 나온다(～ U+FF5E, ~ U+007E, ∼ U+223C TILDE OPERATOR — 실측: 2022 국가직
+// 7급 독어 "[문 4∼문 5.]").
+const ANNOTATION_RANGE_RE = /\[\s*(?:문\s*)?(\d{1,3})\s*\.?\s*(?:[～~∼]|문)\s*\.?\s*(?:문\s*)?(\d{1,3})\s*\.?\s*\]/;
 
 // 같은 시각적 줄에 있어도 글자마다(특히 대괄호·물결표 같은 특수 글리프) y가
 // 소수점 단위로 미세하게 흔들릴 수 있다. 원시 y를 그대로 키로 쓰면 그 흔들림
@@ -105,17 +115,41 @@ function findAnnotationLines(items, half) {
     lines.get(key).parts.push({ x, str: item.str });
   }
 
-  const keys = new Set();
-  const groups = [];
+  // 같은 칼럼 안에서 위→아래(y 내림차순) 순서로 줄을 늘어놓는다 — 안내문이
+  // 줄바꿈으로 두 줄에 걸치는 경우(예: "...밑줄 친 부분에... [문 19～" 다음
+  // 줄에 "문 20.]") 인접한 다음 줄과 이어붙여 다시 검사하기 위해서다. 이런
+  // 경우 한 줄만으로는 "[" 만 있고 "]"가 없어(또는 그 반대) 안내문으로 인식
+  //못 하고 그 안의 "19." "20."이 진짜 마커로 오인돼 중복 크래시가 났다
+  // (실측: 2022 지방직 9급 영어).
+  const linesByCol = new Map();
   for (const [key, line] of lines) {
     const text = line.parts.sort((a, b) => a.x - b.x).map((p) => p.str).join("");
-    const match = ANNOTATION_RANGE_RE.exec(text);
-    if (!match) continue;
-    keys.add(key);
-    const start = Number(match[1]);
-    const end = Number(match[2]);
-    if (end > start && end - start <= 10) {
-      groups.push({ start, end, y: line.y, col: line.col });
+    if (!linesByCol.has(line.col)) linesByCol.set(line.col, []);
+    linesByCol.get(line.col).push({ key, y: line.y, text });
+  }
+  for (const arr of linesByCol.values()) arr.sort((a, b) => b.y - a.y);
+
+  const keys = new Set();
+  const groups = [];
+  for (const [col, arr] of linesByCol) {
+    for (let i = 0; i < arr.length; i++) {
+      const line = arr[i];
+      let match = ANNOTATION_RANGE_RE.exec(line.text);
+      const usedKeys = [line.key];
+      if (!match && line.text.includes("[") && !line.text.includes("]")) {
+        const next = arr[i + 1];
+        if (next) {
+          match = ANNOTATION_RANGE_RE.exec(line.text + next.text);
+          if (match) usedKeys.push(next.key);
+        }
+      }
+      if (!match) continue;
+      for (const k of usedKeys) keys.add(k);
+      const start = Number(match[1]);
+      const end = Number(match[2]);
+      if (end > start && end - start <= 10) {
+        groups.push({ start, end, y: line.y, col });
+      }
     }
   }
   return { keys, groups };
@@ -127,6 +161,32 @@ async function findQuestionMarkers(page) {
   const items = textContent.items.filter((i) => "str" in i);
   const half = viewport.width / 2;
   const { keys: annotationKeys, groups } = findAnnotationLines(items, half);
+
+  // "문"이 단독 조각으로 떨어져 나온 자리들을 (같은 줄, x) 기준으로 미리 모아둔다
+  // — items 배열 순서가 항상 시각적 왼쪽→오른쪽 순서라는 보장이 없어서(콘텐츠
+  // 스트림 기록 순서를 따르므로 2단 조판 등에서 뒤섞일 수 있다) "바로 이전
+  // 인덱스가 문인지"로는 놓치는 경우가 실측에서 나왔다. y를 반올림해 묶는다.
+  const munXsByLine = new Map();
+  for (const item of items) {
+    if (item.str.trim() !== "문") continue;
+    const [, , , , x, y] = item.transform;
+    const key = Math.round(y);
+    if (!munXsByLine.has(key)) munXsByLine.set(key, []);
+    munXsByLine.get(key).push(x);
+  }
+  // 같은 줄에 있기만 하면 다 인정하면 안 된다 — 실측(2021 국가직 7급 세법)에서
+  // "문 7. ..." 뒤로 456pt나 떨어진, 전혀 다른 문제의 날짜 표기 조각("1.")이
+  // "문 7."의 "문"을 자기 것으로 착각해 진짜 마커로 오인된 사례가 있다. 바로
+  // 왼쪽(가장 가까운)의 "문"만 보고, "문"+숫자 정상 간격(실측 10~20pt)보다
+  // 넉넉히 여유를 둔 30pt 안에 있을 때만 유효한 것으로 본다.
+  const MUN_ADJACENCY_PT = 30;
+  function hasMunBefore(x, y) {
+    const xs = munXsByLine.get(Math.round(y));
+    if (!xs) return false;
+    const nearest = Math.max(...xs.filter((munX) => munX < x), -Infinity);
+    return nearest !== -Infinity && x - nearest <= MUN_ADJACENCY_PT;
+  }
+
   const markers = [];
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
@@ -135,54 +195,86 @@ async function findQuestionMarkers(page) {
     const [, , , , itemX, itemY] = item.transform;
     if (annotationKeys.has(lineKey(itemY, itemX < half ? "L" : "R"))) continue;
 
+    // 진짜 문제 마커는 거의 항상 "문"이 앞에 붙는다(같은 조각이든 "문"만 따로
+    // 떨어진 조각이든) — 지문 속 조항·보기 번호("1. 다음의 농지는...")에는
+    // "문"이 절대 안 붙는다. 이 유무가 위치(x)보다 훨씬 믿을 수 있는 신호라
+    // filterMarginMarkers에서 "문 확인된 마커"를 우선 신뢰하는 데 쓴다.
+    const hasMun = /^문\s*/.test(str) || hasMunBefore(itemX, itemY);
+
     const match = QUESTION_MARKER_RE.exec(str);
     if (match) {
       const [, numStr] = match;
       const [, , , , x, y] = item.transform;
-      markers.push({ number: Number(numStr), x, y, height: item.height });
+      markers.push({ number: Number(numStr), x, y, height: item.height, hasMun });
       continue;
     }
 
     const bareMatch = BARE_NUMBER_RE.exec(str);
     if (!bareMatch) continue;
     const next = items[i + 1];
-    if (!next || next.str.trim() !== ".") continue;
+    if (!next || !next.str.trim().startsWith(".")) continue;
     const [, , , , x1, y1] = item.transform;
     const [, , , , x2, y2] = next.transform;
-    if (Math.abs(y1 - y2) > 2 || x2 <= x1 || x2 - x1 > 20) continue;
-    markers.push({ number: Number(bareMatch[1]), x: x1, y: y1, height: item.height });
+    const x1End = x1 + (item.width ?? 0);
+    if (Math.abs(y1 - y2) > 2 || x2 < x1 || x2 - x1End > 20) continue;
+    markers.push({ number: Number(bareMatch[1]), x: x1, y: y1, height: item.height, hasMun });
   }
   return { markers, groups, pageWidthPt: viewport.width, pageHeightPt: viewport.height };
 }
 
-// 진짜 문제 마커는 항상 그 단의 왼쪽 여백에 붙어 나온다(hanging indent). 국어·영어·
-// 한국사처럼 지문이 있는 과목은 지문 안에 번호 매긴 보기/예시가 들어있는 경우가
-// 있는데("1. 첫 문장 2. 둘째 문장"), 본문 들여쓰기만큼 더 오른쪽에 찍혀 같은
-// 정규식에 걸린다(실측상 여백보다 27pt+ 안쪽). 반면 "문"과 번호가 같은 텍스트
-// 조각으로 합쳐지는지 여부·한 자릿수/두 자릿수 숫자 폭 차이로 진짜 마커끼리도
-// x가 몇~십몇 pt씩 흔들린다(실측 최대 ~17pt). 그래서 "최솟값 기준 고정
-// 허용오차" 대신, x를 정렬한 뒤 인접한 값끼리 간격(gap)이 좁으면 같은 묶음으로
-// 보는 클러스터링을 쓴다 — 진짜 마커끼리의 흔들림(~17pt)보다는 크고 지문
-// 들여쓰기 간격(~27pt+)보다는 작은 값으로 잡아야 두 경우가 갈린다. 여백 쪽
-// 묶음(가장 왼쪽)만 남기고, 그 너머(지문 속 텍스트)는 버린다.
-const MARGIN_CLUSTER_GAP_PT = 22;
+// 국어·영어·한국사처럼 지문이 있는 과목은 지문 안에 번호 매긴 보기/조항이
+// 들어있는 경우가 있어("1. 첫 문장 2. 둘째 문장", 법조문 인용 "1. 다음의
+// 농지는...") 본문 들여쓰기만큼 더 오른쪽에 찍혀 같은 정규식에 걸린다. 처음엔
+// "여백 x가 가장 작은 클러스터만 인정"하는 위치 기반 필터를 썼지만, 실측해보니
+// 진짜 마커끼리의 자릿수/조각분리 흔들림(최대 ~24pt, 1단 편집 2015 경력경쟁
+// 9급 식용작물 "문 10." vs "문"+"5.")과 지문 속 가짜 번호의 최소 들여쓰기
+// (~23pt, 2016 지방직 9급 한국사 법조문 인용)가 겹쳐서, x 간격만으로는 어떤
+// 임계값을 잡아도 둘 중 하나를 반드시 잘못 처리했다.
+//
+// 대신 훨씬 믿을 수 있는 신호를 쓴다: 진짜 문제 마커는 예외 없이 "문"이 앞에
+// 붙지만(같은 조각이든 "문"만 따로 뗀 조각이든 — findQuestionMarkers가 hasMun
+// 으로 표시해둔다), 지문 속 조항·보기 번호에는 "문"이 절대 안 붙는다. "문"이
+// 확인된 마커는 위치와 무관하게 무조건 신뢰하고, 그 신뢰 마커들이 실제로 걸쳐
+// 있는 x 범위(자릿수 흔들림이 이미 반영된 실측 범위) 안에 있는 "문" 없는
+// 마커만 추가로 인정한다 — 그 범위 밖은 지문 속 텍스트로 본다. "문" 신호가
+// 페이지에 하나도 없는 극히 드문 경우에만 예전 클러스터링으로 폴백한다.
+const MARGIN_CLUSTER_GAP_PT = 25;
+const TRUSTED_MARGIN_TOLERANCE_PT = 5;
 
 function filterMarginMarkers(columnMarkers) {
   if (columnMarkers.length === 0) return columnMarkers;
-  const sorted = [...columnMarkers].sort((a, b) => a.x - b.x);
-  let clusterEndIndex = 0;
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i].x - sorted[i - 1].x > MARGIN_CLUSTER_GAP_PT) break;
-    clusterEndIndex = i;
+
+  const trusted = columnMarkers.filter((m) => m.hasMun);
+  if (trusted.length === 0) {
+    const sorted = [...columnMarkers].sort((a, b) => a.x - b.x);
+    let clusterEndIndex = 0;
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].x - sorted[i - 1].x > MARGIN_CLUSTER_GAP_PT) break;
+      clusterEndIndex = i;
+    }
+    const marginX = new Set(sorted.slice(0, clusterEndIndex + 1).map((m) => m.x));
+    return columnMarkers.filter((m) => marginX.has(m.x));
   }
-  const marginX = new Set(sorted.slice(0, clusterEndIndex + 1).map((m) => m.x));
-  return columnMarkers.filter((m) => marginX.has(m.x));
+
+  const trustedXs = trusted.map((m) => m.x);
+  const minX = Math.min(...trustedXs) - TRUSTED_MARGIN_TOLERANCE_PT;
+  const maxX = Math.max(...trustedXs) + TRUSTED_MARGIN_TOLERANCE_PT;
+  return columnMarkers.filter((m) => m.hasMun || (m.x >= minX && m.x <= maxX));
 }
 
 // 페이지 안의 마커들을 x좌표 기준으로 좌/우 두 단으로 나누고, 각 단 안에서
 // 위→아래 순서(= y 내림차순, PDF 좌표는 위로 갈수록 y가 큼)로 정렬한다.
-function splitIntoColumns(markers, pageWidthPt) {
+// columnMode==="single"인 문제지(전체 폭 1단 편집 — 실측: 2015 경력경쟁 9급
+// 다수 과목)는 나누지 않고 전부 왼쪽 단 하나로 취급한다. 마커/안내문이 전부
+// 왼쪽 여백(x<half)에서만 나오는 편집이라, 오른쪽으로 안 나누는 것 자체가
+// 이미 올바른 동작이다 — findAnnotationLines의 col 분류(x<half → "L")와도
+// 자연히 맞아떨어진다.
+function splitIntoColumns(markers, pageWidthPt, columnMode) {
   const half = pageWidthPt / 2;
+  if (columnMode === "single") {
+    const left = filterMarginMarkers(markers).sort((a, b) => b.y - a.y);
+    return { left, right: [], half };
+  }
   const left = filterMarginMarkers(markers.filter((m) => m.x < half)).sort((a, b) => b.y - a.y);
   const right = filterMarginMarkers(markers.filter((m) => m.x >= half)).sort((a, b) => b.y - a.y);
   return { left, right, half };
@@ -257,18 +349,27 @@ async function stackVertically(topBuffer, bottomBuffer) {
 // 페이지1에서 만든 9~11용 스트립 중 9번만 쓰고 남은 10, 11번 몫을 다음 페이지
 // 호출로 이어받는다. 반환하는 pendingStrips는 이번 페이지에서도 못 쓴(3페이지
 // 이상 걸치는 등) 스트립을 그다음 페이지로 다시 넘기기 위한 것이다.
-async function cropQuestionsFromPage(page, scale, carriedStrips = new Map()) {
-  const { markers, groups, pageWidthPt, pageHeightPt } = await findQuestionMarkers(page);
+//
+// markerData는 findQuestionMarkers(page)의 결과를 미리 계산해서 넘겨받는다 —
+// columnMode(전체 폭 1단인지 좌우 2단인지)는 문서 전체를 봐야 정확히 판단할 수
+// 있어서(마지막 페이지만 보면 마커가 몇 개 안 남아 우연히 한쪽에만 몰릴 수
+// 있다) extractQuestionsFromPdf가 모든 페이지를 먼저 훑어 한 번만 정하고, 그
+// 김에 얻은 결과를 여기서 재사용해 페이지당 텍스트 추출을 두 번 하지 않는다.
+async function cropQuestionsFromPage(page, markerData, scale, carriedStrips = new Map(), columnMode = "double") {
+  const { markers, groups, pageWidthPt, pageHeightPt } = markerData;
   if (markers.length === 0) return { results: [], pendingStrips: carriedStrips };
 
-  const { left, right, half } = splitIntoColumns(markers, pageWidthPt);
+  const { left, right, half } = splitIntoColumns(markers, pageWidthPt, columnMode);
   const { buffer: pageImage, width: pageWidthPx, height: pageHeightPx } =
     await renderPageToPng(page, scale);
 
-  const columnDefs = [
-    { key: "L", markers: left, xLeftPt: PAGE_MARGIN_X, xRightPt: half - COLUMN_GAP },
-    { key: "R", markers: right, xLeftPt: half + COLUMN_GAP, xRightPt: pageWidthPt - PAGE_MARGIN_X },
-  ];
+  const columnDefs =
+    columnMode === "single"
+      ? [{ key: "L", markers: left, xLeftPt: PAGE_MARGIN_X, xRightPt: pageWidthPt - PAGE_MARGIN_X }]
+      : [
+          { key: "L", markers: left, xLeftPt: PAGE_MARGIN_X, xRightPt: half - COLUMN_GAP },
+          { key: "R", markers: right, xLeftPt: half + COLUMN_GAP, xRightPt: pageWidthPt - PAGE_MARGIN_X },
+        ];
 
   // (top, bottom)은 PDF 좌표(pt, y가 클수록 위)를 받아 이미지 좌표(y가 아래로
   // 갈수록 커짐)로 뒤집어 잘라낸다. 영역이 비면 null.
@@ -418,11 +519,34 @@ async function cropQuestionsFromPage(page, scale, carriedStrips = new Map()) {
 export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage } = {}) {
   const pdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
 
-  const cropped = [];
-  let carriedStrips = new Map();
+  // 1차 패스: 렌더링 없이 텍스트만 뽑아 이 문제지가 좌우 2단인지 전체 폭 1단인지
+  // 판단한다. 페이지 하나만 보고 정하면 마커가 몇 개 안 남는 마지막 페이지 같은
+  // 데서 우연히 한쪽에만 몰려 2단을 1단으로 오판할 수 있어(반대로 1단인데 지문
+  // 속 텍스트가 어쩌다 half를 넘어 2단으로 오판할 수도 있고), 문서 전체의 마커를
+  // 모아 한 번만 정한다 — 실측상 진짜 2단이면 문서 전체에 오른쪽 마커가 여럿
+  // 나오고, 진짜 1단이면 전체를 통틀어 단 하나도 안 나온다. 여기서 얻은 결과를
+  // 2차(실제 크롭) 패스가 그대로 재사용해 페이지당 텍스트 추출을 두 번 하지 않는다.
+  const pageMarkerData = [];
+  let hasRightColumnMarker = false;
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
-    const { results: pageResults, pendingStrips } = await cropQuestionsFromPage(page, scale, carriedStrips);
+    const data = await findQuestionMarkers(page);
+    pageMarkerData.push({ page, data });
+    if (data.markers.some((m) => m.x >= data.pageWidthPt / 2)) hasRightColumnMarker = true;
+  }
+  const columnMode = hasRightColumnMarker ? "double" : "single";
+
+  const cropped = [];
+  let carriedStrips = new Map();
+  for (let p = 1; p <= pageMarkerData.length; p++) {
+    const { page, data } = pageMarkerData[p - 1];
+    const { results: pageResults, pendingStrips } = await cropQuestionsFromPage(
+      page,
+      data,
+      scale,
+      carriedStrips,
+      columnMode,
+    );
     carriedStrips = pendingStrips;
     cropped.push(...pageResults);
     onPage?.(p, pageResults);
@@ -497,7 +621,17 @@ async function main() {
     process.exit(1);
   }
 
+  // 개수가 안 맞으면 레이아웃을 잘못 읽었다는 뜻이라(정규식 버그, 1단 레이아웃
+  // 등 이번 세션에서 겪은 사례 전부 이랬다), 절반만 맞는 이미지를 올리느니
+  // 아예 안 올리고 멈춘다. dry-run은 미리보기 목적이라 그대로 저장해서 원인을
+  // 눈으로 확인할 수 있게 둔다.
   const expected = paper.question_count;
+  if (expected && cropped.length !== expected && !dryRun) {
+    console.error(
+      `실패: exam_papers.question_count=${expected}인데 ${cropped.length}개 문제만 인식됐습니다. 레이아웃을 확인하세요.`,
+    );
+    process.exit(1);
+  }
   if (expected && cropped.length !== expected) {
     console.warn(
       `주의: exam_papers.question_count=${expected}인데 ${cropped.length}개 문제만 인식됐습니다.`,
