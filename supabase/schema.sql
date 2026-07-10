@@ -823,24 +823,55 @@ $$;
 
 grant execute on function is_explanation_bot() to anon, authenticated;
 
--- 문항 해설: questions 1건당 1건. 요청 형식(핵심 키워드/개념 설명 → 선지별 해설)대로
--- 구조화해서 저장한다. verified는 저장 시점에 verify_question_answer()로 대조한
--- 결과이고, 정답 자체는 여기 저장하지 않는다(paper_answers 유출 방지 원칙 유지 —
--- 이 테이블은 public read이므로 정답 값을 직접 담으면 채점 의미가 사라진다).
+-- 문항 해설: questions 1건당 1건. 요청 형식(핵심 키워드/개념 설명 → 문제/정답 요약 →
+-- 선지별 해설)대로 구조화해서 저장한다. 해설은 정답을 그대로 보여주는 게 목적이라
+-- (CBT 채점용 paper_answers와 달리) correct_choice_number를 직접 담는다. verified는
+-- 저장 시점에 verify_question_answer()로 실제 정답표와 대조한 결과 — 대조에 실패한
+-- (=correct_choice_number가 틀렸을 수 있는) 행은 아래 select 정책에서 일반 사용자에게
+-- 숨기고 관리자 검수 대상으로만 남긴다.
 create table if not exists question_explanations (
   id uuid primary key default gen_random_uuid(),
   question_id uuid not null unique references questions(id) on delete cascade,
-  keyword_summary text not null,
+  keyword_title text not null,
+  keyword_explanation text not null,
+  question_text text not null,
+  correct_choice_number smallint not null,
+  correct_choice_summary text not null,
   choice_explanations jsonb not null,
+  law_amendment_note text,
   verified boolean not null default false,
   model_version text not null,
   created_at timestamptz not null default now()
 );
 
+-- 기존 설치본 대비: keyword_summary(단일 문단) → keyword_title+keyword_explanation로
+-- 분리하고, question_text/correct_choice_number/correct_choice_summary/
+-- law_amendment_note를 추가한다.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_name = 'question_explanations' and column_name = 'keyword_summary'
+  ) then
+    alter table question_explanations rename column keyword_summary to keyword_explanation;
+  end if;
+end $$;
+
+alter table question_explanations add column if not exists keyword_title text;
+alter table question_explanations add column if not exists question_text text;
+alter table question_explanations add column if not exists correct_choice_number smallint;
+alter table question_explanations add column if not exists correct_choice_summary text;
+alter table question_explanations add column if not exists law_amendment_note text;
+
 alter table question_explanations enable row level security;
 
+-- 일반 사용자에게는 검증된(verified) 해설만 노출한다 — 정답 대조 실패한 해설을
+-- 그대로 보여주면 틀린 정답을 진짜인 것처럼 보여주는 사고로 이어진다. 관리자와
+-- 배치 봇은 검증 여부와 무관하게 다 봐야 한다(관리자는 검수를 위해, 봇은 이미
+-- 시도한 문항을 "처리됨"으로 인식해서 다음 청크 선정이 꼬이지 않게 하기 위해).
 drop policy if exists "public read question_explanations" on question_explanations;
-create policy "public read question_explanations" on question_explanations for select using (true);
+create policy "public read question_explanations" on question_explanations
+  for select using (verified = true or is_admin() or is_explanation_bot());
 
 drop policy if exists "admin insert question_explanations" on question_explanations;
 create policy "admin insert question_explanations" on question_explanations
