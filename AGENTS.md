@@ -3,3 +3,32 @@
 
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
+
+# 문제 이미지 크롭 작업 시 필독
+
+`scripts/crop-question-images.mjs` / `scripts/batch-crop-questions.mjs`로 PDF에서
+문항 이미지를 잘라 `question_images`에 등록하는 작업(새 시험유형 요청 포함)은
+**절대 한 번 돌리고 성공/실패 개수만 보고 끝내지 말 것.** 이 두 스크립트는 이미
+2단/1단 레이아웃, 세트문제(공통지문/지시문 재사용) 자동 판별, "문" 신뢰 기반
+마커 인식 등 여러 실측 버그를 거쳐 완성된 상태이지만, 매번 새로운 PDF 조판
+변형이 나올 수 있다. 실제로 검증 없이 돌렸다가 결과가 나쁘게 나온 세션이
+있었다 — 아래 순서를 반드시 지킬 것:
+
+1. **샘플 검증**: 대상 시험유형/급수에서 무작위 25~60개를 `extractQuestionsFromPdf`로
+   (업로드 없이) dry 테스트해서 `cropped.length === question_count`가 다 맞는지 확인.
+2. **전체 배치 실행**: 문제없으면 `npm run batch-crop-questions -- --exam-type X --level Y`.
+   개수가 안 맞는 문제지는 자동으로 업로드가 스킵된다(반쪽만 잘린 이미지를 "성공"으로
+   잘못 표시하지 않기 위한 안전장치).
+3. **전체 재검증**: 전체 문제지를 다시 dry 테스트해서 실패/주의 0건 확인. 여기서
+   문제가 나오면 원인(마커 인식, 안내문 인식, 레이아웃 등)을 찾아 고친 뒤 **이미
+   완료했던 다른 시험유형/급수도 전부 재검증** — 한 곳을 고치면 다른 곳이 깨질 수
+   있다(실측: hasMun 로직 하나 바꿨다가 다른 3개 문제지가 새로 깨진 적 있음).
+4. **병합 세트 스크린샷 확인**: 세트문제로 병합된 것 중 최소 1~2개는 실제로
+   Read 도구로 이미지를 열어 지문+문제가 온전히 다 보이는지 눈으로 확인.
+5. **DB 완전성 확인**: `question_images` 개수가 `question_count`와 정확히 일치하는
+   문제지 수를 세어 미크롭/불완전 0건 확인.
+6. 이 전부를 통과한 뒤에만 커밋/빌드/푸시.
+
+"개수만 맞으면 성공"이라고 판단하지 말 것 — 실제로 반쪽만 잘렸는데 문항 수만
+우연히 맞아떨어져 "성공"으로 표시된 사례가 있었다(1단 레이아웃 문제지). 의심스러운
+케이스는 반드시 스크린샷으로 원본과 대조할 것.
