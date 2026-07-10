@@ -15,7 +15,8 @@
     "crop-questions": "node --env-file=.env.local scripts/crop-question-images.mjs",
     "batch-crop-questions": "node --env-file=.env.local scripts/batch-crop-questions.mjs",
     "migrate-question-images": "node --env-file=.env.local scripts/migrate-question-images-to-webp.mjs",
-    "migrate-pdfs": "node --env-file=.env.local scripts/migrate-pdfs-optimize.mjs"
+    "migrate-pdfs": "node --env-file=.env.local scripts/migrate-pdfs-optimize.mjs",
+    "backup-storage": "node --env-file=.env.local scripts/backup-storage.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
