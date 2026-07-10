@@ -70,10 +70,21 @@ async function main() {
     return;
   }
 
+  // 특정 과목(외국어 제2외국어, 수학, 과학 등)은 해설 생성 대상에서 제외한다 —
+  // explanation_excluded_subjects에 등록된 subject_id를 가진 문제지는 통째로 건너뛴다.
+  const { data: excluded, error: excludedError } = await supabase
+    .from("explanation_excluded_subjects")
+    .select("subject_id");
+  if (excludedError) {
+    console.error(`제외 과목 조회 실패: ${excludedError.message}`);
+    process.exit(1);
+  }
+  const excludedSubjectIds = new Set((excluded ?? []).map((e) => e.subject_id));
+
   for (const { exam_type_id, level } of priorities) {
     const { data: papers, error: papersError } = await supabase
       .from("exam_papers")
-      .select("id, title, year, level")
+      .select("id, title, year, level, subject_id")
       .eq("exam_type_id", exam_type_id)
       .eq("level", level)
       .order("year", { ascending: true })
@@ -84,6 +95,7 @@ async function main() {
     }
 
     for (const paper of papers ?? []) {
+      if (excludedSubjectIds.has(paper.subject_id)) continue;
       const { data: questions, error: questionsError } = await supabase
         .from("questions")
         .select("id, question_number, question_images(image_path, order_index)")

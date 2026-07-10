@@ -946,3 +946,34 @@ insert into explanation_batch_priority (exam_type_id, level, priority) values
   ('d5f53459-a4ac-4d90-b2cd-be5673a03752', '9급', 6), -- 지역인재 9급
   ('9e1b59ea-9e39-4ae0-97db-7004654b5f69', '5급', 7)  -- 국가직 5급
 on conflict (exam_type_id, level) do update set priority = excluded.priority;
+
+-- 해설 생성 대상에서 제외할 과목. 제2외국어/수학/과학처럼 당장 해설 우선순위가
+-- 낮은 과목을 배치에서 통째로 건너뛰기 위한 화이트리스트의 반대(블랙리스트) 개념.
+create table if not exists explanation_excluded_subjects (
+  subject_id uuid primary key references subjects(id) on delete cascade
+);
+
+alter table explanation_excluded_subjects enable row level security;
+
+drop policy if exists "read explanation_excluded_subjects" on explanation_excluded_subjects;
+create policy "read explanation_excluded_subjects" on explanation_excluded_subjects
+  for select to authenticated using (is_admin() or is_explanation_bot());
+
+drop policy if exists "admin insert explanation_excluded_subjects" on explanation_excluded_subjects;
+create policy "admin insert explanation_excluded_subjects" on explanation_excluded_subjects
+  for insert to authenticated with check (is_admin());
+
+drop policy if exists "admin delete explanation_excluded_subjects" on explanation_excluded_subjects;
+create policy "admin delete explanation_excluded_subjects" on explanation_excluded_subjects
+  for delete to authenticated using (is_admin());
+
+insert into explanation_excluded_subjects (subject_id) values
+  ('7dd45557-02a4-49f2-b3d6-c6c61674b2a0'), -- 러시아어
+  ('7dcc97de-343f-4b49-a3b1-9fcb54a13ade'), -- 불어
+  ('67f9be83-ed9f-4411-9a4c-fb3af104dc89'), -- 수학
+  ('a07b3678-42b6-4f19-9893-387eb5598d66'), -- 중국어
+  ('aff5a745-563c-4bef-bcd5-cf2ee7589b7e'), -- 스페인어
+  ('475426a9-ee7c-4e85-b574-1c59ff6f1cf2'), -- 독어
+  ('79794ca6-61fe-4d92-a4b4-d23691480116'), -- 과학
+  ('5ace7f31-e8a6-46df-9db6-9f96c1309d76')  -- 일어
+on conflict (subject_id) do nothing;
