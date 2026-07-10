@@ -19,10 +19,21 @@ import { PDFDocument } from "pdf-lib";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 
-const HEADER_RE = /채용시험\s+(.+?)\s*-\s*\d+\s*-/;
+// "채용시험" 뒤에 과목명이 오는 해가 대부분이지만, 8급 시험은 "8급시험"으로만
+// 끝나는 해도 있어서 "시험"으로 넓게 잡는다.
+// 쪽번호가 "- 1 -"처럼 대시로 감싸인 해가 대부분이지만, 대시 없이 그냥 "1"만
+// 찍힌 해도 있어서 대시는 있어도 되고 없어도 되게 둔다.
+// 일부 연도(2019 등)는 PDF 텍스트 추출 순서가 꼬여서 "시험" 바로 뒤에 연도/급수
+// 숫자("2019 8")가 먼저 나오고 그 다음에 과목명이 나오므로, 그 패턴을 먼저 건너뛴다.
+const HEADER_RE = /시험\s+(?:\d{4}\s+\d{1,2}\s+)?(.+?)\s*-?\s*\d+\s*-?(?=\s)/;
 // 책형 표기가 "국어 책형 가"(끝이 "책형가") 형태인 해와, "책형" 없이 "국어 가 형"
 // (끝이 "가형") 형태로만 나오는 해가 둘 다 있어서 두 패턴 다 제거한다.
 const TYPE_SUFFIX_RE = /(책형[가-힣]?|[가-라]형)$/;
+// 8급 시험은 헤더에 "1교시/2교시/3교시"가 과목명 앞에 붙어 나오는 해가 있다.
+const SESSION_PREFIX_RE = /^\d교시/;
+// 표지 페이지("...채용시험 문제 가형 1교시 국어ㆍ헌법ㆍ경제학...")가 대시 없는
+// 쪽번호 매칭 때문에 우연히 걸릴 때 나오는 가짜 과목명. 실제 과목이 아니므로 제외.
+const FAKE_SUBJECT_NAMES = new Set(["문제"]);
 
 function parseArgs(argv) {
   const args = {};
@@ -57,7 +68,11 @@ async function getPageInfos(buffer) {
     // ("- 11 -" vs "- 16 -" 처럼) 내용 비교 시 제외하고 본문만 남긴다.
     let body = text;
     if (m) {
-      subject = m[1].replace(/\s+/g, "").replace(TYPE_SUFFIX_RE, "");
+      subject = m[1]
+        .replace(/\s+/g, "")
+        .replace(TYPE_SUFFIX_RE, "")
+        .replace(SESSION_PREFIX_RE, "");
+      if (FAKE_SUBJECT_NAMES.has(subject)) subject = null;
       body = text.slice(m.index + m[0].length).trim();
     }
     infos.push({ page: i, subject, text: body });
@@ -116,9 +131,18 @@ async function main() {
     const filePath = path.join(dir, filename);
     const buffer = await readFile(filePath);
     const infos = await getPageInfos(buffer);
-    const groups = groupBySubject(infos);
+    const allGroups = groupBySubject(infos);
+    // 표지 페이지(1쪽)에 "가형제 1과목", "문제 가형 1교시" 같은 책형/과목안내 문구가
+    // 대시 없는 쪽번호 매칭 때문에 우연히 걸리는 경우가 있다. 실제 과목은 지금까지
+    // 최소 2쪽 이상이었으므로, 1쪽짜리 그룹이 문서 맨 앞(1쪽)에서 시작하면 표지로
+    // 보고 제외한다(대신 눈에 띄게 로그로 남긴다).
+    const groups = allGroups.filter((g) => !(g.start === 1 && g.end === 1));
+    const droppedCovers = allGroups.filter((g) => g.start === 1 && g.end === 1);
 
     console.log(`\n[${filename}] 총 ${infos.length}쪽`);
+    for (const g of droppedCovers) {
+      console.log(`  (표지로 판단해 제외: "${g.subject}" p1)`);
+    }
     for (const g of groups) {
       console.log(`  - ${g.subject}: p${g.start}~p${g.end} (${g.end - g.start + 1}쪽)`);
     }

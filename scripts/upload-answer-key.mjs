@@ -99,11 +99,13 @@ async function main() {
     const year = yearMatch ? Number(yearMatch[0]) : null;
     const level = filename.includes("9급")
       ? "9급"
-      : filename.includes("7급")
-        ? "7급"
-        : filename.includes("5급")
-          ? "5급"
-          : null;
+      : filename.includes("8급")
+        ? "8급"
+        : filename.includes("7급")
+          ? "7급"
+          : filename.includes("5급")
+            ? "5급"
+            : null;
     // 2017 국가직 9급 추가선발(2차모집), 7급 1차/2차 시험처럼 회차가 나뉘는 경우 round로 구분
     const round = filename.includes("추가") || filename.includes("2차") ? 2 : 1;
 
