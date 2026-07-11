@@ -22,6 +22,7 @@ const TABLES = [
   "question_passage_images",
   "questions",
   "question_images",
+  "question_explanations",
   "cbt_attempts",
   "cbt_attempt_starts",
   "cbt_attempt_answers",
