@@ -834,3 +834,22 @@ create policy "admin update question_explanations" on question_explanations
 drop policy if exists "admin delete question_explanations" on question_explanations;
 create policy "admin delete question_explanations" on question_explanations
   for delete to authenticated using (is_admin());
+
+-- 해설 열람/다운로드 대량 수집 방지용 요청 로그. 로그인 사용자별로 최근 1시간
+-- 이내 행 수를 세어 시간당 한도(explanation-rate-limit.ts)를 넘으면 그 요청은
+-- 전체 해설 대신 미리보기로 되돌아간다. 클라이언트가 직접 읽거나 쓸 일이 없는
+-- 내부 집계 전용 테이블이라 RLS만 켜두고 정책은 두지 않는다 — signup_attempts와
+-- 같은 방식으로, anon/authenticated는 전부 차단되고 서버 액션에서 service_role로만
+-- 기록/조회한다.
+create table if not exists explanation_access_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  action text not null check (action in ('view', 'download')),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists explanation_access_log_user_idx
+  on explanation_access_log(user_id, action, created_at desc);
+
+alter table explanation_access_log enable row level security;

@@ -192,15 +192,28 @@ export default async function PaperDetailPage({
         )}
 
         {/* 전 문항 해설이 준비된 문제지에만 노출. 학습 자료라는 성격이 드러나게
-            오답노트의 "정답/극복"과 같은 에메랄드 계열로 살짝 구분해준다. */}
+            오답노트의 "정답/극복"과 같은 에메랄드 계열로 살짝 구분해준다. 문제/정답과
+            같은 자리에 다운로드 아이콘을 따로 둔다 — 해설은 저장 파일이 아니라
+            페이지를 인쇄해 PDF로 저장하는 방식이라, 이 아이콘은 같은 페이지를
+            ?download=1로 열어 자동으로 인쇄창을 띄운다. */}
         {hasFullExplanations && (
-          <Link
-            href={`/papers/${paper.id}/explanations`}
-            className="flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-lg font-medium text-emerald-700 hover:bg-emerald-100"
-          >
-            <BookOpenCheck size={20} />
-            해설 열기
-          </Link>
+          <div className="flex items-stretch gap-2">
+            <Link
+              href={`/papers/${paper.id}/explanations`}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-lg font-medium text-emerald-700 hover:bg-emerald-100"
+            >
+              <BookOpenCheck size={20} />
+              해설 열기
+            </Link>
+            <Link
+              href={`/papers/${paper.id}/explanations?download=1`}
+              aria-label="해설 다운로드"
+              title="해설 다운로드"
+              className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600"
+            >
+              <Download size={20} />
+            </Link>
+          </div>
         )}
 
         {myCbtRecordItems.length > 0 && (
