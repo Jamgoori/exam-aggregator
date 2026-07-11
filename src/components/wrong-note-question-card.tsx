@@ -42,8 +42,17 @@ export function groupRowsBySharedImages<T extends { images: string[] }>(
 
 // 정답(초록)/내가 고른 답(빨강) 색은 CBT 채점 화면(single-question-view)과 동일하게
 // 맞춰서, 시험을 막 마친 사용자가 오답노트에서도 같은 문법으로 읽을 수 있게 한다.
-function ChoiceRow({ row, showNumberBadge }: { row: WrongNoteCardRow; showNumberBadge: boolean }) {
-  const skipped = row.selectedChoice === null;
+function ChoiceRow({
+  row,
+  showNumberBadge,
+  showSelection,
+}: {
+  row: WrongNoteCardRow;
+  showNumberBadge: boolean;
+  showSelection: boolean;
+}) {
+  // 전체 해설 페이지처럼 "내가 고른 답" 개념이 없는 화면에서는 풀지 않음 배지를 숨긴다.
+  const skipped = showSelection && row.selectedChoice === null;
   return (
     <div className="flex flex-wrap items-center gap-2">
       {showNumberBadge && (
@@ -95,9 +104,15 @@ function ChoiceRow({ row, showNumberBadge }: { row: WrongNoteCardRow; showNumber
 export function WrongNoteQuestionCard({
   rows,
   images,
+  // 전체 해설 페이지용 옵션: 해설을 펼친 채로 시작하고(복습이 아니라 열람이 목적),
+  // "내가 고른 답"/"풀지 않음" 표시는 숨긴다.
+  explanationsOpen = false,
+  showSelection = true,
 }: {
   rows: WrongNoteCardRow[];
   images: string[];
+  explanationsOpen?: boolean;
+  showSelection?: boolean;
 }) {
   const firstNumber = rows[0]?.questionNumber;
   const lastNumber = rows[rows.length - 1]?.questionNumber;
@@ -132,7 +147,12 @@ export function WrongNoteQuestionCard({
 
       <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3">
         {rows.map((row) => (
-          <ChoiceRow key={row.questionNumber} row={row} showNumberBadge={rows.length > 1} />
+          <ChoiceRow
+            key={row.questionNumber}
+            row={row}
+            showNumberBadge={rows.length > 1}
+            showSelection={showSelection}
+          />
         ))}
       </div>
 
@@ -143,7 +163,7 @@ export function WrongNoteQuestionCard({
           {rows
             .filter((row) => row.explanation)
             .map((row) => (
-              <details key={row.questionNumber} className="group">
+              <details key={row.questionNumber} open={explanationsOpen} className="group">
                 <summary className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-blue-600 hover:underline [&::-webkit-details-marker]:hidden">
                   <ChevronRight
                     size={14}

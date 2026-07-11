@@ -5,6 +5,7 @@ import { compareLevels } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getCbtAvailability } from "@/lib/cbt-availability";
+import { countPaperExplanations } from "@/lib/wrong-notes";
 import type {
   MyCbtRecordItem,
   RoundAverage,
@@ -85,6 +86,7 @@ export async function getPaperDetailData(
     { data: myRatingData },
     { data: myCbtAttemptRows },
     myRoundCounts,
+    explanationCount,
   ] = await Promise.all([
     supabase
       .from("comments")
@@ -143,7 +145,15 @@ export async function getPaperDetailData(
     userId
       ? getMyRoundCounts(supabase, userId)
       : Promise.resolve(new Map<string, number>()),
+    // "해설 열기" 버튼 노출 판단용. question_explanations는 관리자 전용 RLS라
+    // service role로 개수만 센다 (해설 내용은 /papers/[id]/explanations에서 렌더링).
+    countPaperExplanations(paper.id),
   ]);
+
+  // 전 문항 해설이 준비된 문제지에만 상세페이지 "해설 열기"를 열어준다 —
+  // 반쪽짜리 해설집을 "지원"으로 표시하지 않기 위한 기준.
+  const hasFullExplanations =
+    !!paper.question_count && explanationCount >= paper.question_count;
 
   // 표본 3명 미만인 회차는 DB 함수에서 이미 제외하고 내려주므로 여기서는 그대로 매핑만 한다.
   const roundAverages: RoundAverage[] = (
@@ -232,6 +242,7 @@ export async function getPaperDetailData(
     myScore: myRatingData ? (myRatingData.score as number) : null,
     isBookmarked: !!bookmarkData,
     hasCbtAnswers,
+    hasFullExplanations,
     roundAverages,
     myCbtRecordItems,
     subjectPapers: subjectPapers as ExamPaper[] | null,

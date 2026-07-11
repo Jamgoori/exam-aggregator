@@ -382,6 +382,56 @@ export async function getSubjectWrongNote(
   return { subject, papers };
 }
 
+// ── 문제지 전체 해설 (상세페이지 "해설 열기") ─────────────────────────────
+// 오답노트와 달리 응시 여부와 무관하게 공개로 보여준다. 정답지 PDF가 이미 공개
+// 다운로드라 해설 공개가 새로운 정답 노출은 아니며, 상세페이지 버튼은 전 문항
+// 해설이 준비된 문제지에만 열어준다(아래 count로 판단).
+
+export async function countPaperExplanations(paperId: string): Promise<number> {
+  const admin = createAdminClient();
+  const { count } = await admin
+    .from("question_explanations")
+    .select("id", { count: "exact", head: true })
+    .eq("paper_id", paperId);
+  return count ?? 0;
+}
+
+export type PaperExplanationQuestion = {
+  questionNumber: number;
+  correctChoice: number | null;
+  choiceCount: number;
+  images: string[];
+  explanation: string;
+};
+
+// 해설이 등록된 문항만 번호순으로 돌려준다 (문항 이미지·정답 포함).
+export async function getPaperExplanations(
+  supabase: Supabase,
+  paper: { id: string; choice_count: number },
+): Promise<PaperExplanationQuestion[]> {
+  const [mediaByPaper, answersByPaper, explanationsByPaper] = await Promise.all([
+    fetchQuestionMedia(supabase, [paper.id]),
+    fetchCorrectAnswers([paper.id]),
+    fetchExplanations([paper.id]),
+  ]);
+  const media = mediaByPaper.get(paper.id);
+  const answers = answersByPaper.get(paper.id);
+  const explanations = explanationsByPaper.get(paper.id) ?? new Map<number, string>();
+
+  return [...explanations.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([questionNumber, explanation]) => {
+      const entry = media?.get(questionNumber);
+      return {
+        questionNumber,
+        correctChoice: answers?.[questionNumber - 1] ?? null,
+        choiceCount: entry?.choiceCount ?? paper.choice_count,
+        images: entry?.images ?? [],
+        explanation,
+      };
+    });
+}
+
 // 회차(응시) 오답노트 페이지용 데이터.
 export type AttemptWrongNote = {
   attempt: {
