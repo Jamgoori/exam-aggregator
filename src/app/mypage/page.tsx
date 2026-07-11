@@ -1,16 +1,22 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Star, Trophy } from "lucide-react";
+import { BookOpenCheck, ChevronRight, Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@/lib/format";
 import { computeStreakDays, streakTier } from "@/lib/streak";
+import { subjectColor } from "@/lib/subject-colors";
+import {
+  buildWrongNoteGroups,
+  fetchWrongAnswerRows,
+  type WrongNoteAttemptRow,
+  type WrongNoteSubjectGroup,
+} from "@/lib/wrong-notes";
 import type { ExamPaper } from "@/lib/supabase/types";
 
-// 오답노트는 문항별 정답/오답 이미지를 모아 보여줘야 해서 더 큰 작업이라 별도로 남겨둠.
-const TAB_KEYS: MyPageTabKey[] = ["bookmarks", "history"];
+const TAB_KEYS: MyPageTabKey[] = ["bookmarks", "history", "wrong-notes"];
 
 type MyAttempt = {
   id: string;
@@ -18,7 +24,7 @@ type MyAttempt = {
   total_questions: number;
   duration_seconds: number | null;
   created_at: string;
-  exam_papers: (Pick<ExamPaper, "id" | "title"> & {
+  exam_papers: (Pick<ExamPaper, "id" | "title" | "level" | "choice_count"> & {
     subjects?: ExamPaper["subjects"];
     exam_types?: ExamPaper["exam_types"];
   }) | null;
@@ -80,7 +86,7 @@ export default async function MyPage({
     supabase
       .from("cbt_attempts")
       .select(
-        "id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, subjects(*), exam_types(*))",
+        "id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, level, choice_count, subjects(*), exam_types(*))",
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
@@ -99,6 +105,21 @@ export default async function MyPage({
 
   const myAttempts = (attemptRows ?? []) as unknown as MyAttempt[];
   const { attemptsByPaper, roundNumberByAttemptId } = computeAttemptRounds(myAttempts);
+
+  // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고,
+  // 문항별 오답 행만 추가로 조회한다.
+  const wrongRows = await fetchWrongAnswerRows(
+    supabase,
+    myAttempts.map((a) => a.id),
+  );
+  const wrongNoteGroups = buildWrongNoteGroups(
+    myAttempts as unknown as WrongNoteAttemptRow[],
+    wrongRows,
+  );
+  const totalUnresolved = wrongNoteGroups.reduce(
+    (sum, g) => sum + g.unresolvedCount,
+    0,
+  );
 
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
@@ -135,6 +156,14 @@ export default async function MyPage({
             )}
           </div>
         </div>
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
+          <span className="text-xs text-zinc-500">남은 오답</span>
+          <span
+            className={`text-xl font-semibold ${totalUnresolved > 0 ? "text-red-600" : "text-emerald-600"}`}
+          >
+            {totalUnresolved}문제
+          </span>
+        </div>
       </div>
 
       <MyPageTabs
@@ -152,6 +181,7 @@ export default async function MyPage({
             roundNumberByAttemptId={roundNumberByAttemptId}
           />
         }
+        wrongNotes={<WrongNotesTab groups={wrongNoteGroups} />}
       />
     </div>
   );
@@ -196,7 +226,8 @@ function BookmarksTab({
   );
 }
 
-// "내 시험 기록" 탭: CBT 응시 이력 목록 (문제지 링크, 날짜/풀이시간, 회독 배지, 점수).
+// "내 시험 기록" 탭: CBT 응시 이력 목록. 회차를 누르면 문제지 상세 대신 그 회차의
+// 오답만 모아 보여주는 페이지로 이동한다 (문제지 상세는 그 페이지 안에서 갈 수 있다).
 function HistoryTab({
   attempts,
   roundNumberByAttemptId,
@@ -222,19 +253,18 @@ function HistoryTab({
               a.total_questions > 0
                 ? Math.round((a.score / a.total_questions) * 100)
                 : 0;
+            const wrongCount = a.total_questions - a.score;
             return (
-              <div
+              <Link
                 key={a.id}
-                className="flex flex-col gap-1 py-4 sm:flex-row sm:items-center sm:justify-between"
+                href={`/mypage/attempts/${a.id}`}
+                className="group flex flex-col gap-1 py-4 transition-colors hover:bg-zinc-50 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex flex-col gap-0.5">
                   {a.exam_papers ? (
-                    <Link
-                      href={`/papers/${a.exam_papers.id}`}
-                      className="text-sm font-medium text-blue-600 hover:underline"
-                    >
+                    <span className="text-sm font-medium group-hover:text-blue-600">
                       {a.exam_papers.title}
-                    </Link>
+                    </span>
                   ) : (
                     <span className="text-sm text-zinc-400">삭제된 문제</span>
                   )}
@@ -254,11 +284,105 @@ function HistoryTab({
                     {a.score}/{a.total_questions}
                   </span>
                   <span className="text-xs text-zinc-400">({pct}점)</span>
+                  <span
+                    className={`text-xs font-medium ${wrongCount > 0 ? "text-red-600" : "text-emerald-600"}`}
+                  >
+                    오답 {wrongCount}
+                  </span>
+                  <ChevronRight
+                    size={15}
+                    className="text-zinc-300 group-hover:text-blue-600"
+                  />
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
+      )}
+    </section>
+  );
+}
+
+// "오답노트" 탭: 과목별로 틀린 문제 수를 요약해서 보여주고, 과목을 누르면
+// 문제 이미지까지 모아둔 과목 오답노트 페이지로 이어준다.
+function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
+  return (
+    <section className="flex flex-col gap-4">
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
+        <BookOpenCheck size={18} className="text-blue-600" />
+        오답노트
+      </h2>
+      {groups.length === 0 ? (
+        <p className="py-12 text-center text-sm text-zinc-500">
+          아직 모인 오답이 없어요. CBT로 문제를 풀면 틀린 문제가 과목별로
+          자동으로 정리돼요.
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-zinc-400">
+            틀린 문제를 과목별로 모아뒀어요. 가장 최근 응시에서 다시 맞힌 문제는
+            &ldquo;극복&rdquo;으로 표시돼요.
+          </p>
+          <div className="flex flex-col gap-4">
+            {groups.map((g) => (
+              <div key={g.subject.id} className="rounded-xl border border-zinc-200 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(g.subject.slug)}`}
+                  >
+                    {g.subject.name}
+                  </span>
+                  <span className="text-sm text-zinc-500">
+                    <span className="font-medium text-red-600">오답 {g.unresolvedCount}</span>
+                    {g.resolvedCount > 0 && (
+                      <>
+                        {" · "}
+                        <span className="font-medium text-emerald-600">
+                          극복 {g.resolvedCount}
+                        </span>
+                      </>
+                    )}
+                  </span>
+                  <Link
+                    href={`/mypage/wrong-notes/${g.subject.slug}`}
+                    className="ml-auto text-sm font-medium text-blue-600 hover:underline"
+                  >
+                    모아보기 →
+                  </Link>
+                </div>
+                <div className="mt-2 flex flex-col divide-y divide-zinc-100">
+                  {g.papers.map((p) => (
+                    <Link
+                      key={p.paper.id}
+                      href={`/mypage/wrong-notes/${g.subject.slug}#paper-${p.paper.id}`}
+                      className="group flex items-center gap-2 py-2.5"
+                    >
+                      <span className="truncate text-sm group-hover:text-blue-600">
+                        {p.paper.title}
+                      </span>
+                      <span className="ml-auto flex shrink-0 items-center gap-2 text-xs">
+                        <span
+                          className={`font-medium ${p.unresolvedCount > 0 ? "text-red-600" : "text-zinc-400"}`}
+                        >
+                          오답 {p.unresolvedCount}
+                        </span>
+                        {p.resolvedCount > 0 && (
+                          <span className="font-medium text-emerald-600">
+                            극복 {p.resolvedCount}
+                          </span>
+                        )}
+                        <ChevronRight
+                          size={14}
+                          className="text-zinc-300 group-hover:text-blue-600"
+                        />
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </section>
   );

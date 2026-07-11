@@ -40,6 +40,18 @@ export function CbtResultModal({
             </p>
           </div>
         </div>
+        {/* 틀린 문제가 있으면 채점 직후가 복습 효과가 가장 클 때라, 회차 오답노트로
+            바로 이어지는 버튼을 가장 눈에 띄는 자리에 둔다. */}
+        {result.attemptId &&
+          (result.score ?? 0) < (result.totalQuestions ?? 0) && (
+            <Link
+              href={`/mypage/attempts/${result.attemptId}`}
+              className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              틀린 문제 다시 보기 (
+              {(result.totalQuestions ?? 0) - (result.score ?? 0)}문제)
+            </Link>
+          )}
         <div className="flex w-full gap-2">
           <Link
             href={`/papers/${paperId}`}
