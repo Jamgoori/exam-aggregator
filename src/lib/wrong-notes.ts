@@ -2,6 +2,7 @@ import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ExamType, Subject } from "@/lib/supabase/types";
+import type { QuestionExplanationContent } from "@/components/wrong-note-question-card";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -218,7 +219,7 @@ export type WrongNoteQuestionDetail = WrongNoteQuestionSummary & {
   correctChoice: number | null;
   choiceCount: number;
   images: string[];
-  explanation: string | null;
+  explanation: QuestionExplanationContent | null;
 };
 
 export type WrongNotePaperDetail = Omit<WrongNotePaperGroup, "questions"> & {
@@ -292,29 +293,118 @@ async function fetchCorrectAnswers(
   return byPaper;
 }
 
-// 문항 해설. 해설에는 정답이 담기므로 question_explanations는 일반 select가 막혀
-// 있고(관리자 전용 RLS), 정답과 같은 조건 — 본인 응시 기록이 있는 문제지의 오답 —
-// 으로 좁힌 뒤에만 service role로 읽는다. 해설이 아직 없는 문항은 그냥 빠진다.
+// 선지 번호가 "①"/"1번"/객체/배열 등 어떤 형태로 저장돼 있어도 숫자로 되살린다.
+function parseChoiceNumber(raw: unknown, fallback: number): number {
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string") {
+    const circled = "①②③④⑤⑥⑦⑧".indexOf(raw.trim().charAt(0));
+    if (circled >= 0) return circled + 1;
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
+// choice_explanations는 해설 제작 루틴이 jsonb로 저장한다. 배열([문자열] 또는
+// [{choice, explanation}]) / 객체({"1": "..."} 또는 {"①": "..."}) 어느 형태로
+// 들어와도 화면용 {choice, text} 목록으로 정규화한다.
+function normalizeChoiceExplanations(
+  raw: unknown,
+): { choice: number; text: string }[] {
+  if (!raw) return [];
+
+  const textOf = (v: unknown): string => {
+    if (typeof v === "string") return v;
+    if (v && typeof v === "object") {
+      const o = v as Record<string, unknown>;
+      const t = o.explanation ?? o.text ?? o.content ?? o.reason;
+      if (typeof t === "string") return t;
+    }
+    return "";
+  };
+
+  let entries: { choice: number; text: string }[] = [];
+  if (Array.isArray(raw)) {
+    entries = raw.map((item, i) => {
+      const o = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+      return {
+        choice: parseChoiceNumber(o.choice ?? o.number ?? o.choice_number, i + 1),
+        text: textOf(item),
+      };
+    });
+  } else if (typeof raw === "object") {
+    entries = Object.entries(raw as Record<string, unknown>).map(([key, v], i) => ({
+      choice: parseChoiceNumber(key, i + 1),
+      text: textOf(v),
+    }));
+  }
+
+  return entries
+    .filter((e) => e.text.trim().length > 0)
+    .sort((a, b) => a.choice - b.choice);
+}
+
+type ExplanationRow = {
+  keyword_title: string | null;
+  keyword_explanation: string | null;
+  choice_explanations: unknown;
+  correct_choice_summary: string | null;
+  law_amendment_note: string | null;
+};
+
+function toExplanationContent(row: ExplanationRow): QuestionExplanationContent | null {
+  const content: QuestionExplanationContent = {
+    keywordTitle: row.keyword_title?.trim() || null,
+    keywordExplanation: row.keyword_explanation?.trim() || null,
+    choiceExplanations: normalizeChoiceExplanations(row.choice_explanations),
+    correctChoiceSummary: row.correct_choice_summary?.trim() || null,
+    lawAmendmentNote: row.law_amendment_note?.trim() || null,
+  };
+  const empty =
+    !content.keywordTitle &&
+    !content.keywordExplanation &&
+    content.choiceExplanations.length === 0 &&
+    !content.correctChoiceSummary &&
+    !content.lawAmendmentNote;
+  return empty ? null : content;
+}
+
+// 문항 해설. question_explanations는 해설 제작 루틴이 관리하는 테이블로
+// questions.id(question_id)를 키로 쓰므로, questions를 거쳐 (paper_id,
+// question_number)로 환원한다. 해설에는 정답이 담기므로 일반 select는 막아두고
+// (관리자 전용 RLS 권장) service role로만 읽는다. 해설이 없는 문항은 그냥 빠진다.
 async function fetchExplanations(
   paperIds: string[],
-): Promise<Map<string, Map<number, string>>> {
+): Promise<Map<string, Map<number, QuestionExplanationContent>>> {
   const admin = createAdminClient();
-  const byPaper = new Map<string, Map<number, string>>();
+  const byPaper = new Map<string, Map<number, QuestionExplanationContent>>();
   for (const ids of chunk(paperIds, 10)) {
     let from = 0;
     while (true) {
+      // created_at 오름차순이라, 같은 문항에 해설이 여러 번 생성됐으면
+      // 아래 map.set이 가장 최근 것으로 자연스럽게 덮어쓴다.
       const { data } = await admin
         .from("question_explanations")
-        .select("paper_id, question_number, explanation")
-        .in("paper_id", ids)
-        .order("paper_id")
-        .order("question_number")
+        .select(
+          "id, created_at, keyword_title, keyword_explanation, choice_explanations, correct_choice_summary, law_amendment_note, questions!inner(paper_id, question_number)",
+        )
+        .in("questions.paper_id", ids)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
         .range(from, from + BATCH_SIZE - 1);
       if (!data || data.length === 0) break;
       for (const row of data) {
-        const paperMap = byPaper.get(row.paper_id as string) ?? new Map<number, string>();
-        paperMap.set(row.question_number as number, row.explanation as string);
-        byPaper.set(row.paper_id as string, paperMap);
+        const q = row.questions as unknown as {
+          paper_id: string;
+          question_number: number;
+        } | null;
+        if (!q) continue;
+        const content = toExplanationContent(row as unknown as ExplanationRow);
+        if (!content) continue;
+        const paperMap =
+          byPaper.get(q.paper_id) ?? new Map<number, QuestionExplanationContent>();
+        paperMap.set(q.question_number, content);
+        byPaper.set(q.paper_id, paperMap);
       }
       if (data.length < BATCH_SIZE) break;
       from += BATCH_SIZE;
@@ -328,7 +418,7 @@ function toQuestionDetail(
   paper: WrongNotePaperInfo,
   media: Map<number, QuestionMediaEntry> | undefined,
   answers: number[] | undefined,
-  explanations: Map<number, string> | undefined,
+  explanations: Map<number, QuestionExplanationContent> | undefined,
 ): WrongNoteQuestionDetail {
   const entry = media?.get(q.questionNumber);
   return {
@@ -389,11 +479,18 @@ export async function getSubjectWrongNote(
 
 export async function countPaperExplanations(paperId: string): Promise<number> {
   const admin = createAdminClient();
-  const { count } = await admin
+  // 같은 문항에 해설이 여러 번 생성됐을 수 있으므로 행 수가 아니라
+  // "해설이 있는 문항 번호"의 개수를 센다.
+  const { data } = await admin
     .from("question_explanations")
-    .select("id", { count: "exact", head: true })
-    .eq("paper_id", paperId);
-  return count ?? 0;
+    .select("questions!inner(paper_id, question_number)")
+    .eq("questions.paper_id", paperId);
+  const numbers = new Set(
+    (data ?? [])
+      .map((row) => (row.questions as unknown as { question_number: number } | null)?.question_number)
+      .filter((n): n is number => n != null),
+  );
+  return numbers.size;
 }
 
 export type PaperExplanationQuestion = {
@@ -401,7 +498,7 @@ export type PaperExplanationQuestion = {
   correctChoice: number | null;
   choiceCount: number;
   images: string[];
-  explanation: string;
+  explanation: QuestionExplanationContent;
 };
 
 // 해설이 등록된 문항만 번호순으로 돌려준다 (문항 이미지·정답 포함).
@@ -416,7 +513,8 @@ export async function getPaperExplanations(
   ]);
   const media = mediaByPaper.get(paper.id);
   const answers = answersByPaper.get(paper.id);
-  const explanations = explanationsByPaper.get(paper.id) ?? new Map<number, string>();
+  const explanations =
+    explanationsByPaper.get(paper.id) ?? new Map<number, QuestionExplanationContent>();
 
   return [...explanations.entries()]
     .sort((a, b) => a[0] - b[0])
@@ -450,7 +548,7 @@ export type AttemptWrongNote = {
     correctChoice: number | null;
     choiceCount: number;
     images: string[];
-    explanation: string | null;
+    explanation: QuestionExplanationContent | null;
   }[];
 };
 
@@ -511,7 +609,7 @@ export async function getAttemptWrongNote(
       : [
           new Map<string, Map<number, QuestionMediaEntry>>(),
           new Map<string, number[]>(),
-          new Map<string, Map<number, string>>(),
+          new Map<string, Map<number, QuestionExplanationContent>>(),
         ];
 
   const media = paper ? mediaByPaper.get(paper.id) : undefined;

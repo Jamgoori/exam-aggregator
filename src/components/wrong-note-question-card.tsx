@@ -4,6 +4,17 @@ import { ChevronRight } from "lucide-react";
 // 컴포넌트라 서버 컴포넌트(회차 페이지)와 클라이언트 컴포넌트(과목 페이지의 필터
 // 목록) 어느 쪽에서든 그대로 가져다 쓸 수 있다.
 
+// 해설 제작 루틴이 만드는 구조화된 해설 한 건. question_explanations 테이블의
+// 컬럼(keyword_*, choice_explanations, correct_choice_summary, law_amendment_note)을
+// 화면용으로 정규화한 형태다. 모든 필드가 선택적이라 있는 것만 그린다.
+export type QuestionExplanationContent = {
+  keywordTitle: string | null;
+  keywordExplanation: string | null;
+  choiceExplanations: { choice: number; text: string }[];
+  correctChoiceSummary: string | null;
+  lawAmendmentNote: string | null;
+};
+
 // 카드 하나에 들어가는 답 줄. 세트문제(공통지문)는 이미지 한 벌에 답 줄이 여러 개 붙는다.
 export type WrongNoteCardRow = {
   questionNumber: number;
@@ -11,7 +22,7 @@ export type WrongNoteCardRow = {
   correctChoice: number | null;
   choiceCount: number;
   // 해설이 등록된 문항만 채워진다 (없으면 "해설 보기" 자체가 안 뜬다).
-  explanation?: string | null;
+  explanation?: QuestionExplanationContent | null;
   // 과목별 모아보기에서만 채워지는 값들 (회차별 보기에서는 undefined).
   wrongCount?: number;
   resolved?: boolean;
@@ -171,12 +182,76 @@ export function WrongNoteQuestionCard({
                   />
                   {rows.length > 1 ? `${row.questionNumber}번 해설 보기` : "해설 보기"}
                 </summary>
-                <p className="mt-2 whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700">
-                  {row.explanation}
-                </p>
+                <ExplanationBody
+                  explanation={row.explanation!}
+                  correctChoice={row.correctChoice}
+                />
               </details>
             ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+const CIRCLED_DIGITS = ["", "①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧"];
+
+// 구조화된 해설 본문: 정답 요약 → 핵심 개념 → 선지별 해설 → 개정 참고 순서로,
+// 채워진 항목만 그린다. 정답 선지의 해설 줄은 정답 원과 같은 에메랄드로 강조한다.
+function ExplanationBody({
+  explanation,
+  correctChoice,
+}: {
+  explanation: QuestionExplanationContent;
+  correctChoice: number | null;
+}) {
+  return (
+    <div className="mt-2 flex flex-col gap-3 rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700">
+      {explanation.correctChoiceSummary && (
+        <p className="whitespace-pre-wrap">
+          <span className="mr-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700">
+            정답
+          </span>
+          {explanation.correctChoiceSummary}
+        </p>
+      )}
+
+      {(explanation.keywordTitle || explanation.keywordExplanation) && (
+        <div>
+          <p className="text-xs font-semibold text-zinc-400">핵심 개념</p>
+          {explanation.keywordTitle && (
+            <p className="mt-0.5 font-semibold text-zinc-800">{explanation.keywordTitle}</p>
+          )}
+          {explanation.keywordExplanation && (
+            <p className="mt-1 whitespace-pre-wrap">{explanation.keywordExplanation}</p>
+          )}
+        </div>
+      )}
+
+      {explanation.choiceExplanations.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-zinc-400">선지별 해설</p>
+          <div className="mt-1 flex flex-col gap-1.5">
+            {explanation.choiceExplanations.map((c) => (
+              <p key={c.choice} className="whitespace-pre-wrap">
+                <span
+                  className={`mr-1 font-semibold ${
+                    c.choice === correctChoice ? "text-emerald-600" : "text-zinc-400"
+                  }`}
+                >
+                  {CIRCLED_DIGITS[c.choice] ?? `${c.choice}.`}
+                </span>
+                {c.text}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {explanation.lawAmendmentNote && (
+        <p className="whitespace-pre-wrap rounded bg-amber-50 px-2.5 py-2 text-xs text-amber-700">
+          개정 참고: {explanation.lawAmendmentNote}
+        </p>
       )}
     </div>
   );

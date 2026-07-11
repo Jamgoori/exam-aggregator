@@ -793,21 +793,29 @@ $$;
 
 grant execute on function avg_score_by_round(uuid) to anon, authenticated;
 
--- 문항 해설. 해설 본문에는 사실상 정답이 담기므로 questions(public read)에 컬럼으로
--- 두지 않고, paper_answers와 같은 방식으로 관리자/서버 전용으로 격리한다. 화면에는
--- 오답노트가 "본인이 응시를 마친 문제지의 오답"에 한해 service role로 읽어 서버에서만
--- 렌더링한다. (paper_id, question_number)는 paper_answers/cbt_attempt_answers와 같은
--- 조인 키라, 문항 크롭(questions) 등록 여부와 무관하게 해설만 먼저 넣어둘 수 있다.
+-- 문항 해설. 해설 제작 루틴(별도 세션)이 만들고 채우는 테이블이라 이 스키마 파일이
+-- 아니라 그 루틴이 원본 소유자다 — 여기 정의는 새 환경 재현용이며, 컬럼 구조는
+-- 루틴 쪽과 맞춰서만 바꿀 것. questions.id를 키로 쓰므로 화면(오답노트/전체 해설)은
+-- questions를 거쳐 (paper_id, question_number)로 환원해 읽는다.
+-- 해설 본문에는 사실상 정답이 담기므로(correct_choice_number, 선지별 해설 등)
+-- paper_answers처럼 일반 select를 열지 않고 관리자/서버(service role) 전용으로
+-- 격리한다.
 create table if not exists question_explanations (
   id uuid primary key default gen_random_uuid(),
-  paper_id uuid not null references exam_papers(id) on delete cascade,
-  question_number int not null,
-  explanation text not null,
-  updated_at timestamptz not null default now(),
-  unique (paper_id, question_number)
+  question_id uuid not null references questions(id) on delete cascade,
+  question_text text,
+  keyword_title text,
+  keyword_explanation text,
+  choice_explanations jsonb,
+  correct_choice_number smallint,
+  correct_choice_summary text,
+  law_amendment_note text,
+  verified boolean not null default false,
+  model_version text,
+  created_at timestamptz not null default now()
 );
 
-create index if not exists question_explanations_paper_idx on question_explanations(paper_id);
+create index if not exists question_explanations_question_idx on question_explanations(question_id);
 
 alter table question_explanations enable row level security;
 
