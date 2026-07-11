@@ -51,38 +51,59 @@ function clampZoom(zoom: number) {
 }
 
 // 페이지에 들어오면 곧바로 재기 시작하는 대신 5초 카운트다운을 보여주고, 그
-// 카운트다운이 끝나는 시점부터 실제 풀이 시간을 잰다. 동시에 서버에도 시작 시각을
-// 기록해서(startCbtAttempt), 채점 시 최소 응시시간(3분)을 클라이언트가 조작할 수
-// 없는 기준으로 검증할 수 있게 한다. running이 꺼지면(채점 완료) 시간도 멈춘다.
+// 카운트다운이 끝나면 서버에 시작 시각을 기록한다(startCbtAttempt). 채점 시 최소
+// 응시시간(3분) 검증은 이 서버 기록 시각을 기준으로 하므로, 클라이언트도 반드시
+// 그 응답의 시각을 기다렸다가 기준으로 삼아야 한다 — 응답을 기다리지 않고 클라이언트
+// 자기 시계로 먼저 타이머를 시작해버리면, 그 사이의 네트워크 지연(드물게는 수십
+// 초까지도)만큼 서버 기준 3분이 화면보다 항상 늦게 끝나 실제로는 3분보다 더
+// 기다려야 제출되는 문제가 생긴다. running이 꺼지면(채점 완료) 시간도 멈춘다.
 function useCbtTimer(paperId: string, running: boolean) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [countdown, setCountdown] = useState(5);
+  const [started, setStarted] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const startedAtRef = useRef(0);
+  const startRequestedRef = useRef(false);
+
+  const requestStart = useCallback(() => {
+    startRequestedRef.current = true;
+    setStartError(null);
+    startCbtAttempt(paperId).then((res) => {
+      if (res.error || !res.startedAt) {
+        startRequestedRef.current = false;
+        setStartError(res.error ?? "시작 기록에 실패했어요.");
+        return;
+      }
+      startedAtRef.current = new Date(res.startedAt).getTime();
+      setStarted(true);
+    });
+  }, [paperId]);
 
   useEffect(() => {
     if (countdown <= 0) {
-      startedAtRef.current = Date.now();
-      startCbtAttempt(paperId);
+      if (!startRequestedRef.current) requestStart();
       return;
     }
     const timeout = setTimeout(() => setCountdown((c) => c - 1), 1000);
     return () => clearTimeout(timeout);
-  }, [countdown, paperId]);
+  }, [countdown, requestStart]);
 
   useEffect(() => {
-    if (!running || countdown > 0) return;
+    if (!running || !started) return;
     const timer = setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - startedAtRef.current) / 1000));
     }, 1000);
     return () => clearInterval(timer);
-  }, [running, countdown]);
+  }, [running, started]);
 
   function resetTimer() {
     setElapsedSeconds(0);
     setCountdown(5);
+    setStarted(false);
+    startRequestedRef.current = false;
   }
 
-  return { countdown, elapsedSeconds, startedAtRef, resetTimer };
+  return { countdown, elapsedSeconds, started, startError, startedAtRef, resetTimer, requestStart };
 }
 
 // 저장 버튼이 따로 없어서, 채점 전에 페이지를 벗어나면 지금까지 고른 답이 그냥
@@ -261,10 +282,8 @@ export function CbtSolver({
     return groups;
   }, [questionImages, totalQuestions]);
 
-  const { countdown, elapsedSeconds, startedAtRef, resetTimer } = useCbtTimer(
-    paperId,
-    !result,
-  );
+  const { countdown, elapsedSeconds, started, startError, startedAtRef, resetTimer, requestStart } =
+    useCbtTimer(paperId, !result);
   useLeaveConfirmation(!result);
   useQuestionImagePreload(viewMode, questionImages);
 
@@ -322,8 +341,13 @@ export function CbtSolver({
 
   function handleSubmit() {
     if (isPending) return;
+    if (!started) {
+      alert("시작 기록 확인 중이에요. 잠시 후 다시 시도해주세요.");
+      return;
+    }
     // 실제 최소 응시시간 검증은 서버가 하지만, 3분이 안 지났으면 서버까지 왕복하지
-    // 않고 바로 알려준다 (서버 기준 시각과는 별개로 클라이언트 안내용).
+    // 않고 바로 알려준다. startedAtRef는 서버가 실제로 기록한 시각이라(클라이언트가
+    // 응답을 기다리지 않고 먼저 잰 시각이 아니라) 이 검사가 서버 판정과 일치한다.
     if (Date.now() - startedAtRef.current < MIN_ATTEMPT_SECONDS * 1000) {
       alert("최소 3분은 풀어야 채점할 수 있어요. 조금만 더 풀어보세요!");
       return;
@@ -402,7 +426,21 @@ export function CbtSolver({
             <div className="flex shrink-0 items-center gap-2">
               <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
                 <Clock size={16} />
-                {countdown > 0 ? `${countdown}초 후 시작` : formatDuration(elapsedSeconds)}
+                {countdown > 0 ? (
+                  `${countdown}초 후 시작`
+                ) : startError ? (
+                  <button
+                    type="button"
+                    onClick={requestStart}
+                    className="text-red-600 underline underline-offset-2"
+                  >
+                    시작 기록 실패, 다시 시도
+                  </button>
+                ) : started ? (
+                  formatDuration(elapsedSeconds)
+                ) : (
+                  "시작하는 중..."
+                )}
               </div>
               <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex">
                 <button

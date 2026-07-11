@@ -285,25 +285,34 @@ export type CbtSubmitResult = CommentResult & {
   questionResults?: CbtQuestionResult[];
 };
 
+export type StartCbtAttemptResult = CommentResult & { startedAt?: string };
+
 // 회독 배지가 "제출 횟수"만 세다 보니, 페이지 진입 직후 아무것도 안 풀고 연타로
 // 제출해 회독수만 올리는 게 가능했다. 클라이언트가 보내는 durationSeconds는 조작
 // 가능해서 신뢰할 수 없으므로, startCbtAttempt가 서버에 직접 기록해 둔 시작 시각과
 // 현재 시각의 차이로만 최소 응시시간을 검증한다.
-export async function startCbtAttempt(paperId: string): Promise<CommentResult> {
+//
+// 이 함수가 기록하는 시각을 그대로 응답에 실어 돌려준다 — 클라이언트가 이 응답을
+// 기다리지 않고 자기 시계로 먼저 타이머를 시작해버리면, 그 사이의 네트워크 지연
+// (드물게는 수십 초까지도)만큼 서버 기준 "3분"이 클라이언트가 보는 화면보다 항상
+// 늦게 끝나서 실제로는 3분보다 더 기다려야 제출되는 문제가 생긴다. 클라이언트는
+// 반드시 이 응답의 startedAt을 기준시각으로 써야 이 차이가 사라진다.
+export async function startCbtAttempt(paperId: string): Promise<StartCbtAttemptResult> {
   const id = String(paperId ?? "");
   if (!isUuid(id)) return { error: "잘못된 접근입니다." };
 
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
+  const startedAt = new Date().toISOString();
   const { error } = await supabase
     .from("cbt_attempt_starts")
     .upsert(
-      { user_id: user.id, paper_id: id, started_at: new Date().toISOString() },
+      { user_id: user.id, paper_id: id, started_at: startedAt },
       { onConflict: "user_id,paper_id" },
     );
   if (error) return { error: "시작 기록에 실패했어요." };
-  return { success: true };
+  return { success: true, startedAt };
 }
 
 export async function submitCbtAttempt(input: {
