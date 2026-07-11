@@ -50,6 +50,7 @@ export default async function SubjectWrongNotePage({
         selectedChoice: q.lastSelectedChoice,
         correctChoice: q.correctChoice,
         choiceCount: q.choiceCount,
+        explanation: q.explanation,
         wrongCount: q.wrongCount,
         resolved: q.resolved,
       })),

@@ -213,11 +213,12 @@ export async function getWrongNoteGroups(
   return buildWrongNoteGroups(attempts, wrongRows);
 }
 
-// 화면에 그릴 수 있게 이미지/정답까지 붙인 문제 상세.
+// 화면에 그릴 수 있게 이미지/정답/해설까지 붙인 문제 상세.
 export type WrongNoteQuestionDetail = WrongNoteQuestionSummary & {
   correctChoice: number | null;
   choiceCount: number;
   images: string[];
+  explanation: string | null;
 };
 
 export type WrongNotePaperDetail = Omit<WrongNotePaperGroup, "questions"> & {
@@ -291,11 +292,43 @@ async function fetchCorrectAnswers(
   return byPaper;
 }
 
+// 문항 해설. 해설에는 정답이 담기므로 question_explanations는 일반 select가 막혀
+// 있고(관리자 전용 RLS), 정답과 같은 조건 — 본인 응시 기록이 있는 문제지의 오답 —
+// 으로 좁힌 뒤에만 service role로 읽는다. 해설이 아직 없는 문항은 그냥 빠진다.
+async function fetchExplanations(
+  paperIds: string[],
+): Promise<Map<string, Map<number, string>>> {
+  const admin = createAdminClient();
+  const byPaper = new Map<string, Map<number, string>>();
+  for (const ids of chunk(paperIds, 10)) {
+    let from = 0;
+    while (true) {
+      const { data } = await admin
+        .from("question_explanations")
+        .select("paper_id, question_number, explanation")
+        .in("paper_id", ids)
+        .order("paper_id")
+        .order("question_number")
+        .range(from, from + BATCH_SIZE - 1);
+      if (!data || data.length === 0) break;
+      for (const row of data) {
+        const paperMap = byPaper.get(row.paper_id as string) ?? new Map<number, string>();
+        paperMap.set(row.question_number as number, row.explanation as string);
+        byPaper.set(row.paper_id as string, paperMap);
+      }
+      if (data.length < BATCH_SIZE) break;
+      from += BATCH_SIZE;
+    }
+  }
+  return byPaper;
+}
+
 function toQuestionDetail(
   q: WrongNoteQuestionSummary,
   paper: WrongNotePaperInfo,
   media: Map<number, QuestionMediaEntry> | undefined,
   answers: number[] | undefined,
+  explanations: Map<number, string> | undefined,
 ): WrongNoteQuestionDetail {
   const entry = media?.get(q.questionNumber);
   return {
@@ -303,6 +336,7 @@ function toQuestionDetail(
     correctChoice: answers?.[q.questionNumber - 1] ?? null,
     choiceCount: entry?.choiceCount ?? paper.choice_count,
     images: entry?.images ?? [],
+    explanation: explanations?.get(q.questionNumber) ?? null,
   };
 }
 
@@ -326,9 +360,10 @@ export async function getSubjectWrongNote(
   if (!group) return { subject, papers: [] };
 
   const paperIds = group.papers.map((p) => p.paper.id);
-  const [mediaByPaper, answersByPaper] = await Promise.all([
+  const [mediaByPaper, answersByPaper, explanationsByPaper] = await Promise.all([
     fetchQuestionMedia(supabase, paperIds),
     fetchCorrectAnswers(paperIds),
+    fetchExplanations(paperIds),
   ]);
 
   const papers: WrongNotePaperDetail[] = group.papers.map((p) => ({
@@ -339,6 +374,7 @@ export async function getSubjectWrongNote(
         p.paper,
         mediaByPaper.get(p.paper.id),
         answersByPaper.get(p.paper.id),
+        explanationsByPaper.get(p.paper.id),
       ),
     ),
   }));
@@ -364,6 +400,7 @@ export type AttemptWrongNote = {
     correctChoice: number | null;
     choiceCount: number;
     images: string[];
+    explanation: string | null;
   }[];
 };
 
@@ -412,18 +449,24 @@ export async function getAttemptWrongNote(
     selected_choice: number | null;
   }[];
 
-  // 문제지가 삭제됐으면 이미지·정답 없이 번호/선택지만 보여준다.
+  // 문제지가 삭제됐으면 이미지·정답·해설 없이 번호/선택지만 보여준다.
   const paper = attempt.exam_papers;
-  const [mediaByPaper, answersByPaper] =
+  const [mediaByPaper, answersByPaper, explanationsByPaper] =
     paper && wrong.length > 0
       ? await Promise.all([
           fetchQuestionMedia(supabase, [paper.id]),
           fetchCorrectAnswers([paper.id]),
+          fetchExplanations([paper.id]),
         ])
-      : [new Map<string, Map<number, QuestionMediaEntry>>(), new Map<string, number[]>()];
+      : [
+          new Map<string, Map<number, QuestionMediaEntry>>(),
+          new Map<string, number[]>(),
+          new Map<string, Map<number, string>>(),
+        ];
 
   const media = paper ? mediaByPaper.get(paper.id) : undefined;
   const answers = paper ? answersByPaper.get(paper.id) : undefined;
+  const explanations = paper ? explanationsByPaper.get(paper.id) : undefined;
 
   return {
     attempt: {
@@ -443,6 +486,7 @@ export async function getAttemptWrongNote(
         correctChoice: answers?.[row.question_number - 1] ?? null,
         choiceCount: entry?.choiceCount ?? paper?.choice_count ?? 4,
         images: entry?.images ?? [],
+        explanation: explanations?.get(row.question_number) ?? null,
       };
     }),
   };

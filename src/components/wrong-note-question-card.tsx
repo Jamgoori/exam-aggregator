@@ -1,3 +1,5 @@
+import { ChevronRight } from "lucide-react";
+
 // 오답노트 화면(회차별/과목별)이 공유하는 문제 카드. 훅을 쓰지 않는 순수 표시용
 // 컴포넌트라 서버 컴포넌트(회차 페이지)와 클라이언트 컴포넌트(과목 페이지의 필터
 // 목록) 어느 쪽에서든 그대로 가져다 쓸 수 있다.
@@ -8,6 +10,8 @@ export type WrongNoteCardRow = {
   selectedChoice: number | null;
   correctChoice: number | null;
   choiceCount: number;
+  // 해설이 등록된 문항만 채워진다 (없으면 "해설 보기" 자체가 안 뜬다).
+  explanation?: string | null;
   // 과목별 모아보기에서만 채워지는 값들 (회차별 보기에서는 undefined).
   wrongCount?: number;
   resolved?: boolean;
@@ -131,6 +135,29 @@ export function WrongNoteQuestionCard({
           <ChoiceRow key={row.questionNumber} row={row} showNumberBadge={rows.length > 1} />
         ))}
       </div>
+
+      {/* 해설: 먼저 스스로 다시 풀어보게 기본은 접어두고, 누르면 펼친다. 서버/클라이언트
+          어느 트리에서든 그대로 동작해야 해서 JS 없는 네이티브 details/summary를 쓴다. */}
+      {rows.some((row) => row.explanation) && (
+        <div className="flex flex-col gap-1 border-t border-zinc-100 px-4 py-3">
+          {rows
+            .filter((row) => row.explanation)
+            .map((row) => (
+              <details key={row.questionNumber} className="group">
+                <summary className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-blue-600 hover:underline [&::-webkit-details-marker]:hidden">
+                  <ChevronRight
+                    size={14}
+                    className="shrink-0 transition-transform group-open:rotate-90"
+                  />
+                  {rows.length > 1 ? `${row.questionNumber}번 해설 보기` : "해설 보기"}
+                </summary>
+                <p className="mt-2 whitespace-pre-wrap rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700">
+                  {row.explanation}
+                </p>
+              </details>
+            ))}
+        </div>
+      )}
     </div>
   );
 }
