@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Monitor } from "lucide-react";
+import { LockKeyhole, Monitor } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPaper } from "../paper-detail-data";
 import { getPaperExplanations } from "@/lib/wrong-notes";
@@ -27,6 +27,11 @@ export async function generateMetadata({
   };
 }
 
+// 비로그인 사용자에게 실제로 렌더링해주는 해설 카드 수. 해설은 이 서비스가 직접
+// 만드는 자산이라 익명 크롤링에 통째로 내주지 않는다 — 나머지 문항은 CSS로 가리는
+// 게 아니라 서버가 HTML에 아예 담지 않는다.
+const ANON_PREVIEW_CARDS = 2;
+
 // 문제지 전체 해설 페이지 ("해설 열기"). 문항 이미지 + 정답 + 해설을 번호순으로
 // 죽 읽어 내려가는 열람용 화면이라, 오답노트와 달리 해설을 펼친 채로 보여준다.
 export default async function PaperExplanationsPage({
@@ -39,6 +44,11 @@ export default async function PaperExplanationsPage({
   if (!paper) notFound();
 
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const loggedIn = !!user;
+
   const questions = await getPaperExplanations(supabase, paper);
 
   if (questions.length === 0) {
@@ -64,6 +74,11 @@ export default async function PaperExplanationsPage({
     // 열람용 화면이라 "내가 고른 답" 개념이 없다 — selectedChoice는 항상 비워둔다.
     questions.map((q) => ({ ...q, selectedChoice: null })),
   );
+
+  // 비로그인은 미리보기 카드까지만 서버가 렌더링한다 (나머지는 응답에 포함 안 됨).
+  const visibleGroups = loggedIn ? groups : groups.slice(0, ANON_PREVIEW_CARDS);
+  const hiddenQuestionCount =
+    questions.length - visibleGroups.reduce((sum, g) => sum + g.rows.length, 0);
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-12">
@@ -116,7 +131,7 @@ export default async function PaperExplanationsPage({
       </div>
 
       <div className="flex flex-col gap-4">
-        {groups.map((group) => (
+        {visibleGroups.map((group) => (
           <WrongNoteQuestionCard
             key={group.rows[0].questionNumber}
             rows={group.rows}
@@ -126,6 +141,24 @@ export default async function PaperExplanationsPage({
           />
         ))}
       </div>
+
+      {!loggedIn && hiddenQuestionCount > 0 && (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-6 py-10 text-center">
+          <LockKeyhole size={28} className="text-blue-600" />
+          <p className="font-semibold">
+            나머지 {hiddenQuestionCount}문항 해설은 로그인하면 볼 수 있어요
+          </p>
+          <p className="text-sm text-zinc-500">
+            무료로 가입하고 전체 해설과 오답노트까지 이용해보세요.
+          </p>
+          <Link
+            href={`/login?next=${encodeURIComponent(`/papers/${paper.id}/explanations`)}`}
+            className="mt-1 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+          >
+            로그인하고 전체 해설 보기
+          </Link>
+        </div>
+      )}
 
       <div className="flex gap-2">
         <Link
