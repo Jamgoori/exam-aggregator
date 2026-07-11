@@ -792,3 +792,37 @@ as $$
 $$;
 
 grant execute on function avg_score_by_round(uuid) to anon, authenticated;
+
+-- 문항 해설. 해설 본문에는 사실상 정답이 담기므로 questions(public read)에 컬럼으로
+-- 두지 않고, paper_answers와 같은 방식으로 관리자/서버 전용으로 격리한다. 화면에는
+-- 오답노트가 "본인이 응시를 마친 문제지의 오답"에 한해 service role로 읽어 서버에서만
+-- 렌더링한다. (paper_id, question_number)는 paper_answers/cbt_attempt_answers와 같은
+-- 조인 키라, 문항 크롭(questions) 등록 여부와 무관하게 해설만 먼저 넣어둘 수 있다.
+create table if not exists question_explanations (
+  id uuid primary key default gen_random_uuid(),
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  question_number int not null,
+  explanation text not null,
+  updated_at timestamptz not null default now(),
+  unique (paper_id, question_number)
+);
+
+create index if not exists question_explanations_paper_idx on question_explanations(paper_id);
+
+alter table question_explanations enable row level security;
+
+drop policy if exists "admin read question_explanations" on question_explanations;
+create policy "admin read question_explanations" on question_explanations
+  for select to authenticated using (is_admin());
+
+drop policy if exists "admin insert question_explanations" on question_explanations;
+create policy "admin insert question_explanations" on question_explanations
+  for insert to authenticated with check (is_admin());
+
+drop policy if exists "admin update question_explanations" on question_explanations;
+create policy "admin update question_explanations" on question_explanations
+  for update to authenticated using (is_admin());
+
+drop policy if exists "admin delete question_explanations" on question_explanations;
+create policy "admin delete question_explanations" on question_explanations
+  for delete to authenticated using (is_admin());
