@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { LockKeyhole, Monitor } from "lucide-react";
+import { Hourglass, LockKeyhole, Monitor } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPaper } from "../paper-detail-data";
 import { getPaperExplanations } from "@/lib/wrong-notes";
@@ -9,6 +9,8 @@ import {
   WrongNoteQuestionCard,
 } from "@/components/wrong-note-question-card";
 import { PrintButton } from "@/components/print-button";
+import { ExplanationAutoPrint } from "@/components/explanation-auto-print";
+import { checkExplanationAccess } from "@/lib/explanation-rate-limit";
 import { levelColor } from "@/lib/level-colors";
 import { examTypeColor } from "@/lib/exam-type-colors";
 import { subjectColor } from "@/lib/subject-colors";
@@ -37,10 +39,14 @@ const ANON_PREVIEW_CARDS = 2;
 // 죽 읽어 내려가는 열람용 화면이라, 오답노트와 달리 해설을 펼친 채로 보여준다.
 export default async function PaperExplanationsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ download?: string }>;
 }) {
   const { id } = await params;
+  const { download } = await searchParams;
+  const isDownload = download === "1";
   const paper = await getPaper(id);
   if (!paper) notFound();
 
@@ -49,6 +55,14 @@ export default async function PaperExplanationsPage({
     data: { user },
   } = await supabase.auth.getUser();
   const loggedIn = !!user;
+
+  // 로그인 사용자만 레이트리밋 대상이다 — 비로그인은 어차피 미리보기만 보이므로
+  // 별도로 셀 필요가 없다. 상세페이지의 "해설 열기"/"다운로드" 아이콘이 각각
+  // view/download로 들어오므로, 같은 사람이라도 두 한도가 독립적으로 소진된다.
+  const withinRateLimit = loggedIn
+    ? await checkExplanationAccess(user!.id, paper.id, isDownload ? "download" : "view")
+    : true;
+  const hasFullAccess = loggedIn && withinRateLimit;
 
   const questions = await getPaperExplanations(supabase, paper);
 
@@ -76,13 +90,16 @@ export default async function PaperExplanationsPage({
     questions.map((q) => ({ ...q, selectedChoice: null })),
   );
 
-  // 비로그인은 미리보기 카드까지만 서버가 렌더링한다 (나머지는 응답에 포함 안 됨).
-  const visibleGroups = loggedIn ? groups : groups.slice(0, ANON_PREVIEW_CARDS);
+  // 비로그인이거나 시간당 한도를 넘긴 요청은 미리보기 카드까지만 서버가
+  // 렌더링한다 (나머지는 응답에 포함 안 됨 — CSS로 가리는 게 아니다).
+  const visibleGroups = hasFullAccess ? groups : groups.slice(0, ANON_PREVIEW_CARDS);
   const hiddenQuestionCount =
     questions.length - visibleGroups.reduce((sum, g) => sum + g.rows.length, 0);
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-12">
+      {hasFullAccess && isDownload && <ExplanationAutoPrint />}
+
       <div className="flex flex-col gap-3">
         <Link
           href={`/papers/${paper.id}`}
@@ -121,7 +138,7 @@ export default async function PaperExplanationsPage({
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
             정답
           </span>
-          {loggedIn && (
+          {hasFullAccess && (
             <span className="ml-auto">
               <PrintButton />
             </span>
@@ -150,21 +167,35 @@ export default async function PaperExplanationsPage({
         ))}
       </div>
 
-      {!loggedIn && hiddenQuestionCount > 0 && (
+      {!hasFullAccess && hiddenQuestionCount > 0 && (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-6 py-10 text-center">
-          <LockKeyhole size={28} className="text-blue-600" />
-          <p className="font-semibold">
-            나머지 {hiddenQuestionCount}문항 해설은 로그인하면 볼 수 있어요
-          </p>
-          <p className="text-sm text-zinc-500">
-            무료로 가입하고 전체 해설과 오답노트까지 이용해보세요.
-          </p>
-          <Link
-            href={`/login?next=${encodeURIComponent(`/papers/${paper.id}/explanations`)}`}
-            className="mt-1 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            로그인하고 전체 해설 보기
-          </Link>
+          {loggedIn ? (
+            <>
+              {/* 시간당 한도 초과: 로그인은 돼 있으니 로그인 유도 대신 "잠시 후"로만
+                  완만하게 안내한다 — 정상 사용자는 이 문구 자체를 볼 일이 없다. */}
+              <Hourglass size={28} className="text-blue-600" />
+              <p className="font-semibold">잠시 후 다시 시도해주세요</p>
+              <p className="text-sm text-zinc-500">
+                요청이 많아 전체 해설 표시가 일시적으로 제한됐어요.
+              </p>
+            </>
+          ) : (
+            <>
+              <LockKeyhole size={28} className="text-blue-600" />
+              <p className="font-semibold">
+                나머지 {hiddenQuestionCount}문항 해설은 로그인하면 볼 수 있어요
+              </p>
+              <p className="text-sm text-zinc-500">
+                무료로 가입하고 전체 해설과 오답노트까지 이용해보세요.
+              </p>
+              <Link
+                href={`/login?next=${encodeURIComponent(`/papers/${paper.id}/explanations`)}`}
+                className="mt-1 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                로그인하고 전체 해설 보기
+              </Link>
+            </>
+          )}
         </div>
       )}
 
