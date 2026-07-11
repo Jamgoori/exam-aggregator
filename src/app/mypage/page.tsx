@@ -347,14 +347,14 @@ function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
                     href={`/mypage/wrong-notes/${g.subject.slug}`}
                     className="ml-auto text-sm font-medium text-blue-600 hover:underline"
                   >
-                    모아보기 →
+                    문제지 목록 →
                   </Link>
                 </div>
                 <div className="mt-2 flex flex-col divide-y divide-zinc-100">
                   {g.papers.map((p) => (
                     <Link
                       key={p.paper.id}
-                      href={`/mypage/wrong-notes/${g.subject.slug}#paper-${p.paper.id}`}
+                      href={`/mypage/wrong-notes/${g.subject.slug}/${p.paper.id}`}
                       className="group flex items-center gap-2 py-2.5"
                     >
                       <span className="truncate text-sm group-hover:text-blue-600">

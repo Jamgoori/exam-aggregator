@@ -21,6 +21,10 @@ export type WrongNotePaperInfo = {
 export type WrongNoteAttemptRow = {
   id: string;
   created_at: string;
+  // 있으면 buildWrongNoteGroups가 문제지별 "최근 점수"까지 채운다
+  // (과목 오답노트의 문제지 카드처럼 점수를 함께 보여주는 화면용).
+  score?: number;
+  total_questions?: number;
   exam_papers: WrongNotePaperInfo | null;
 };
 
@@ -39,6 +43,9 @@ export type WrongNotePaperGroup = {
   paper: WrongNotePaperInfo;
   attemptCount: number;
   lastAttemptAt: string;
+  // 응시 행에 score/total_questions가 없으면 null (마이페이지 탭은 안 쓴다).
+  latestScore: number | null;
+  latestTotal: number | null;
   questions: WrongNoteQuestionSummary[];
   unresolvedCount: number;
   resolvedCount: number;
@@ -152,6 +159,8 @@ export function buildWrongNoteGroups(
       paper: latest.exam_papers!,
       attemptCount: sorted.length,
       lastAttemptAt: latest.created_at,
+      latestScore: latest.score ?? null,
+      latestTotal: latest.total_questions ?? null,
       questions,
       unresolvedCount,
       resolvedCount: questions.length - unresolvedCount,
@@ -192,7 +201,7 @@ export function buildWrongNoteGroups(
 }
 
 const ATTEMPT_SELECT =
-  "id, created_at, exam_papers(id, title, level, choice_count, subjects(*), exam_types(*))";
+  "id, created_at, score, total_questions, exam_papers(id, title, level, choice_count, subjects(*), exam_types(*))";
 
 export async function getWrongNoteGroups(
   supabase: Supabase,
@@ -220,10 +229,6 @@ export type WrongNoteQuestionDetail = WrongNoteQuestionSummary & {
   choiceCount: number;
   images: string[];
   explanation: QuestionExplanationContent | null;
-};
-
-export type WrongNotePaperDetail = Omit<WrongNotePaperGroup, "questions"> & {
-  questions: WrongNoteQuestionDetail[];
 };
 
 type QuestionMediaEntry = { choiceCount: number | null; images: string[] };
@@ -430,13 +435,15 @@ function toQuestionDetail(
   };
 }
 
-// 과목 오답노트 페이지용: 해당 과목에서 틀려본 문제 전체를 문제지별로 묶고,
-// 문항 이미지와 정답까지 붙여서 돌려준다. 과목 slug가 존재하지 않으면 null.
-export async function getSubjectWrongNote(
+// 과목 오답노트 페이지용: 오답이 있는 문제지 목록을 요약(회독 수·최근 점수·오답/극복
+// 수)만으로 돌려준다. 문항 이미지·해설은 문제지 오답노트 페이지에서 그 문제지 것만
+// 받는다 — 회독이 쌓여도 과목 페이지가 무거워지지 않게 하려는 분리다.
+// 과목 slug가 존재하지 않으면 null.
+export async function getSubjectWrongNoteOverview(
   supabase: Supabase,
   userId: string,
   slug: string,
-): Promise<{ subject: Subject; papers: WrongNotePaperDetail[] } | null> {
+): Promise<{ subject: Subject; papers: WrongNotePaperGroup[] } | null> {
   const { data: subjectRow } = await supabase
     .from("subjects")
     .select("*")
@@ -447,29 +454,99 @@ export async function getSubjectWrongNote(
 
   const groups = await getWrongNoteGroups(supabase, userId);
   const group = groups.find((g) => g.subject.id === subject.id);
-  if (!group) return { subject, papers: [] };
+  return { subject, papers: group?.papers ?? [] };
+}
 
-  const paperIds = group.papers.map((p) => p.paper.id);
-  const [mediaByPaper, answersByPaper, explanationsByPaper] = await Promise.all([
-    fetchQuestionMedia(supabase, paperIds),
-    fetchCorrectAnswers(paperIds),
-    fetchExplanations(paperIds),
-  ]);
+// ── 문제지 오답노트 (과목 → 문제지 드릴다운) ───────────────────────────────
 
-  const papers: WrongNotePaperDetail[] = group.papers.map((p) => ({
-    ...p,
-    questions: p.questions.map((q) =>
-      toQuestionDetail(
-        q,
-        p.paper,
-        mediaByPaper.get(p.paper.id),
-        answersByPaper.get(p.paper.id),
-        explanationsByPaper.get(p.paper.id),
-      ),
-    ),
+export type PaperWrongNoteRound = {
+  attemptId: string;
+  // 이 문제지를 몇 번째로 푼 기록인지 (1부터, 오래된 순 — "N회독"과 같은 기준).
+  round: number;
+  score: number;
+  totalQuestions: number;
+  createdAt: string;
+  // 이 회독에서 틀린 문항과 그때 고른 답. 회독 필터가 그대로 그린다.
+  wrong: { questionNumber: number; selectedChoice: number | null }[];
+};
+
+export type PaperWrongNote = {
+  paper: WrongNotePaperInfo;
+  rounds: PaperWrongNoteRound[];
+  // 모든 회독을 합친 "통합" 문제 목록 (몇 번 틀렸는지/극복 여부 포함).
+  questions: WrongNoteQuestionDetail[];
+  unresolvedCount: number;
+  resolvedCount: number;
+};
+
+// 문제지 오답노트 페이지용: 이 문제지에 대한 내 회독 기록 전체와, 통합 오답
+// 목록(이미지·정답·해설 포함)을 돌려준다. 응시 기록이 없거나 문제지가 삭제됐으면 null.
+export async function getPaperWrongNote(
+  supabase: Supabase,
+  userId: string,
+  paperId: string,
+): Promise<PaperWrongNote | null> {
+  const { data: attemptRows } = await supabase
+    .from("cbt_attempts")
+    .select(ATTEMPT_SELECT)
+    .eq("user_id", userId)
+    .eq("paper_id", paperId)
+    .order("created_at", { ascending: true });
+  const attempts = (attemptRows ?? []) as unknown as WrongNoteAttemptRow[];
+  const paper = attempts.find((a) => a.exam_papers)?.exam_papers;
+  if (!paper) return null;
+
+  const wrongRows = await fetchWrongAnswerRows(
+    supabase,
+    attempts.map((a) => a.id),
+  );
+
+  const wrongByAttempt = new Map<string, PaperWrongNoteRound["wrong"]>();
+  for (const row of wrongRows) {
+    const list = wrongByAttempt.get(row.attempt_id) ?? [];
+    list.push({
+      questionNumber: row.question_number,
+      selectedChoice: row.selected_choice,
+    });
+    wrongByAttempt.set(row.attempt_id, list);
+  }
+  const rounds: PaperWrongNoteRound[] = attempts.map((a, i) => ({
+    attemptId: a.id,
+    round: i + 1,
+    score: a.score ?? 0,
+    totalQuestions: a.total_questions ?? 0,
+    createdAt: a.created_at,
+    wrong: wrongByAttempt.get(a.id) ?? [],
   }));
 
-  return { subject, papers };
+  // 오답이 하나도 없으면(전부 만점) 통합 목록은 비지만 회독 기록은 그대로 보여준다.
+  // 응시가 전부 한 문제지 것이므로 결과는 과목 하나 → 문제지 하나로 좁혀진다.
+  const group = buildWrongNoteGroups(attempts, wrongRows)[0]?.papers[0];
+  if (!group) {
+    return { paper, rounds, questions: [], unresolvedCount: 0, resolvedCount: 0 };
+  }
+
+  const [mediaByPaper, answersByPaper, explanationsByPaper] = await Promise.all([
+    fetchQuestionMedia(supabase, [paper.id]),
+    fetchCorrectAnswers([paper.id]),
+    fetchExplanations([paper.id]),
+  ]);
+
+  return {
+    paper,
+    rounds,
+    questions: group.questions.map((q) =>
+      toQuestionDetail(
+        q,
+        paper,
+        mediaByPaper.get(paper.id),
+        answersByPaper.get(paper.id),
+        explanationsByPaper.get(paper.id),
+      ),
+    ),
+    unresolvedCount: group.unresolvedCount,
+    resolvedCount: group.resolvedCount,
+  };
 }
 
 // ── 문제지 전체 해설 (상세페이지 "해설 열기") ─────────────────────────────

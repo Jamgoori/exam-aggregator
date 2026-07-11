@@ -1,0 +1,113 @@
+import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { Monitor } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { getPaperWrongNote } from "@/lib/wrong-notes";
+import {
+  WrongNotePaperView,
+  type PaperViewQuestion,
+} from "@/components/wrong-note-paper-view";
+import { levelColor } from "@/lib/level-colors";
+import { subjectColor } from "@/lib/subject-colors";
+
+// 문제지 하나의 오답노트: 회독별 점수 기록(스트립)과 틀린 문제·해설을 한 화면에서
+// 본다. 기본은 모든 회독을 합친 "통합" 보기, 회독 칩을 누르면 그 회독만 필터된다.
+export default async function PaperWrongNotePage({
+  params,
+}: {
+  params: Promise<{ slug: string; paperId: string }>;
+}) {
+  const { slug, paperId } = await params;
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect(
+      `/login?next=${encodeURIComponent(`/mypage/wrong-notes/${slug}/${paperId}`)}&error=${encodeURIComponent("로그인이 필요해요")}`,
+    );
+  }
+
+  const note = await getPaperWrongNote(supabase, user.id, paperId);
+  // 잘못된 주소(다른 과목의 문제지 등)로 들어오면 404.
+  if (!note || note.paper.subjects?.slug !== slug) notFound();
+
+  const { paper, rounds, questions, unresolvedCount, resolvedCount } = note;
+  const subject = paper.subjects!;
+  const totalWrong = questions.length;
+
+  const viewQuestions: PaperViewQuestion[] = questions.map((q) => ({
+    questionNumber: q.questionNumber,
+    lastSelectedChoice: q.lastSelectedChoice,
+    correctChoice: q.correctChoice,
+    choiceCount: q.choiceCount,
+    images: q.images,
+    explanation: q.explanation,
+    wrongCount: q.wrongCount,
+    resolved: q.resolved,
+  }));
+
+  return (
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-12">
+      <div className="flex flex-col gap-3">
+        <Link
+          href={`/mypage/wrong-notes/${slug}`}
+          className="text-sm text-zinc-500 hover:text-blue-600"
+        >
+          ← {subject.name} 오답노트로
+        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(subject.slug)}`}
+          >
+            {subject.name}
+          </span>
+          {paper.level && (
+            <span
+              className={`rounded px-2 py-0.5 text-xs font-bold ${levelColor(paper.level)}`}
+            >
+              {paper.level}
+            </span>
+          )}
+        </div>
+        <h1 className="text-2xl font-semibold leading-snug">{paper.title}</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          {totalWrong > 0 ? (
+            <p className="text-sm text-zinc-500">
+              {rounds.length}회독 동안 틀려본 문제 {totalWrong}개 중{" "}
+              <span className="font-medium text-emerald-600">{resolvedCount}개</span>를
+              극복했어요.
+            </p>
+          ) : (
+            <p className="text-sm text-zinc-500">
+              {rounds.length}회독 동안 틀린 문제가 하나도 없어요.
+            </p>
+          )}
+          <span className="ml-auto flex shrink-0 items-center gap-2">
+            <Link
+              href={`/papers/${paper.id}`}
+              className="text-xs font-medium text-zinc-500 hover:text-blue-600"
+            >
+              문제지 보기
+            </Link>
+            <Link
+              href={`/papers/${paper.id}/cbt`}
+              className="flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+            >
+              <Monitor size={12} />
+              다시 풀기
+            </Link>
+          </span>
+        </div>
+      </div>
+
+      <WrongNotePaperView
+        questions={viewQuestions}
+        rounds={rounds}
+        unresolvedCount={unresolvedCount}
+      />
+    </div>
+  );
+}
