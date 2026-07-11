@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Download, ExternalLink, Monitor } from "lucide-react";
+import { BookOpenCheck, Download, ExternalLink, Monitor } from "lucide-react";
 import { subjectColor } from "@/lib/subject-colors";
 import { levelColor } from "@/lib/level-colors";
 import { examTypeTabColor } from "@/lib/exam-type-colors";
@@ -61,6 +61,7 @@ export default async function PaperDetailPage({
     myScore,
     isBookmarked,
     hasCbtAnswers,
+    hasFullExplanations,
     roundAverages,
     myCbtRecordItems,
     subjectPapers,
@@ -131,12 +132,29 @@ export default async function PaperDetailPage({
       </div>
 
       <div className="flex flex-col gap-3">
+        {/* 주 동선인 "온라인에서 풀기"를 맨 위 + 단색(primary)으로 두고, 나머지
+            열기 버튼들은 연한 파랑으로 통일한다. CBT를 지원하지 않는 문제지는
+            primary 자리가 비므로 문제 열기가 단색을 물려받는다. */}
+        {hasCbtAnswers && (
+          <Link
+            href={`/papers/${paper.id}/cbt`}
+            className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-4 text-lg font-medium text-white hover:bg-blue-700"
+          >
+            <Monitor size={20} />
+            온라인에서 풀기
+          </Link>
+        )}
+
         <div className="flex items-stretch gap-2">
           <a
             href={paperFileUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-4 text-lg font-medium text-white hover:bg-blue-700"
+            className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-4 text-lg font-medium ${
+              hasCbtAnswers
+                ? "border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                : "bg-blue-600 text-white hover:bg-blue-700"
+            }`}
           >
             <ExternalLink size={20} />
             문제 열기
@@ -173,13 +191,15 @@ export default async function PaperDetailPage({
           </div>
         )}
 
-        {hasCbtAnswers && (
+        {/* 전 문항 해설이 준비된 문제지에만 노출. 학습 자료라는 성격이 드러나게
+            오답노트의 "정답/극복"과 같은 에메랄드 계열로 살짝 구분해준다. */}
+        {hasFullExplanations && (
           <Link
-            href={`/papers/${paper.id}/cbt`}
-            className="flex items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-lg font-medium text-blue-700 hover:bg-blue-100"
+            href={`/papers/${paper.id}/explanations`}
+            className="flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-lg font-medium text-emerald-700 hover:bg-emerald-100"
           >
-            <Monitor size={20} />
-            온라인에서 풀기
+            <BookOpenCheck size={20} />
+            해설 열기
           </Link>
         )}
 
