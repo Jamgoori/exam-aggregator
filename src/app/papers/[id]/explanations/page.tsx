@@ -8,6 +8,7 @@ import {
   groupRowsBySharedImages,
   WrongNoteQuestionCard,
 } from "@/components/wrong-note-question-card";
+import { PrintButton } from "@/components/print-button";
 import { levelColor } from "@/lib/level-colors";
 import { examTypeColor } from "@/lib/exam-type-colors";
 import { subjectColor } from "@/lib/subject-colors";
@@ -85,7 +86,7 @@ export default async function PaperExplanationsPage({
       <div className="flex flex-col gap-3">
         <Link
           href={`/papers/${paper.id}`}
-          className="text-sm text-zinc-500 hover:text-blue-600"
+          className="text-sm text-zinc-500 hover:text-blue-600 print:hidden"
         >
           ← 문제지로
         </Link>
@@ -120,6 +121,11 @@ export default async function PaperExplanationsPage({
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
             정답
           </span>
+          {loggedIn && (
+            <span className="ml-auto">
+              <PrintButton />
+            </span>
+          )}
         </div>
 
         {paper.question_count != null && questions.length < paper.question_count && (
@@ -130,7 +136,9 @@ export default async function PaperExplanationsPage({
         )}
       </div>
 
-      <div className="flex flex-col gap-4">
+      {/* break-inside-avoid: 인쇄(PDF 저장) 시 카드 하나가 페이지 경계에서 두 동강
+          나지 않게 한다 — 화면 표시에는 아무 영향 없음. */}
+      <div className="flex flex-col gap-4 [&>*]:break-inside-avoid">
         {visibleGroups.map((group) => (
           <WrongNoteQuestionCard
             key={group.rows[0].questionNumber}
@@ -160,7 +168,7 @@ export default async function PaperExplanationsPage({
         </div>
       )}
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 print:hidden">
         <Link
           href={`/papers/${paper.id}/cbt`}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
