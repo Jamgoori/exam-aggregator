@@ -20,6 +20,15 @@
   --background: #0a0a0a;
   --foreground: #ededed;
   color-scheme: dark;
+
+  /* 어두운 배경에서는 기본 블루 팔레트가 형광색처럼 쨍해 보여서, 다크모드에서만
+     채도(chroma)와 명도를 낮춘 값으로 재정의한다. Tailwind v4 유틸리티가
+     var(--color-blue-*)를 참조하므로 여기 한 곳만 바꾸면 버튼·링크·아이콘 등
+     사이트 전체 파란색이 함께 차분해진다. (기본값은 node_modules/tailwindcss/theme.css) */
+  --color-blue-400: oklch(70.7% 0.125 254.624);
+  --color-blue-500: oklch(58% 0.16 259.815);
+  --color-blue-600: oklch(49% 0.16 262.881);
+  --color-blue-700: oklch(43.5% 0.15 264.376);
 }
 
 /* JS가 실행되기 전(또는 비활성화된 경우)에는 시스템 설정을 기본값으로 따른다. */
@@ -28,6 +37,10 @@
     --background: #0a0a0a;
     --foreground: #ededed;
     color-scheme: dark;
+    --color-blue-400: oklch(70.7% 0.125 254.624);
+    --color-blue-500: oklch(58% 0.16 259.815);
+    --color-blue-600: oklch(49% 0.16 262.881);
+    --color-blue-700: oklch(43.5% 0.15 264.376);
   }
 }
 
