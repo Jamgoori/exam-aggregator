@@ -47,7 +47,7 @@ export default async function Home({
       ? getMyBookmarkedSubjectIds(supabase, userId)
       : Promise.resolve(new Set<string>()),
   ]);
-  const { totalCount } = homeStats;
+  const { totalCount, totalDownloads, totalAttempts } = homeStats;
 
   const latestYear = allPapers[0]?.year;
 
@@ -66,10 +66,11 @@ export default async function Home({
               <br />
               한 곳에서 빠르게
             </h1>
-            {/* 통계 타일 3개를 걷어내면서 그중 유일하게 의미 있던 "총 자료 수"만
-                소개 문장 안으로 옮겼다 — 모바일 첫 화면에 카드 목록이 보이게
-                하려고 히어로 영역을 압축한 것. */}
-            <p className="text-zinc-600 dark:text-zinc-400">
+            {/* 모바일은 첫 화면에 카드 목록이 보이도록 통계 타일을 걷어내고
+                "총 자료 수"만 이 문장에 통합한 압축 버전, PC(sm 이상)는 아래
+                통계 타일 3개(home-exam-browser.tsx)가 그대로 보이므로 숫자 없는
+                원래 문장을 쓴다. */}
+            <p className="text-zinc-600 sm:hidden dark:text-zinc-400">
               국가직·지방직·서울시 등 주요 공무원 시험 기출문제{" "}
               {totalCount ? (
                 <>
@@ -83,6 +84,10 @@ export default async function Home({
               )}
               연도별·과목별로 정리했어요.
             </p>
+            <p className="hidden text-zinc-600 sm:block dark:text-zinc-400">
+              국가직·지방직·서울시 등 주요 공무원 시험 기출문제를 연도별·과목별로
+              정리했어요.
+            </p>
           </>
         }
         allPapers={allPapers}
@@ -95,6 +100,9 @@ export default async function Home({
         cbtAvailableIds={cbtAvailableIds}
         myRoundCounts={Object.fromEntries(myRoundCounts)}
         loggedIn={!!userId}
+        totalCount={totalCount}
+        totalDownloads={totalDownloads}
+        totalAttempts={totalAttempts}
       />
     </div>
   );
