@@ -24,7 +24,7 @@ export function CommentGuestFields({
         maxLength={NICKNAME_MAX}
         placeholder={`닉네임 (최대 ${NICKNAME_MAX}자)`}
         required
-        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm sm:w-40"
+        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm sm:w-40 dark:border-zinc-700"
       />
       <input
         type="password"
@@ -34,7 +34,7 @@ export function CommentGuestFields({
         maxLength={COMMENT_PW_MAX}
         placeholder={`비밀번호 (${COMMENT_PW_MIN}~${COMMENT_PW_MAX}자)`}
         required
-        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm sm:w-52"
+        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm sm:w-52 dark:border-zinc-700"
       />
     </>
   );

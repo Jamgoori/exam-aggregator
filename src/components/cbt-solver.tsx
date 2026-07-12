@@ -408,23 +408,23 @@ export function CbtSolver({
     <div className="flex h-[100dvh] flex-col lg:h-[calc(100dvh-65px)]">
       {/* 헤더/탭/펜 색상 바를 하나의 그룹으로 묶어서, 각 줄마다 구분선이 겹겹이
           쌓이지 않게 내부 구분선 없이 콘텐츠와 닿는 맨 아래에만 선을 둔다. */}
-      <div className="shrink-0 border-b border-zinc-200 bg-white">
+      <div className="shrink-0 border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <header>
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
             <div className="flex min-w-0 items-center gap-2">
               <Link
                 href={`/papers/${paperId}`}
                 aria-label="문제지로 돌아가기"
-                className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100"
+                className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
               >
                 <ChevronLeft size={20} />
               </Link>
-              <h1 className="truncate text-sm font-medium text-zinc-700">
+              <h1 className="truncate text-sm font-medium text-zinc-700 dark:text-zinc-300">
                 {paperTitle}
               </h1>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <div className="flex items-center gap-1 text-sm font-medium text-zinc-600">
+              <div className="flex items-center gap-1 text-sm font-medium text-zinc-600 dark:text-zinc-400">
                 <Clock size={16} />
                 {countdown > 0 ? (
                   `${countdown}초 후 시작`
@@ -432,7 +432,7 @@ export function CbtSolver({
                   <button
                     type="button"
                     onClick={requestStart}
-                    className="text-red-600 underline underline-offset-2"
+                    className="text-red-600 underline underline-offset-2 dark:text-red-400"
                   >
                     시작 기록 실패, 다시 시도
                   </button>
@@ -442,17 +442,17 @@ export function CbtSolver({
                   "시작하는 중..."
                 )}
               </div>
-              <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex">
+              <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex dark:bg-zinc-800">
                 <button
                   type="button"
                   onClick={zoomOut}
                   disabled={zoom <= MIN_ZOOM}
                   aria-label="시험지 축소"
-                  className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                  className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-700"
                 >
                   <ZoomOut size={18} />
                 </button>
-                <span className="w-10 text-center text-xs font-medium text-zinc-500">
+                <span className="w-10 text-center text-xs font-medium text-zinc-500 dark:text-zinc-500">
                   {Math.round(zoom * 100)}%
                 </span>
                 <button
@@ -460,12 +460,12 @@ export function CbtSolver({
                   onClick={zoomIn}
                   disabled={zoom >= MAX_ZOOM}
                   aria-label="시험지 확대"
-                  className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+                  className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-700"
                 >
                   <ZoomIn size={18} />
                 </button>
               </div>
-              <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
+              <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">
                 <button
                   type="button"
                   onClick={() => setTool("move")}
@@ -474,7 +474,7 @@ export function CbtSolver({
                   className={`flex items-center justify-center rounded-md p-1.5 ${
                     tool === "move"
                       ? "bg-blue-600 text-white"
-                      : "text-zinc-600 hover:bg-zinc-200"
+                      : "text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
                   }`}
                 >
                   <Hand size={18} />
@@ -487,7 +487,7 @@ export function CbtSolver({
                   className={`flex items-center justify-center rounded-md p-1.5 ${
                     tool === "pen"
                       ? "bg-blue-600 text-white"
-                      : "text-zinc-600 hover:bg-zinc-200"
+                      : "text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
                   }`}
                 >
                   <PenLine size={18} />
@@ -500,7 +500,7 @@ export function CbtSolver({
                   className={`flex items-center justify-center rounded-md p-1.5 ${
                     tool === "eraser"
                       ? "bg-blue-600 text-white"
-                      : "text-zinc-600 hover:bg-zinc-200"
+                      : "text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
                   }`}
                 >
                   <Eraser size={18} />
@@ -529,7 +529,7 @@ export function CbtSolver({
               className={`rounded-full px-3 py-1 text-[15px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
                 viewMode === "single"
                   ? "bg-blue-600 text-white"
-                  : "text-zinc-500 hover:bg-zinc-100"
+                  : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
               }`}
             >
               문제별 풀기
@@ -540,7 +540,7 @@ export function CbtSolver({
               className={`rounded-full px-3 py-1 text-[15px] font-medium ${
                 viewMode === "full"
                   ? "bg-blue-600 text-white"
-                  : "text-zinc-500 hover:bg-zinc-100"
+                  : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
               }`}
             >
               전체보기
@@ -585,13 +585,13 @@ export function CbtSolver({
               />
               {/* 모바일은 헤더가 좁아 데스크톱용 줌 버튼을 넣기 어려워, 시험지 위에
                   떠 있는 형태의 줌 컨트롤을 따로 둔다. */}
-              <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-full border border-zinc-200 bg-white/95 shadow-md lg:hidden">
+              <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-full border border-zinc-200 bg-white/95 shadow-md lg:hidden dark:border-zinc-700 dark:bg-zinc-900/95">
                 <button
                   type="button"
                   onClick={zoomIn}
                   disabled={zoom >= MAX_ZOOM}
                   aria-label="시험지 확대"
-                  className="flex items-center justify-center p-2.5 text-zinc-600 active:bg-zinc-100 disabled:opacity-30"
+                  className="flex items-center justify-center p-2.5 text-zinc-600 active:bg-zinc-100 disabled:opacity-30 dark:text-zinc-400 dark:active:bg-zinc-800"
                 >
                   <ZoomIn size={20} />
                 </button>
@@ -600,7 +600,7 @@ export function CbtSolver({
                   onClick={zoomOut}
                   disabled={zoom <= MIN_ZOOM}
                   aria-label="시험지 축소"
-                  className="flex items-center justify-center border-t border-zinc-200 p-2.5 text-zinc-600 active:bg-zinc-100 disabled:opacity-30"
+                  className="flex items-center justify-center border-t border-zinc-200 p-2.5 text-zinc-600 active:bg-zinc-100 disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-400 dark:active:bg-zinc-800"
                 >
                   <ZoomOut size={20} />
                 </button>
@@ -636,7 +636,7 @@ export function CbtSolver({
           </div>
 
           <OmrPanel
-            className="hidden w-[240px] shrink-0 flex-col border-l border-zinc-200 lg:flex"
+            className="hidden w-[240px] shrink-0 flex-col border-l border-zinc-200 lg:flex dark:border-zinc-800"
             totalQuestions={totalQuestions}
             choiceCount={choiceCount}
             answers={answers}
@@ -658,14 +658,14 @@ export function CbtSolver({
             onClick={() => setOmrOpen(false)}
             className="absolute inset-0 bg-black/40"
           />
-          <div className="relative flex max-h-[65dvh] flex-col rounded-t-2xl bg-white shadow-xl">
-            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2">
-              <h2 className="text-sm font-semibold text-zinc-700">답안 입력</h2>
+          <div className="relative flex max-h-[65dvh] flex-col rounded-t-2xl bg-white shadow-xl dark:bg-zinc-900">
+            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2 dark:border-zinc-800">
+              <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">답안 입력</h2>
               <button
                 type="button"
                 aria-label="닫기"
                 onClick={() => setOmrOpen(false)}
-                className="rounded-lg p-1 text-zinc-500 hover:bg-zinc-100"
+                className="rounded-lg p-1 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
               >
                 <X size={18} />
               </button>

@@ -128,9 +128,9 @@ export function CommentsSection({
           placeholder="이 시험에 대한 의견을 남겨주세요"
           required
           rows={3}
-          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
+          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700"
         />
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <button
           type="submit"
           disabled={pending}
@@ -140,9 +140,9 @@ export function CommentsSection({
         </button>
       </form>
 
-      <div className="flex flex-col divide-y divide-zinc-100">
+      <div className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
         {topLevelComments.length === 0 && (
-          <p className="py-10 text-center text-sm text-zinc-500">
+          <p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-500">
             아직 댓글이 없어요. 첫 댓글을 남겨보세요.
           </p>
         )}
@@ -156,7 +156,7 @@ export function CommentsSection({
               })}
 
               {replies.length > 0 && (
-                <div className="mt-4 ml-6 flex flex-col gap-4 border-l-2 border-zinc-100 pl-4">
+                <div className="mt-4 ml-6 flex flex-col gap-4 border-l-2 border-zinc-100 pl-4 dark:border-zinc-800">
                   {replies.map((reply) => (
                     <div key={reply.id}>
                       {renderRow(reply, { canReply: false, isReplying: false })}
@@ -166,7 +166,7 @@ export function CommentsSection({
               )}
 
               {replyingToId === comment.id && (
-                <div className="mt-4 ml-6 border-l-2 border-zinc-100 pl-4">
+                <div className="mt-4 ml-6 border-l-2 border-zinc-100 pl-4 dark:border-zinc-800">
                   <ReplyForm
                     paperId={paperId}
                     parentId={comment.id}

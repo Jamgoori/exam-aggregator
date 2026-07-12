@@ -33,12 +33,12 @@ export default async function UploadPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">기출문제 업로드</h1>
         <form action={logout}>
-          <button type="submit" className="text-sm text-zinc-500 underline">
+          <button type="submit" className="text-sm text-zinc-500 underline dark:text-zinc-500">
             로그아웃
           </button>
         </form>
       </div>
-      <Link href="/admin/answers" className="text-sm text-blue-600 underline">
+      <Link href="/admin/answers" className="text-sm text-blue-600 underline dark:text-blue-400">
         CBT 정답 입력하기 →
       </Link>
       <UploadForm

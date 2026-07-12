@@ -59,8 +59,8 @@ export function SubjectBookmarkButton({
         size === "sm" ? "p-1.5" : "p-2.5"
       } ${
         bookmarked
-          ? "border-amber-300 bg-amber-50 text-amber-500"
-          : "border-zinc-300 text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+          ? "border-amber-300 bg-amber-50 text-amber-500 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-400"
+          : "border-zinc-300 text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
       }`}
     >
       <Star size={size === "sm" ? 14 : 18} fill={bookmarked ? "currentColor" : "none"} />

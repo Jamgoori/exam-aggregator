@@ -83,7 +83,7 @@ function ChoiceRow({
                   ? "bg-emerald-500 text-white"
                   : isMyWrongPick
                     ? "bg-red-500 text-white"
-                    : "bg-zinc-100 text-zinc-500"
+                    : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500"
               }`}
             >
               {choice}
@@ -93,17 +93,17 @@ function ChoiceRow({
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1">
         {skipped && (
-          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500">
             풀지 않음
           </span>
         )}
         {row.wrongCount !== undefined && row.wrongCount >= 2 && (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
             {row.wrongCount}번 틀림
           </span>
         )}
         {row.resolved && (
-          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
+          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
             극복
           </span>
         )}
@@ -131,9 +131,9 @@ export function WrongNoteQuestionCard({
     firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-      <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-2.5">
-        <span className="text-sm font-bold text-zinc-800">{numberLabel}</span>
+    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-800/50">
+        <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{numberLabel}</span>
       </div>
 
       {images.length > 0 ? (
@@ -150,13 +150,13 @@ export function WrongNoteQuestionCard({
           ))}
         </div>
       ) : (
-        <p className="px-4 py-6 text-center text-xs text-zinc-400">
+        <p className="px-4 py-6 text-center text-xs text-zinc-400 dark:text-zinc-500">
           아직 이 문제의 이미지가 등록되지 않았어요. 문제 내용은 원본 문제지에서
           확인해주세요.
         </p>
       )}
 
-      <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3">
+      <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
         {rows.map((row) => (
           <ChoiceRow
             key={row.questionNumber}
@@ -170,12 +170,12 @@ export function WrongNoteQuestionCard({
       {/* 해설: 먼저 스스로 다시 풀어보게 기본은 접어두고, 누르면 펼친다. 서버/클라이언트
           어느 트리에서든 그대로 동작해야 해서 JS 없는 네이티브 details/summary를 쓴다. */}
       {rows.some((row) => row.explanation) && (
-        <div className="flex flex-col gap-1 border-t border-zinc-100 px-4 py-3">
+        <div className="flex flex-col gap-1 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
           {rows
             .filter((row) => row.explanation)
             .map((row) => (
               <details key={row.questionNumber} open={explanationsOpen} className="group">
-                <summary className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-blue-600 hover:underline [&::-webkit-details-marker]:hidden">
+                <summary className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-blue-600 hover:underline [&::-webkit-details-marker]:hidden dark:text-blue-400">
                   <ChevronRight
                     size={14}
                     className="shrink-0 transition-transform group-open:rotate-90"
@@ -206,10 +206,10 @@ function ExplanationBody({
   correctChoice: number | null;
 }) {
   return (
-    <div className="mt-2 flex flex-col gap-3 rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700">
+    <div className="mt-2 flex flex-col gap-3 rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300">
       {explanation.correctChoiceSummary && (
         <p className="whitespace-pre-wrap">
-          <span className="mr-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700">
+          <span className="mr-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
             정답
           </span>
           {explanation.correctChoiceSummary}
@@ -218,9 +218,9 @@ function ExplanationBody({
 
       {(explanation.keywordTitle || explanation.keywordExplanation) && (
         <div>
-          <p className="text-xs font-semibold text-zinc-400">핵심 개념</p>
+          <p className="text-xs font-semibold text-zinc-400 dark:text-zinc-600">핵심 개념</p>
           {explanation.keywordTitle && (
-            <p className="mt-0.5 font-semibold text-zinc-800">{explanation.keywordTitle}</p>
+            <p className="mt-0.5 font-semibold text-zinc-800 dark:text-zinc-200">{explanation.keywordTitle}</p>
           )}
           {explanation.keywordExplanation && (
             <p className="mt-1 whitespace-pre-wrap">{explanation.keywordExplanation}</p>
@@ -230,13 +230,13 @@ function ExplanationBody({
 
       {explanation.choiceExplanations.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-zinc-400">선지별 해설</p>
+          <p className="text-xs font-semibold text-zinc-400 dark:text-zinc-600">선지별 해설</p>
           <div className="mt-1 flex flex-col gap-1.5">
             {explanation.choiceExplanations.map((c) => (
               <p key={c.choice} className="whitespace-pre-wrap">
                 <span
                   className={`mr-1 font-semibold ${
-                    c.choice === correctChoice ? "text-emerald-600" : "text-zinc-400"
+                    c.choice === correctChoice ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400 dark:text-zinc-600"
                   }`}
                 >
                   {CIRCLED_DIGITS[c.choice] ?? `${c.choice}.`}
@@ -249,7 +249,7 @@ function ExplanationBody({
       )}
 
       {explanation.lawAmendmentNote && (
-        <p className="whitespace-pre-wrap rounded bg-amber-50 px-2.5 py-2 text-xs text-amber-700">
+        <p className="whitespace-pre-wrap rounded bg-amber-50 px-2.5 py-2 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
           개정 참고: {explanation.lawAmendmentNote}
         </p>
       )}
@@ -260,7 +260,7 @@ function ExplanationBody({
 // 초록=정답, 빨강=내가 고른 답 규칙을 화면마다 한 번씩 설명해주는 범례.
 export function WrongNoteLegend() {
   return (
-    <p className="flex items-center gap-3 text-xs text-zinc-500">
+    <p className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-500">
       <span className="flex items-center gap-1">
         <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
         정답

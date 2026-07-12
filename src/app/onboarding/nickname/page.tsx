@@ -36,7 +36,7 @@ export default async function NicknameOnboardingPage({
     <div className="mx-auto flex max-w-sm flex-col gap-6 px-4 py-24">
       <div>
         <h1 className="text-2xl font-semibold">닉네임을 설정해주세요</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
           앞으로 댓글과 마이페이지에 표시될 닉네임이에요. 나중에 언제든 바꿀 수 있어요.
         </p>
       </div>
@@ -44,7 +44,7 @@ export default async function NicknameOnboardingPage({
       <form action={updateNickname} className="flex flex-col gap-1">
         <input type="hidden" name="formPath" value={formPath} />
         <input type="hidden" name="successPath" value={next} />
-        <label htmlFor="nickname" className="text-sm text-zinc-600">
+        <label htmlFor="nickname" className="text-sm text-zinc-600 dark:text-zinc-400">
           닉네임
         </label>
         <input
@@ -54,12 +54,12 @@ export default async function NicknameOnboardingPage({
           minLength={NICKNAME_MIN}
           maxLength={NICKNAME_MAX}
           autoFocus
-          className="rounded border border-zinc-300 px-3 py-2"
+          className="rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700"
         />
-        <p className="mb-2 text-xs text-zinc-400">
+        <p className="mb-2 text-xs text-zinc-400 dark:text-zinc-500">
           {NICKNAME_MIN}~{NICKNAME_MAX}자로 입력해주세요.
         </p>
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <button
           type="submit"
           className="mt-2 rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"

@@ -41,7 +41,7 @@ export default async function CbtPage({
     return (
       <div className="mx-auto flex max-w-lg flex-col items-center gap-4 px-4 py-24 text-center">
         <h1 className="text-xl font-semibold">아직 CBT를 지원하지 않는 문제지예요</h1>
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-zinc-500 dark:text-zinc-500">
           정답이 등록되면 CBT로 풀 수 있어요. 우선 원본 PDF로 풀어보세요.
         </p>
         <Link

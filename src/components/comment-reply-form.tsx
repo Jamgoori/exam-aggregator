@@ -61,14 +61,14 @@ export function ReplyForm({
         required
         rows={2}
         autoFocus
-        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
+        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700"
       />
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       <div className="flex justify-end gap-2">
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-700"
+          className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-300"
         >
           취소
         </button>

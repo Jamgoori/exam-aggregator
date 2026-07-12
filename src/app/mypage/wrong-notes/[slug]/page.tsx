@@ -62,7 +62,7 @@ export default async function SubjectWrongNotePage({
       <div className="flex flex-col gap-3">
         <Link
           href="/mypage?tab=wrong-notes"
-          className="text-sm text-zinc-500 hover:text-blue-600"
+          className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400"
         >
           ← 오답노트로
         </Link>
@@ -75,18 +75,18 @@ export default async function SubjectWrongNotePage({
         </div>
         <h1 className="text-2xl font-semibold">{subject.name} 오답노트</h1>
         {totalWrong > 0 && (
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-zinc-500 dark:text-zinc-500">
             지금까지 틀려본 문제 {totalWrong}개 중 {totalWrong - totalUnresolved}개를
             극복했어요. 가장 최근 응시에서도 틀린 문제는{" "}
-            <span className="font-medium text-red-600">오답</span>, 다시 풀어서 맞힌
-            문제는 <span className="font-medium text-emerald-600">극복</span>으로
+            <span className="font-medium text-red-600 dark:text-red-400">오답</span>, 다시 풀어서 맞힌
+            문제는 <span className="font-medium text-emerald-600 dark:text-emerald-400">극복</span>으로
             표시돼요.
           </p>
         )}
       </div>
 
       {totalWrong === 0 ? (
-        <p className="py-16 text-center text-sm text-zinc-500">
+        <p className="py-16 text-center text-sm text-zinc-500 dark:text-zinc-500">
           이 과목에서는 아직 틀린 문제가 없어요. CBT로 문제를 풀면 틀린 문제가
           자동으로 이곳에 모여요.
         </p>

@@ -83,7 +83,7 @@ export function CbtViewModeLock({
         className={`flex items-center justify-center rounded-full p-1.5 disabled:opacity-50 ${
           isDefaultViewModeLocked
             ? "bg-blue-600 text-white"
-            : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+            : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-400"
         }`}
       >
         {isDefaultViewModeLocked ? (
@@ -100,7 +100,7 @@ export function CbtViewModeLock({
             type="button"
             aria-label="안내 닫기"
             onClick={() => dismissLockHint(dontShowLockHint)}
-            className="absolute right-2 top-2 text-blue-200 hover:text-white"
+            className="absolute right-2 top-2 text-blue-200 hover:text-white dark:text-blue-300 dark:hover:text-white"
           >
             <X size={14} />
           </button>

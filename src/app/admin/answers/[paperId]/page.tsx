@@ -45,13 +45,13 @@ export default async function AnswerEditPage({
 
   return (
     <div className="mx-auto flex max-w-lg flex-col gap-6 px-4 py-16">
-      <Link href="/admin/answers" className="text-sm text-blue-600 underline">
+      <Link href="/admin/answers" className="text-sm text-blue-600 underline dark:text-blue-400">
         ← 목록으로
       </Link>
 
       <div>
         <h1 className="text-2xl font-semibold">{paper.title}</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-500">
           {paper.year}년
           {paper.question_count ? ` · 문항 수 ${paper.question_count}개` : ""}
         </p>

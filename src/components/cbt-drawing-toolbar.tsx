@@ -154,7 +154,7 @@ export function CbtDrawingToolbar({
               onClick={() => onPenColorChange(color)}
               style={{ backgroundColor: color }}
               className={`h-5 w-5 shrink-0 rounded-full ${
-                penColor === color ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                penColor === color ? "ring-2 ring-offset-1 ring-zinc-400 dark:ring-offset-zinc-900" : ""
               }`}
             />
           ))}
@@ -175,13 +175,13 @@ export function CbtDrawingToolbar({
                   style={{ background: RAINBOW_GRADIENT }}
                   className={`flex h-5 w-5 items-center justify-center rounded-full p-[2px] ${
                     penColor === customColor
-                      ? "ring-2 ring-offset-1 ring-zinc-400"
+                      ? "ring-2 ring-offset-1 ring-zinc-400 dark:ring-offset-zinc-900"
                       : ""
                   }`}
                 >
                   <span
                     style={{ backgroundColor: customColor }}
-                    className="h-full w-full rounded-full border border-white"
+                    className="h-full w-full rounded-full border border-white dark:border-zinc-900"
                   />
                 </span>
               ) : (
@@ -192,7 +192,7 @@ export function CbtDrawingToolbar({
               )}
             </button>
             {paletteOpen && (
-              <div className="absolute left-0 top-full z-30 mt-1 w-52 rounded-xl border border-zinc-200 bg-white p-3 shadow-lg">
+              <div className="absolute left-0 top-full z-30 mt-1 w-52 rounded-xl border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
                 <div className="grid grid-cols-7 gap-1.5">
                   {PALETTE_PRESETS.map((color) => (
                     <button
@@ -208,7 +208,7 @@ export function CbtDrawingToolbar({
                       style={{ backgroundColor: color }}
                       className={`h-5 w-5 rounded-full ${
                         customColor === color
-                          ? "ring-2 ring-offset-1 ring-zinc-400"
+                          ? "ring-2 ring-offset-1 ring-zinc-400 dark:ring-offset-zinc-900"
                           : ""
                       }`}
                     />
@@ -277,14 +277,14 @@ export function CbtDrawingToolbar({
         {tool === "pen" && (
           <div
             ref={widthMenuRef}
-            className="relative shrink-0 border-l border-zinc-200 pl-2"
+            className="relative shrink-0 border-l border-zinc-200 pl-2 dark:border-zinc-800"
           >
             <button
               type="button"
               aria-label="펜 굵기 선택"
               aria-expanded={widthMenuOpen}
               onClick={() => setWidthMenuOpen((v) => !v)}
-              className="flex h-6 items-center gap-0.5 rounded-full px-1 hover:bg-zinc-100"
+              className="flex h-6 items-center gap-0.5 rounded-full px-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
               <span
                 className="rounded-full bg-zinc-500"
@@ -292,11 +292,11 @@ export function CbtDrawingToolbar({
               />
               <ChevronDown
                 size={12}
-                className={`text-zinc-400 transition-transform ${widthMenuOpen ? "rotate-180" : ""}`}
+                className={`text-zinc-400 transition-transform dark:text-zinc-600 ${widthMenuOpen ? "rotate-180" : ""}`}
               />
             </button>
             {widthMenuOpen && (
-              <div className="absolute left-1/2 top-full z-30 mt-1 flex -translate-x-1/2 flex-col items-center gap-1 rounded-full border border-zinc-200 bg-white p-1.5 shadow-lg">
+              <div className="absolute left-1/2 top-full z-30 mt-1 flex -translate-x-1/2 flex-col items-center gap-1 rounded-full border border-zinc-200 bg-white p-1.5 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
                 {PEN_WIDTH_PRESETS.map((width) => (
                   <button
                     key={width}
@@ -307,11 +307,11 @@ export function CbtDrawingToolbar({
                       onPenWidthChange(width);
                       setWidthMenuOpen(false);
                     }}
-                    className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-zinc-100"
+                    className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
                     <span
                       className={`rounded-full bg-zinc-500 ${
-                        penWidth === width ? "ring-2 ring-offset-1 ring-zinc-400" : ""
+                        penWidth === width ? "ring-2 ring-offset-1 ring-zinc-400 dark:ring-offset-zinc-900" : ""
                       }`}
                       style={{ width: width + 2, height: width + 2 }}
                     />
@@ -322,7 +322,7 @@ export function CbtDrawingToolbar({
           </div>
         )}
         {tool === "eraser" && (
-          <p className="shrink-0 text-xs text-zinc-400">
+          <p className="shrink-0 text-xs text-zinc-400 dark:text-zinc-500">
             드래그한 부분만 지워져요
           </p>
         )}
@@ -330,7 +330,7 @@ export function CbtDrawingToolbar({
           type="button"
           onClick={onClearDrawing}
           aria-label="전체 지우기"
-          className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-zinc-500 hover:text-zinc-700"
+          className="ml-auto flex shrink-0 items-center gap-1 whitespace-nowrap text-xs font-medium text-zinc-500 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-300"
         >
           <Trash2 size={14} />
           <span className="hidden sm:inline">전체 지우기</span>

@@ -56,17 +56,17 @@ export default async function Home({
       <HomeExamBrowser
         heroText={
           <>
-            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600">
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
               {latestYear
                 ? `${latestYear}년 자료 업데이트 완료`
                 : "기출문제를 업로드해보세요"}
             </span>
-            <h1 className="text-3xl font-bold sm:text-4xl">
+            <h1 className="text-3xl font-bold sm:text-4xl dark:text-zinc-100">
               공무원 기출문제,
               <br />
               한 곳에서 빠르게
             </h1>
-            <p className="text-zinc-600">
+            <p className="text-zinc-600 dark:text-zinc-400">
               국가직·지방직·서울시 등 주요 공무원 시험 기출문제를 연도별·과목별로
               정리했어요.
             </p>

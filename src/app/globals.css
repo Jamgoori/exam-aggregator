@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* 다크모드는 OS 설정이 아니라 사용자가 고른 토글 값을 기준으로 삼는다 (data-theme
+   속성). Tailwind 기본 dark: 변형(prefers-color-scheme)을 이걸로 재정의한다. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -10,8 +14,14 @@
   --color-foreground: var(--foreground);
 }
 
+[data-theme="dark"] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+/* JS가 실행되기 전(또는 비활성화된 경우)에는 시스템 설정을 기본값으로 따른다. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --background: #0a0a0a;
     --foreground: #ededed;
   }
@@ -182,6 +192,10 @@ button:not(:disabled) {
   position: relative;
   overflow: hidden;
   background: #e4e4e7;
+}
+
+[data-theme="dark"] .skeleton {
+  background: #27272a;
 }
 
 .skeleton::after {

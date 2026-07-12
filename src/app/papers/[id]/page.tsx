@@ -82,7 +82,7 @@ export default async function PaperDetailPage({
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-14 px-4 pb-12 pt-6 sm:pt-8">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-14">
       <div className="flex flex-col gap-4">
-        <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600">
+        <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">
           ← 홈으로
         </Link>
 
@@ -114,7 +114,7 @@ export default async function PaperDetailPage({
           <h1 className="text-3xl font-bold leading-snug">
             {paper.title}
           </h1>
-          <p className="mt-2 text-sm text-zinc-500">
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
             {examType?.name}
             {examType?.name ? " · " : ""}
             {paper.year}년
@@ -124,7 +124,7 @@ export default async function PaperDetailPage({
               : ""}
           </p>
           {paper.tags.length > 0 && (
-            <p className="mt-1 text-sm text-zinc-400">
+            <p className="mt-1 text-sm text-zinc-400 dark:text-zinc-600">
               {paper.tags.map((tag) => `#${tag}`).join(" ")}
             </p>
           )}
@@ -152,7 +152,7 @@ export default async function PaperDetailPage({
             rel="noopener noreferrer"
             className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-4 text-lg font-medium ${
               hasCbtAnswers
-                ? "border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+                ? "border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"
                 : "bg-blue-600 text-white hover:bg-blue-700"
             }`}
           >
@@ -163,7 +163,7 @@ export default async function PaperDetailPage({
             href={`/download/${paper.id}`}
             aria-label="문제 다운로드"
             title="문제 다운로드"
-            className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+            className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-800 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
           >
             <Download size={20} />
           </a>
@@ -175,7 +175,7 @@ export default async function PaperDetailPage({
               href={answerKeyFileUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-lg font-medium text-blue-700 hover:bg-blue-100"
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-lg font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"
             >
               <ExternalLink size={20} />
               정답 열기
@@ -184,7 +184,7 @@ export default async function PaperDetailPage({
               href={`/download/answer/${answerKey.id}`}
               aria-label="정답 다운로드"
               title="정답 다운로드"
-              className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+              className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-800 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
             >
               <Download size={20} />
             </a>
@@ -200,7 +200,7 @@ export default async function PaperDetailPage({
           <div className="flex items-stretch gap-2">
             <Link
               href={`/papers/${paper.id}/explanations`}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-lg font-medium text-emerald-700 hover:bg-emerald-100"
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-lg font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 dark:hover:bg-emerald-900/40"
             >
               <BookOpenCheck size={20} />
               해설 열기
@@ -209,7 +209,7 @@ export default async function PaperDetailPage({
               href={`/papers/${paper.id}/explanations?download=1`}
               aria-label="해설 다운로드"
               title="해설 다운로드"
-              className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600"
+              className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
             >
               <Download size={20} />
             </Link>
@@ -217,7 +217,7 @@ export default async function PaperDetailPage({
         )}
 
         {myCbtRecordItems.length > 0 && (
-          <div className="mt-1 flex items-center justify-end gap-2 text-xs text-zinc-400">
+          <div className="mt-1 flex items-center justify-end gap-2 text-xs text-zinc-400 dark:text-zinc-600">
             <MyCbtRecordModal attempts={myCbtRecordItems} roundAverages={roundAverages} />
           </div>
         )}
@@ -301,14 +301,14 @@ function RelatedPapersSection({
   }
 
   return (
-    <div className="flex flex-col gap-4 border-t border-zinc-100 pt-14">
+    <div className="flex flex-col gap-4 border-t border-zinc-100 pt-14 dark:border-zinc-800">
       <div className="flex items-center justify-between gap-4">
         <h2 className="text-lg font-semibold">
           {subject.name} 기출문제 목록
         </h2>
         <Link
           href={`/subjects/${subject.slug}${level ? `?level=${encodeURIComponent(level)}` : ""}`}
-          className="shrink-0 text-sm font-medium text-blue-600 hover:underline"
+          className="shrink-0 text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
         >
           전체보기
         </Link>
@@ -321,7 +321,7 @@ function RelatedPapersSection({
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               !level
                 ? "bg-zinc-800 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
@@ -333,7 +333,7 @@ function RelatedPapersSection({
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 level === lv
                   ? levelColor(lv)
-                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
               }`}
             >
               {lv}
@@ -352,7 +352,7 @@ function RelatedPapersSection({
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               selectedExamTypeIds.size === 0
                 ? "bg-zinc-800 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
@@ -370,7 +370,7 @@ function RelatedPapersSection({
                 className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                   isSelected
                     ? examTypeTabColor(et.name)
-                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
                 }`}
               >
                 {et.name}
@@ -382,7 +382,7 @@ function RelatedPapersSection({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {papers.length === 0 && (
-          <p className="col-span-full py-8 text-center text-zinc-500">
+          <p className="col-span-full py-8 text-center text-zinc-500 dark:text-zinc-500">
             조건에 맞는 기출문제가 없습니다.
           </p>
         )}

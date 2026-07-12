@@ -24,13 +24,13 @@ export function SubjectIndexTabs({
 
   return (
     <>
-      <div className="flex flex-wrap gap-x-3 gap-y-2 border-t border-zinc-100 pt-3">
+      <div className="flex flex-wrap gap-x-3 gap-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
         {CONSONANTS.map((c) => (
           <button
             key={c}
             type="button"
             onClick={() => setActive(c)}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-sm font-medium text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 text-sm font-medium text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
           >
             {c}
           </button>
@@ -43,7 +43,7 @@ export function SubjectIndexTabs({
           onClick={() => setActive(null)}
         >
           <div
-            className="max-h-[70vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5"
+            className="max-h-[70vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 dark:bg-zinc-900"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center justify-between">
@@ -51,13 +51,13 @@ export function SubjectIndexTabs({
               <button
                 type="button"
                 onClick={() => setActive(null)}
-                className="text-sm text-zinc-400"
+                className="text-sm text-zinc-400 dark:text-zinc-600"
               >
                 닫기
               </button>
             </div>
             {filtered.length === 0 ? (
-              <p className="py-6 text-center text-sm text-zinc-500">
+              <p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-500">
                 해당하는 과목이 없어요.
               </p>
             ) : (
@@ -65,7 +65,7 @@ export function SubjectIndexTabs({
                 {filtered.map((s) => (
                   <div
                     key={s.id}
-                    className="flex items-center gap-1 rounded-lg border border-zinc-200 pl-3 pr-1.5 py-1 text-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600"
+                    className="flex items-center gap-1 rounded-lg border border-zinc-200 pl-3 pr-1.5 py-1 text-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-800 dark:hover:border-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
                   >
                     <Link
                       href={`/subjects/${s.slug}`}

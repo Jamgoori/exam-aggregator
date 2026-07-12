@@ -17,16 +17,16 @@ export function CbtResultModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-      <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl bg-white p-8 text-center shadow-xl">
+      <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl bg-white p-8 text-center shadow-xl dark:bg-zinc-900">
         <Trophy size={40} className="text-amber-500" />
-        <h2 className="text-lg font-semibold">채점 결과</h2>
-        <p className="text-3xl font-bold text-blue-600">
+        <h2 className="text-lg font-semibold dark:text-zinc-100">채점 결과</h2>
+        <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">
           {result.score} / {result.totalQuestions}
         </p>
-        <div className="flex w-full divide-x divide-zinc-100 rounded-xl border border-zinc-100">
+        <div className="flex w-full divide-x divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800">
           <div className="flex-1 py-3">
-            <p className="text-xs text-zinc-400">정답률</p>
-            <p className="mt-1 font-semibold text-zinc-700">
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">정답률</p>
+            <p className="mt-1 font-semibold text-zinc-700 dark:text-zinc-300">
               {Math.round(
                 ((result.score ?? 0) / (result.totalQuestions || 1)) * 100,
               )}
@@ -34,8 +34,8 @@ export function CbtResultModal({
             </p>
           </div>
           <div className="flex-1 py-3">
-            <p className="text-xs text-zinc-400">풀이시간</p>
-            <p className="mt-1 font-semibold text-zinc-700">
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">풀이시간</p>
+            <p className="mt-1 font-semibold text-zinc-700 dark:text-zinc-300">
               {formatDuration(result.durationSeconds ?? 0)}
             </p>
           </div>
@@ -55,7 +55,7 @@ export function CbtResultModal({
         <div className="flex w-full gap-2">
           <Link
             href={`/papers/${paperId}`}
-            className="flex-1 rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+            className="flex-1 rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
           >
             문제지로
           </Link>

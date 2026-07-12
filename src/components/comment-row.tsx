@@ -51,18 +51,18 @@ export function CommentRow({
       <div className="flex items-center justify-between">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-bold">{comment.nickname}</span>
-          <span className="text-[11px] text-zinc-400">
+          <span className="text-[11px] text-zinc-400 dark:text-zinc-600">
             {new Date(comment.created_at).toLocaleDateString("ko-KR")}
             {comment.updated_at ? " (수정됨)" : ""}
           </span>
         </div>
         {(canReply || canEdit || canDelete) && (
-          <div className="flex gap-2 text-[11px] text-zinc-400">
+          <div className="flex gap-2 text-[11px] text-zinc-400 dark:text-zinc-600">
             {canReply && (
               <button
                 type="button"
                 onClick={onToggleReply}
-                className={isReplying ? "text-blue-600" : "hover:text-blue-600"}
+                className={isReplying ? "text-blue-600 dark:text-blue-400" : "hover:text-blue-600 dark:hover:text-blue-400"}
               >
                 답글
               </button>
@@ -71,7 +71,7 @@ export function CommentRow({
               <button
                 type="button"
                 onClick={onEdit}
-                className="hover:text-blue-600"
+                className="hover:text-blue-600 dark:hover:text-blue-400"
               >
                 수정
               </button>
@@ -80,7 +80,7 @@ export function CommentRow({
               <button
                 type="button"
                 onClick={() => setConfirming((v) => !v)}
-                className="hover:text-red-600"
+                className="hover:text-red-600 dark:hover:text-red-400"
               >
                 삭제
               </button>
@@ -88,19 +88,19 @@ export function CommentRow({
           </div>
         )}
       </div>
-      <p className="whitespace-pre-wrap text-sm text-zinc-700">
+      <p className="whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">
         {comment.content}
       </p>
 
       {confirming && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-zinc-50 p-3">
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/50">
           {requiresPassword && (
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="비밀번호"
-              className="rounded border border-zinc-300 px-2 py-1 text-sm"
+              className="rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700"
             />
           )}
           <button
@@ -117,11 +117,11 @@ export function CommentRow({
               setConfirming(false);
               setError(null);
             }}
-            className="text-sm text-zinc-500"
+            className="text-sm text-zinc-500 dark:text-zinc-500"
           >
             취소
           </button>
-          {error && <p className="w-full text-sm text-red-600">{error}</p>}
+          {error && <p className="w-full text-sm text-red-600 dark:text-red-400">{error}</p>}
         </div>
       )}
     </div>

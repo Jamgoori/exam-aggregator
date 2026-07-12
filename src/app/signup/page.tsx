@@ -22,28 +22,28 @@ export default async function SignupPage({
         <input type="hidden" name="next" value={next} />
         <button
           type="submit"
-          className="flex w-full items-center justify-center gap-2 rounded border border-zinc-300 px-4 py-2 hover:bg-zinc-50"
+          className="flex w-full items-center justify-center gap-2 rounded border border-zinc-300 px-4 py-2 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800/50"
         >
           <GoogleIcon />
           Google로 계속하기
         </button>
       </form>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      <div className="flex items-center gap-3 text-xs text-zinc-400">
-        <div className="h-px flex-1 bg-zinc-200" />
+      <div className="flex items-center gap-3 text-xs text-zinc-400 dark:text-zinc-500">
+        <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
         또는
-        <div className="h-px flex-1 bg-zinc-200" />
+        <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
       </div>
 
       <SignupForm next={next} turnstileSiteKey={turnstileSiteKey} />
 
-      <p className="text-sm text-zinc-500">
+      <p className="text-sm text-zinc-500 dark:text-zinc-500">
         이미 계정이 있나요?{" "}
         <Link
           href={`/login?next=${encodeURIComponent(next)}`}
-          className="text-blue-600 underline-offset-2 hover:underline"
+          className="text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
         >
           로그인
         </Link>
