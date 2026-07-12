@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect, useDeferredValue, useRef, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Star } from "lucide-react";
+import { FileStack, Download, Users, Star } from "lucide-react";
 import { ExamCard } from "@/components/exam-card";
 import { SearchInput } from "@/components/search-input";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
@@ -106,6 +106,9 @@ export function HomeExamBrowser({
   cbtAvailableIds,
   myRoundCounts,
   loggedIn,
+  totalCount,
+  totalDownloads,
+  totalAttempts,
 }: {
   // 배지/제목/소개 문단은 검색어와 무관한 정적 텍스트라 서버에서 그대로 렌더링해
   // 넘겨받는다 — 검색 인터랙션(SearchInput)과 같은 히어로 섹션 안에
@@ -121,6 +124,9 @@ export function HomeExamBrowser({
   cbtAvailableIds: string[];
   myRoundCounts: Record<string, number>;
   loggedIn: boolean;
+  totalCount: number | null;
+  totalDownloads: number | null;
+  totalAttempts: number | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -288,6 +294,34 @@ export function HomeExamBrowser({
         {heroText}
 
         <SearchInput value={query} onChange={handleQueryChange} />
+
+        {/* 통계 타일은 PC(sm 이상)에만 보여준다. 모바일에서는 첫 화면에 카드
+            목록이 들어오도록 걷어냈고, "총 자료 수"만 소개 문장에 통합돼 있다
+            (page.tsx의 모바일 전용 소개 문단). PC는 검색창(596px)과 같은 폭으로
+            위 소개 문단 줄 끝과 나란히 보이게 한다. */}
+        <div className="mt-4 hidden w-full max-w-[596px] grid-cols-3 gap-3 text-center sm:grid">
+          <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <FileStack size={20} className="text-blue-500" />
+            <span className="whitespace-nowrap text-sm font-medium text-zinc-600 dark:text-zinc-400">
+              총 자료 수
+            </span>
+            <strong className="text-lg tabular-nums">{totalCount ?? 0}건</strong>
+          </div>
+          <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <Download size={20} className="text-blue-500" />
+            <span className="whitespace-nowrap text-sm font-medium text-zinc-600 dark:text-zinc-400">
+              누적 다운로드
+            </span>
+            <strong className="text-lg tabular-nums">{totalDownloads ?? 0}회</strong>
+          </div>
+          <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <Users size={20} className="text-blue-500" />
+            <span className="whitespace-nowrap text-sm font-medium text-zinc-600 dark:text-zinc-400">
+              실시간 총 응시 수
+            </span>
+            <strong className="text-lg tabular-nums">{totalAttempts ?? 0}건</strong>
+          </div>
+        </div>
 
         <button
           type="button"
