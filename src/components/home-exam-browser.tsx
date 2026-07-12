@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect, useDeferredValue, useRef, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { FileStack, Download, Users, Star } from "lucide-react";
+import { Star } from "lucide-react";
 import { ExamCard } from "@/components/exam-card";
 import { SearchInput } from "@/components/search-input";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
@@ -106,12 +106,9 @@ export function HomeExamBrowser({
   cbtAvailableIds,
   myRoundCounts,
   loggedIn,
-  totalCount,
-  totalDownloads,
-  totalAttempts,
 }: {
   // 배지/제목/소개 문단은 검색어와 무관한 정적 텍스트라 서버에서 그대로 렌더링해
-  // 넘겨받는다 — 검색 인터랙션(SearchInput·스탯 타일)과 같은 히어로 섹션 안에
+  // 넘겨받는다 — 검색 인터랙션(SearchInput)과 같은 히어로 섹션 안에
   // 나란히 있어야 하는 원래 레이아웃을 유지하기 위한 슬롯이다.
   heroText: ReactNode;
   allPapers: LightPaper[];
@@ -124,9 +121,6 @@ export function HomeExamBrowser({
   cbtAvailableIds: string[];
   myRoundCounts: Record<string, number>;
   loggedIn: boolean;
-  totalCount: number | null;
-  totalDownloads: number | null;
-  totalAttempts: number | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -294,40 +288,6 @@ export function HomeExamBrowser({
         {heroText}
 
         <SearchInput value={query} onChange={handleQueryChange} />
-
-        {/* pill을 flex-wrap으로 늘어놓으면 좁은 화면에서 한 줄에 안 들어가 3줄로
-            쌓여 지저분해져서, 폭과 무관하게 항상 3칸을 유지하는 스탯 타일로 바꿨다.
-            PC(sm 이상)에서는 search-input과 같은 596px로 맞춰 위 소개 문단 줄 끝과
-            나란히 보이게 한다. mt-4는 section의 gap-4에 더해져서, 그리드 위 여백이
-            아래(섹션 간 gap-8)와 같아지도록 맞춘 값이다. */}
-        <div className="mt-4 grid w-full max-w-xs grid-cols-3 gap-1.5 text-center sm:max-w-[596px] sm:gap-3">
-          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3 dark:border-zinc-800">
-            <FileStack size={14} className="text-blue-500 sm:size-5" />
-            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:text-sm dark:text-zinc-400">
-              총 자료 수
-            </span>
-            <strong className="text-sm tabular-nums sm:text-lg">{totalCount ?? 0}건</strong>
-          </div>
-          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3 dark:border-zinc-800">
-            <Download size={14} className="text-blue-500 sm:size-5" />
-            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:text-sm dark:text-zinc-400">
-              누적 다운로드
-            </span>
-            <strong className="text-sm tabular-nums sm:text-lg">{totalDownloads ?? 0}회</strong>
-          </div>
-          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3 dark:border-zinc-800">
-            <Users size={14} className="text-blue-500 sm:size-5" />
-            {/* PC에서는 검색창만큼 폭이 넉넉해져 전체 문구가 한 줄로 들어가지만,
-                모바일 좁은 칸에서는 그대로 두면 줄바꿈되니 짧은 문구를 따로 쓴다. */}
-            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:hidden dark:text-zinc-400">
-              실시간 총 응시수
-            </span>
-            <span className="hidden whitespace-nowrap text-sm font-medium text-zinc-600 sm:inline dark:text-zinc-400">
-              실시간 총 응시 수
-            </span>
-            <strong className="text-sm tabular-nums sm:text-lg">{totalAttempts ?? 0}건</strong>
-          </div>
-        </div>
 
         <button
           type="button"
