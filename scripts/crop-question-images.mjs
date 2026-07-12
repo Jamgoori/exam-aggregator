@@ -308,8 +308,39 @@ const STRIP_DESCENT_PAD = 4;
 async function finalizeQuestionImage(rawPng, scale) {
   const pad = Math.round(8 * scale);
   try {
+    // 세로(위/아래) 여백만 걷어내고 원본 칼럼 폭은 그대로 둔다. 좌우까지 trim하면
+    // 선택지가 짧은 문항("① 라이신 …")이 좁게 잘려, 프런트가 이미지를 컨테이너
+    // 폭(w-full)에 맞춰 늘릴 때 넓은 문항보다 크게 확대돼 글씨 크기가 문항마다
+    // 들쭉날쭉해진다(실측: 2026 지방직 9급 공업화학 8번이 폭 516px로 같은 문제지
+    // 다른 문항 ~1050px의 절반 → 표시 글씨 약 2배). 한 문제지 안에서 폭을 칼럼
+    // 폭으로 통일해 표시 배율을 맞춘다.
+    const { data, info } = await sharp(rawPng)
+      .greyscale()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const { width, height } = info;
+    let top = -1;
+    let bottom = -1;
+    for (let y = 0; y < height; y++) {
+      const rowStart = y * width;
+      let hasInk = false;
+      for (let x = 0; x < width; x++) {
+        if (data[rowStart + x] < 245) {
+          hasInk = true;
+          break;
+        }
+      }
+      if (hasInk) {
+        if (top === -1) top = y;
+        bottom = y;
+      }
+    }
+    if (top === -1) {
+      // 내용이 거의 없어 잉크 행을 못 찾으면 원본을 그대로 쓴다.
+      return await sharp(rawPng).webp({ lossless: true }).toBuffer();
+    }
     return await sharp(rawPng)
-      .trim({ background: "#ffffff", threshold: 10 })
+      .extract({ left: 0, top, width, height: bottom - top + 1 })
       .extend({ top: pad, bottom: pad, left: pad, right: pad, background: "#ffffff" })
       .webp({ lossless: true })
       .toBuffer();
