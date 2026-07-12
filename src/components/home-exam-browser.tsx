@@ -62,7 +62,7 @@ function PageButtons({
         onMouseDown={keepFocus}
         onClick={() => onNavigate(Math.max(1, prevBlockPage))}
         disabled={prevBlockPage < 1}
-        className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600 disabled:pointer-events-none disabled:opacity-40"
+        className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600 disabled:pointer-events-none disabled:opacity-40 dark:border-zinc-800 dark:text-zinc-500 dark:hover:border-blue-700 dark:hover:text-blue-400"
       >
         ‹
       </button>
@@ -75,7 +75,7 @@ function PageButtons({
           className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium ${
             p === currentPage
               ? "bg-blue-600 text-white"
-              : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
+              : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
           }`}
         >
           {p}
@@ -86,7 +86,7 @@ function PageButtons({
         onMouseDown={keepFocus}
         onClick={() => onNavigate(Math.min(totalPages, nextBlockPage))}
         disabled={nextBlockPage > totalPages}
-        className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600 disabled:pointer-events-none disabled:opacity-40"
+        className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600 disabled:pointer-events-none disabled:opacity-40 dark:border-zinc-800 dark:text-zinc-500 dark:hover:border-blue-700 dark:hover:text-blue-400"
       >
         ›
       </button>
@@ -301,28 +301,28 @@ export function HomeExamBrowser({
             나란히 보이게 한다. mt-4는 section의 gap-4에 더해져서, 그리드 위 여백이
             아래(섹션 간 gap-8)와 같아지도록 맞춘 값이다. */}
         <div className="mt-4 grid w-full max-w-xs grid-cols-3 gap-1.5 text-center sm:max-w-[596px] sm:gap-3">
-          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3">
+          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3 dark:border-zinc-800">
             <FileStack size={14} className="text-blue-500 sm:size-5" />
-            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:text-sm">
+            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:text-sm dark:text-zinc-400">
               총 자료 수
             </span>
             <strong className="text-sm tabular-nums sm:text-lg">{totalCount ?? 0}건</strong>
           </div>
-          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3">
+          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3 dark:border-zinc-800">
             <Download size={14} className="text-blue-500 sm:size-5" />
-            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:text-sm">
+            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:text-sm dark:text-zinc-400">
               누적 다운로드
             </span>
             <strong className="text-sm tabular-nums sm:text-lg">{totalDownloads ?? 0}회</strong>
           </div>
-          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3">
+          <div className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl border border-zinc-200 px-1.5 py-2 sm:gap-1 sm:rounded-2xl sm:border-2 sm:px-4 sm:py-3 dark:border-zinc-800">
             <Users size={14} className="text-blue-500 sm:size-5" />
             {/* PC에서는 검색창만큼 폭이 넉넉해져 전체 문구가 한 줄로 들어가지만,
                 모바일 좁은 칸에서는 그대로 두면 줄바꿈되니 짧은 문구를 따로 쓴다. */}
-            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:hidden">
+            <span className="whitespace-nowrap text-[11px] font-medium text-zinc-600 sm:hidden dark:text-zinc-400">
               실시간 총 응시수
             </span>
-            <span className="hidden whitespace-nowrap text-sm font-medium text-zinc-600 sm:inline">
+            <span className="hidden whitespace-nowrap text-sm font-medium text-zinc-600 sm:inline dark:text-zinc-400">
               실시간 총 응시 수
             </span>
             <strong className="text-sm tabular-nums sm:text-lg">{totalAttempts ?? 0}건</strong>
@@ -336,8 +336,8 @@ export function HomeExamBrowser({
           title={loggedIn ? undefined : "로그인 후 이용할 수 있어요"}
           className={`mt-2 flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium ${
             effectiveFavOnly
-              ? "border border-amber-300 bg-amber-50 text-amber-600"
-              : "border border-zinc-200 text-zinc-600 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600"
+              ? "border border-amber-300 bg-amber-50 text-amber-600 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400"
+              : "border border-zinc-200 text-zinc-600 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-amber-800 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
           }`}
         >
           <Star size={14} fill={effectiveFavOnly ? "currentColor" : "none"} />
@@ -352,8 +352,8 @@ export function HomeExamBrowser({
             onClick={() => handleLevelChange(undefined)}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               !level
-                ? "bg-zinc-800 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                ? "bg-zinc-800 text-white dark:bg-zinc-700"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
@@ -366,7 +366,7 @@ export function HomeExamBrowser({
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 level === lv
                   ? levelColor(lv)
-                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
               }`}
             >
               {lv}
@@ -380,12 +380,12 @@ export function HomeExamBrowser({
           loggedIn={loggedIn}
         />
 
-        <p className="text-sm text-zinc-500">총 {filtered.length}개의 자료</p>
+        <p className="text-sm text-zinc-500 dark:text-zinc-500">총 {filtered.length}개의 자료</p>
 
         {groupedByYear ? (
           <div className="flex flex-col gap-8">
             {filtered.length === 0 && (
-              <p className="py-12 text-center text-zinc-500">
+              <p className="py-12 text-center text-zinc-500 dark:text-zinc-500">
                 {bookmarkedSubjectSet.size === 0
                   ? "아직 즐겨찾기한 과목이 없어요. 과목 옆의 별 아이콘을 눌러 추가해보세요."
                   : "조건에 맞는 기출문제가 없습니다."}
@@ -396,7 +396,7 @@ export function HomeExamBrowser({
                 <h2 className="text-lg font-bold">{year}년</h2>
                 {[...bySubject.entries()].map(([subjectName, papers]) => (
                   <div key={subjectName} className="flex flex-col gap-3">
-                    <h3 className="text-sm font-semibold text-zinc-500">
+                    <h3 className="text-sm font-semibold text-zinc-500 dark:text-zinc-500">
                       {subjectName}
                     </h3>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -431,7 +431,7 @@ export function HomeExamBrowser({
               />
             ))}
             {visiblePapers.length === 0 && (
-              <p className="col-span-full py-12 text-center text-zinc-500">
+              <p className="col-span-full py-12 text-center text-zinc-500 dark:text-zinc-500">
                 조건에 맞는 기출문제가 없습니다.
               </p>
             )}

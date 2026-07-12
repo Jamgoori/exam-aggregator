@@ -127,24 +127,24 @@ export default async function MyPage({
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-12">
       <div>
-        <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600">
+        <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">
           ← 홈으로
         </Link>
         <h1 className="mt-2 text-3xl font-semibold">{nickname}님의 마이페이지</h1>
-        <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500">
-          <Link href="/mypage/edit" className="text-blue-600 hover:underline">
+        <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-500">
+          <Link href="/mypage/edit" className="text-blue-600 hover:underline dark:text-blue-400">
             내 정보 수정
           </Link>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
-          <span className="text-xs text-zinc-500">CBT 응시</span>
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <span className="text-xs text-zinc-500 dark:text-zinc-500">CBT 응시</span>
           <span className="text-xl font-semibold">{myAttempts.length}</span>
         </div>
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
-          <span className="text-xs text-zinc-500">연속 학습</span>
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <span className="text-xs text-zinc-500 dark:text-zinc-500">연속 학습</span>
           <div className="flex items-baseline gap-1.5">
             <span className="text-xl font-semibold">{streakDays}일</span>
             {tier && (
@@ -156,10 +156,10 @@ export default async function MyPage({
             )}
           </div>
         </div>
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
-          <span className="text-xs text-zinc-500">남은 오답</span>
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <span className="text-xs text-zinc-500 dark:text-zinc-500">남은 오답</span>
           <span
-            className={`text-xl font-semibold ${totalUnresolved > 0 ? "text-red-600" : "text-emerald-600"}`}
+            className={`text-xl font-semibold ${totalUnresolved > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}
           >
             {totalUnresolved}문제
           </span>
@@ -204,7 +204,7 @@ function BookmarksTab({
         즐겨찾기한 문제 ({papers.length})
       </h2>
       {papers.length === 0 ? (
-        <p className="py-12 text-center text-sm text-zinc-500">
+        <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-500">
           아직 즐겨찾기한 문제가 없어요. 문제 상세 페이지에서 북마크 아이콘을
           눌러보세요.
         </p>
@@ -242,12 +242,12 @@ function HistoryTab({
         내 시험 기록 ({attempts.length})
       </h2>
       {attempts.length === 0 ? (
-        <p className="py-12 text-center text-sm text-zinc-500">
+        <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-500">
           아직 CBT로 풀어본 문제가 없어요. 문제 상세 페이지에서 온라인 풀기를
           눌러보세요.
         </p>
       ) : (
-        <div className="flex flex-col divide-y divide-zinc-100">
+        <div className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
           {attempts.map((a) => {
             const pct =
               a.total_questions > 0
@@ -258,17 +258,17 @@ function HistoryTab({
               <Link
                 key={a.id}
                 href={`/mypage/attempts/${a.id}`}
-                className="group flex flex-col gap-1 py-4 transition-colors hover:bg-zinc-50 sm:flex-row sm:items-center sm:justify-between"
+                className="group flex flex-col gap-1 py-4 transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex flex-col gap-0.5">
                   {a.exam_papers ? (
-                    <span className="text-sm font-medium group-hover:text-blue-600">
+                    <span className="text-sm font-medium group-hover:text-blue-600 dark:group-hover:text-blue-400">
                       {a.exam_papers.title}
                     </span>
                   ) : (
-                    <span className="text-sm text-zinc-400">삭제된 문제</span>
+                    <span className="text-sm text-zinc-400 dark:text-zinc-600">삭제된 문제</span>
                   )}
-                  <span className="text-xs text-zinc-400">
+                  <span className="text-xs text-zinc-400 dark:text-zinc-600">
                     {new Date(a.created_at).toLocaleDateString("ko-KR")}
                     {a.duration_seconds != null &&
                       ` · ${formatDuration(a.duration_seconds)}`}
@@ -276,22 +276,22 @@ function HistoryTab({
                 </div>
                 <div className="flex items-center gap-2 text-sm">
                   {roundNumberByAttemptId.has(a.id) && (
-                    <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">
+                    <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500">
                       {roundNumberByAttemptId.get(a.id)}회독
                     </span>
                   )}
                   <span className="font-semibold">
                     {a.score}/{a.total_questions}
                   </span>
-                  <span className="text-xs text-zinc-400">({pct}점)</span>
+                  <span className="text-xs text-zinc-400 dark:text-zinc-600">({pct}점)</span>
                   <span
-                    className={`text-xs font-medium ${wrongCount > 0 ? "text-red-600" : "text-emerald-600"}`}
+                    className={`text-xs font-medium ${wrongCount > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}
                   >
                     오답 {wrongCount}
                   </span>
                   <ChevronRight
                     size={15}
-                    className="text-zinc-300 group-hover:text-blue-600"
+                    className="text-zinc-300 group-hover:text-blue-600 dark:text-zinc-700 dark:group-hover:text-blue-400"
                   />
                 </div>
               </Link>
@@ -309,35 +309,35 @@ function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
   return (
     <section className="flex flex-col gap-4">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
-        <BookOpenCheck size={18} className="text-blue-600" />
+        <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
         오답노트
       </h2>
       {groups.length === 0 ? (
-        <p className="py-12 text-center text-sm text-zinc-500">
+        <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-500">
           아직 모인 오답이 없어요. CBT로 문제를 풀면 틀린 문제가 과목별로
           자동으로 정리돼요.
         </p>
       ) : (
         <>
-          <p className="text-xs text-zinc-400">
+          <p className="text-xs text-zinc-400 dark:text-zinc-600">
             틀린 문제를 과목별로 모아뒀어요. 가장 최근 응시에서 다시 맞힌 문제는
             &ldquo;극복&rdquo;으로 표시돼요.
           </p>
           <div className="flex flex-col gap-4">
             {groups.map((g) => (
-              <div key={g.subject.id} className="rounded-xl border border-zinc-200 p-4">
+              <div key={g.subject.id} className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
                 <div className="flex flex-wrap items-center gap-2">
                   <span
                     className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(g.subject.slug)}`}
                   >
                     {g.subject.name}
                   </span>
-                  <span className="text-sm text-zinc-500">
-                    <span className="font-medium text-red-600">오답 {g.unresolvedCount}</span>
+                  <span className="text-sm text-zinc-500 dark:text-zinc-500">
+                    <span className="font-medium text-red-600 dark:text-red-400">오답 {g.unresolvedCount}</span>
                     {g.resolvedCount > 0 && (
                       <>
                         {" · "}
-                        <span className="font-medium text-emerald-600">
+                        <span className="font-medium text-emerald-600 dark:text-emerald-400">
                           극복 {g.resolvedCount}
                         </span>
                       </>
@@ -345,35 +345,35 @@ function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
                   </span>
                   <Link
                     href={`/mypage/wrong-notes/${g.subject.slug}`}
-                    className="ml-auto text-sm font-medium text-blue-600 hover:underline"
+                    className="ml-auto text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
                   >
                     모아보기 →
                   </Link>
                 </div>
-                <div className="mt-2 flex flex-col divide-y divide-zinc-100">
+                <div className="mt-2 flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
                   {g.papers.map((p) => (
                     <Link
                       key={p.paper.id}
                       href={`/mypage/wrong-notes/${g.subject.slug}#paper-${p.paper.id}`}
                       className="group flex items-center gap-2 py-2.5"
                     >
-                      <span className="truncate text-sm group-hover:text-blue-600">
+                      <span className="truncate text-sm group-hover:text-blue-600 dark:group-hover:text-blue-400">
                         {p.paper.title}
                       </span>
                       <span className="ml-auto flex shrink-0 items-center gap-2 text-xs">
                         <span
-                          className={`font-medium ${p.unresolvedCount > 0 ? "text-red-600" : "text-zinc-400"}`}
+                          className={`font-medium ${p.unresolvedCount > 0 ? "text-red-600 dark:text-red-400" : "text-zinc-400 dark:text-zinc-600"}`}
                         >
                           오답 {p.unresolvedCount}
                         </span>
                         {p.resolvedCount > 0 && (
-                          <span className="font-medium text-emerald-600">
+                          <span className="font-medium text-emerald-600 dark:text-emerald-400">
                             극복 {p.resolvedCount}
                           </span>
                         )}
                         <ChevronRight
                           size={14}
-                          className="text-zinc-300 group-hover:text-blue-600"
+                          className="text-zinc-300 group-hover:text-blue-600 dark:text-zinc-700 dark:group-hover:text-blue-400"
                         />
                       </span>
                     </Link>

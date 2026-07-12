@@ -6,12 +6,12 @@ function Block({ className = "" }: { className?: string }) {
 
 function QuestionCardSkeleton() {
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-200">
-      <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-2.5">
+    <div className="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-800/50">
         <Block className="h-4 w-12" />
       </div>
       <Block className="h-48 w-full rounded-none" />
-      <div className="flex items-center gap-1.5 border-t border-zinc-100 px-4 py-3">
+      <div className="flex items-center gap-1.5 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
         {Array.from({ length: 4 }, (_, i) => (
           <Block key={i} className="h-9 w-9 rounded-full" />
         ))}

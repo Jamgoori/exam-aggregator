@@ -53,7 +53,7 @@ export default async function AttemptWrongNotePage({
       <div className="flex flex-col gap-3">
         <Link
           href="/mypage?tab=history"
-          className="text-sm text-zinc-500 hover:text-blue-600"
+          className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400"
         >
           ← 내 시험 기록으로
         </Link>
@@ -78,22 +78,22 @@ export default async function AttemptWrongNotePage({
               {paper.subjects.name}
             </span>
           )}
-          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">
+          <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500">
             {attempt.round}회독
           </span>
         </div>
 
         {paper ? (
           <h1 className="text-2xl font-semibold leading-snug">
-            <Link href={`/papers/${paper.id}`} className="hover:text-blue-600">
+            <Link href={`/papers/${paper.id}`} className="hover:text-blue-600 dark:hover:text-blue-400">
               {paper.title}
             </Link>
           </h1>
         ) : (
-          <h1 className="text-2xl font-semibold text-zinc-400">삭제된 문제지</h1>
+          <h1 className="text-2xl font-semibold text-zinc-400 dark:text-zinc-600">삭제된 문제지</h1>
         )}
 
-        <span className="text-sm text-zinc-500">
+        <span className="text-sm text-zinc-500 dark:text-zinc-500">
           {new Date(attempt.createdAt).toLocaleDateString("ko-KR")} 응시
           {attempt.durationSeconds != null &&
             ` · ${formatDuration(attempt.durationSeconds)}`}
@@ -101,19 +101,19 @@ export default async function AttemptWrongNotePage({
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
-          <span className="text-xs text-zinc-500">점수</span>
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <span className="text-xs text-zinc-500 dark:text-zinc-500">점수</span>
           <div className="flex items-baseline gap-1.5">
             <span className="text-xl font-semibold">{pct}점</span>
-            <span className="text-xs text-zinc-400">
+            <span className="text-xs text-zinc-400 dark:text-zinc-600">
               {attempt.score}/{attempt.totalQuestions}
             </span>
           </div>
         </div>
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3">
-          <span className="text-xs text-zinc-500">오답</span>
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <span className="text-xs text-zinc-500 dark:text-zinc-500">오답</span>
           <span
-            className={`text-xl font-semibold ${questions.length > 0 ? "text-red-600" : "text-emerald-600"}`}
+            className={`text-xl font-semibold ${questions.length > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}
           >
             {questions.length}문제
           </span>
@@ -121,10 +121,10 @@ export default async function AttemptWrongNotePage({
       </div>
 
       {questions.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-zinc-200 py-16 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-zinc-200 py-16 text-center dark:border-zinc-800">
           <PartyPopper size={32} className="text-amber-500" />
           <p className="font-semibold">이 회차는 모두 맞혔어요!</p>
-          <p className="text-sm text-zinc-500">복습할 오답이 없어요. 다음 회차도 파이팅!</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-500">복습할 오답이 없어요. 다음 회차도 파이팅!</p>
         </div>
       ) : (
         <section className="flex flex-col gap-4">
@@ -155,7 +155,7 @@ export default async function AttemptWrongNotePage({
           </Link>
           <Link
             href={`/papers/${paper.id}`}
-            className="flex flex-1 items-center justify-center rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+            className="flex flex-1 items-center justify-center rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
           >
             문제지 상세
           </Link>

@@ -133,12 +133,12 @@ export function SingleQuestionView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2">
+      <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-900">
         <div>
-          <span className="text-sm font-bold text-zinc-800">
+          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
             {firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`}
           </span>
-          <span className="text-sm text-zinc-400"> / {totalQuestions}</span>
+          <span className="text-sm text-zinc-400 dark:text-zinc-600"> / {totalQuestions}</span>
         </div>
         {/* 문제별 풀기 도중에도 언제든 전체 채점할 수 있도록 상단에 제출 버튼을 둔다. */}
         {!submitted && (
@@ -146,7 +146,7 @@ export function SingleQuestionView({
             type="button"
             onClick={onSubmit}
             disabled={submitting}
-            className="absolute right-3 rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+            className="absolute right-3 rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
           >
             {submitting ? "채점 중..." : `제출 (${answeredCount}/${totalQuestions})`}
           </button>
@@ -155,14 +155,14 @@ export function SingleQuestionView({
 
       <div
         ref={scrollAreaRef}
-        className="min-h-0 flex-1 overflow-y-auto bg-zinc-100 px-4 py-4"
+        className="min-h-0 flex-1 overflow-y-auto bg-zinc-100 px-4 py-4 dark:bg-zinc-800"
       >
         <div
           ref={contentRef}
-          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white"
+          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
         >
           {images.length === 0 ? (
-            <p className="pt-24 text-center text-sm text-zinc-400">
+            <p className="pt-24 text-center text-sm text-zinc-400 dark:text-zinc-600">
               아직 이 문제의 이미지가 등록되지 않았어요.
             </p>
           ) : (
@@ -184,9 +184,9 @@ export function SingleQuestionView({
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-zinc-200 bg-white px-3 py-3">
+      <div className="shrink-0 border-t border-zinc-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-zinc-900">
         {error && (
-          <p className="mx-auto mb-2 max-w-2xl text-center text-xs text-red-600">
+          <p className="mx-auto mb-2 max-w-2xl text-center text-xs text-red-600 dark:text-red-400">
             {error}
           </p>
         )}
@@ -196,7 +196,7 @@ export function SingleQuestionView({
             aria-label="이전 문제"
             disabled={prevIndex === null}
             onClick={() => prevIndex !== null && onNavigate(prevIndex)}
-            className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+            className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800"
           >
             <ChevronLeft size={22} />
           </button>
@@ -209,7 +209,7 @@ export function SingleQuestionView({
               return (
                 <div key={q.number} className="flex items-center justify-center gap-2">
                   {questions.length > 1 && (
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white dark:bg-zinc-700">
                       {q.number}
                     </span>
                   )}
@@ -233,7 +233,7 @@ export function SingleQuestionView({
                                 ? "bg-red-500 text-white"
                                 : isSelected
                                   ? "bg-blue-600 text-white"
-                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+                                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
                           } disabled:cursor-default`}
                         >
                           {choice}
@@ -254,7 +254,7 @@ export function SingleQuestionView({
               aria-label="제출하고 채점"
               disabled={submitting}
               onClick={onSubmit}
-              className="flex shrink-0 items-center justify-center rounded-full bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+              className="flex shrink-0 items-center justify-center rounded-full bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
             >
               <Check size={22} />
             </button>
@@ -264,7 +264,7 @@ export function SingleQuestionView({
               aria-label="다음 문제"
               disabled={nextIndex === null}
               onClick={() => nextIndex !== null && onNavigate(nextIndex)}
-              className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+              className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800"
             >
               <ChevronRight size={22} />
             </button>

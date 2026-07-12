@@ -53,7 +53,7 @@ export function NicknameField({
 
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor="nickname" className="text-sm text-zinc-600">
+      <label htmlFor="nickname" className="text-sm text-zinc-600 dark:text-zinc-400">
         닉네임
       </label>
       <input
@@ -68,14 +68,14 @@ export function NicknameField({
         required
         minLength={NICKNAME_MIN}
         maxLength={NICKNAME_MAX}
-        className="rounded border border-zinc-300 px-3 py-2"
+        className="rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700"
       />
       <div className="mt-1 flex gap-2">
         <button
           type="button"
           onClick={handleCheck}
           disabled={isPending || !value}
-          className="flex-1 rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50"
+          className="flex-1 rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
         >
           중복확인
         </button>
@@ -90,11 +90,11 @@ export function NicknameField({
           </button>
         )}
       </div>
-      <p className="mt-1 text-xs text-zinc-400">
+      <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
         {NICKNAME_MIN}~{NICKNAME_MAX}자로 입력해주세요.
       </p>
       {message && (
-        <p className={`text-sm ${status === "bad" ? "text-red-600" : "text-green-600"}`}>
+        <p className={`text-sm ${status === "bad" ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>
           {message}
         </p>
       )}

@@ -21,7 +21,7 @@ export function AnswerForm({
       <input type="hidden" name="paper_id" value={paperId} />
 
       <div className="flex flex-col gap-1">
-        <label htmlFor="answers" className="text-sm text-zinc-600">
+        <label htmlFor="answers" className="text-sm text-zinc-600 dark:text-zinc-400">
           정답 (1번부터 순서대로, 쉼표나 공백으로 구분)
         </label>
         <textarea
@@ -31,19 +31,19 @@ export function AnswerForm({
           rows={4}
           defaultValue={initialAnswers}
           placeholder="2, 4, 1, 3, 5, ..."
-          className="rounded border border-zinc-300 px-3 py-2 font-mono"
+          className="rounded border border-zinc-300 px-3 py-2 font-mono dark:border-zinc-700"
         />
         {questionCount && (
-          <p className="text-xs text-zinc-400">
+          <p className="text-xs text-zinc-400 dark:text-zinc-500">
             문항 수 {questionCount}개 — 순서대로 {questionCount}개를 입력해주세요.
             5번 정답이 있으면 CBT 화면에 자동으로 5지선다로 표시돼요.
           </p>
         )}
       </div>
 
-      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p className="text-sm text-red-600 dark:text-red-400">{state.error}</p>}
       {state?.success && (
-        <p className="text-sm text-green-600">저장되었습니다.</p>
+        <p className="text-sm text-green-600 dark:text-green-400">저장되었습니다.</p>
       )}
 
       <button

@@ -154,7 +154,7 @@ export default async function SubjectPage({
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-12">
       <div>
-        <Link href="/" className="text-sm text-zinc-500 underline">
+        <Link href="/" className="text-sm text-zinc-500 underline dark:text-zinc-500">
           ← 홈으로
         </Link>
         <div className="mt-2 flex items-center gap-2">
@@ -174,7 +174,7 @@ export default async function SubjectPage({
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               !level
                 ? "bg-zinc-800 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
@@ -186,7 +186,7 @@ export default async function SubjectPage({
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 level === lv
                   ? levelColor(lv)
-                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
               }`}
             >
               {lv}
@@ -205,7 +205,7 @@ export default async function SubjectPage({
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               selectedExamTypeIds.size === 0
                 ? "bg-zinc-800 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
@@ -223,7 +223,7 @@ export default async function SubjectPage({
                 className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                   isSelected
                     ? examTypeTabColor(et.name)
-                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400"
+                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
                 }`}
               >
                 {et.name}
@@ -235,7 +235,7 @@ export default async function SubjectPage({
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filteredPapers.length === 0 && (
-          <p className="col-span-full py-12 text-center text-zinc-500">
+          <p className="col-span-full py-12 text-center text-zinc-500 dark:text-zinc-500">
             {(levelRows ?? []).length === 0
               ? "아직 업로드된 기출문제가 없습니다."
               : "조건에 맞는 기출문제가 없습니다."}

@@ -70,7 +70,7 @@ export default async function PaperExplanationsPage({
     return (
       <div className="mx-auto flex max-w-lg flex-col items-center gap-4 px-4 py-24 text-center">
         <h1 className="text-xl font-semibold">아직 해설이 등록되지 않은 문제지예요</h1>
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-zinc-500 dark:text-zinc-500">
           해설이 준비되면 이곳에서 문항별 해설을 볼 수 있어요.
         </p>
         <Link
@@ -103,7 +103,7 @@ export default async function PaperExplanationsPage({
       <div className="flex flex-col gap-3">
         <Link
           href={`/papers/${paper.id}`}
-          className="text-sm text-zinc-500 hover:text-blue-600 print:hidden"
+          className="text-sm text-zinc-500 hover:text-blue-600 print:hidden dark:text-zinc-500 dark:hover:text-blue-400"
         >
           ← 문제지로
         </Link>
@@ -132,9 +132,9 @@ export default async function PaperExplanationsPage({
 
         <h1 className="text-2xl font-semibold leading-snug">{paper.title} 해설</h1>
 
-        <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-500">
+        <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-500 dark:text-zinc-500">
           <span>{questions.length}문항 해설</span>
-          <span className="flex items-center gap-1 text-xs text-zinc-500">
+          <span className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-500">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
             정답
           </span>
@@ -146,7 +146,7 @@ export default async function PaperExplanationsPage({
         </div>
 
         {paper.question_count != null && questions.length < paper.question_count && (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
             일부 문항({paper.question_count - questions.length}개)의 해설은 아직 준비
             중이에요.
           </p>
@@ -168,24 +168,24 @@ export default async function PaperExplanationsPage({
       </div>
 
       {!hasFullAccess && hiddenQuestionCount > 0 && (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-6 py-10 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-6 py-10 text-center dark:border-blue-900 dark:bg-blue-950/30">
           {loggedIn ? (
             <>
               {/* 시간당 한도 초과: 로그인은 돼 있으니 로그인 유도 대신 "잠시 후"로만
                   완만하게 안내한다 — 정상 사용자는 이 문구 자체를 볼 일이 없다. */}
-              <Hourglass size={28} className="text-blue-600" />
+              <Hourglass size={28} className="text-blue-600 dark:text-blue-400" />
               <p className="font-semibold">잠시 후 다시 시도해주세요</p>
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-zinc-500 dark:text-zinc-500">
                 요청이 많아 전체 해설 표시가 일시적으로 제한됐어요.
               </p>
             </>
           ) : (
             <>
-              <LockKeyhole size={28} className="text-blue-600" />
+              <LockKeyhole size={28} className="text-blue-600 dark:text-blue-400" />
               <p className="font-semibold">
                 나머지 {hiddenQuestionCount}문항 해설은 로그인하면 볼 수 있어요
               </p>
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-zinc-500 dark:text-zinc-500">
                 무료로 가입하고 전체 해설과 오답노트까지 이용해보세요.
               </p>
               <Link
@@ -209,7 +209,7 @@ export default async function PaperExplanationsPage({
         </Link>
         <Link
           href={`/papers/${paper.id}`}
-          className="flex flex-1 items-center justify-center rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+          className="flex flex-1 items-center justify-center rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
         >
           문제지로
         </Link>

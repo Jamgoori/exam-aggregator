@@ -45,13 +45,13 @@ export default async function AnswersListPage({
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">CBT 정답 입력</h1>
         <form action={logout}>
-          <button type="submit" className="text-sm text-zinc-500 underline">
+          <button type="submit" className="text-sm text-zinc-500 underline dark:text-zinc-500">
             로그아웃
           </button>
         </form>
       </div>
 
-      <Link href="/admin/upload" className="text-sm text-blue-600 underline">
+      <Link href="/admin/upload" className="text-sm text-blue-600 underline dark:text-blue-400">
         ← 문제 업로드로 돌아가기
       </Link>
 
@@ -60,37 +60,37 @@ export default async function AnswersListPage({
           name="q"
           defaultValue={q}
           placeholder="제목으로 검색"
-          className="flex-1 rounded border border-zinc-300 px-3 py-2"
+          className="flex-1 rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700"
         />
         <button
           type="submit"
-          className="rounded border border-zinc-300 px-4 py-2 text-sm"
+          className="rounded border border-zinc-300 px-4 py-2 text-sm dark:border-zinc-700"
         >
           검색
         </button>
       </form>
 
-      <div className="flex flex-col divide-y divide-zinc-100 rounded border border-zinc-200">
+      <div className="flex flex-col divide-y divide-zinc-100 rounded border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
         {(papers ?? []).length === 0 && (
-          <p className="p-4 text-sm text-zinc-500">문제지가 없습니다.</p>
+          <p className="p-4 text-sm text-zinc-500 dark:text-zinc-500">문제지가 없습니다.</p>
         )}
         {(papers ?? []).map((p) => (
           <Link
             key={p.id}
             href={`/admin/answers/${p.id}`}
-            className="flex items-center justify-between gap-4 p-4 hover:bg-zinc-50"
+            className="flex items-center justify-between gap-4 p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
           >
             <div>
               <p className="font-medium">{p.title}</p>
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-zinc-500 dark:text-zinc-500">
                 {p.year}년{p.question_count ? ` · ${p.question_count}문항` : ""}
               </p>
             </div>
             <span
               className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
                 answeredSet.has(p.id)
-                  ? "bg-emerald-50 text-emerald-600"
-                  : "bg-zinc-100 text-zinc-500"
+                  ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400"
+                  : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500"
               }`}
             >
               {answeredSet.has(p.id) ? "입력됨" : "미입력"}

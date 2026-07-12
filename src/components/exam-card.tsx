@@ -38,8 +38,8 @@ export function ExamCard({
 
   const className = `relative flex flex-col gap-3 rounded-xl border p-4 transition-colors ${
     isCurrent
-      ? "border-2 border-blue-500 bg-blue-50/50"
-      : "border-zinc-200 hover:border-blue-300 hover:shadow-sm"
+      ? "border-2 border-blue-500 bg-blue-50/50 dark:bg-blue-950/20"
+      : "border-zinc-200 hover:border-blue-300 hover:shadow-sm dark:border-zinc-800 dark:hover:border-blue-700"
   }`;
 
   return (
@@ -116,20 +116,20 @@ export function ExamCard({
       <p className="font-medium leading-snug">{paper.title}</p>
 
       {!isCurrent && (
-        <div className="mt-auto flex items-center border-t border-zinc-100 pt-3 text-xs">
+        <div className="mt-auto flex items-center border-t border-zinc-100 pt-3 text-xs dark:border-zinc-800">
           {hasCbtAnswers && (
             // 카드 전체 링크(상세페이지)와 다른 목적지로 가야 해서 z-10으로 그
             // 위에서 따로 클릭되게 한다. "자세히 보기"는 목적지가 같으므로
             // 그대로 아래 카드 전체 링크에 맡긴다.
             <Link
               href={`/papers/${paper.id}/cbt`}
-              className="relative z-10 flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 font-medium text-blue-700 hover:bg-blue-100"
+              className="relative z-10 flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"
             >
               <Monitor size={12} />
               바로 풀기
             </Link>
           )}
-          <span className="ml-auto flex items-center gap-1 font-medium text-blue-600">
+          <span className="ml-auto flex items-center gap-1 font-medium text-blue-600 dark:text-blue-400">
             자세히 보기
             <ChevronRight size={14} />
           </span>

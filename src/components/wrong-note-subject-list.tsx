@@ -59,7 +59,7 @@ export function WrongNoteSubjectList({ papers }: { papers: WrongNoteListPaper[] 
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               filter === f.key
                 ? "bg-blue-600 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600"
+                : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
             }`}
           >
             {f.label}
@@ -68,7 +68,7 @@ export function WrongNoteSubjectList({ papers }: { papers: WrongNoteListPaper[] 
       </div>
 
       {visiblePapers.length === 0 ? (
-        <p className="py-12 text-center text-sm text-zinc-500">
+        <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-500">
           아직 틀리는 문제가 없어요. 모든 오답을 극복했어요! 🎉
         </p>
       ) : (
@@ -88,17 +88,17 @@ export function WrongNoteSubjectList({ papers }: { papers: WrongNoteListPaper[] 
               )}
               <Link
                 href={`/papers/${p.paperId}`}
-                className="font-medium leading-snug hover:text-blue-600"
+                className="font-medium leading-snug hover:text-blue-600 dark:hover:text-blue-400"
               >
                 {p.title}
               </Link>
-              <span className="text-xs text-zinc-400">
+              <span className="text-xs text-zinc-400 dark:text-zinc-600">
                 {p.attemptCount}회 응시 · 오답 {p.unresolvedCount}
                 {p.resolvedCount > 0 && ` · 극복 ${p.resolvedCount}`}
               </span>
               <Link
                 href={`/papers/${p.paperId}/cbt`}
-                className="ml-auto flex shrink-0 items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                className="ml-auto flex shrink-0 items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"
               >
                 <Monitor size={12} />
                 다시 풀기

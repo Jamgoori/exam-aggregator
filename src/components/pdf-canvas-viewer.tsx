@@ -433,10 +433,10 @@ export function PdfCanvasViewer({
       // 다시 clientWidth 변화로 이어지는 무한 루프(전체보기 "깜빡이며 무한 로딩")가 됐다.
       // 공간을 차지하는 클래식 스크롤바(대부분의 Windows Chrome)에서만 나던 문제다.
       style={{ scrollbarGutter: "stable" }}
-      className="relative h-full w-full overflow-auto bg-zinc-200"
+      className="relative h-full w-full overflow-auto bg-zinc-200 dark:bg-zinc-800"
     >
       {loading && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-gradient-to-b from-blue-50 via-white to-white">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-5 bg-gradient-to-b from-blue-50 via-white to-white dark:from-blue-950/30 dark:via-zinc-900 dark:to-zinc-900">
           <div className="relative flex h-16 w-16 items-center justify-center">
             <span className="absolute h-16 w-16 animate-ping rounded-full bg-blue-400/30" />
             <span className="relative flex h-14 w-14 animate-loading-float items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/30">
@@ -445,17 +445,17 @@ export function PdfCanvasViewer({
           </div>
           <p
             key={messageIndex}
-            className="animate-loading-fade-in px-4 text-center text-sm font-medium text-zinc-600"
+            className="animate-loading-fade-in px-4 text-center text-sm font-medium text-zinc-600 dark:text-zinc-400"
           >
             {LOADING_MESSAGES[messageIndex]}
           </p>
-          <div className="h-1.5 w-36 overflow-hidden rounded-full bg-blue-100">
+          <div className="h-1.5 w-36 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950/40">
             <div className="h-full w-1/3 animate-loading-bar rounded-full bg-blue-600" />
           </div>
         </div>
       )}
       {error && (
-        <p className="whitespace-pre-wrap p-4 text-center text-sm text-red-600">
+        <p className="whitespace-pre-wrap p-4 text-center text-sm text-red-600 dark:text-red-400">
           {error}
         </p>
       )}

@@ -42,7 +42,7 @@ export function EditRow({
         onChange={(e) => setContent(e.target.value)}
         maxLength={COMMENT_CONTENT_MAX}
         rows={3}
-        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm"
+        className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700"
       />
       <div className="flex flex-wrap items-center gap-2">
         {requiresPassword && (
@@ -51,7 +51,7 @@ export function EditRow({
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="비밀번호"
-            className="rounded border border-zinc-300 px-2 py-1 text-sm"
+            className="rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700"
           />
         )}
         <button
@@ -65,11 +65,11 @@ export function EditRow({
         <button
           type="button"
           onClick={onCancel}
-          className="text-sm text-zinc-500"
+          className="text-sm text-zinc-500 dark:text-zinc-500"
         >
           취소
         </button>
-        {error && <p className="w-full text-sm text-red-600">{error}</p>}
+        {error && <p className="w-full text-sm text-red-600 dark:text-red-400">{error}</p>}
       </div>
     </div>
   );

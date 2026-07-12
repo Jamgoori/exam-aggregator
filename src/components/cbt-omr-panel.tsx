@@ -33,8 +33,8 @@ export function OmrPanel({
 
   return (
     <div className={className}>
-      <div className="shrink-0 border-b border-zinc-100 px-4 py-2">
-        <p className="text-sm text-zinc-500">
+      <div className="shrink-0 border-b border-zinc-100 px-4 py-2 dark:border-zinc-800">
+        <p className="text-sm text-zinc-500 dark:text-zinc-500">
           {answeredCount}/{totalQuestions} 문항 표기
         </p>
       </div>
@@ -51,12 +51,12 @@ export function OmrPanel({
                 className={`flex items-center gap-2 rounded-lg border px-2 py-1 ${
                   graded
                     ? questionResult?.is_correct
-                      ? "border-emerald-200 bg-emerald-50"
-                      : "border-red-200 bg-red-50"
-                    : "border-zinc-200"
+                      ? "border-emerald-200 bg-emerald-50 dark:border-emerald-800/60 dark:bg-emerald-950/30"
+                      : "border-red-200 bg-red-50 dark:border-red-800/60 dark:bg-red-950/30"
+                    : "border-zinc-200 dark:border-zinc-800"
                 }`}
               >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white dark:bg-zinc-700">
                   {questionNumber}
                 </span>
                 <div className="flex flex-1 gap-1">
@@ -70,8 +70,8 @@ export function OmrPanel({
                         className={`flex h-6 flex-1 items-center justify-center rounded text-xs font-medium ${
                           selected === choice
                             ? "bg-blue-600 text-white"
-                            : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
-                        } disabled:cursor-default disabled:hover:bg-zinc-100`}
+                            : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                        } disabled:cursor-default disabled:hover:bg-zinc-100 dark:disabled:hover:bg-zinc-800`}
                       >
                         {choice}
                       </button>
@@ -84,13 +84,13 @@ export function OmrPanel({
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-zinc-100 px-4 py-3">
-        {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      <div className="shrink-0 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+        {error && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
         <button
           type="button"
           onClick={onSubmit}
           disabled={submitting || graded}
-          className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+          className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
         >
           {graded ? "채점 완료" : submitting ? "채점 중..." : "제출하고 채점하기"}
         </button>

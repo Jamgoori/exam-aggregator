@@ -46,7 +46,16 @@ export default async function RootLayout({
     : null;
 
   return (
-    <html lang="ko" className="h-full antialiased">
+    <html lang="ko" className="h-full antialiased" suppressHydrationWarning>
+      <head>
+        {/* data-theme를 첫 페인트 전에 동기적으로 세팅해서 라이트→다크 깜빡임을 없앤다.
+            저장된 값이 없으면 시스템 설정을 기본값으로 쓴다. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark"){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}document.documentElement.setAttribute("data-theme",t)}catch(e){}})()`,
+          }}
+        />
+      </head>
       <body className="min-h-full">
         <SiteHeaderGate user={headerUser} />
         {children}
