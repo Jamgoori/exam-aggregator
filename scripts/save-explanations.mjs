@@ -11,10 +11,15 @@
 //     "correct_choice_number": 4,
 //     "correct_choice_summary": "정답 선지 한 줄 요약",
 //     "choice_explanations": [
-//       { "number": 1, "verdict_label": "맞는 설명", "explanation": "..." },
+//       // 법령 선지는 current_status("유효"|"개정됨"|"확인불가")와, 개정됨일 때 현행 내용 current_note가 더 붙는다.
+//       { "number": 1, "verdict_label": "맞는 설명", "explanation": "...", "current_status": "유효" },
+//       { "number": 2, "verdict_label": "틀린 설명", "explanation": "당시 기준 판정...", "current_status": "개정됨", "current_note": "현행법상 ...% 입니다(당시 11%)." },
 //       ...
 //     ],
-//     "law_amendment_note": "2024년 O월부로 OO법 제O조가 이렇게 개정됨. 확실하지 않으면 이 필드는 아예 생략(null).",
+//     // 아래 3개는 법령 문항에서만 채운다(비법령 문항이면 전부 생략/null).
+//     "current_answer_status": "동일",   // "동일" | "정답변경" | "성립불가"
+//     "current_answer_note": null,        // 정답변경/성립불가 사유 한두 줄
+//     "law_basis_date": "2026-07",        // 참조한 "현행"의 기준 시점
 //     "model_version": "claude-opus-4-8"
 //   },
 //   ...
@@ -88,6 +93,9 @@ async function main() {
         correct_choice_summary: item.correct_choice_summary,
         choice_explanations: item.choice_explanations,
         law_amendment_note: item.law_amendment_note ?? null,
+        current_answer_status: item.current_answer_status ?? null,
+        current_answer_note: item.current_answer_note ?? null,
+        law_basis_date: item.law_basis_date ?? null,
         verified: verified === true,
         model_version: item.model_version,
       },

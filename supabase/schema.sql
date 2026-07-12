@@ -815,6 +815,24 @@ create table if not exists question_explanations (
   created_at timestamptz not null default now()
 );
 
+-- 법령 문항 해설의 "현행법 기준" 확장 컬럼 (전부 nullable — 기존 행/기존 렌더링과 호환).
+-- 원칙: correct_choice_number는 언제나 출제 당시 공식 정답 그대로 두고(채점·verify와
+-- 정합), "지금 법으로는 어떻게 되는가"는 아래 컬럼으로 분리해서 담는다. 두 시점을
+-- 섞지 않는 게 이 확장의 핵심 — 정답 검증 파이프라인은 손대지 않는다.
+--   current_answer_status: 개정이 이 문항 정답에 미치는 영향
+--     '동일'     = 현행법으로도 정답 번호가 그대로
+--     '정답변경' = 현행법 기준으로는 다른 선지가 정답이 됨 (화면 상단 경고 배지 대상)
+--     '성립불가' = 근거 조문 폐지/전면개정으로 현행 기준 문제가 성립하지 않음
+--     null       = 법령 문항이 아니거나 판단 보류 (비법령 문항은 항상 null)
+--   current_answer_note: 정답변경/성립불가일 때 그 이유 한두 줄 (동일이면 보통 null)
+--   law_basis_date: 이 해설이 참조한 "현행"의 기준 시점(예: "2026-07"). "현행법"은
+--     시간이 지나면 낡으므로, 나중에 개정 발생 시 이 값으로 재생성 대상을 골라낸다.
+-- 선지별 개정 정보(current_status/current_note)는 choice_explanations jsonb 안에
+-- 항목별로 함께 담기므로 별도 컬럼이 없다(스키마 변경 불필요).
+alter table question_explanations add column if not exists current_answer_status text;
+alter table question_explanations add column if not exists current_answer_note text;
+alter table question_explanations add column if not exists law_basis_date text;
+
 create index if not exists question_explanations_question_idx on question_explanations(question_id);
 
 alter table question_explanations enable row level security;
@@ -834,6 +852,38 @@ create policy "admin update question_explanations" on question_explanations
 drop policy if exists "admin delete question_explanations" on question_explanations;
 create policy "admin delete question_explanations" on question_explanations
   for delete to authenticated using (is_admin());
+
+-- 법령 다이제스트(선택적 근거 캐시). 법령·조문 단위로 "현행 규정 요약 + 주요 개정
+-- 연혁"을 실제 확인된 것만 쌓아두는 테이블. 해설 생성 시 이 요약을 프롬프트에
+-- 주입하면 (1) 같은 법을 문항마다 다르게 말하는 비일관성이 사라지고 (2) 다이제스트
+-- 한 건만 사람이 검수하면 그 법의 모든 해설이 검증되며 (3) 재개정 시 다이제스트만
+-- 갱신하면 참조 문항을 일괄 재생성할 수 있다. 비어 있어도 무방하다 — 그 경우
+-- 해설 생성기는 확실한 것만 쓰고 불확실하면 '확인불가'로 남긴다(지어내지 않는다).
+-- 지금 당장 채우지 않아도 되며, 파일럿 과목부터 점진적으로 채우는 것을 전제로 둔다.
+create table if not exists law_digests (
+  id uuid primary key default gen_random_uuid(),
+  law_name text not null,             -- 예: "지방세법"
+  article text,                       -- 예: "제71조" (법 전체 요약이면 null)
+  current_summary text not null,      -- 현행 규정 요약 (사람이 검수한 사실만)
+  amendment_history text,             -- 주요 개정 연혁 (연도·내용)
+  source_url text,                    -- 근거 출처(국가법령정보센터 등)
+  basis_date text,                    -- 이 요약이 확인된 기준 시점(예: "2026-07")
+  verified_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists law_digests_law_name_idx on law_digests(law_name);
+
+alter table law_digests enable row level security;
+
+drop policy if exists "admin read law_digests" on law_digests;
+create policy "admin read law_digests" on law_digests
+  for select to authenticated using (is_admin());
+
+drop policy if exists "admin write law_digests" on law_digests;
+create policy "admin write law_digests" on law_digests
+  for all to authenticated using (is_admin()) with check (is_admin());
 
 -- 해설 열람/다운로드 대량 수집 방지용 요청 로그. 로그인 사용자별로 최근 1시간
 -- 이내 행 수를 세어 시간당 한도(explanation-rate-limit.ts)를 넘으면 그 요청은

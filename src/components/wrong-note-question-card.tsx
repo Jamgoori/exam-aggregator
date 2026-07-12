@@ -5,14 +5,24 @@ import { ChevronRight } from "lucide-react";
 // 목록) 어느 쪽에서든 그대로 가져다 쓸 수 있다.
 
 // 해설 제작 루틴이 만드는 구조화된 해설 한 건. question_explanations 테이블의
-// 컬럼(keyword_*, choice_explanations, correct_choice_summary, law_amendment_note)을
-// 화면용으로 정규화한 형태다. 모든 필드가 선택적이라 있는 것만 그린다.
+// 컬럼을 화면용으로 정규화한 형태다. 모든 필드가 선택적이라 있는 것만 그린다.
+// 법령 문항은 "출제 당시 정답"은 그대로 두고, "지금 법으로는 어떤가"를 현행 필드로
+// 분리해 담는다 — choiceExplanations의 currentStatus/currentNote(선지별)와
+// currentAnswerStatus/currentAnswerNote(문항 전체), lawBasisDate(현행 기준 시점).
 export type QuestionExplanationContent = {
   keywordTitle: string | null;
   keywordExplanation: string | null;
-  choiceExplanations: { choice: number; text: string }[];
+  choiceExplanations: {
+    choice: number;
+    text: string;
+    currentStatus: string | null; // "유효" | "개정됨" | "확인불가"
+    currentNote: string | null; // "개정됨"일 때 현행 내용 한 줄
+  }[];
   correctChoiceSummary: string | null;
   lawAmendmentNote: string | null;
+  currentAnswerStatus: string | null; // "동일" | "정답변경" | "성립불가"
+  currentAnswerNote: string | null; // "정답변경"/"성립불가" 사유
+  lawBasisDate: string | null; // 참조한 "현행"의 기준 시점 (예: "2026-07")
 };
 
 // 카드 하나에 들어가는 답 줄. 세트문제(공통지문)는 이미지 한 벌에 답 줄이 여러 개 붙는다.
@@ -196,8 +206,11 @@ export function WrongNoteQuestionCard({
 
 const CIRCLED_DIGITS = ["", "①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧"];
 
-// 구조화된 해설 본문: 정답 요약 → 핵심 개념 → 선지별 해설 → 개정 참고 순서로,
-// 채워진 항목만 그린다. 정답 선지의 해설 줄은 정답 원과 같은 에메랄드로 강조한다.
+// 구조화된 해설 본문: (개정 경고 배너) → 정답 요약 → 핵심 개념 → 선지별 해설
+// → 개정 참고 → 현행 기준 시점 순서로, 채워진 항목만 그린다. 정답 선지의 해설
+// 줄은 정답 원과 같은 에메랄드로 강조한다. 법령 문항은 "당시 정답"은 그대로 두고
+// "지금 법으로는" 정보를 별도 톤으로 얹는다 — 수험생이 폐기된 규정을 그대로
+// 외우지 않도록 현행 내용을 눈에 띄게 보여주는 게 핵심이다.
 function ExplanationBody({
   explanation,
   correctChoice,
@@ -205,8 +218,26 @@ function ExplanationBody({
   explanation: QuestionExplanationContent;
   correctChoice: number | null;
 }) {
+  // 개정으로 현행 기준 정답이 흔들리는 문항이 수험생에게 가장 위험하다 —
+  // 그래서 이 배너를 카드 맨 위에 크게 띄운다.
+  const answerChanged =
+    explanation.currentAnswerStatus === "정답변경" ||
+    explanation.currentAnswerStatus === "성립불가";
+
   return (
     <div className="mt-2 flex flex-col gap-3 rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300">
+      {answerChanged && (
+        <div className="rounded-md border border-amber-300 bg-amber-100 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300">
+          <p className="font-bold">
+            ⚠️ {explanation.currentAnswerStatus === "성립불가" ? "현행법상 성립하지 않는 문항" : "개정 주의 — 현행 기준 정답이 다릅니다"}
+          </p>
+          <p className="mt-1 whitespace-pre-wrap">
+            아래 정답·해설은 <strong>출제 당시 공식 정답</strong> 기준입니다.
+            {explanation.currentAnswerNote ? ` ${explanation.currentAnswerNote}` : ""}
+          </p>
+        </div>
+      )}
+
       {explanation.correctChoiceSummary && (
         <p className="whitespace-pre-wrap">
           <span className="mr-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
@@ -233,16 +264,28 @@ function ExplanationBody({
           <p className="text-xs font-semibold text-zinc-400 dark:text-zinc-600">선지별 해설</p>
           <div className="mt-1 flex flex-col gap-1.5">
             {explanation.choiceExplanations.map((c) => (
-              <p key={c.choice} className="whitespace-pre-wrap">
-                <span
-                  className={`mr-1 font-semibold ${
-                    c.choice === correctChoice ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400 dark:text-zinc-600"
-                  }`}
-                >
-                  {CIRCLED_DIGITS[c.choice] ?? `${c.choice}.`}
-                </span>
-                {c.text}
-              </p>
+              <div key={c.choice}>
+                <p className="whitespace-pre-wrap">
+                  <span
+                    className={`mr-1 font-semibold ${
+                      c.choice === correctChoice ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-400 dark:text-zinc-600"
+                    }`}
+                  >
+                    {CIRCLED_DIGITS[c.choice] ?? `${c.choice}.`}
+                  </span>
+                  {c.currentStatus === "개정됨" && (
+                    <span className="mr-1 rounded bg-amber-100 px-1 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+                      개정
+                    </span>
+                  )}
+                  {c.text}
+                </p>
+                {c.currentNote && (
+                  <p className="mt-1 ml-5 whitespace-pre-wrap rounded bg-amber-50 px-2 py-1.5 text-xs text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+                    <span className="font-semibold">현행</span> {c.currentNote}
+                  </p>
+                )}
+              </div>
             ))}
           </div>
         </div>
@@ -251,6 +294,12 @@ function ExplanationBody({
       {explanation.lawAmendmentNote && (
         <p className="whitespace-pre-wrap rounded bg-amber-50 px-2.5 py-2 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
           개정 참고: {explanation.lawAmendmentNote}
+        </p>
+      )}
+
+      {explanation.lawBasisDate && (
+        <p className="text-[11px] text-zinc-400 dark:text-zinc-600">
+          현행법 기준: {explanation.lawBasisDate}
         </p>
       )}
     </div>

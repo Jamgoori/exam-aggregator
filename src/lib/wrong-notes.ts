@@ -312,10 +312,17 @@ function parseChoiceNumber(raw: unknown, fallback: number): number {
 
 // choice_explanations는 해설 제작 루틴이 jsonb로 저장한다. 배열([문자열] 또는
 // [{choice, explanation}]) / 객체({"1": "..."} 또는 {"①": "..."}) 어느 형태로
-// 들어와도 화면용 {choice, text} 목록으로 정규화한다.
-function normalizeChoiceExplanations(
-  raw: unknown,
-): { choice: number; text: string }[] {
+// 들어와도 화면용 목록으로 정규화한다. 법령 문항 선지는 항목에 current_status
+// ("유효"/"개정됨"/"확인불가")와 current_note(개정됨일 때 현행 내용)가 더 붙는데,
+// 있을 때만 실어 보낸다(없으면 null — 화면이 있는 것만 그린다).
+type NormalizedChoice = {
+  choice: number;
+  text: string;
+  currentStatus: string | null;
+  currentNote: string | null;
+};
+
+function normalizeChoiceExplanations(raw: unknown): NormalizedChoice[] {
   if (!raw) return [];
 
   const textOf = (v: unknown): string => {
@@ -327,20 +334,26 @@ function normalizeChoiceExplanations(
     }
     return "";
   };
+  const strOrNull = (v: unknown): string | null =>
+    typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
 
-  let entries: { choice: number; text: string }[] = [];
+  let entries: NormalizedChoice[] = [];
   if (Array.isArray(raw)) {
     entries = raw.map((item, i) => {
       const o = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
       return {
         choice: parseChoiceNumber(o.choice ?? o.number ?? o.choice_number, i + 1),
         text: textOf(item),
+        currentStatus: strOrNull(o.current_status),
+        currentNote: strOrNull(o.current_note),
       };
     });
   } else if (typeof raw === "object") {
     entries = Object.entries(raw as Record<string, unknown>).map(([key, v], i) => ({
       choice: parseChoiceNumber(key, i + 1),
       text: textOf(v),
+      currentStatus: null,
+      currentNote: null,
     }));
   }
 
@@ -355,6 +368,9 @@ type ExplanationRow = {
   choice_explanations: unknown;
   correct_choice_summary: string | null;
   law_amendment_note: string | null;
+  current_answer_status: string | null;
+  current_answer_note: string | null;
+  law_basis_date: string | null;
 };
 
 function toExplanationContent(row: ExplanationRow): QuestionExplanationContent | null {
@@ -364,13 +380,17 @@ function toExplanationContent(row: ExplanationRow): QuestionExplanationContent |
     choiceExplanations: normalizeChoiceExplanations(row.choice_explanations),
     correctChoiceSummary: row.correct_choice_summary?.trim() || null,
     lawAmendmentNote: row.law_amendment_note?.trim() || null,
+    currentAnswerStatus: row.current_answer_status?.trim() || null,
+    currentAnswerNote: row.current_answer_note?.trim() || null,
+    lawBasisDate: row.law_basis_date?.trim() || null,
   };
   const empty =
     !content.keywordTitle &&
     !content.keywordExplanation &&
     content.choiceExplanations.length === 0 &&
     !content.correctChoiceSummary &&
-    !content.lawAmendmentNote;
+    !content.lawAmendmentNote &&
+    !content.currentAnswerNote;
   return empty ? null : content;
 }
 
@@ -391,7 +411,7 @@ async function fetchExplanations(
       const { data } = await admin
         .from("question_explanations")
         .select(
-          "id, created_at, keyword_title, keyword_explanation, choice_explanations, correct_choice_summary, law_amendment_note, questions!inner(paper_id, question_number)",
+          "id, created_at, keyword_title, keyword_explanation, choice_explanations, correct_choice_summary, law_amendment_note, current_answer_status, current_answer_note, law_basis_date, questions!inner(paper_id, question_number)",
         )
         .in("questions.paper_id", ids)
         .order("created_at", { ascending: true })
