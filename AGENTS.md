@@ -67,13 +67,22 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
   다시 손볼 일이 있으면 이 봇 계정의 쓰기 권한이 안 깨지는지 반드시 확인할 것
   (한 번 스키마 변경으로 조용히 깨진 전적이 있음).
 - **`question_explanations_question_uidx` unique 인덱스**: `question_id`에 걸려
-  있어 같은 문항에 해설이 두 번 저장되는 걸 DB 레벨에서 막는다. 저장 스크립트는
-  upsert가 아니라 순수 INSERT라, 이 제약에 걸리면 그 저장 시도가 실패로 잡힌다 —
-  정상적인 중복 방지 동작인지 실제 버그인지 구분해서 볼 것.
-- **제외 과목**: 러시아어, 불어, 수학, 중국어, 스페인어, 독어, 과학, 일어는 해설이
-  필요 없다고 판단해 `next-explanation-chunk.mjs`의 청크 선택 쿼리에서 아예
-  제외하도록 필터가 들어가 있다. 이 스크립트를 다시 고칠 일이 있으면 이 제외
-  필터가 그대로 유지되는지 확인할 것.
+  있다. `save-explanations.mjs`는 순수 INSERT가 아니라
+  `.upsert(..., { onConflict: "question_id" })`를 쓰는데, PostgREST의 upsert가
+  `ON CONFLICT (question_id)`를 실행하려면 그 컬럼에 매칭되는 unique/exclusion
+  제약이 반드시 있어야 한다 — 이 인덱스가 그 전제조건이다. 지웠다간 저장 자체가
+  안 되거나 중복 저장이 다시 가능해지니 절대 손대지 말 것.
+- **제외 과목**: `next-explanation-chunk.mjs`는 `explanation_excluded_subjects`
+  테이블을 매 실행(청크 하나 요청할 때마다 새 프로세스로 뜸)마다 조회해서, 거기
+  등록된 subject_id를 가진 문제지는 통째로 건너뛴다. **스크립트에 과목을
+  하드코딩하는 방식이 아니다** — 제외할 과목을 바꾸고 싶으면 이 테이블에
+  INSERT/DELETE만 하면 되고, 스크립트 수정이나 Storage 재업로드는 전혀 필요 없다
+  (심지어 지금 돌고 있는 세션의 다음 청크 요청부터 바로 반영된다). 러시아어,
+  불어, 수학, 중국어, 스페인어, 독어, 과학, 일어의 subject_id가 이 테이블에
+  등록돼 있다. 이걸 스크립트 쪽 필터로 착각해서 `next-explanation-chunk.mjs`를
+  고치려 하다가 애먼 Storage 업로드 권한 문제로 여러 세션을 낭비한 전적이 있다
+  (해설봇 계정은 이 스크립트에 대해 읽기 전용이고, Storage에 이 스크립트가 있는
+  `exam-papers` 버킷은 쓰기 정책이 0개라 서비스 롤 없이는 애초에 못 쓴다).
 - **Batch API 전환 검토 이력**: 남은 물량이 많아 속도를 올리고 싶다면 Anthropic
   Batch API로 전환하는 방법도 검토했었다 — 품질은 동일(같은 Opus 모델), 5시간
   세션 한도와 무관하게 병렬로 처리돼 훨씬 빠르지만, Max 구독 한도가 아니라
