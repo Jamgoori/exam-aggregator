@@ -1,0 +1,46 @@
+// 문제지 오답노트는 회독 기록과 문항 이미지·해설까지 붙여오느라 첫 로딩이 느릴 수
+// 있어서, 실제 페이지와 같은 뼈대(헤더 → 회독 스트립 → 문제 카드)를 미리 깔아둔다.
+function Block({ className = "" }: { className?: string }) {
+  return <div className={`skeleton rounded-lg ${className}`} />;
+}
+
+function QuestionCardSkeleton() {
+  return (
+    <div className="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800">
+      <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-800/50">
+        <Block className="h-4 w-12" />
+      </div>
+      <Block className="h-48 w-full rounded-none" />
+      <div className="flex items-center gap-1.5 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+        {Array.from({ length: 4 }, (_, i) => (
+          <Block key={i} className="h-9 w-9 rounded-full" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function PaperWrongNoteLoading() {
+  return (
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-12">
+      <div className="flex flex-col gap-3">
+        <Block className="h-4 w-32" />
+        <div className="flex gap-2">
+          <Block className="h-5 w-16 rounded" />
+          <Block className="h-5 w-10 rounded" />
+        </div>
+        <Block className="h-8 w-64" />
+        <Block className="h-4 w-full max-w-md" />
+      </div>
+      <div className="flex gap-2">
+        <Block className="h-8 w-28 rounded-full" />
+        <Block className="h-8 w-36 rounded-full" />
+        <Block className="h-8 w-36 rounded-full" />
+      </div>
+      <div className="flex flex-col gap-4">
+        <QuestionCardSkeleton />
+        <QuestionCardSkeleton />
+      </div>
+    </div>
+  );
+}
