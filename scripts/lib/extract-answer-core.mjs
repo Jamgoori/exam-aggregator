@@ -48,6 +48,47 @@ function buildPrompt(subjectNames) {
 - 정답 값은 1~${MAX_CHOICE_COUNT} 사이 숫자여야 해.`;
 }
 
+// 실제 채점에 그대로 쓰이는 값이라, 1차 추출을 그대로 믿지 않고 같은 PDF를 다시 보여주며
+// 한 번 더 대조·검증시킨다. 정답표는 표 형태라 숫자 하나를 옆 칸으로 잘못 읽는 실수가
+// 나올 수 있어, 독립된 2차 호출로 대조하는 편이 같은 프롬프트를 재확인시키는 것보다 낫다.
+const VERIFY_SCHEMA = {
+  type: "object",
+  properties: {
+    subjects: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          subject_name: { type: "string" },
+          answers: {
+            type: "array",
+            items: { type: "integer" },
+            description: "PDF와 다시 대조해 확정한 정답 번호(1차 결과가 맞으면 그대로 반환)",
+          },
+          voided_questions: { type: "array", items: { type: "integer" } },
+          corrected: {
+            type: "boolean",
+            description: "1차 결과의 answers 또는 voided_questions를 하나라도 고쳤으면 true",
+          },
+        },
+        required: ["subject_name", "answers", "voided_questions", "corrected"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["subjects"],
+  additionalProperties: false,
+};
+
+function buildVerifyPrompt(firstPass) {
+  return `첨부된 PDF는 공무원 시험 정답표야. 아래는 이 PDF에서 1차로 추출한 과목별 정답이야.
+PDF 원본을 한 문제씩 다시 대조해서 틀린 게 있으면 고쳐줘. 표에서 칸을 잘못 읽었거나
+과목/문제 번호가 밀린 곳이 없는지 특히 주의해서 봐줘. 틀린 게 없으면 그대로 반환해도 돼.
+
+1차 추출 결과:
+${JSON.stringify(firstPass, null, 2)}`;
+}
+
 // supabase는 service_role 클라이언트여야 한다(paper_answers는 authenticated+admin에만 쓰기 허용).
 export async function extractAndSaveAnswers({ supabase, anthropicApiKey, answerKey }) {
   const anthropic = new Anthropic({ apiKey: anthropicApiKey });
@@ -102,11 +143,46 @@ export async function extractAndSaveAnswers({ supabase, anthropicApiKey, answerK
     throw new Error("Claude 응답에서 결과를 찾을 수 없습니다.");
   }
 
-  const { subjects: extracted } = JSON.parse(textBlock.text);
+  const { subjects: firstPass } = JSON.parse(textBlock.text);
+
+  // 2차 검증: 같은 PDF를 다시 첨부해 1차 결과를 대조·수정시킨다.
+  const verifyResponse = await anthropic.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 8192,
+    output_config: { format: { type: "json_schema", schema: VERIFY_SCHEMA } },
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "document",
+            source: {
+              type: "base64",
+              media_type: "application/pdf",
+              data: base64Pdf,
+            },
+          },
+          { type: "text", text: buildVerifyPrompt(firstPass) },
+        ],
+      },
+    ],
+  });
+
+  if (verifyResponse.stop_reason === "refusal") {
+    throw new Error("Claude가 검증을 거부했습니다.");
+  }
+
+  const verifyTextBlock = verifyResponse.content.find((b) => b.type === "text");
+  if (!verifyTextBlock) {
+    throw new Error("Claude 검증 응답에서 결과를 찾을 수 없습니다.");
+  }
+
+  const { subjects: extracted } = JSON.parse(verifyTextBlock.text);
 
   let updated = 0;
   const skipped = [];
   const updatedPapers = [];
+  const corrected = extracted.filter((item) => item.corrected).map((item) => item.subject_name);
 
   for (const item of extracted) {
     const subjectId = subjectByName.get(item.subject_name);
@@ -179,5 +255,5 @@ export async function extractAndSaveAnswers({ supabase, anthropicApiKey, answerK
     }
   }
 
-  return { updated, skipped, updatedPapers };
+  return { updated, skipped, updatedPapers, corrected };
 }

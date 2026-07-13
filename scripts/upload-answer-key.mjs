@@ -188,12 +188,15 @@ async function main() {
 
     if (anthropicApiKey) {
       try {
-        const { updated, skipped: extractSkipped } = await extractAndSaveAnswers({
+        const { updated, skipped: extractSkipped, corrected } = await extractAndSaveAnswers({
           supabase,
           anthropicApiKey,
           answerKey: answerKeyRow,
         });
         console.log(`  -> 정답 자동 반영: ${updated}개 문제지`);
+        if (corrected.length > 0) {
+          console.log(`     2차 검증에서 수정된 과목: ${corrected.join(", ")}`);
+        }
         extractSkipped.forEach((s) => console.log(`     건너뜀: ${s}`));
       } catch (err) {
         console.error(`  -> 정답 자동 반영 실패: ${err.message}`);

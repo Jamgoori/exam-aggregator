@@ -78,13 +78,16 @@ async function main() {
   for (const [i, answerKey] of pending.entries()) {
     console.log(`[${i + 1}/${pending.length}] ${answerKey.file_name} 처리 중...`);
     try {
-      const { updated, skipped } = await extractAndSaveAnswers({
+      const { updated, skipped, corrected } = await extractAndSaveAnswers({
         supabase,
         anthropicApiKey,
         answerKey,
       });
       totalUpdated += updated;
       console.log(`  -> ${updated}개 문제지 저장`);
+      if (corrected.length > 0) {
+        console.log(`     2차 검증에서 수정된 과목: ${corrected.join(", ")}`);
+      }
       skipped.forEach((s) => console.log(`     건너뜀: ${s}`));
     } catch (err) {
       failures.push(`${answerKey.file_name} (${answerKey.id}): ${err.message}`);

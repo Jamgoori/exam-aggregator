@@ -63,7 +63,7 @@ async function main() {
 
   console.log(`Claude에게 정답표 분석 요청 중... (${answerKey.file_name})`);
 
-  const { updated, skipped, updatedPapers } = await extractAndSaveAnswers({
+  const { updated, skipped, updatedPapers, corrected } = await extractAndSaveAnswers({
     supabase,
     anthropicApiKey,
     answerKey,
@@ -74,6 +74,9 @@ async function main() {
   }
 
   console.log(`\n총 ${updated}개 문제지 정답 저장 완료.`);
+  if (corrected.length > 0) {
+    console.log(`2차 검증에서 수정된 과목 (${corrected.length}개): ${corrected.join(", ")}`);
+  }
   if (skipped.length > 0) {
     console.log(`건너뜀 (${skipped.length}개):`);
     skipped.forEach((s) => console.log(`  - ${s}`));
