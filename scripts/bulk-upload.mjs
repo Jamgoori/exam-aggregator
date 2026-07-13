@@ -6,12 +6,18 @@
 // --track은 같은 연도/급수를 공유하는 특수모집 분야(예: 근로감독 및 산업안전분야)를 일반 채용과
 // 구분하기 위한 값으로, 생략하면 null(일반 채용)로 저장된다.
 // 성공한 파일은 uploads/incoming/_done/{year}-{type}(-{level})/ 로 이동된다.
+//
+// 업로드가 끝나면, 같은 (시험종류+연도+급수+회차+분야) 조합의 정답표(answer_keys)가 이미
+// 등록돼 있는지 확인해서 있으면 정답 추출도 바로 이어서 실행한다(ANTHROPIC_API_KEY가 없거나
+// 아직 정답표가 없으면 업로드만 하고 건너뛴다 — 정답표가 나중에 upload-answer로 올라오면
+// 그때 그 스크립트가 알아서 이 문제지들의 정답을 채운다).
 
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { optimizePdf } from "./lib/optimize-pdf.mjs";
+import { extractAndSaveAnswers } from "./lib/extract-answer-core.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -176,6 +182,43 @@ async function main() {
   if (skipped.length > 0) {
     console.log(`건너뜀 (${skipped.length}개):`);
     skipped.forEach((s) => console.log(`  - ${s}`));
+  }
+
+  if (uploaded === 0) return;
+
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  if (!anthropicApiKey) {
+    console.log("\nANTHROPIC_API_KEY가 없어 정답 자동 반영은 건너뜁니다.");
+    return;
+  }
+
+  let answerKeyQuery = supabase
+    .from("answer_keys")
+    .select("*")
+    .eq("exam_type_id", examType.id)
+    .eq("year", year)
+    .eq("round", round);
+  answerKeyQuery = level ? answerKeyQuery.eq("level", level) : answerKeyQuery.is("level", null);
+  answerKeyQuery = track ? answerKeyQuery.eq("track", track) : answerKeyQuery.is("track", null);
+
+  const { data: answerKey } = await answerKeyQuery.maybeSingle();
+
+  if (!answerKey) {
+    console.log("\n일치하는 정답표가 아직 없어 정답 자동 반영은 건너뜁니다.");
+    return;
+  }
+
+  console.log(`\n일치하는 정답표를 찾았습니다 (${answerKey.file_name}). 정답 자동 반영 중...`);
+  try {
+    const { updated, skipped: extractSkipped } = await extractAndSaveAnswers({
+      supabase,
+      anthropicApiKey,
+      answerKey,
+    });
+    console.log(`정답 자동 반영 완료: ${updated}개 문제지`);
+    extractSkipped.forEach((s) => console.log(`  건너뜀: ${s}`));
+  } catch (err) {
+    console.error(`정답 자동 반영 실패: ${err.message}`);
   }
 }
 

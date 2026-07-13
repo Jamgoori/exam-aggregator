@@ -11,6 +11,7 @@
     "bulk-upload": "node --env-file=.env.local scripts/bulk-upload.mjs",
     "upload-answer": "node --env-file=.env.local scripts/upload-answer-key.mjs",
     "extract-answers": "node --env-file=.env.local scripts/extract-answer-keys.mjs",
+    "batch-extract-answers": "node --env-file=.env.local scripts/batch-extract-answers.mjs",
     "list-pending-answers": "node --env-file=.env.local scripts/list-pending-answer-keys.mjs",
     "crop-questions": "node --env-file=.env.local scripts/crop-question-images.mjs",
     "batch-crop-questions": "node --env-file=.env.local scripts/batch-crop-questions.mjs",

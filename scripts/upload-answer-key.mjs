@@ -4,12 +4,17 @@
 // 연도/시험종류/급수를 파일명에서 자동으로 추출해 answer_keys 테이블에 업로드한다.
 // 과목별 exam_papers와 달리 (시험종류+연도+급수+회차) 조합당 1개만 저장되며,
 // 이미 있으면 upsert로 덮어쓴다. 성공한 파일은 --dir/_done/answers/ 로 이동된다.
+//
+// 업로드 직후, 이미 등록돼 있는(먼저 업로드된) 과목별 exam_papers 중 이 정답표와
+// 조건이 일치하는 문제지가 있으면 정답 추출도 바로 이어서 실행해 "바로 풀기"가
+// 뜨도록 한다(ANTHROPIC_API_KEY가 없으면 업로드만 하고 건너뛴다).
 
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { optimizePdf } from "./lib/optimize-pdf.mjs";
+import { extractAndSaveAnswers } from "./lib/extract-answer-core.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -51,12 +56,18 @@ async function main() {
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
     console.error(
       ".env.local에 NEXT_PUBLIC_SUPABASE_URL과 SUPABASE_SERVICE_ROLE_KEY가 필요합니다.",
     );
     process.exit(1);
+  }
+  if (!anthropicApiKey) {
+    console.log(
+      "ANTHROPIC_API_KEY가 없어 업로드 후 정답 자동 반영은 건너뜁니다(업로드는 정상 진행).",
+    );
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
@@ -145,7 +156,7 @@ async function main() {
       continue;
     }
 
-    const { error: upsertError } = await supabase
+    const { data: answerKeyRow, error: upsertError } = await supabase
       .from("answer_keys")
       .upsert(
         {
@@ -159,7 +170,9 @@ async function main() {
           file_size: fileBuffer.byteLength,
         },
         { onConflict: "exam_type_id,year,level,round,track" },
-      );
+      )
+      .select()
+      .single();
 
     if (upsertError) {
       await supabase.storage.from("exam-papers").remove([storagePath]);
@@ -172,6 +185,20 @@ async function main() {
     console.log(
       `완료: ${year} ${examType.name}${level ? " " + level : ""}${track ? ` (${track})` : ""} 정답${round > 1 ? ` (${round}회차/추가선발)` : ""}`,
     );
+
+    if (anthropicApiKey) {
+      try {
+        const { updated, skipped: extractSkipped } = await extractAndSaveAnswers({
+          supabase,
+          anthropicApiKey,
+          answerKey: answerKeyRow,
+        });
+        console.log(`  -> 정답 자동 반영: ${updated}개 문제지`);
+        extractSkipped.forEach((s) => console.log(`     건너뜀: ${s}`));
+      } catch (err) {
+        console.error(`  -> 정답 자동 반영 실패: ${err.message}`);
+      }
+    }
   }
 
   console.log(`\n총 ${uploaded}개 업로드 완료.`);
