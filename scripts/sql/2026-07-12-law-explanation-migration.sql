@@ -18,7 +18,7 @@ alter table question_explanations add column if not exists current_answer_status
 alter table question_explanations add column if not exists current_answer_note text;
 alter table question_explanations add column if not exists law_basis_date text;
 
--- 선지별 개정 정보(current_status/current_note)는 choice_explanations jsonb 안에
+-- 선지별 개정 정보(current_status/original_note)는 choice_explanations jsonb 안에
 -- 항목별로 담기므로 컬럼 추가가 필요 없다.
 
 -- 2) 법령 다이제스트(선택적 근거 캐시) ------------------------------------------

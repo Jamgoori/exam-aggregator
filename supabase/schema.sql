@@ -816,9 +816,10 @@ create table if not exists question_explanations (
 );
 
 -- 법령 문항 해설의 "현행법 기준" 확장 컬럼 (전부 nullable — 기존 행/기존 렌더링과 호환).
--- 원칙: correct_choice_number는 언제나 출제 당시 공식 정답 그대로 두고(채점·verify와
--- 정합), "지금 법으로는 어떻게 되는가"는 아래 컬럼으로 분리해서 담는다. 두 시점을
--- 섞지 않는 게 이 확장의 핵심 — 정답 검증 파이프라인은 손대지 않는다.
+-- 원칙: 해설 본문(선지 판정 포함)은 현행법 기준으로 생성하고, correct_choice_number는
+-- 언제나 출제 당시 공식 정답 그대로 둔다(채점·verify와 정합 — 정답 검증 파이프라인은
+-- 손대지 않는다). "출제 당시에는 어땠나"는 선지별 original_note로, 개정이 정답 자체를
+-- 흔드는지는 아래 컬럼으로 담는다.
 --   current_answer_status: 개정이 이 문항 정답에 미치는 영향
 --     '동일'     = 현행법으로도 정답 번호가 그대로
 --     '정답변경' = 현행법 기준으로는 다른 선지가 정답이 됨 (화면 상단 경고 배지 대상)
@@ -827,7 +828,7 @@ create table if not exists question_explanations (
 --   current_answer_note: 정답변경/성립불가일 때 그 이유 한두 줄 (동일이면 보통 null)
 --   law_basis_date: 이 해설이 참조한 "현행"의 기준 시점(예: "2026-07"). "현행법"은
 --     시간이 지나면 낡으므로, 나중에 개정 발생 시 이 값으로 재생성 대상을 골라낸다.
--- 선지별 개정 정보(current_status/current_note)는 choice_explanations jsonb 안에
+-- 선지별 개정 정보(current_status/original_note)는 choice_explanations jsonb 안에
 -- 항목별로 함께 담기므로 별도 컬럼이 없다(스키마 변경 불필요).
 alter table question_explanations add column if not exists current_answer_status text;
 alter table question_explanations add column if not exists current_answer_note text;

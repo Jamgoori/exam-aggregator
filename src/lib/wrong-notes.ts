@@ -313,13 +313,14 @@ function parseChoiceNumber(raw: unknown, fallback: number): number {
 // choice_explanations는 해설 제작 루틴이 jsonb로 저장한다. 배열([문자열] 또는
 // [{choice, explanation}]) / 객체({"1": "..."} 또는 {"①": "..."}) 어느 형태로
 // 들어와도 화면용 목록으로 정규화한다. 법령 문항 선지는 항목에 current_status
-// ("유효"/"개정됨"/"확인불가")와 current_note(개정됨일 때 현행 내용)가 더 붙는데,
-// 있을 때만 실어 보낸다(없으면 null — 화면이 있는 것만 그린다).
+// ("유효"/"개정됨"/"확인불가")와 original_note(개정됨일 때 "출제 당시엔 어땠나"
+// 한 줄)가 더 붙는데, 있을 때만 실어 보낸다(없으면 null — 화면이 있는 것만 그린다).
+// 해설 본문(explanation)은 현행법 기준으로 생성된다 — 프롬프트 참조.
 type NormalizedChoice = {
   choice: number;
   text: string;
   currentStatus: string | null;
-  currentNote: string | null;
+  originalNote: string | null;
 };
 
 function normalizeChoiceExplanations(raw: unknown): NormalizedChoice[] {
@@ -345,7 +346,7 @@ function normalizeChoiceExplanations(raw: unknown): NormalizedChoice[] {
         choice: parseChoiceNumber(o.choice ?? o.number ?? o.choice_number, i + 1),
         text: textOf(item),
         currentStatus: strOrNull(o.current_status),
-        currentNote: strOrNull(o.current_note),
+        originalNote: strOrNull(o.original_note),
       };
     });
   } else if (typeof raw === "object") {
@@ -353,7 +354,7 @@ function normalizeChoiceExplanations(raw: unknown): NormalizedChoice[] {
       choice: parseChoiceNumber(key, i + 1),
       text: textOf(v),
       currentStatus: null,
-      currentNote: null,
+      originalNote: null,
     }));
   }
 

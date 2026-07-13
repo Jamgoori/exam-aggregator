@@ -6,9 +6,11 @@ import { ChevronRight } from "lucide-react";
 
 // 해설 제작 루틴이 만드는 구조화된 해설 한 건. question_explanations 테이블의
 // 컬럼을 화면용으로 정규화한 형태다. 모든 필드가 선택적이라 있는 것만 그린다.
-// 법령 문항은 "출제 당시 정답"은 그대로 두고, "지금 법으로는 어떤가"를 현행 필드로
-// 분리해 담는다 — choiceExplanations의 currentStatus/currentNote(선지별)와
-// currentAnswerStatus/currentAnswerNote(문항 전체), lawBasisDate(현행 기준 시점).
+// 법령 문항의 해설 본문(text)은 현행법 기준으로 생성되고, 정답 번호는 출제 당시
+// 공식 정답을 유지한다. 개정된 선지는 currentStatus="개정됨" + originalNote("출제
+// 당시엔 어땠나" 한 줄)로 표시하고, 개정이 정답 자체를 흔드는 문항은
+// currentAnswerStatus/currentAnswerNote(문항 전체)와 상단 경고 배너로 알린다.
+// lawBasisDate는 이 해설이 참조한 "현행"의 기준 시점.
 export type QuestionExplanationContent = {
   keywordTitle: string | null;
   keywordExplanation: string | null;
@@ -16,7 +18,7 @@ export type QuestionExplanationContent = {
     choice: number;
     text: string;
     currentStatus: string | null; // "유효" | "개정됨" | "확인불가"
-    currentNote: string | null; // "개정됨"일 때 현행 내용 한 줄
+    originalNote: string | null; // "개정됨"일 때 "출제 당시엔 어땠나" 한 줄
   }[];
   correctChoiceSummary: string | null;
   lawAmendmentNote: string | null;
@@ -232,7 +234,8 @@ function ExplanationBody({
             ⚠️ {explanation.currentAnswerStatus === "성립불가" ? "현행법상 성립하지 않는 문항" : "개정 주의 — 현행 기준 정답이 다릅니다"}
           </p>
           <p className="mt-1 whitespace-pre-wrap">
-            아래 정답·해설은 <strong>출제 당시 공식 정답</strong> 기준입니다.
+            표시된 정답 번호는 <strong>출제 당시 공식 정답</strong>이고, 해설은 현행법
+            기준으로 작성되었습니다.
             {explanation.currentAnswerNote ? ` ${explanation.currentAnswerNote}` : ""}
           </p>
         </div>
@@ -280,9 +283,9 @@ function ExplanationBody({
                   )}
                   {c.text}
                 </p>
-                {c.currentNote && (
+                {c.originalNote && (
                   <p className="mt-1 ml-5 whitespace-pre-wrap rounded bg-amber-50 px-2 py-1.5 text-xs text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
-                    <span className="font-semibold">현행</span> {c.currentNote}
+                    <span className="font-semibold">출제 당시</span> {c.originalNote}
                   </p>
                 )}
               </div>

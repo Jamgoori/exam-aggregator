@@ -11,9 +11,10 @@
 //     "correct_choice_number": 4,
 //     "correct_choice_summary": "정답 선지 한 줄 요약",
 //     "choice_explanations": [
-//       // 법령 선지는 current_status("유효"|"개정됨"|"확인불가")와, 개정됨일 때 현행 내용 current_note가 더 붙는다.
-//       { "number": 1, "verdict_label": "맞는 설명", "explanation": "...", "current_status": "유효" },
-//       { "number": 2, "verdict_label": "틀린 설명", "explanation": "당시 기준 판정...", "current_status": "개정됨", "current_note": "현행법상 ...% 입니다(당시 11%)." },
+//       // 법령 선지의 verdict_label/explanation은 현행법 기준으로 쓴다. current_status("유효"|"개정됨"|"확인불가")와,
+//       // 개정됨일 때 출제 당시 기준 한 줄 original_note가 더 붙는다.
+//       { "number": 1, "verdict_label": "맞는 설명", "explanation": "현행법 기준 근거...", "current_status": "유효" },
+//       { "number": 2, "verdict_label": "틀린 설명", "explanation": "현행법 기준으로 왜 틀렸는지...", "current_status": "개정됨", "original_note": "출제 당시에는 11%여서 맞는 설명이었습니다(현행 25.3%)." },
 //       ...
 //     ],
 //     // 아래 3개는 법령 문항에서만 채운다(비법령 문항이면 전부 생략/null).
