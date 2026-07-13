@@ -1,5 +1,11 @@
 # 법령 해설 배포 런북 (2026-07-13)
 
+> **2026-07-13 06:30 UTC 갱신**: 루틴 환경에는 service role 키가 없어 이 런북의
+> 1·3단계를 원격 세션이 수행할 수 없음이 실측 확인됐다 (2단계 미니 검증은 완료 —
+> `2026-07-13-law-deploy-report.md` 참조). 남은 단계는 소유자가 로컬에서
+> `node --env-file=.env.local scripts/deploy-law-explanations.mjs --delete`
+> 한 번으로 실행한다. 아래 본문은 기록용.
+
 계정 소유자가 직접 연 세션에서 이 파일을 읽고 그대로 실행하기 위한 런북이다.
 배경: 법령 문항 해설을 "현행법 기준 본문 + 출제 당시 별도 표기" 방식으로 전환한다.
 전략·파일은 이 브랜치(claude/legal-problem-explanation-update-svoq8h)에 준비돼 있고,

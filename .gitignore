@@ -47,3 +47,6 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+# 해설 백업 JSON (deploy-law-explanations.mjs가 생성 — 해설 본문 포함이라 커밋 금지)
+/backups/
