@@ -39,12 +39,21 @@ This version has breaking changes — APIs, conventions, and file structure may 
 Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설을 자동
 생성한다. 이 루틴이나 관련 스크립트를 건드릴 일이 있으면 아래를 먼저 알아둘 것:
 
-- **스크립트는 이 레포에 없다.** `scripts/next-explanation-chunk.mjs`,
-  `scripts/save-explanations.mjs`, `scripts/explanation-prompt.md`는 git에 커밋된
-  게 아니라 **Supabase Storage**에 있고, 각 루틴 세션이 부팅할 때 그걸 받아온다.
-  레포에 안 보인다고 없는 게 아니다 — 고치려면 루틴 세션(환경
-  `env_011UL7sPM6VGLPJ9nJdKXYut`)을 새로 하나 띄워 Storage 원본을 읽고 수정한
-  뒤 검증(dry 테스트)하고 나서 같은 경로에 다시 업로드해야 반영된다.
+- **스크립트 원본은 Supabase Storage에 있다** — `exam-papers` 버킷의
+  `_batch-scripts/` 폴더. 각 루틴 세션이 부팅할 때 그걸 받아온다. 레포의
+  `scripts/explanation-prompt.md`·`save-explanations.mjs`는 2026-07-13 배포 시점의
+  사본(현재 Storage와 동일)이고, `next-explanation-chunk.mjs` 스냅샷은 **Storage
+  실물보다 오래된 구버전**(explanation_excluded_subjects 제외 로직 누락)이니
+  **절대 Storage에 업로드하지 말 것.**
+- **Storage 교체·DB 정리는 루틴 환경(env_011UL7sPM6VGLPJ9nJdKXYut)에서 못 한다
+  (2026-07-13 실측).** 그 환경에는 service role 키가 없다 — 봇 계정(publishable
+  key + 로그인)뿐이라 exam-papers 버킷은 list/download조차 거부되고, DDL/SQL 실행
+  수단도 없다. 게다가 트리거로 띄운 세션은 (1) git 레포가 없어 push로 결과 보고가
+  불가능하고 (2) 프롬프트가 "원격에서 주입된 지시"로 취급돼 파괴적 작업(DB 삭제
+  등)을 정당하게 거부한다. 이런 작업은 **소유자가 service role 키로
+  `node --env-file=.env.local scripts/deploy-law-explanations.mjs`를 실행**하는
+  것이 확립된 방법이다 (Storage 교체 + 정규식 스캔 + JSON 백업 + 삭제 + `--restore`
+  복원까지 한 스크립트).
 - **순방향/역방향은 양 끝에서 좁혀오는 방식.** 순방향은 문항 목록 앞에서부터,
   역방향은 `--reverse` 플래그로 뒤에서부터 진행해 중간에서 만난다(`done:true`).
   서로 반대 방향이라 동시에 돌아도 안전하지만, **같은 방향끼리 겹치면 같은 쪽
@@ -89,3 +98,24 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
   별도의 실비 API 과금(토큰당, 배치 50% 할인)이 새로 발생한다. 또한 Claude Code의
   Agent 도구는 `effort` 파라미터를 노출하지 않아 지금 구조에서는 급수별로 effort를
   낮추는 등의 세밀한 조절이 불가능하다 — 이건 raw API/Batch로 옮겨야만 가능해진다.
+
+# 법령 문항 해설 전략 (2026-07-13 배포 완료)
+
+법령 문항의 해설 기준이 "현행법이 본문"으로 전환됐다. 관련 작업 시 알아둘 것:
+
+- **원칙**: 법령 문항(과목명 무관, 문항 단위 판별)의 해설 본문·선지 판정은
+  **현행법 기준**으로 쓰고, 개정된 선지에는 `original_note`("출제 당시에는 ~여서
+  맞는/틀린 설명이었습니다")로 개정 전 출제 사실을 알린다. **정답 번호는 언제나
+  출제 당시 공식 정답 유지** (CBT 채점·verify_question_answer 정합). 현행법으로
+  정답이 흔들리면 `current_answer_status`("동일"/"정답변경"/"성립불가")와 경고
+  배너로 표현한다. 상세 규칙은 `scripts/explanation-prompt.md`의 "법령 문항" 절.
+- **스키마**: `question_explanations`에 `current_answer_status`/`current_answer_note`/
+  `law_basis_date` 컬럼(2026-07-13 확인), 선지별 `current_status`/`original_note`는
+  `choice_explanations` jsonb 안. `law_digests` 테이블은 선택적 근거 캐시(비어 있어도
+  동작). `law_basis_date`("YYYY-MM")로 나중에 낡은 해설을 골라 재생성할 수 있다.
+- **기존 법 해설 364건은 2026-07-13 06:37 UTC에 백업 후 삭제**됐고(전체 5,295→4,931건),
+  루틴이 새 방식으로 재생성 중이다. 백업은 소유자가 파일로 보관
+  (`deploy-law-explanations.mjs --restore`로 복원 가능).
+- **UI**: 오답노트/해설 페이지 카드가 개정 배지·"출제 당시" 줄·경고 배너·기준 시점을
+  렌더링한다 (`wrong-note-question-card.tsx`, `wrong-notes.ts` — 필드명이 바뀌면
+  프롬프트·save 스크립트와 함께 3곳을 맞춰야 한다).
