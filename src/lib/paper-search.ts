@@ -8,6 +8,9 @@ export type LightPaper = {
   id: string;
   title: string;
   level: string | null;
+  // 중복 시험지(같은 시험지를 직류만 다르게 올린 것)를 목록에서 하나로 합칠 때,
+  // 대표로 남긴 카드의 title에서 " (전산서기보)" 같은 접미사를 떼기 위해 필요하다.
+  track: string | null;
   year: number;
   round: number;
   subject_id: string;

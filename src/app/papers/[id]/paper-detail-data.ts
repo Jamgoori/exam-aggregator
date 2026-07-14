@@ -6,6 +6,12 @@ import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { countPaperExplanations } from "@/lib/wrong-notes";
+import {
+  collapseDuplicatePapers,
+  collidingPaperIds,
+  fetchQuestionCounts,
+  paperDedupKey,
+} from "@/lib/dedup-papers";
 import type {
   MyCbtRecordItem,
   RoundAverage,
@@ -13,6 +19,10 @@ import type {
 import type { AnswerKey, Comment, ExamPaper } from "@/lib/supabase/types";
 
 const RELATED_PAPERS_LIMIT = 12;
+// 중복(직류만 다른 같은 시험지)을 합치면 개수가 줄기 때문에, 12개를 채우려면
+// 합치기 전에 넉넉히 받아둬야 대표가 잘려나가지 않는다. 상세페이지는 자주 열리는
+// 경로라 과목 전체를 받지는 않고, 미리보기에 충분한 만큼만 여유 있게 받는다.
+const RELATED_FETCH_LIMIT = RELATED_PAPERS_LIMIT * 5;
 
 // generateMetadata와 페이지 본문이 같은 id로 중복 조회하지 않도록 캐싱
 export const getPaper = cache(async (id: string) => {
@@ -101,7 +111,7 @@ export async function getPaperDetailData(
       ? subjectPapersQuery
           .order("year", { ascending: false })
           .order("round", { ascending: false })
-          .limit(RELATED_PAPERS_LIMIT)
+          .limit(RELATED_FETCH_LIMIT)
       : Promise.resolve({ data: null }),
     paper.subject_id
       ? supabase
@@ -208,10 +218,26 @@ export async function getPaperDetailData(
     (a, b) => a.display_order - b.display_order,
   );
 
+  // 홈·과목 목록과 똑같이, 직류만 다른 같은 시험지를 하나로 합쳐 대표만 남긴다.
+  const relatedRaw = (subjectPapers as ExamPaper[] | null) ?? [];
+  const relatedWeightById = await fetchQuestionCounts(
+    supabase,
+    collidingPaperIds(relatedRaw),
+  );
+  const relatedDeduped = collapseDuplicatePapers(relatedRaw, relatedWeightById);
+  // 지금 보고 있는 문제지가 중복으로 합쳐져 목록에서 빠졌다면, 그 그룹 대표 자리에
+  // 현재 문제지를 대신 넣어 "현재 보는 중" 카드가 그대로 보이게 한다.
+  if (!relatedDeduped.some((p) => p.id === paper.id)) {
+    const currentKey = paperDedupKey(paper);
+    const idx = relatedDeduped.findIndex((p) => paperDedupKey(p) === currentKey);
+    if (idx !== -1) relatedDeduped[idx] = paper;
+  }
+  const relatedPapers = relatedDeduped.slice(0, RELATED_PAPERS_LIMIT);
+
   // "같은 과목 목록" 카드에 북마크/바로풀기를 달아주기 위한 배치 조회. subjectPapers의
   // id는 위 Promise.all이 끝나야 알 수 있어서 그 안에 묶지 못하고 여기서 한 번 더
   // 병렬 조회한다(현재 보는 문제지 자신은 카드에서 두 기능 다 안 쓰니 제외).
-  const subjectPaperIds = ((subjectPapers as ExamPaper[] | null) ?? [])
+  const subjectPaperIds = relatedPapers
     .map((p) => p.id)
     .filter((pid) => pid !== paper.id);
   const [subjectBookmarkedIds, subjectCbtAvailability] = await Promise.all([
@@ -245,7 +271,7 @@ export async function getPaperDetailData(
     hasFullExplanations,
     roundAverages,
     myCbtRecordItems,
-    subjectPapers: subjectPapers as ExamPaper[] | null,
+    subjectPapers: relatedPapers,
     availableLevels,
     availableExamTypes,
     myRoundCounts,

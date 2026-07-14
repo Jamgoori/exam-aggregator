@@ -11,6 +11,11 @@ import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { SubjectBookmarkButton } from "@/components/subject-bookmark-button";
+import {
+  collapseDuplicatePapers,
+  collidingPaperIds,
+  fetchQuestionCounts,
+} from "@/lib/dedup-papers";
 import type { ExamPaper, Subject } from "@/lib/supabase/types";
 import type { Metadata } from "next";
 
@@ -68,21 +73,41 @@ export default async function SubjectPage({
   const { data: claimsData } = await supabase.auth.getClaims();
   const userId = claimsData?.claims.sub ?? null;
 
+  // 이 과목(+필터)의 문제지를 전부 받아 중복(직류만 다른 같은 시험지)을 합친 뒤에
+  // 페이지를 자른다. SQL LIMIT/OFFSET으로 먼저 자르면 대표가 잘려나간 페이지에 걸려
+  // 페이지 경계·총 개수가 흔들리므로, 합친 다음 메모리에서 페이지네이션한다.
+  // PostgREST 기본 max_rows(1000)에 걸려 조용히 잘리지 않도록 1000건씩 이어받는다.
+  async function fetchAllSubjectPapers(): Promise<ExamPaper[]> {
+    const BATCH_SIZE = 1000;
+    const rows: ExamPaper[] = [];
+    let start = 0;
+    while (true) {
+      let q = supabase
+        .from("exam_papers")
+        .select("*, subjects(*), exam_types(*)")
+        .eq("subject_id", subject!.id);
+      if (level) q = q.eq("level", level);
+      if (selectedExamTypeIds.size > 0)
+        q = q.in("exam_type_id", [...selectedExamTypeIds]);
+      const { data, error } = await q
+        .order("year", { ascending: false })
+        .order("round", { ascending: false })
+        .order("id", { ascending: true })
+        .range(start, start + BATCH_SIZE - 1);
+      if (error || !data || data.length === 0) break;
+      rows.push(...(data as unknown as ExamPaper[]));
+      if (data.length < BATCH_SIZE) break;
+      start += BATCH_SIZE;
+    }
+    return rows;
+  }
+
   // 급수 탭은 이 과목에 존재하는 급수 종류만 필요하므로, 목록 전체를 받아오는 대신
   // level 컬럼만 가볍게 조회해서 만든다.
-  let papersQuery = supabase
-    .from("exam_papers")
-    .select("*, subjects(*), exam_types(*)", { count: "exact" })
-    .eq("subject_id", subject.id);
-  if (level) papersQuery = papersQuery.eq("level", level);
-  if (selectedExamTypeIds.size > 0)
-    papersQuery = papersQuery.in("exam_type_id", [...selectedExamTypeIds]);
-  const from = (currentPage - 1) * PAGE_SIZE;
-
   const [
     { data: levelRows },
     { data: examTypeRows },
-    { data: papers, count: filteredCount },
+    allSubjectPapers,
     myRoundCounts,
     bookmarkedSubjectIds,
   ] = await Promise.all([
@@ -92,10 +117,7 @@ export default async function SubjectPage({
       .from("exam_papers")
       .select("exam_type_id, exam_types(id, name, display_order)")
       .eq("subject_id", subject.id),
-    papersQuery
-      .order("year", { ascending: false })
-      .order("round", { ascending: false })
-      .range(from, from + PAGE_SIZE - 1),
+    fetchAllSubjectPapers(),
     userId
       ? getMyRoundCounts(supabase, userId)
       : Promise.resolve(new Map<string, number>()),
@@ -103,6 +125,16 @@ export default async function SubjectPage({
       ? getMyBookmarkedSubjectIds(supabase, userId)
       : Promise.resolve(new Set<string>()),
   ]);
+
+  // 중복을 합친 뒤 이 페이지에 보일 만큼만 자른다. 대표는 문항이 실제로 등록된 쪽을
+  // 남기려고 문항 수로 고르며, 그 조회는 정말 겹치는 문제지에 대해서만 한다.
+  const weightById = await fetchQuestionCounts(
+    supabase,
+    collidingPaperIds(allSubjectPapers),
+  );
+  const dedupedPapers = collapseDuplicatePapers(allSubjectPapers, weightById);
+  const totalPages = Math.max(1, Math.ceil(dedupedPapers.length / PAGE_SIZE));
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
 
   const availableLevels = [
     ...new Set(
@@ -124,7 +156,7 @@ export default async function SubjectPage({
     (a, b) => a.display_order - b.display_order,
   );
 
-  const filteredPapers = (papers ?? []) as ExamPaper[];
+  const filteredPapers = dedupedPapers.slice(pageStart, pageStart + PAGE_SIZE);
 
   // 급수 탭·직렬 탭이 서로의 선택 상태를 지우지 않도록, 두 탭 모두 이 헬퍼로
   // href를 만든다 — 인자로 넘긴 값만 바꾸고 나머지는 현재 선택을 그대로 유지한다.
@@ -149,7 +181,6 @@ export default async function SubjectPage({
       : Promise.resolve(new Set<string>()),
     getCbtAvailability(supabase, filteredPaperIds),
   ]);
-  const totalPages = Math.max(1, Math.ceil((filteredCount ?? 0) / PAGE_SIZE));
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-12">

@@ -1,6 +1,11 @@
 import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import type { LightPaper } from "@/lib/paper-search";
+import {
+  collapseDuplicatePapers,
+  collidingPaperIds,
+  fetchQuestionCounts,
+} from "@/lib/dedup-papers";
 
 // Supabase(PostgREST)는 range()를 안 주면 기본적으로 한 번에 최대 1000행까지만
 // 돌려준다(db.max_rows 설정). 홈 검색을 위해 문제지 "전체"를 한 번에 받아야 하는데
@@ -47,7 +52,7 @@ export async function fetchAllExamPapers(
     const { data, error } = await supabase
       .from("exam_papers")
       .select(
-        "id, title, level, year, round, subject_id, exam_type_id, subjects(id, name, slug), exam_types(id, name)",
+        "id, title, level, track, year, round, subject_id, exam_type_id, subjects(id, name, slug), exam_types(id, name)",
       )
       .order("year", { ascending: false })
       .order("round", { ascending: false })
@@ -75,5 +80,10 @@ export async function fetchAllExamPapers(
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   });
 
-  return rows;
+  // 같은 시험지를 직류(track)만 다르게 중복 업로드한 것(예: 법원직 한국사의
+  // (전산서기보)/(사서서기보))을 카드 하나로 합친다. 대표는 문항이 실제로 등록된
+  // 쪽을 남기려고 문항 수로 고르는데, 그 조회는 "정말 겹치는" 문제지에 대해서만
+  // 한다(대부분은 겹치지 않아 조회 대상에서 빠진다).
+  const weightById = await fetchQuestionCounts(supabase, collidingPaperIds(rows));
+  return collapseDuplicatePapers(rows, weightById);
 }

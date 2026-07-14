@@ -47,7 +47,10 @@ export default async function Home({
       ? getMyBookmarkedSubjectIds(supabase, userId)
       : Promise.resolve(new Set<string>()),
   ]);
-  const { totalCount, totalDownloads, totalAttempts } = homeStats;
+  const { totalDownloads, totalAttempts } = homeStats;
+  // "총 자료 수"는 exam_papers 원본 행 수(homeStats.totalCount) 대신, 중복 시험지를
+  // 합친 뒤 실제로 목록에 보이는 개수를 쓴다 — 아래 "총 N개의 자료"와 숫자가 맞도록.
+  const totalCount = allPapers.length;
 
   const latestYear = allPapers[0]?.year;
 
