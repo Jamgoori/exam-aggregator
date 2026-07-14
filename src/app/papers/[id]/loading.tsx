@@ -86,6 +86,7 @@ export default function PaperDetailLoading() {
           </div>
           {/* 온라인에서 풀기 */}
           <Block className="h-16 w-full rounded-xl" />
+          <Block className="h-16 w-full rounded-xl" />
         </div>
 
         <DifficultyGaugeSkeleton />
