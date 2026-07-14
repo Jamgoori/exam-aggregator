@@ -14,7 +14,7 @@ import { SubjectBookmarkButton } from "@/components/subject-bookmark-button";
 import {
   collapseDuplicatePapers,
   collidingPaperIds,
-  fetchQuestionCounts,
+  fetchPaperIdentitySignals,
 } from "@/lib/dedup-papers";
 import type { ExamPaper, Subject } from "@/lib/supabase/types";
 import type { Metadata } from "next";
@@ -126,13 +126,13 @@ export default async function SubjectPage({
       : Promise.resolve(new Set<string>()),
   ]);
 
-  // 중복을 합친 뒤 이 페이지에 보일 만큼만 자른다. 대표는 문항이 실제로 등록된 쪽을
-  // 남기려고 문항 수로 고르며, 그 조회는 정말 겹치는 문제지에 대해서만 한다.
-  const weightById = await fetchQuestionCounts(
+  // 메타데이터가 같아도 정답 배열까지 일치할 때만 합친 뒤, 이 페이지에 보일 만큼만
+  // 자른다. 확인용 조회는 정말 겹칠 수 있는 문제지에 대해서만 한다.
+  const signals = await fetchPaperIdentitySignals(
     supabase,
     collidingPaperIds(allSubjectPapers),
   );
-  const dedupedPapers = collapseDuplicatePapers(allSubjectPapers, weightById);
+  const dedupedPapers = collapseDuplicatePapers(allSubjectPapers, signals);
   const totalPages = Math.max(1, Math.ceil(dedupedPapers.length / PAGE_SIZE));
   const pageStart = (currentPage - 1) * PAGE_SIZE;
 

@@ -4,7 +4,7 @@ import type { LightPaper } from "@/lib/paper-search";
 import {
   collapseDuplicatePapers,
   collidingPaperIds,
-  fetchQuestionCounts,
+  fetchPaperIdentitySignals,
 } from "@/lib/dedup-papers";
 
 // Supabase(PostgREST)는 range()를 안 주면 기본적으로 한 번에 최대 1000행까지만
@@ -81,9 +81,9 @@ export async function fetchAllExamPapers(
   });
 
   // 같은 시험지를 직류(track)만 다르게 중복 업로드한 것(예: 법원직 한국사의
-  // (전산서기보)/(사서서기보))을 카드 하나로 합친다. 대표는 문항이 실제로 등록된
-  // 쪽을 남기려고 문항 수로 고르는데, 그 조회는 "정말 겹치는" 문제지에 대해서만
-  // 한다(대부분은 겹치지 않아 조회 대상에서 빠진다).
-  const weightById = await fetchQuestionCounts(supabase, collidingPaperIds(rows));
-  return collapseDuplicatePapers(rows, weightById);
+  // (전산서기보)/(사서서기보))을 카드 하나로 합친다. 메타데이터가 같아도 정답
+  // 배열까지 일치할 때만 합치며, 그 확인용 조회는 "정말 겹칠 수 있는" 문제지에
+  // 대해서만 한다(대부분은 겹치지 않아 조회 대상에서 빠진다).
+  const signals = await fetchPaperIdentitySignals(supabase, collidingPaperIds(rows));
+  return collapseDuplicatePapers(rows, signals);
 }

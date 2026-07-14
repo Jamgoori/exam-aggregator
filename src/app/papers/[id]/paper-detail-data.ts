@@ -9,7 +9,7 @@ import { countPaperExplanations } from "@/lib/wrong-notes";
 import {
   collapseDuplicatePapers,
   collidingPaperIds,
-  fetchQuestionCounts,
+  fetchPaperIdentitySignals,
   paperDedupKey,
 } from "@/lib/dedup-papers";
 import type {
@@ -218,13 +218,14 @@ export async function getPaperDetailData(
     (a, b) => a.display_order - b.display_order,
   );
 
-  // 홈·과목 목록과 똑같이, 직류만 다른 같은 시험지를 하나로 합쳐 대표만 남긴다.
+  // 홈·과목 목록과 똑같이, 직류만 다른 데다 정답까지 같은 시험지를 하나로 합쳐
+  // 대표만 남긴다.
   const relatedRaw = (subjectPapers as ExamPaper[] | null) ?? [];
-  const relatedWeightById = await fetchQuestionCounts(
+  const relatedSignals = await fetchPaperIdentitySignals(
     supabase,
     collidingPaperIds(relatedRaw),
   );
-  const relatedDeduped = collapseDuplicatePapers(relatedRaw, relatedWeightById);
+  const relatedDeduped = collapseDuplicatePapers(relatedRaw, relatedSignals);
   // 지금 보고 있는 문제지가 중복으로 합쳐져 목록에서 빠졌다면, 그 그룹 대표 자리에
   // 현재 문제지를 대신 넣어 "현재 보는 중" 카드가 그대로 보이게 한다.
   if (!relatedDeduped.some((p) => p.id === paper.id)) {
