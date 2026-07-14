@@ -44,17 +44,23 @@
   }
 }
 
-/* 다크모드 토글 시 배경/글자색 등이 뚝 끊기지 않고 0.4초 동안 부드럽게 전환되게 한다.
-   prefers-reduced-motion을 존중해 모션에 민감한 사용자에게는 즉시 전환된다. */
+/* 다크모드 전환: 모든 요소에 개별 CSS transition을 거는 방식(전 버전)은 DOM 전체를
+   동시에 리페인트해서 요소가 많은 페이지에서 프레임이 뚝뚝 끊겼다. 대신 View
+   Transitions API로 전/후 화면을 스냅샷 두 장으로 찍어 opacity로 크로스페이드한다 —
+   컴포지터(GPU)만 쓰는 단일 연산이라 DOM 크기와 무관하게 항상 매끄럽다.
+   (실제 전환 트리거는 theme-toggle.tsx의 document.startViewTransition) */
 @media (prefers-reduced-motion: no-preference) {
-  html,
-  body,
-  *,
-  *::before,
-  *::after {
-    transition-property: background-color, border-color, color, fill, stroke;
-    transition-timing-function: ease-in-out;
-    transition-duration: 0.4s;
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.4s;
+    animation-timing-function: ease-in-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
   }
 }
 

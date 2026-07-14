@@ -27,13 +27,24 @@ export function ThemeToggle() {
 
   function toggle() {
     const next = isDark ? "light" : "dark";
-    document.documentElement.setAttribute("data-theme", next);
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // localStorage를 쓸 수 없어도(시크릿 모드 등) 토글 자체는 계속 동작해야 한다.
+    const apply = () => {
+      document.documentElement.setAttribute("data-theme", next);
+      try {
+        localStorage.setItem(STORAGE_KEY, next);
+      } catch {
+        // localStorage를 쓸 수 없어도(시크릿 모드 등) 토글 자체는 계속 동작해야 한다.
+      }
+      window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
+    };
+
+    // 지원 브라우저는 크로스페이드 전환(globals.css의 ::view-transition-* 참고),
+    // 미지원이거나 모션을 줄이길 원하는 경우 그냥 즉시 전환한다.
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!reduceMotion && document.startViewTransition) {
+      document.startViewTransition(apply);
+    } else {
+      apply();
     }
-    window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
   }
 
   return (
