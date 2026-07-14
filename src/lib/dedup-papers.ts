@@ -10,13 +10,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 // 직류별로 한 번씩 올리면 같은 시험지가 (전산서기보)/(사서서기보)처럼 여러 카드로
 // 중복 노출된다.
 //
-// 합치기 전에 "정말 같은 시험지인지" 두 단계로 확인한다:
+// 합치는 기준:
 //   1) 메타데이터: track을 뺀 (과목·직렬·연도·회차·급수)가 같아야 한다. 직류 전용
-//      과목은 subject_id 자체가 달라 여기서 이미 걸러진다.
-//   2) 내용 확인: 같은 메타데이터 안에서도 정답 배열(paper_answers.answers)이 같아야
-//      비로소 합친다. 정답 순서까지 같으면 사실상 동일 시험지가 확실하다. 정답이
-//      아직 등록되지 않은 문제지는 문항 수로 대체 확인하고, 그것마저 없으면 "확인
-//      불가"로 보고 합치지 않는다(다른 시험지를 잘못 숨기지 않기 위한 안전장치).
+//      과목은 subject_id 자체가 달라 여기서 이미 걸러진다. 공무원 시험은 한
+//      (직렬·연도·회차·급수)에서 과목당 시험지가 하나뿐이라, 이 값이 다 같은 여러
+//      행은 사실상 직류만 다르게 중복 업로드한 것으로 본다.
+//   2) 다르다는 증거가 있으면 분리: 같은 메타데이터라도 정답 배열(paper_answers.
+//      answers)이 둘 다 등록돼 있는데 값이 다르면 다른 시험지로 보고 분리한다.
+//      정답이 아직 없거나 한쪽만 있으면(예: 법원직 서기보) 같은 시험지로 보고
+//      합친다. 즉 정답은 "잘못된 병합을 막는 안전장치"로만 쓰고, 합치기의 전제
+//      조건으로 쓰지는 않는다(그렇게 했더니 정답 미등록 문제지가 안 합쳐졌다).
 
 type DedupablePaper = {
   id: string;
@@ -128,35 +131,39 @@ export async function fetchPaperIdentitySignals(
   return signals;
 }
 
-// 한 메타데이터 그룹 안에서, 내용 신호로 "정말 같은 시험지"끼리 다시 묶는다.
+// 한 메타데이터 그룹 안에서 "정말 다른 시험지"만 갈라낸다.
+//
+// 기본 방침: 같은 (과목·직렬·연도·회차·급수)면 같은 시험지로 보고 합친다. 공무원
+// 시험은 한 (직렬·연도·회차·급수)에서 과목당 실제 시험지가 하나뿐이라, 이 값이
+// 모두 같은 여러 행은 사실상 직류만 다르게 중복 업로드한 것이다. 정답이 아직
+// 등록되지 않았거나 한쪽만 있어도(예: 법원직 서기보) 합친다.
+//
+// 유일하게 분리하는 경우: 서로 "다르다는 확실한 증거"가 있을 때 — 즉 정답 배열이
+// 둘 다 등록돼 있는데 값이 다른 경우다(정답 전체가 다르면 다른 시험지가 확실).
+// 문항 수는 크롭이 덜 됐을 때도 달라져 신뢰할 수 없으므로 분리 근거로 쓰지 않는다.
 function clusterSamePaper<T extends DedupablePaper>(
   members: T[],
   signals: Map<string, PaperIdentitySignal> | undefined,
 ): T[][] {
   if (members.length === 1) return [members];
 
-  // 정답 지문이 2종 이상 섞여 있으면 이 그룹엔 실제로 다른 시험지가 있다는 뜻이다.
-  // 이때는 문항 수 같다는 이유로 섞지 않고 "정답 일치"만 신뢰한다.
   const distinctSignatures = new Set(
     members
       .map((m) => signals?.get(m.id)?.answerSignature)
       .filter((sig): sig is string => sig != null),
   );
-  const hasSignatureConflict = distinctSignatures.size >= 2;
 
+  // 등록된 정답이 서로 다르게 2종 이상 섞여 있지 않으면(0종 또는 1종) 다르다는
+  // 증거가 없으므로 메타데이터를 믿고 전부 합친다.
+  if (distinctSignatures.size <= 1) return [members];
+
+  // 정답이 서로 다른 시험지가 섞여 있다 → 정답으로 확실히 가른다. 정답 지문이
+  // 있는 것은 지문별로 묶고, 어디에 속하는지 알 수 없는(정답 없는) 것은 안전하게
+  // 각자 단독으로 둔다.
   const buckets = new Map<string, T[]>();
   for (const m of members) {
-    const s = signals?.get(m.id);
-    let key: string;
-    if (hasSignatureConflict) {
-      // 정답이 있으면 그 지문으로 확정 분리, 없으면 안전하게 단독 처리.
-      key = s?.answerSignature != null ? `a:${s.answerSignature}` : `solo:${m.id}`;
-    } else {
-      // 충돌 없음 → 정답 있는 것끼리는 지문이 모두 같으므로, 정답 개수(없으면 문항
-      // 수)를 공통 신호로 써서 정답 미등록분까지 같은 개수면 함께 묶는다.
-      const count = s?.answerLength ?? s?.questionCount ?? 0;
-      key = count > 0 ? `c:${count}` : `solo:${m.id}`;
-    }
+    const sig = signals?.get(m.id)?.answerSignature;
+    const key = sig != null ? `a:${sig}` : `solo:${m.id}`;
     const arr = buckets.get(key);
     if (arr) arr.push(m);
     else buckets.set(key, [m]);
