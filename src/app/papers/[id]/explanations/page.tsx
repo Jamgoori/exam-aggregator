@@ -14,6 +14,7 @@ import { checkExplanationAccess } from "@/lib/explanation-rate-limit";
 import { levelColor } from "@/lib/level-colors";
 import { examTypeColor } from "@/lib/exam-type-colors";
 import { subjectColor } from "@/lib/subject-colors";
+import { getPaperDisplayTitle } from "@/lib/paper-title";
 import type { Metadata } from "next";
 
 export async function generateMetadata({
@@ -24,9 +25,10 @@ export async function generateMetadata({
   const { id } = await params;
   const paper = await getPaper(id);
   if (!paper) return {};
+  const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
   return {
-    title: `${paper.title} 해설`,
-    description: `${paper.title} 전체 문항 해설을 문제 이미지·정답과 함께 열람하세요.`,
+    title: `${displayTitle} 해설`,
+    description: `${displayTitle} 전체 문항 해설을 문제 이미지·정답과 함께 열람하세요.`,
   };
 }
 
@@ -49,6 +51,7 @@ export default async function PaperExplanationsPage({
   const isDownload = download === "1";
   const paper = await getPaper(id);
   if (!paper) notFound();
+  const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
 
   const supabase = await createClient();
   const {
@@ -130,7 +133,7 @@ export default async function PaperExplanationsPage({
           )}
         </div>
 
-        <h1 className="text-2xl font-semibold leading-snug">{paper.title} 해설</h1>
+        <h1 className="text-2xl font-semibold leading-snug">{displayTitle} 해설</h1>
 
         <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-500 dark:text-zinc-500">
           <span>{questions.length}문항 해설</span>

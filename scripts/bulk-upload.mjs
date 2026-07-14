@@ -154,7 +154,7 @@ async function main() {
       continue;
     }
 
-    const title = `${year} ${examTypeName}${level ? " " + level : ""}${track ? ` (${track})` : ""} ${subject.name}`;
+    const title = `${year} ${examTypeName}${level ? " " + level : ""}${track && examTypeName !== "법원직" ? ` (${track})` : ""} ${subject.name}`;
 
     const { error: insertError } = await supabase.from("exam_papers").insert({
       subject_id: subject.id,

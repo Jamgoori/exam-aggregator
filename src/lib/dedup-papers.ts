@@ -1,6 +1,7 @@
 import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { stripTrackFromTitle } from "@/lib/paper-title";
 
 // 같은 시험지를 직류(track)만 다르게 중복 업로드한 행을 하나로 합치기 위한 도구.
 //
@@ -57,11 +58,6 @@ export function paperDedupKey(p: DedupablePaper): string {
 // title을 `${year} ${examType}${level?} (${track})? ${subject}` 형태로 만들기
 // 때문에, track 값을 알면 정확히 그 조각만 안전하게 지울 수 있다(제목 다른 곳에
 // 우연히 괄호가 있어도 건드리지 않는다).
-export function stripTrackFromTitle(title: string, track: string | null | undefined): string {
-  if (!track) return title;
-  return title.replace(` (${track})`, "").replace(/\s{2,}/g, " ").trim();
-}
-
 // 메타데이터 후보 그룹(같은 키에 2건 이상)에 속한 문제지 id만 모은다. 내용 확인용
 // 조회를 "정말 겹칠 수 있는 것"에 대해서만 하기 위한 것 — 대부분의 문제지는 겹치지
 // 않아 조회 대상에서 빠진다.

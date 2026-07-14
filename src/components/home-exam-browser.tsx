@@ -386,7 +386,7 @@ export function HomeExamBrowser({
               </p>
             )}
             {[...groupedByYear.entries()].map(([year, bySubject]) => (
-              <div key={year} className="flex flex-col gap-6">
+              <div key={year} className="flex flex-col gap-4">
                 <h2 className="text-lg font-bold">{year}년</h2>
                 {[...bySubject.entries()].map(([subjectName, papers]) => (
                   <div key={subjectName} className="flex flex-col gap-3">

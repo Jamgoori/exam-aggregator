@@ -6,6 +6,7 @@ import { levelColor } from "@/lib/level-colors";
 import { examTypeColor } from "@/lib/exam-type-colors";
 import { getRoundTier } from "@/lib/round-tier";
 import { BookmarkButton } from "@/components/bookmark-button";
+import { getPaperDisplayTitle } from "@/lib/paper-title";
 import type { ExamPaper } from "@/lib/supabase/types";
 
 export function ExamCard({
@@ -31,6 +32,7 @@ export function ExamCard({
 }) {
   const subject = paper.subjects;
   const examType = paper.exam_types;
+  const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
   const roundTier = myRoundCount ? getRoundTier(myRoundCount) : null;
   const href = linkLevel
     ? `/papers/${paper.id}?level=${encodeURIComponent(linkLevel)}`
@@ -50,7 +52,7 @@ export function ExamCard({
       {!isCurrent && (
         <Link
           href={href}
-          aria-label={paper.title}
+          aria-label={displayTitle}
           className="absolute inset-0 z-0 rounded-xl"
         />
       )}
@@ -113,7 +115,7 @@ export function ExamCard({
         )}
       </div>
 
-      <p className="font-medium leading-snug">{paper.title}</p>
+      <p className="font-medium leading-snug">{displayTitle}</p>
 
       {!isCurrent && (
         <div className="mt-auto flex items-center border-t border-zinc-100 pt-3 text-xs dark:border-zinc-800">

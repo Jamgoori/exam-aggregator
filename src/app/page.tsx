@@ -74,7 +74,7 @@ export default async function Home({
                 통계 타일 3개(home-exam-browser.tsx)가 그대로 보이므로 숫자 없는
                 원래 문장을 쓴다. */}
             <p className="text-zinc-600 sm:hidden dark:text-zinc-400">
-              국가직·지방직·서울시 등 주요 공무원 시험 기출문제{" "}
+              국가직·지방직·소방·경찰 등 주요 공무원 시험 기출문제{" "}
               {totalCount ? (
                 <>
                   <strong className="font-semibold text-zinc-800 dark:text-zinc-200">
@@ -88,7 +88,7 @@ export default async function Home({
               연도별·과목별로 정리했어요.
             </p>
             <p className="hidden text-zinc-600 sm:block dark:text-zinc-400">
-              국가직·지방직·서울시 등 주요 공무원 시험 기출문제를 연도별·과목별로
+              국가직·지방직·소방·경찰 등 주요 공무원 시험 기출문제를 연도별·과목별로
               정리했어요.
             </p>
           </>

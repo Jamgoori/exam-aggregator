@@ -9,6 +9,7 @@ import { CommentsSection } from "@/components/comments-section";
 import { ExamCard } from "@/components/exam-card";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { MyCbtRecordModal } from "@/components/my-cbt-record-modal";
+import { getPaperDisplayTitle } from "@/lib/paper-title";
 import { getPaper, getPaperDetailData } from "./paper-detail-data";
 import type { ExamPaper } from "@/lib/supabase/types";
 import type { Metadata } from "next";
@@ -21,10 +22,11 @@ export async function generateMetadata({
   const { id } = await params;
   const paper = await getPaper(id);
   if (!paper) return {};
+  const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
 
   const subject = paper.subjects;
   const examType = paper.exam_types;
-  const title = `${paper.title} 기출문제`;
+  const title = `${displayTitle} 기출문제`;
   const description = `${examType?.name ?? ""} ${paper.level ?? ""} ${paper.year}년 ${subject?.name ?? ""} 기출문제를 정답과 함께 무료로 열람·다운로드하세요.`
     .replace(/\s+/g, " ")
     .trim();
@@ -50,6 +52,7 @@ export default async function PaperDetailPage({
   if (!paper) {
     notFound();
   }
+  const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
 
   const {
     userId,
@@ -111,8 +114,8 @@ export default async function PaperDetailPage({
         </div>
 
         <div>
-          <h1 className="text-3xl font-bold leading-snug">
-            {paper.title}
+          <h1 className="text-[27px] font-bold leading-snug sm:text-3xl">
+            {displayTitle}
           </h1>
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
             {examType?.name}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CbtSolver } from "@/components/cbt-solver";
+import { getPaperDisplayTitle } from "@/lib/paper-title";
 import type { ExamPaper } from "@/lib/supabase/types";
 
 export default async function CbtPage({
@@ -88,7 +89,7 @@ export default async function CbtPage({
   return (
     <CbtSolver
       paperId={typedPaper.id}
-      paperTitle={typedPaper.title}
+      paperTitle={getPaperDisplayTitle(typedPaper.title, typedPaper.track)}
       fileUrl={paperFileUrl.publicUrl}
       totalQuestions={typedPaper.question_count}
       choiceCount={typedPaper.choice_count}
