@@ -44,9 +44,7 @@
   }
 }
 
-/* 다크모드 토글 시 배경/글자색 등이 뚝 끊기지 않고 0.15초 동안 부드럽게 전환되게 한다.
-   기존에 hover 등에서 쓰이는 Tailwind transition-colors 유틸의 기본 지속시간이 이미
-   150ms라서, 새로 추가되는 이 전환과 durations이 자연스럽게 맞아떨어진다.
+/* 다크모드 토글 시 배경/글자색 등이 뚝 끊기지 않고 0.4초 동안 부드럽게 전환되게 한다.
    prefers-reduced-motion을 존중해 모션에 민감한 사용자에게는 즉시 전환된다. */
 @media (prefers-reduced-motion: no-preference) {
   html,
@@ -56,7 +54,7 @@
   *::after {
     transition-property: background-color, border-color, color, fill, stroke;
     transition-timing-function: ease-in-out;
-    transition-duration: 0.15s;
+    transition-duration: 0.4s;
   }
 }
 
