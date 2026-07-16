@@ -889,7 +889,10 @@ export async function getUnresolvedCountBySubject(
   for (const p of papers) if (p.subjects) subjectOfPaper.set(p.id, p.subjects);
 
   // (대표, 문항)별로 가장 최근 상태만 남긴다(중복 시험지의 status가 흩어져도 통합).
-  const byRepQ = new Map<string, { resolved: boolean; at: string; subjectId: string | null }>();
+  const byRepQ = new Map<
+    string,
+    { rep: string; questionNumber: number; resolved: boolean; at: string; subjectId: string | null }
+  >();
   for (const r of statusRows) {
     const rep = repId(r.paper_id);
     const subj = subjectOfPaper.get(rep) ?? subjectOfPaper.get(r.paper_id) ?? null;
@@ -897,6 +900,8 @@ export async function getUnresolvedCountBySubject(
     const ex = byRepQ.get(key);
     if (!ex || r.last_answered_at > ex.at) {
       byRepQ.set(key, {
+        rep,
+        questionNumber: r.question_number,
         resolved: r.last_is_correct,
         at: r.last_answered_at,
         subjectId: subj?.id ?? null,
@@ -904,11 +909,21 @@ export async function getUnresolvedCountBySubject(
     }
   }
 
+  // 실제로 "복습 시작하기"가 담을 수 있는 문항만 센다: 크롭 이미지가 있는 문항.
+  // collectAllReviewCandidates(섞어풀기 후보)가 이미지 없는 문항을 제외하므로, 여기서
+  // 같은 기준으로 걸러야 헤드라인·오늘 카드의 "복습할 문항 N개"가 실제 후보 수와 맞아
+  // "N개라며 눌렀더니 0개" dead-end가 사라진다(이미지 없는 미극복은 문항 모아보기에는
+  // 계속 보이되, 섞어풀기가 불가능해 이 카운트에서는 뺀다).
+  const mediaByRep = await fetchQuestionMedia(supabase, [
+    ...new Set([...byRepQ.values()].map((v) => v.rep)),
+  ]);
+
   const nameSlug = new Map<string, { name: string; slug: string }>();
   for (const s of subjectOfPaper.values()) nameSlug.set(s.id, { name: s.name, slug: s.slug });
 
   for (const v of byRepQ.values()) {
     if (v.resolved || !v.subjectId) continue;
+    if (!mediaByRep.get(v.rep)?.get(v.questionNumber)?.images.length) continue;
     const meta = nameSlug.get(v.subjectId);
     if (!meta) continue;
     const e = out.get(v.subjectId) ?? { name: meta.name, slug: meta.slug, unresolved: 0, due: 0 };

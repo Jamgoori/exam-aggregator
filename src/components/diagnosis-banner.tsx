@@ -76,7 +76,7 @@ export function DiagnosisBanner({
             진단을 준비하고 있어요
           </p>
           <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
-            오답 데이터를 분석하고 있어요. 준비되면 여기에 표시돼요(보통 하루 안).
+            오답 데이터를 분석하고 있어요. 준비되면 여기에 표시돼요.
           </p>
         </div>
       </div>
