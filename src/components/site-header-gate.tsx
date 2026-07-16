@@ -12,9 +12,13 @@ export function SiteHeaderGate({
   user: { nickname: string } | null;
 }) {
   const pathname = usePathname();
-  const isCbtSolvingPage = /^\/papers\/[^/]+\/cbt(\/|$)/.test(pathname ?? "");
+  // CBT 풀이 화면과 섞어풀기/복습 풀이 화면 둘 다 자체 헤더로 화면을 꽉 채우는
+  // 몰입형이라, 모바일에서 전역 헤더가 겹치면 OMR이 화면 밖으로 밀린다.
+  const isImmersiveSolvePage =
+    /^\/papers\/[^/]+\/cbt(\/|$)/.test(pathname ?? "") ||
+    /^\/mypage\/wrong-notes\/[^/]+\/review\/[^/]+/.test(pathname ?? "");
 
-  if (isCbtSolvingPage) {
+  if (isImmersiveSolvePage) {
     return (
       <div className="hidden lg:block">
         <SiteHeader user={user} />
