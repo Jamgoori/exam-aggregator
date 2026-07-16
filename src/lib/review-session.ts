@@ -492,14 +492,33 @@ export async function submitReviewSessionForUser(
     .upsert(gradedRows, { onConflict: "id" });
   if (upsertError) return { error: "채점 저장에 실패했어요." };
 
-  await admin
+  // 제출을 원자적으로 "선점"한다: submitted_at이 아직 null인 행에만 기록하고, 실제로
+  // 갱신된 행을 돌려받는다. 동시에 두 번 제출(더블탭·두 탭·재시도)되면 두 번째는
+  // 여기서 0행이라, 아래 문항 통합 상태 갱신(recordQuestionResults, 읽고-쓰는 증분)이
+  // 두 번 돌아 wrong_count가 두 배로 뛰는 사고를 막는다.
+  const { data: claimed } = await admin
     .from("review_sessions")
     .update({ score, submitted_at: new Date().toISOString() })
-    .eq("id", sessionId);
+    .eq("id", sessionId)
+    .is("submitted_at", null)
+    .select("id")
+    .maybeSingle();
+  if (!claimed) {
+    // 다른 요청이 먼저 제출을 끝냈다. 현재 채점 결과만 다시 읽어 돌려준다.
+    const view = await getReviewSessionView(supabase, userId, sessionId);
+    return view ? { view } : { error: "이미 채점된 세션이에요." };
+  }
 
   // 문항 통합 상태 갱신(극복 판정). 문제지별로 묶어 한 번씩. 실패해도 채점은 유효.
+  // 사용자가 실제로 답을 고른 문항만 반영한다 — 섞어풀기에서 그냥 넘긴(풀지 않음,
+  // selected=null) 문항까지 오답으로 기록하면, 예전에 극복해 둔 문항이 "풀지 않았다"는
+  // 이유만으로 다시 미극복으로 뒤집히고 wrong_count가 부풀기 때문이다(부분 채점·조기
+  // 채점이 정상 흐름이라 실제로 자주 발생). 스킵 문항은 신호가 없으니 상태를 건드리지
+  // 않는다(정답/오답 판정은 이 세션 결과 화면에만 반영). voided(전항정답) 문항도 답을
+  // 고른 경우에만 정답으로 기록된다.
   const byPaper = new Map<string, { question_number: number; is_correct: boolean }[]>();
   for (const r of gradedRows) {
+    if (r.selected_choice === null) continue;
     const list = byPaper.get(r.paper_id) ?? [];
     list.push({ question_number: r.question_number, is_correct: r.is_correct });
     byPaper.set(r.paper_id, list);

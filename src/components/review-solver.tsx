@@ -59,6 +59,23 @@ export function ReviewSolver({
     return <ReviewResult view={view} backHref={backHref} subjectSlug={subjectSlug} />;
   }
 
+  // 방어: 문항이 하나도 없는 세션(데이터 손상 등)에서 view.items[0] 접근이 터지지 않게.
+  if (view.items.length === 0) {
+    return (
+      <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4 px-4 py-16 text-center">
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          풀 수 있는 문항이 없어요. 오답노트로 돌아가 다시 시도해주세요.
+        </p>
+        <Link
+          href={backHref}
+          className="rounded-xl bg-zinc-100 px-5 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+        >
+          오답노트로 돌아가기
+        </Link>
+      </div>
+    );
+  }
+
   const item = view.items[index];
   const isLast = index >= view.items.length - 1;
 
@@ -212,6 +229,10 @@ export function ReviewSolver({
   );
 }
 
+// 한 세션에 담기는 최대 문항 수(서버 review-session.ts의 MAX_LIMIT와 맞춰둔 값).
+// 이보다 많이 골라도 서버가 잘라내므로, 골라둔 수가 이를 넘으면 미리 알려준다.
+const REVIEW_MAX_ITEMS = 50;
+
 // 채점 결과: 점수 + 문항별 정오/정답/출처 공개.
 function ReviewResult({
   view,
@@ -330,6 +351,12 @@ function ReviewResult({
               선택 해제
             </button>
           </div>
+          {selected.size > REVIEW_MAX_ITEMS && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              한 번에 최대 {REVIEW_MAX_ITEMS}문항까지 풀 수 있어, {REVIEW_MAX_ITEMS}문항만
+              무작위로 담겨요.
+            </p>
+          )}
           <button
             type="button"
             onClick={retrySelected}
@@ -340,7 +367,7 @@ function ReviewResult({
             {pending
               ? "준비 중..."
               : selected.size > 0
-                ? `선택한 ${selected.size}문항 다시 풀기`
+                ? `선택한 ${Math.min(selected.size, REVIEW_MAX_ITEMS)}문항 다시 풀기`
                 : "다시 풀 문항을 선택하세요"}
           </button>
         </div>
