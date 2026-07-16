@@ -141,11 +141,15 @@ export function WrongNoteQuestionCard({
   // "내가 고른 답"/"풀지 않음" 표시는 숨긴다.
   explanationsOpen = false,
   showSelection = true,
+  // 해설 페이지(?download=1)는 로드 직후 window.print()를 띄우는데, lazy 이미지는
+  // 브라우저에 따라 화면 밖 문항이 안 실린 채 인쇄될 수 있어 eager로 전환한다.
+  eagerImages = false,
 }: {
   rows: WrongNoteCardRow[];
   images: string[];
   explanationsOpen?: boolean;
   showSelection?: boolean;
+  eagerImages?: boolean;
 }) {
   const firstNumber = rows[0]?.questionNumber;
   const lastNumber = rows[rows.length - 1]?.questionNumber;
@@ -160,17 +164,21 @@ export function WrongNoteQuestionCard({
 
       {images.length > 0 ? (
         <div className="flex flex-col">
-          {/* 인쇄: 이미지를 인쇄 폭 전체로 확대하면 문항 하나가 페이지를 넘겨버려서
-              폭을 줄여 세로 공간을 아낀다(원본 시험지 단 폭보다는 여전히 크다).
-              break-inside-avoid로 이미지 자체는 페이지 경계에서 잘리지 않게 한다. */}
+          {/* 인쇄: 이미지를 인쇄 폭 전체로 확대하면 원본 시험지보다 훨씬 커져 문항
+              하나가 페이지를 넘겨버린다. 크롭 스크립트가 항상 PDF 1pt당 3px(scale=3)로
+              렌더링하므로, 원본 크기(zoom 0.444)가 되는 배율 기준으로 zoom 0.5를 걸면
+              레이아웃(2단/1단)과 무관하게 어떤 크롭이든 "원본 시험지의 약 1.13배"
+              크기로 인쇄된다. 1단(전체 폭) 크롭은 max-w-full에 걸려 인쇄 폭에 맞게
+              들어간다. break-inside-avoid로 이미지 자체는 페이지 경계에서 잘리지
+              않게 한다. */}
           {images.map((src, i) => (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               key={i}
               src={src}
               alt={`${numberLabel} 문제 이미지 ${i + 1}`}
-              loading="lazy"
-              className="w-full break-inside-avoid print:w-[75%] print:self-center"
+              loading={eagerImages ? "eager" : "lazy"}
+              className="w-full break-inside-avoid print:w-auto print:max-w-full print:self-center print:[zoom:0.5]"
             />
           ))}
         </div>

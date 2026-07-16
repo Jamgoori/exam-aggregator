@@ -169,6 +169,7 @@ export default async function PaperExplanationsPage({
             images={group.images}
             explanationsOpen
             showSelection={false}
+            eagerImages
           />
         ))}
       </div>
