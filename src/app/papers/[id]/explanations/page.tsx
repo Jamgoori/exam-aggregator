@@ -100,7 +100,7 @@ export default async function PaperExplanationsPage({
     questions.length - visibleGroups.reduce((sum, g) => sum + g.rows.length, 0);
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-12">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-12 print:gap-4 print:py-0">
       {hasFullAccess && isDownload && <ExplanationAutoPrint />}
 
       <div className="flex flex-col gap-3">
@@ -156,9 +156,12 @@ export default async function PaperExplanationsPage({
         )}
       </div>
 
-      {/* break-inside-avoid: 인쇄(PDF 저장) 시 카드 하나가 페이지 경계에서 두 동강
-          나지 않게 한다 — 화면 표시에는 아무 영향 없음. */}
-      <div className="flex flex-col gap-4 [&>*]:break-inside-avoid">
+      {/* 인쇄(PDF 저장) 시 페이지 나눔은 카드 단위가 아니라 카드 안의 작은 블록
+          단위(이미지·답 줄·해설 항목, wrong-note-question-card.tsx의
+          break-inside-avoid)로 제어한다 — 카드 전체에 avoid를 걸면 긴 카드가
+          통째로 다음 페이지로 밀리며 반 페이지씩 비어 문항당 한 페이지를 넘겨
+          쓰게 되기 때문. 화면 표시에는 아무 영향 없음. */}
+      <div className="flex flex-col gap-4 print:gap-2.5">
         {visibleGroups.map((group) => (
           <WrongNoteQuestionCard
             key={group.rows[0].questionNumber}
