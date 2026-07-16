@@ -129,6 +129,24 @@ export default async function MyPage({
       ? [...unresolvedBySubject.values()].reduce((s, v) => s + v.unresolved, 0)
       : wrongNoteGroups.reduce((sum, g) => sum + g.unresolvedCount, 0);
 
+  // 오늘 할 일(복습/섞어풀기) 카드 — 마이페이지 진입 즉시 최상단에 보이게 한다.
+  // 전 과목 기준: 복습 대상(하루 지난 미극복) 합계, 미극복 합계, 대표 과목 슬러그.
+  const dueTotal = [...unresolvedBySubject.values()].reduce((s, v) => s + v.due, 0);
+  let topSubjectSlug: string | null = null;
+  let topSubjectN = 0;
+  for (const v of unresolvedBySubject.values()) {
+    if (v.unresolved > topSubjectN) {
+      topSubjectN = v.unresolved;
+      topSubjectSlug = v.slug;
+    }
+  }
+  if (!topSubjectSlug) {
+    const g = wrongNoteGroups
+      .filter((x) => x.unresolvedCount > 0)
+      .sort((a, b) => b.unresolvedCount - a.unresolvedCount)[0];
+    if (g) topSubjectSlug = g.subject.slug;
+  }
+
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
 
@@ -160,6 +178,14 @@ export default async function MyPage({
           </Link>
         </div>
       </div>
+
+      {wrongNoteGroups.length > 0 && (
+        <WrongNoteTodayCard
+          unresolvedTotal={totalUnresolved}
+          dueTotal={dueTotal}
+          topSubjectSlug={topSubjectSlug}
+        />
+      )}
 
       <div className="flex flex-wrap gap-3">
         <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
@@ -346,34 +372,6 @@ function WrongNotesTab({
   diagnosisState: DiagnosisBannerState;
   diagnosisHint: string | null;
 }) {
-  // 오늘 카드용: 미극복이 가장 많은 과목. status 기준으로 고르고(섞어풀기 후보와 일치),
-  // status가 비어 있으면 응시 기준 groups에서 고른다.
-  let topSubject: { slug: string; name: string; unresolved: number } | null = null;
-  for (const v of unresolvedBySubject.values()) {
-    if (v.unresolved > 0 && (!topSubject || v.unresolved > topSubject.unresolved)) {
-      topSubject = { slug: v.slug, name: v.name, unresolved: v.unresolved };
-    }
-  }
-  if (!topSubject) {
-    const g = groups
-      .filter((x) => x.unresolvedCount > 0)
-      .reduce<WrongNoteSubjectGroup | null>(
-        (best, x) => (best === null || x.unresolvedCount > best.unresolvedCount ? x : best),
-        null,
-      );
-    if (g)
-      topSubject = { slug: g.subject.slug, name: g.subject.name, unresolved: g.unresolvedCount };
-  }
-
-  // 전 과목 복습 대상 합계(하루 지난 미극복)와 미극복 합계. 오늘 카드가 과목을 가리지
-  // 않고 이 수를 쓴다. status가 비면(백필 전) 응시 기준으로 폴백.
-  let dueTotal = 0;
-  for (const v of unresolvedBySubject.values()) dueTotal += v.due;
-  const unresolvedTotal =
-    unresolvedBySubject.size > 0
-      ? [...unresolvedBySubject.values()].reduce((s, v) => s + v.unresolved, 0)
-      : groups.reduce((s, g) => s + g.unresolvedCount, 0);
-
   return (
     <section className="flex flex-col gap-4">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
@@ -388,14 +386,9 @@ function WrongNotesTab({
         </p>
       ) : (
         <>
-          <WrongNoteTodayCard
-            unresolvedTotal={unresolvedTotal}
-            dueTotal={dueTotal}
-            topSubjectSlug={topSubject?.slug ?? null}
-          />
           <p className="text-xs text-zinc-400 dark:text-zinc-600">
             틀린 문항을 과목별로 모아뒀어요. 다시 맞힌 문항은 &ldquo;극복&rdquo;으로
-            표시돼요. 과목을 누르면 문항을 모아 보고 섞어풀 수 있어요.
+            표시돼요. 과목을 누르면 시험지별로 다시 풀거나 문항을 모아 볼 수 있어요.
           </p>
           <div className="flex flex-col gap-3">
             {groups.map((g) => {
