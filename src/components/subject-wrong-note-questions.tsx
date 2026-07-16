@@ -8,7 +8,10 @@ import {
   WrongNoteQuestionCard,
   type WrongNoteCardRow,
 } from "@/components/wrong-note-question-card";
-import { createReviewSession } from "@/app/mypage/wrong-notes/actions";
+import {
+  createReviewSession,
+  createReviewFromWrong,
+} from "@/app/mypage/wrong-notes/actions";
 import { MemoEditor } from "@/components/memo-editor";
 import { levelColor } from "@/lib/level-colors";
 import type { SubjectWrongNoteQuestion } from "@/lib/wrong-notes";
@@ -81,6 +84,39 @@ export function SubjectWrongNoteQuestions({
   const [sort, setSort] = useState<SortKey>("number");
   const [reviewPending, startReview] = useTransition();
   const [reviewError, setReviewError] = useState<string | null>(null);
+
+  // 문항 선택 → 선택한 것만 섞어풀기. 극복한 문항도 목록에 뜨므로(미극복만 필터 끄면)
+  // 골라서 다시 풀 수 있다. 키는 `${paperId}#${questionNumber}`.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selPending, startSel] = useTransition();
+  const [selError, setSelError] = useState<string | null>(null);
+
+  function toggleSelect(paperId: string, questionNumber: number) {
+    const key = `${paperId}#${questionNumber}`;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function startSelected() {
+    if (selPending || selected.size === 0) return;
+    setSelError(null);
+    const items = [...selected].map((k) => {
+      const idx = k.lastIndexOf("#");
+      return { paperId: k.slice(0, idx), questionNumber: Number(k.slice(idx + 1)) };
+    });
+    startSel(async () => {
+      const res = await createReviewFromWrong({ items });
+      if (res.error || !res.sessionId) {
+        setSelError(res.error ?? "다시 풀기를 시작하지 못했어요.");
+        return;
+      }
+      router.push(`/mypage/wrong-notes/${subjectSlug}/review/${res.sessionId}`);
+    });
+  }
 
   // 이미지가 있어 실제로 풀 수 있는 미극복 오답만 섞어풀기 대상이 된다(서버도 같은
   // 기준으로 거른다). 0개면 버튼을 숨긴다.
@@ -177,7 +213,7 @@ export function SubjectWrongNoteQuestions({
     !!initialConcept && concepts.length > 0 && !concepts.includes(initialConcept);
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className={`flex flex-col gap-4 ${selected.size > 0 ? "pb-24" : ""}`}>
       {conceptMissing && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
           &lsquo;{initialConcept}&rsquo; 개념으로 좁히지 못해 전체 문항을 보여드려요.
@@ -286,20 +322,64 @@ export function SubjectWrongNoteQuestions({
                 </div>
                 <WrongNoteQuestionCard rows={card.rows} images={card.images} />
                 <div className="flex flex-col divide-y divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800/70">
-                  {card.source.map((q) => (
-                    <MemoEditor
-                      key={q.questionNumber}
-                      paperId={q.paperId}
-                      questionNumber={q.questionNumber}
-                      initialMemo={q.memo}
-                      label={card.source.length > 1 ? `${q.questionNumber}번` : undefined}
-                    />
-                  ))}
+                  {card.source.map((q) => {
+                    const key = `${q.paperId}#${q.questionNumber}`;
+                    return (
+                      <div key={q.questionNumber} className="flex items-start gap-1">
+                        <label className="flex shrink-0 cursor-pointer items-center gap-1 py-2 pl-2 text-xs text-zinc-500 dark:text-zinc-400">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(key)}
+                            onChange={() => toggleSelect(q.paperId, q.questionNumber)}
+                            className="h-4 w-4 accent-blue-600"
+                          />
+                          <span className="select-none">선택</span>
+                        </label>
+                        <div className="min-w-0 flex-1">
+                          <MemoEditor
+                            paperId={q.paperId}
+                            questionNumber={q.questionNumber}
+                            initialMemo={q.memo}
+                            label={card.source.length > 1 ? `${q.questionNumber}번` : undefined}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}
           </div>
         </>
+      )}
+
+      {/* 문항을 고르면 뜨는 하단 바: 선택한 것(극복 포함)만 섞어풀기. */}
+      {selected.size > 0 && (
+        <div className="fixed inset-x-0 bottom-4 z-30 flex justify-center px-4">
+          <div className="flex w-full max-w-md items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            >
+              해제
+            </button>
+            <button
+              type="button"
+              onClick={startSelected}
+              disabled={selPending}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              <Shuffle size={15} />
+              {selPending ? "준비 중..." : `선택한 ${selected.size}개 섞어풀기`}
+            </button>
+          </div>
+        </div>
+      )}
+      {selError && (
+        <p className="fixed inset-x-0 bottom-20 z-30 text-center text-xs text-red-600 dark:text-red-400">
+          {selError}
+        </p>
       )}
     </div>
   );
