@@ -39,6 +39,18 @@ This version has breaking changes — APIs, conventions, and file structure may 
 Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설을 자동
 생성한다. 이 루틴이나 관련 스크립트를 건드릴 일이 있으면 아래를 먼저 알아둘 것:
 
+- **caveman 플러그인은 배치 루틴 환경에서 자동 비활성화된다 (2026-07-16).**
+  PR #80이 넣은 `.claude/hooks/session-start.sh`는 모든 원격 세션에 caveman
+  플러그인을 자동 설치하는데, caveman은 사용자 설정이 없으면 기본 모드가 `full`
+  이라 **설치된 컨테이너의 다음 세션 부팅부터 압축 말투 규칙이 자동 주입**된다
+  (플러그인 자체 SessionStart 훅). 루틴 환경은 컨테이너를 재사용하므로 무인 배치
+  세션이 이 상태로 돌면 세션 요약·중간 산출물 형식이 오염될 수 있다. 그래서 훅이
+  배치 환경(EXPLANATION_BOT_EMAIL 환경변수 존재)을 감지하면 설치를 건너뛰고
+  `~/.config/caveman/config.json`을 `{"defaultMode": "off"}`로 강제해 이전 부팅에서
+  설치된 것도 꺼둔다. 이 훅을 고칠 일이 있으면 이 분기를 유지할 것. 참고로 해설
+  본문 자체는 Opus 서브에이전트가 작성해 caveman 주입의 영향 밖에 있다(2026-07-16
+  DB 표본 검사로 오염 0건 확인).
+
 - **스크립트 원본은 Supabase Storage에 있다** — `exam-papers` 버킷의
   `_batch-scripts/` 폴더. 각 루틴 세션이 부팅할 때 그걸 받아온다. 레포의
   `scripts/explanation-prompt.md`·`save-explanations.mjs`는 2026-07-13 배포 시점의
