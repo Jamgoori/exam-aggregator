@@ -47,6 +47,7 @@ export default async function SubjectWrongNotePage({
         <SubjectWrongNoteQuestions
           questions={note.questions}
           unresolvedCount={note.unresolvedCount}
+          subjectSlug={slug}
         />
       </SubjectWrongNoteShell>
     );

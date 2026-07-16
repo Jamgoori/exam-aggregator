@@ -1,11 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { Shuffle } from "lucide-react";
 import {
   WrongNoteLegend,
   WrongNoteQuestionCard,
   type WrongNoteCardRow,
 } from "@/components/wrong-note-question-card";
+import { createReviewSession } from "@/app/mypage/wrong-notes/actions";
 import { levelColor } from "@/lib/level-colors";
 import type { SubjectWrongNoteQuestion } from "@/lib/wrong-notes";
 
@@ -61,13 +64,38 @@ function comparator(sort: SortKey) {
 export function SubjectWrongNoteQuestions({
   questions,
   unresolvedCount,
+  subjectSlug,
 }: {
   questions: SubjectWrongNoteQuestion[];
   unresolvedCount: number;
+  subjectSlug: string;
 }) {
+  const router = useRouter();
   const [hideResolved, setHideResolved] = useState(false);
   const [onlyRepeated, setOnlyRepeated] = useState(false);
   const [sort, setSort] = useState<SortKey>("number");
+  const [reviewPending, startReview] = useTransition();
+  const [reviewError, setReviewError] = useState<string | null>(null);
+
+  // 이미지가 있어 실제로 풀 수 있는 미극복 오답만 섞어풀기 대상이 된다(서버도 같은
+  // 기준으로 거른다). 0개면 버튼을 숨긴다.
+  const playableUnresolved = useMemo(
+    () => questions.filter((q) => !q.resolved && q.images.length > 0).length,
+    [questions],
+  );
+
+  function startShuffle() {
+    if (reviewPending) return;
+    setReviewError(null);
+    startReview(async () => {
+      const res = await createReviewSession({ subjectSlug, onlyUnresolved: true });
+      if (res.error || !res.sessionId) {
+        setReviewError(res.error ?? "섞어풀기를 시작하지 못했어요.");
+        return;
+      }
+      router.push(`/mypage/wrong-notes/${subjectSlug}/review/${res.sessionId}`);
+    });
+  }
 
   const cards = useMemo(() => {
     let list = questions;
@@ -111,6 +139,25 @@ export function SubjectWrongNoteQuestions({
 
   return (
     <div className="flex flex-col gap-4">
+      {playableUnresolved > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={startShuffle}
+            disabled={reviewPending}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Shuffle size={16} />
+            {reviewPending
+              ? "섞는 중..."
+              : `섞어풀기 — 미극복 ${playableUnresolved}문항 · 순서 섞기`}
+          </button>
+          {reviewError && (
+            <p className="text-center text-xs text-red-600 dark:text-red-400">{reviewError}</p>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
