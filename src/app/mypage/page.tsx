@@ -13,6 +13,7 @@ import { computeStreakDays, streakTier } from "@/lib/streak";
 import { subjectColor } from "@/lib/subject-colors";
 import {
   buildWrongNoteGroups,
+  fetchQuestionStatusRaw,
   fetchWrongAnswerRows,
   getUnresolvedCountBySubject,
   type WrongNoteAttemptRow,
@@ -116,9 +117,14 @@ export default async function MyPage({
     supabase,
     myAttempts.map((a) => a.id),
   );
+  const wrongPaperIds = [
+    ...new Set(myAttempts.map((a) => a.exam_papers?.id).filter((id): id is string => !!id)),
+  ];
+  const statusByPaperQ = await fetchQuestionStatusRaw(supabase, user.id, wrongPaperIds);
   const wrongNoteGroups = buildWrongNoteGroups(
     myAttempts as unknown as WrongNoteAttemptRow[],
     wrongRows,
+    statusByPaperQ,
   );
   // 미극복 수는 user_question_status(CBT+섞어풀기 통합) 기준으로 센다 — 섞어풀기로
   // 극복한 게 헤드라인·과목·오늘 카드에 즉시 반영되고, 섞어풀기 후보 수와 일치한다.

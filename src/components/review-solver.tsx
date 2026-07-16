@@ -8,7 +8,7 @@ import {
   submitReviewSession,
   createReviewFromWrong,
 } from "@/app/mypage/wrong-notes/actions";
-import type { ReviewSessionView } from "@/lib/review-session";
+import type { ReviewItemView, ReviewSessionView } from "@/lib/review-session";
 
 // 섞어풀기 풀이 화면. 문제지 경계 없이 섞인 오답을 순서대로 풀고 채점한다. 풀이
 // 중에는 출처(문제지·번호)와 정답을 숨겨 힌트가 되지 않게 하고, 채점 후에만 공개한다.
@@ -236,15 +236,34 @@ function ReviewResult({
     [view.items],
   );
 
-  const wrongItems = items
-    .filter((it) => it.isCorrect === false && it.paperId && it.questionNumber != null)
-    .map((it) => ({ paperId: it.paperId as string, questionNumber: it.questionNumber as number }));
+  // 다시 풀기 후보(출처가 있는 문항 전체 — 극복/오답 무관). 체크박스로 문항별
+  // 포함 여부를 고르고, 기본값은 "틀린 것만"으로 맞춰 기존 동작을 그대로 유지한다.
+  const retryable = items.filter(
+    (it) => it.paperId && it.questionNumber != null,
+  ) as (ReviewItemView & { paperId: string; questionNumber: number })[];
+  const wrongItems = retryable.filter((it) => it.isCorrect === false);
 
-  function retryWrong() {
-    if (pending || wrongItems.length === 0) return;
+  const [selected, setSelected] = useState<Set<number>>(
+    () => new Set(wrongItems.map((it) => it.position)),
+  );
+
+  function toggle(position: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(position)) next.delete(position);
+      else next.add(position);
+      return next;
+    });
+  }
+
+  function retrySelected() {
+    if (pending || selected.size === 0) return;
     setError(null);
+    const chosen = retryable
+      .filter((it) => selected.has(it.position))
+      .map((it) => ({ paperId: it.paperId, questionNumber: it.questionNumber }));
     start(async () => {
-      const res = await createReviewFromWrong({ items: wrongItems });
+      const res = await createReviewFromWrong({ items: chosen });
       if (res.error || !res.sessionId) {
         setError(res.error ?? "다시 풀기를 시작하지 못했어요.");
         return;
@@ -282,16 +301,49 @@ function ReviewResult({
         )}
       </div>
 
-      {wrongItems.length > 0 && (
-        <button
-          type="button"
-          onClick={retryWrong}
-          disabled={pending}
-          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
-        >
-          <RotateCcw size={16} />
-          {pending ? "준비 중..." : `틀린 ${wrongItems.length}문항만 다시 풀기`}
-        </button>
+      {retryable.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {/* 극복한 문항도 다시 풀고 싶을 수 있어, 문항 카드 체크박스로 개별 선택하거나
+              아래 프리셋으로 한 번에 고를 수 있게 한다. 기본 선택은 "틀린 것만"이라
+              바로 눌러도 예전과 동일하게 동작한다. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-500">
+            <span>다시 풀 문항 고르기:</span>
+            <button
+              type="button"
+              onClick={() => setSelected(new Set(wrongItems.map((it) => it.position)))}
+              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              틀린 것만
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelected(new Set(retryable.map((it) => it.position)))}
+              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              극복 포함 전체
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              선택 해제
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={retrySelected}
+            disabled={pending || selected.size === 0}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RotateCcw size={16} />
+            {pending
+              ? "준비 중..."
+              : selected.size > 0
+                ? `선택한 ${selected.size}문항 다시 풀기`
+                : "다시 풀 문항을 선택하세요"}
+          </button>
+        </div>
       )}
       {error && <p className="-mt-3 text-center text-xs text-red-600 dark:text-red-400">{error}</p>}
 
@@ -309,7 +361,16 @@ function ReviewResult({
             className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
           >
             <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-4 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-800/50">
-              <span className="font-medium text-zinc-600 dark:text-zinc-400">
+              <span className="flex items-center gap-2 font-medium text-zinc-600 dark:text-zinc-400">
+                {it.paperId && it.questionNumber != null && (
+                  <input
+                    type="checkbox"
+                    checked={selected.has(it.position)}
+                    onChange={() => toggle(it.position)}
+                    aria-label="다시 풀기에 포함"
+                    className="h-3.5 w-3.5 accent-blue-600"
+                  />
+                )}
                 {it.position + 1}번
                 {it.paperTitle ? ` · ${it.paperTitle} ${it.questionNumber}번` : ""}
               </span>

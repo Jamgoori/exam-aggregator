@@ -108,9 +108,15 @@ export async function fetchWrongAnswerRows(
 // 응시 목록 + 오답 행을 과목 → 문제지 → 문제 순으로 묶는다. "몇 번 틀렸는지"와
 // "가장 최근 응시에서는 맞혔는지(극복)"까지 여기서 한 번에 계산해서, 화면들은
 // 이 결과를 그대로 그리기만 하면 된다.
+//
+// statusByPaperQ(선택): user_question_status(CBT+섞어풀기 통합, `${paper_id}#${question_number}`
+// 키)가 있으면 그 값을 우선한다. 없으면(테이블 미적용/기록 없음) CBT 최신 응시 기준으로
+// 폴백한다. 이게 없으면 섞어풀기(다시 풀기)로 맞힌 문항이 "문제지별" 오답노트에서는
+// 영원히 극복으로 반영되지 않는다 — buildWrongNoteGroups는 원래 cbt_attempts만 보므로.
 export function buildWrongNoteGroups(
   attempts: WrongNoteAttemptRow[],
   wrongRows: WrongAnswerRow[],
+  statusByPaperQ?: Map<string, boolean>,
 ): WrongNoteSubjectGroup[] {
   const wrongByAttempt = new Map<string, WrongAnswerRow[]>();
   for (const row of wrongRows) {
@@ -134,6 +140,7 @@ export function buildWrongNoteGroups(
       (x, y) => new Date(y.created_at).getTime() - new Date(x.created_at).getTime(),
     );
     const latest = sorted[0];
+    const paperId = latest.exam_papers!.id;
     const wrongInLatest = new Set(
       (wrongByAttempt.get(latest.id) ?? []).map((r) => r.question_number),
     );
@@ -146,10 +153,11 @@ export function buildWrongNoteGroups(
         if (existing) {
           existing.wrongCount++;
         } else {
+          const status = statusByPaperQ?.get(`${paperId}#${row.question_number}`);
           byNumber.set(row.question_number, {
             questionNumber: row.question_number,
             wrongCount: 1,
-            resolved: !wrongInLatest.has(row.question_number),
+            resolved: status ?? !wrongInLatest.has(row.question_number),
             lastSelectedChoice: row.selected_choice,
           });
         }
@@ -226,7 +234,11 @@ export async function getWrongNoteGroups(
     supabase,
     attempts.map((a) => a.id),
   );
-  return buildWrongNoteGroups(attempts, wrongRows);
+  const paperIds = [
+    ...new Set(attempts.map((a) => a.exam_papers?.id).filter((id): id is string => !!id)),
+  ];
+  const statusByPaperQ = await fetchQuestionStatusRaw(supabase, userId, paperIds);
+  return buildWrongNoteGroups(attempts, wrongRows, statusByPaperQ);
 }
 
 // 화면에 그릴 수 있게 이미지/정답/해설까지 붙인 문제 상세.
@@ -578,6 +590,21 @@ async function fetchQuestionStatusByRep(
       }
     }
   }
+  return out;
+}
+
+// buildWrongNoteGroups(응시 기반)에 얹을 극복 오버라이드. dedup 대표로 접지 않고
+// 문항이 실제로 기록된 그 paper_id 그대로 `${paperId}#${questionNumber}` → 정답 여부만
+// 돌려준다(문제지별 오답노트는 대표 병합을 아직 안 하므로 원본 키가 맞다). 섞어풀기로
+// 맞힌 문항이 "문제지별"/문제지 상세 오답노트에도 극복으로 반영되게 하는 게 목적.
+export async function fetchQuestionStatusRaw(
+  supabase: Supabase,
+  userId: string,
+  paperIds: string[],
+): Promise<Map<string, boolean>> {
+  const byRep = await fetchQuestionStatusByRep(supabase, userId, paperIds, (id) => id);
+  const out = new Map<string, boolean>();
+  for (const [key, v] of byRep) out.set(key, v.correct);
   return out;
 }
 
@@ -956,7 +983,8 @@ export async function getPaperWrongNote(
 
   // 오답이 하나도 없으면(전부 만점) 통합 목록은 비지만 회독 기록은 그대로 보여준다.
   // 응시가 전부 한 문제지 것이므로 결과는 과목 하나 → 문제지 하나로 좁혀진다.
-  const group = buildWrongNoteGroups(attempts, wrongRows)[0]?.papers[0];
+  const statusByPaperQ = await fetchQuestionStatusRaw(supabase, userId, [paper.id]);
+  const group = buildWrongNoteGroups(attempts, wrongRows, statusByPaperQ)[0]?.papers[0];
   if (!group) {
     return { paper, rounds, questions: [], unresolvedCount: 0, resolvedCount: 0 };
   }
