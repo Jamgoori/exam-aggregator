@@ -3,27 +3,25 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Shuffle, RotateCcw } from "lucide-react";
+import { RotateCcw } from "lucide-react";
 import { createReviewAll } from "@/app/mypage/wrong-notes/actions";
 
-// 오답노트 허브 최상단 "오늘 카드". 전 과목을 한 번에 다룬다(과목을 가리지 않음):
-// (1) 복습 대상(하루 지난 미극복)이 있으면 전 과목 복습, (2) 아니면 전 과목 미극복
-// 섞어풀기, (3) 전부 극복이면 축하. 극복한 문항까지 다시 풀고 싶으면 하단 링크로.
+// 마이페이지 최상단 "오늘 할 일" 카드. 전 과목 미극복 오답을 한 번에 다시 푼다.
+// (복습 대상 수 = 미극복 수와 항상 일치 — 채점 후 극복한 만큼만 줄어든다.)
+// 극복한 문항까지 다시 풀고 싶으면 하단 링크로.
 export function WrongNoteTodayCard({
   unresolvedTotal,
-  dueTotal,
   topSubjectSlug,
 }: {
   unresolvedTotal: number;
-  dueTotal: number;
-  // 보조 "문항 모아보기" 링크가 향하는 대표 과목(미극복 최다). 없으면 링크 숨김.
+  // 보조 "시험지 보기" 링크가 향하는 대표 과목(미극복 최다). 없으면 링크 숨김.
   topSubjectSlug: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  function launch(opts: { onlyDue?: boolean; includeResolved?: boolean }) {
+  function launch(opts: { includeResolved?: boolean }) {
     if (pending) return;
     setError(null);
     start(async () => {
@@ -36,7 +34,7 @@ export function WrongNoteTodayCard({
     });
   }
 
-  // (3) 전부 극복
+  // 전부 극복
   if (unresolvedTotal <= 0) {
     return (
       <div className="rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 p-5 text-white">
@@ -66,39 +64,31 @@ export function WrongNoteTodayCard({
     );
   }
 
-  const isReview = dueTotal > 0;
-
   return (
     <div className="rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 p-5 text-white">
       <p className="flex items-center gap-1 text-xs font-semibold opacity-85">
-        {isReview ? <RotateCcw size={13} /> : <Shuffle size={13} />} 오늘 할 일
+        <RotateCcw size={13} /> 오늘 할 일
       </p>
-      <h3 className="mt-1.5 text-lg font-bold">
-        {isReview
-          ? `복습할 문항 ${dueTotal}개가 기다려요`
-          : `미극복 ${unresolvedTotal}문항, 섞어서 다시 풀어요`}
-      </h3>
+      <h3 className="mt-1.5 text-lg font-bold">복습할 문항 {unresolvedTotal}개가 기다려요</h3>
       <p className="mt-1 text-sm opacity-90">
-        {isReview
-          ? "하루 전에 틀린 문제예요. 과목 상관없이 모아서 잊기 전에 극복해요."
-          : "여러 과목 오답을 한 번에 섞어 풀어요. 맞히면 자동으로 극복 처리돼요."}
+        아직 못 넘긴 오답이에요. 과목 상관없이 한 번에 섞어 풀어 극복해요.
       </p>
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={() => launch(isReview ? { onlyDue: true } : {})}
+          onClick={() => launch({})}
           disabled={pending}
           className="inline-flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-bold text-blue-700 disabled:opacity-70"
         >
-          {isReview ? <RotateCcw size={15} /> : <Shuffle size={15} />}
-          {pending ? "준비 중..." : isReview ? "복습 시작하기" : "섞어풀기 시작"}
+          <RotateCcw size={15} />
+          {pending ? "준비 중..." : "복습 시작하기"}
         </button>
         {topSubjectSlug && (
           <Link
-            href={`/mypage/wrong-notes/${topSubjectSlug}?view=questions`}
+            href={`/mypage/wrong-notes/${topSubjectSlug}`}
             className="rounded-lg bg-white/15 px-3.5 py-2 text-sm font-medium text-white hover:bg-white/25"
           >
-            문항 모아보기
+            시험지 보기
           </Link>
         )}
       </div>

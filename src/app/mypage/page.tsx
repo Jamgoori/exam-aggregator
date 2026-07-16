@@ -129,9 +129,8 @@ export default async function MyPage({
       ? [...unresolvedBySubject.values()].reduce((s, v) => s + v.unresolved, 0)
       : wrongNoteGroups.reduce((sum, g) => sum + g.unresolvedCount, 0);
 
-  // 오늘 할 일(복습/섞어풀기) 카드 — 마이페이지 진입 즉시 최상단에 보이게 한다.
-  // 전 과목 기준: 복습 대상(하루 지난 미극복) 합계, 미극복 합계, 대표 과목 슬러그.
-  const dueTotal = [...unresolvedBySubject.values()].reduce((s, v) => s + v.due, 0);
+  // 오늘 할 일 카드 — 마이페이지 진입 즉시 최상단. 전 과목 미극복 합계 기준(복습 대상
+  // 수 = 미극복 수라 채점 후 극복한 만큼만 줄어 개수가 어긋나지 않는다).
   let topSubjectSlug: string | null = null;
   let topSubjectN = 0;
   for (const v of unresolvedBySubject.values()) {
@@ -182,7 +181,6 @@ export default async function MyPage({
       {wrongNoteGroups.length > 0 && (
         <WrongNoteTodayCard
           unresolvedTotal={totalUnresolved}
-          dueTotal={dueTotal}
           topSubjectSlug={topSubjectSlug}
         />
       )}
@@ -397,7 +395,7 @@ function WrongNotesTab({
               return (
                 <Link
                   key={g.subject.id}
-                  href={`/mypage/wrong-notes/${g.subject.slug}?view=questions`}
+                  href={`/mypage/wrong-notes/${g.subject.slug}`}
                   className="group flex items-center gap-3 rounded-xl border border-zinc-200 p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
                 >
                   <span
@@ -419,7 +417,7 @@ function WrongNotesTab({
                     )}
                   </span>
                   <span className="ml-auto flex shrink-0 items-center gap-1 text-sm font-medium text-blue-600 group-hover:underline dark:text-blue-400">
-                    문항 보기
+                    시험지 보기
                     <ChevronRight size={15} />
                   </span>
                 </Link>
