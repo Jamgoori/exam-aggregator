@@ -3,6 +3,12 @@ import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ExamType, Subject } from "@/lib/supabase/types";
 import type { QuestionExplanationContent } from "@/components/wrong-note-question-card";
+import {
+  collidingPaperIds,
+  fetchPaperIdentitySignals,
+  representativePaperIds,
+} from "@/lib/dedup-papers";
+import { stripTrackFromTitle } from "@/lib/paper-title";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -476,6 +482,227 @@ export async function getSubjectWrongNoteOverview(
   const groups = await getWrongNoteGroups(supabase, userId);
   const group = groups.find((g) => g.subject.id === subject.id);
   return { subject, papers: group?.papers ?? [] };
+}
+
+// ── 과목 문항 모아보기 (과목 오답을 문제지 경계 없이 문항 단위로 펼침) ──────────
+//
+// 과목 오답노트의 "문항 모아보기" 탭용. 문제지별 요약과 달리, 그 과목에서 틀린
+// 문항 전체를 이미지·정답·해설까지 붙여 한 목록으로 돌려준다. 필터·정렬은 화면
+// (클라이언트)에서 하고 여기서는 정렬 안정성을 위해 (문제지 제목, 문항 번호)
+// 순으로만 정돈해 둔다 — 세트문제(공통지문) 병합이 같은 문제지 내 연속 문항에서
+// 성립하도록.
+//
+// 중복 시험지(직류만 다른 같은 시험지) 처리: 같은 과목 안에서 track만 다른 문제지
+// 두 행에 각각 응시 기록이 있으면 같은 문항이 두 번 잡힌다. dedup-papers의 대표
+// 선정 규칙을 그대로 써서 응시를 대표 문제지 id로 접은 뒤 문항을 합친다(표시 통합과
+// 동일 기준).
+
+export type SubjectWrongNoteQuestion = {
+  paperId: string;
+  paperTitle: string;
+  paperLevel: string | null;
+  questionNumber: number;
+  wrongCount: number;
+  resolved: boolean;
+  // 가장 최근에 틀렸을 때 고른 답 (null이면 풀지 않고 넘어감).
+  selectedChoice: number | null;
+  // 가장 최근에 이 문항을 틀린 응시 시각 ("최근 틀린 순" 정렬용).
+  lastWrongAt: string;
+  correctChoice: number | null;
+  choiceCount: number;
+  images: string[];
+  explanation: QuestionExplanationContent | null;
+};
+
+export type SubjectWrongNoteQuestions = {
+  subject: Subject;
+  questions: SubjectWrongNoteQuestion[];
+  unresolvedCount: number;
+  resolvedCount: number;
+};
+
+// dedup 대표 선정에 필요한 필드까지 포함해 응시를 받는다. subjects/exam_types는
+// 표시용.
+type SubjectAttemptPaper = {
+  id: string;
+  title: string;
+  level: string | null;
+  choice_count: number;
+  subject_id: string;
+  exam_type_id: string;
+  year: number;
+  round: number;
+  track: string | null;
+  created_at: string;
+};
+
+type SubjectAttemptRow = {
+  id: string;
+  created_at: string;
+  exam_papers: SubjectAttemptPaper | null;
+};
+
+const SUBJECT_ATTEMPT_SELECT =
+  "id, created_at, exam_papers!inner(id, title, level, choice_count, subject_id, exam_type_id, year, round, track, created_at)";
+
+export async function getSubjectWrongNoteQuestions(
+  supabase: Supabase,
+  userId: string,
+  slug: string,
+): Promise<SubjectWrongNoteQuestions | null> {
+  const { data: subjectRow } = await supabase
+    .from("subjects")
+    .select("*")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (!subjectRow) return null;
+  const subject = subjectRow as Subject;
+
+  const { data: attemptRows } = await supabase
+    .from("cbt_attempts")
+    .select(SUBJECT_ATTEMPT_SELECT)
+    .eq("user_id", userId)
+    .eq("exam_papers.subject_id", subject.id)
+    .order("created_at", { ascending: false });
+
+  const attempts = ((attemptRows ?? []) as unknown as SubjectAttemptRow[]).filter(
+    (a) => a.exam_papers,
+  );
+  if (attempts.length === 0) {
+    return { subject, questions: [], unresolvedCount: 0, resolvedCount: 0 };
+  }
+
+  // 응시에 등장한 문제지들(중복 제거) — dedup 대표 계산 입력.
+  const distinctPapers = new Map<string, SubjectAttemptPaper>();
+  for (const a of attempts) {
+    const p = a.exam_papers!;
+    if (!distinctPapers.has(p.id)) distinctPapers.set(p.id, p);
+  }
+  const paperList = [...distinctPapers.values()];
+
+  // 겹칠 수 있는 문제지에 대해서만 정답 지문을 조회해 대표를 정한다.
+  const collidingIds = collidingPaperIds(paperList);
+  const signals =
+    collidingIds.length > 0
+      ? await fetchPaperIdentitySignals(supabase, collidingIds)
+      : undefined;
+  const { repByPaperId, finalGroupSizeByRepId } = representativePaperIds(
+    paperList,
+    signals,
+  );
+  const repId = (paperId: string) => repByPaperId.get(paperId) ?? paperId;
+
+  // 대표 문제지 표시 정보. 실제로 합쳐진(2건 이상) 대표는 title에서 track 접미사를 뗀다.
+  const repInfo = new Map<string, { title: string; level: string | null; choiceCount: number }>();
+  for (const p of paperList) {
+    if (repId(p.id) !== p.id) continue;
+    const collapsed = (finalGroupSizeByRepId.get(p.id) ?? 1) > 1;
+    repInfo.set(p.id, {
+      title: collapsed && p.track ? stripTrackFromTitle(p.title, p.track) : p.title,
+      level: p.level,
+      choiceCount: p.choice_count,
+    });
+  }
+
+  const wrongRows = await fetchWrongAnswerRows(
+    supabase,
+    attempts.map((a) => a.id),
+  );
+  const wrongByAttempt = new Map<string, WrongAnswerRow[]>();
+  for (const row of wrongRows) {
+    const list = wrongByAttempt.get(row.attempt_id) ?? [];
+    list.push(row);
+    wrongByAttempt.set(row.attempt_id, list);
+  }
+
+  // 대표별 "가장 최근 응시" = 최신순 attempts에서 처음 만나는 것. 그 응시에서
+  // 틀리지 않은 문항은 극복으로 본다.
+  const latestAttemptIdByRep = new Map<string, string>();
+  for (const a of attempts) {
+    const r = repId(a.exam_papers!.id);
+    if (!latestAttemptIdByRep.has(r)) latestAttemptIdByRep.set(r, a.id);
+  }
+  const wrongInLatestByRep = new Map<string, Set<number>>();
+  for (const [r, attemptId] of latestAttemptIdByRep) {
+    wrongInLatestByRep.set(
+      r,
+      new Set((wrongByAttempt.get(attemptId) ?? []).map((w) => w.question_number)),
+    );
+  }
+
+  // (대표 문제지, 문항 번호)로 오답을 합친다. 최신순으로 훑으므로 처음 만든 값이
+  // "가장 최근에 고른 답 / 가장 최근에 틀린 시각"이 된다.
+  type Agg = {
+    repId: string;
+    questionNumber: number;
+    wrongCount: number;
+    selectedChoice: number | null;
+    lastWrongAt: string;
+  };
+  const byRepQ = new Map<string, Agg>();
+  for (const a of attempts) {
+    const r = repId(a.exam_papers!.id);
+    for (const row of wrongByAttempt.get(a.id) ?? []) {
+      const key = `${r}#${row.question_number}`;
+      const existing = byRepQ.get(key);
+      if (existing) {
+        existing.wrongCount++;
+      } else {
+        byRepQ.set(key, {
+          repId: r,
+          questionNumber: row.question_number,
+          wrongCount: 1,
+          selectedChoice: row.selected_choice,
+          lastWrongAt: a.created_at,
+        });
+      }
+    }
+  }
+
+  const repIds = [...repInfo.keys()];
+  const [mediaByPaper, answersByPaper, explanationsByPaper] = await Promise.all([
+    fetchQuestionMedia(supabase, repIds),
+    fetchCorrectAnswers(repIds),
+    fetchExplanations(repIds),
+  ]);
+
+  const questions: SubjectWrongNoteQuestion[] = [];
+  for (const agg of byRepQ.values()) {
+    const info = repInfo.get(agg.repId);
+    if (!info) continue;
+    const media = mediaByPaper.get(agg.repId)?.get(agg.questionNumber);
+    const answers = answersByPaper.get(agg.repId);
+    const resolved = !wrongInLatestByRep.get(agg.repId)?.has(agg.questionNumber);
+    questions.push({
+      paperId: agg.repId,
+      paperTitle: info.title,
+      paperLevel: info.level,
+      questionNumber: agg.questionNumber,
+      wrongCount: agg.wrongCount,
+      resolved,
+      selectedChoice: agg.selectedChoice,
+      lastWrongAt: agg.lastWrongAt,
+      correctChoice: answers?.[agg.questionNumber - 1] ?? null,
+      choiceCount: media?.choiceCount ?? info.choiceCount,
+      images: media?.images ?? [],
+      explanation: explanationsByPaper.get(agg.repId)?.get(agg.questionNumber) ?? null,
+    });
+  }
+
+  // 세트문제 병합이 성립하도록 (제목, 번호) 순 안정 정렬. 화면이 다시 정렬한다.
+  questions.sort(
+    (a, b) =>
+      a.paperTitle.localeCompare(b.paperTitle, "ko") ||
+      a.questionNumber - b.questionNumber,
+  );
+  const unresolvedCount = questions.filter((q) => !q.resolved).length;
+
+  return {
+    subject,
+    questions,
+    unresolvedCount,
+    resolvedCount: questions.length - unresolvedCount,
+  };
 }
 
 // ── 문제지 오답노트 (과목 → 문제지 드릴다운) ───────────────────────────────

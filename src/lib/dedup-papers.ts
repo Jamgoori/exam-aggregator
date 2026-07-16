@@ -188,14 +188,14 @@ function isBetterRepresentative<T extends DedupablePaper>(
   return candidate.id < current.id;
 }
 
-// 중복(내용까지 확인된 같은 시험지)마다 대표 1건만 남긴다. 입력 순서는 그대로
-// 유지하고(정렬은 호출부 책임), 대표가 있던 자리에 대표를 둔다. 실제로 합쳐진
-// (2건 이상이던) 그룹의 대표만 title에서 track 접미사를 떼어내고, 그 외에는 제목을
-// 손대지 않는다.
-export function collapseDuplicatePapers<T extends DedupablePaper>(
+// 문제지 id마다 그 문제지가 속한 그룹의 대표 id를 매핑해 돌려준다. 대표 자신은
+// 자기 id로 매핑된다. finalGroupSize는 각 대표가 대표하는 그룹 크기(1이면 단독,
+// 2 이상이면 실제로 합쳐진 중복). 표시 통합(collapseDuplicatePapers)과 문항 단위
+// 집계(오답노트 모아보기)가 같은 대표 선정 규칙을 공유하도록 여기서 한 번만 계산한다.
+export function representativePaperIds<T extends DedupablePaper>(
   papers: T[],
   signals?: Map<string, PaperIdentitySignal>,
-): T[] {
+): { repByPaperId: Map<string, string>; finalGroupSizeByRepId: Map<string, number> } {
   const metaGroups = new Map<string, T[]>();
   for (const p of papers) {
     const key = paperDedupKey(p);
@@ -204,7 +204,7 @@ export function collapseDuplicatePapers<T extends DedupablePaper>(
     else metaGroups.set(key, [p]);
   }
 
-  const representativeIdByPaperId = new Map<string, string>();
+  const repByPaperId = new Map<string, string>();
   const finalGroupSizeByRepId = new Map<string, number>();
   for (const members of metaGroups.values()) {
     for (const subgroup of clusterSamePaper(members, signals)) {
@@ -212,14 +212,26 @@ export function collapseDuplicatePapers<T extends DedupablePaper>(
       for (let i = 1; i < subgroup.length; i++) {
         if (isBetterRepresentative(subgroup[i], best, signals)) best = subgroup[i];
       }
-      for (const m of subgroup) representativeIdByPaperId.set(m.id, best.id);
+      for (const m of subgroup) repByPaperId.set(m.id, best.id);
       finalGroupSizeByRepId.set(best.id, subgroup.length);
     }
   }
+  return { repByPaperId, finalGroupSizeByRepId };
+}
+
+// 중복(내용까지 확인된 같은 시험지)마다 대표 1건만 남긴다. 입력 순서는 그대로
+// 유지하고(정렬은 호출부 책임), 대표가 있던 자리에 대표를 둔다. 실제로 합쳐진
+// (2건 이상이던) 그룹의 대표만 title에서 track 접미사를 떼어내고, 그 외에는 제목을
+// 손대지 않는다.
+export function collapseDuplicatePapers<T extends DedupablePaper>(
+  papers: T[],
+  signals?: Map<string, PaperIdentitySignal>,
+): T[] {
+  const { repByPaperId, finalGroupSizeByRepId } = representativePaperIds(papers, signals);
 
   const result: T[] = [];
   for (const p of papers) {
-    if (representativeIdByPaperId.get(p.id) !== p.id) continue;
+    if (repByPaperId.get(p.id) !== p.id) continue;
     const wasCollapsed = (finalGroupSizeByRepId.get(p.id) ?? 1) > 1;
     if (wasCollapsed && p.track) {
       result.push({ ...p, title: stripTrackFromTitle(p.title, p.track) });
