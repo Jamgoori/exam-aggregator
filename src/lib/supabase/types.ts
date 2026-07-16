@@ -148,3 +148,25 @@ export type UserQuestionStatus = {
   source: string;
   updated_at: string;
 };
+
+export type ReviewSession = {
+  id: string;
+  user_id: string;
+  subject_id: string | null;
+  scope: string;
+  only_unresolved: boolean;
+  total_questions: number;
+  score: number | null;
+  created_at: string;
+  submitted_at: string | null;
+};
+
+export type ReviewSessionItem = {
+  id: string;
+  session_id: string;
+  paper_id: string;
+  question_number: number;
+  position: number;
+  selected_choice: number | null;
+  is_correct: boolean | null;
+};

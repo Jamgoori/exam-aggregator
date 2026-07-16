@@ -689,6 +689,47 @@ drop policy if exists "update own question status" on user_question_status;
 create policy "update own question status" on user_question_status
   for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+-- 섞어풀기(오답 재풀이) 세션과 그 문항. 오답노트에서 고른 틀린 문항들을 무작위로
+-- 섞어 다시 CBT처럼 풀고, 결과를 user_question_status(극복 판정)에 반영한다.
+-- 정답(is_correct/채점 결과)이 담기므로, paper_answers·question_explanations와 같이
+-- 클라이언트 직접 접근을 전부 막고(정책 0개 = RLS가 모든 접근 차단) 서버 액션에서
+-- service_role로만 읽고 쓴다. 채점 전까지 score/is_correct는 null.
+create table if not exists review_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  -- null이면 전체 과목 범위. 과목이 지워져도 세션 기록은 남기려 set null.
+  subject_id uuid references subjects(id) on delete set null,
+  scope text not null default 'subject',      -- 'subject' | 'all'
+  only_unresolved boolean not null default true,
+  total_questions int not null default 0,
+  score int,                                   -- 채점 후 채워짐
+  created_at timestamptz not null default now(),
+  submitted_at timestamptz
+);
+
+create index if not exists review_sessions_user_idx
+  on review_sessions(user_id, created_at desc);
+
+alter table review_sessions enable row level security;
+-- 클라이언트 직접 접근 없음: 서버 액션에서 service_role로만.
+
+create table if not exists review_session_items (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references review_sessions(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  question_number int not null,
+  position int not null,                       -- 섞인 출제 순서(0부터)
+  selected_choice smallint,                    -- 채점 전 사용자가 고른 답
+  is_correct boolean,                          -- 채점 후 채워짐
+  unique (session_id, position)
+);
+
+create index if not exists review_session_items_session_idx
+  on review_session_items(session_id, position);
+
+alter table review_session_items enable row level security;
+-- 클라이언트 직접 접근 없음: 서버 액션에서 service_role로만.
+
 -- 회원가입 IP 레이트리밋: 캡차(Turnstile)와 별개로 짧은 시간 동안의 대량 가입 시도를
 -- 막는 2차 방어선. 성공/실패 관계없이 시도할 때마다 한 행씩 기록한다.
 create table if not exists signup_attempts (
