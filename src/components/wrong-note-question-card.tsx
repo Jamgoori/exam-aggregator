@@ -79,9 +79,9 @@ function ChoiceRow({
   // 전체 해설 페이지처럼 "내가 고른 답" 개념이 없는 화면에서는 풀지 않음 배지를 숨긴다.
   const skipped = showSelection && row.selectedChoice === null;
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2 break-inside-avoid">
       {showNumberBadge && (
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white print:h-5 print:w-5 print:text-[10px]">
           {row.questionNumber}
         </span>
       )}
@@ -92,7 +92,7 @@ function ChoiceRow({
           return (
             <span
               key={choice}
-              className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold ${
+              className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold print:h-6 print:w-6 print:text-xs ${
                 isCorrect
                   ? "bg-emerald-500 text-white"
                   : isMyWrongPick
@@ -141,11 +141,15 @@ export function WrongNoteQuestionCard({
   // "내가 고른 답"/"풀지 않음" 표시는 숨긴다.
   explanationsOpen = false,
   showSelection = true,
+  // 해설 페이지(?download=1)는 로드 직후 window.print()를 띄우는데, lazy 이미지는
+  // 브라우저에 따라 화면 밖 문항이 안 실린 채 인쇄될 수 있어 eager로 전환한다.
+  eagerImages = false,
 }: {
   rows: WrongNoteCardRow[];
   images: string[];
   explanationsOpen?: boolean;
   showSelection?: boolean;
+  eagerImages?: boolean;
 }) {
   const firstNumber = rows[0]?.questionNumber;
   const lastNumber = rows[rows.length - 1]?.questionNumber;
@@ -153,21 +157,32 @@ export function WrongNoteQuestionCard({
     firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-800/50">
+    // print:mb-3: 해설 인쇄가 2단(columns) 레이아웃으로 전환되면 flex gap이 안
+    // 먹어서 카드 간격을 margin으로 준다 (화면에는 영향 없음).
+    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white print:mb-3 dark:border-zinc-800 dark:bg-zinc-900">
+      {/* print [break-after:avoid]: 단/페이지 끝에 번호 헤더만 남고 본문이 다음
+          단으로 넘어가는 고아 헤더를 막는다. */}
+      <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 print:py-1 print:[break-after:avoid] dark:border-zinc-800 dark:bg-zinc-800/50">
         <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{numberLabel}</span>
       </div>
 
       {images.length > 0 ? (
         <div className="flex flex-col">
+          {/* 인쇄: 이미지를 인쇄 폭 전체로 확대하면 원본 시험지보다 훨씬 커져 문항
+              하나가 페이지를 넘겨버린다. 크롭 스크립트가 항상 PDF 1pt당 3px(scale=3)로
+              렌더링하므로, 원본 크기(zoom 0.444)가 되는 배율 기준으로 zoom 0.5를 걸면
+              레이아웃(2단/1단)과 무관하게 어떤 크롭이든 "원본 시험지의 약 1.13배"
+              크기로 인쇄된다. 1단(전체 폭) 크롭은 max-w-full에 걸려 인쇄 폭에 맞게
+              들어간다. break-inside-avoid로 이미지 자체는 페이지 경계에서 잘리지
+              않게 한다. */}
           {images.map((src, i) => (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               key={i}
               src={src}
               alt={`${numberLabel} 문제 이미지 ${i + 1}`}
-              loading="lazy"
-              className="w-full"
+              loading={eagerImages ? "eager" : "lazy"}
+              className="w-full break-inside-avoid print:w-auto print:max-w-full print:self-center print:[zoom:0.5]"
             />
           ))}
         </div>
@@ -178,7 +193,7 @@ export function WrongNoteQuestionCard({
         </p>
       )}
 
-      <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+      <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 print:gap-1 print:py-1.5 dark:border-zinc-800">
         {rows.map((row) => (
           <ChoiceRow
             key={row.questionNumber}
@@ -192,7 +207,7 @@ export function WrongNoteQuestionCard({
       {/* 해설: 먼저 스스로 다시 풀어보게 기본은 접어두고, 누르면 펼친다. 서버/클라이언트
           어느 트리에서든 그대로 동작해야 해서 JS 없는 네이티브 details/summary를 쓴다. */}
       {rows.some((row) => row.explanation) && (
-        <div className="flex flex-col gap-1 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+        <div className="flex flex-col gap-1 border-t border-zinc-100 px-4 py-3 print:py-1.5 dark:border-zinc-800">
           {rows
             .filter((row) => row.explanation)
             .map((row) => (
@@ -237,9 +252,9 @@ function ExplanationBody({
     explanation.currentAnswerStatus === "성립불가";
 
   return (
-    <div className="mt-2 flex flex-col gap-3 rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300">
+    <div className="mt-2 flex flex-col gap-3 rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700 print:mt-1 print:gap-2 print:p-2 print:text-xs print:leading-snug dark:bg-zinc-800/50 dark:text-zinc-300">
       {answerChanged && (
-        <div className="rounded-md border border-amber-300 bg-amber-100 px-3 py-2 text-xs text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300">
+        <div className="rounded-md border border-amber-300 bg-amber-100 px-3 py-2 text-xs text-amber-900 break-inside-avoid dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300">
           <p className="font-bold">
             ⚠️ {explanation.currentAnswerStatus === "성립불가" ? "현행법상 성립하지 않는 문항" : "개정 주의 — 현행 기준 정답이 다릅니다"}
           </p>
@@ -252,7 +267,7 @@ function ExplanationBody({
       )}
 
       {explanation.correctChoiceSummary && (
-        <p className="whitespace-pre-wrap">
+        <p className="whitespace-pre-wrap break-inside-avoid">
           <span className="mr-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
             정답
           </span>
@@ -261,7 +276,7 @@ function ExplanationBody({
       )}
 
       {(explanation.keywordTitle || explanation.keywordExplanation) && (
-        <div>
+        <div className="break-inside-avoid">
           <p className="text-xs font-semibold text-zinc-400 dark:text-zinc-600">핵심 개념</p>
           {explanation.keywordTitle && (
             <p className="mt-0.5 font-semibold text-zinc-800 dark:text-zinc-200">{explanation.keywordTitle}</p>
@@ -277,7 +292,7 @@ function ExplanationBody({
           <p className="text-xs font-semibold text-zinc-400 dark:text-zinc-600">선지별 해설</p>
           <div className="mt-1 flex flex-col gap-1.5">
             {explanation.choiceExplanations.map((c) => (
-              <div key={c.choice}>
+              <div key={c.choice} className="break-inside-avoid">
                 <p className="whitespace-pre-wrap">
                   <span
                     className={`mr-1 font-semibold ${
