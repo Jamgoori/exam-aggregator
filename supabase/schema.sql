@@ -730,6 +730,38 @@ create index if not exists review_session_items_session_idx
 alter table review_session_items enable row level security;
 -- 클라이언트 직접 접근 없음: 서버 액션에서 service_role로만.
 
+-- AI 약점 진단(일 1회). 사용자의 오답·응시 통계를 바탕으로 취약 개념·과목별 흐름을
+-- 정리한 리포트를 하루 한 번 제공한다. report가 null이면 "요청됨, 아직 생성 안 됨"
+-- 상태 — 생성기(Claude Code 배치/스크립트 또는 온디맨드 API)가 나중에 채운다.
+-- 사용자는 자기 요청 행만 만들 수 있고(report null), report 본문은 service_role만
+-- 쓴다(가짜 리포트 주입 방지).
+create table if not exists ai_diagnoses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  -- "일 1회"를 DB 제약으로 강제(KST 기준 날짜 문자열을 서버가 넣는다).
+  diagnosis_date date not null,
+  report jsonb,                      -- null = 요청됨/생성 대기
+  model text,                        -- 생성에 쓴 모델(기록용)
+  requested_at timestamptz not null default now(),
+  generated_at timestamptz,
+  unique (user_id, diagnosis_date)
+);
+
+create index if not exists ai_diagnoses_user_idx
+  on ai_diagnoses(user_id, diagnosis_date desc);
+
+alter table ai_diagnoses enable row level security;
+
+drop policy if exists "select own diagnoses" on ai_diagnoses;
+create policy "select own diagnoses" on ai_diagnoses
+  for select to authenticated using (auth.uid() = user_id);
+
+-- 사용자는 "오늘 진단 요청"만 만들 수 있다(report는 반드시 null). report 본문 작성은
+-- service_role(생성기) 몫이라 update 정책을 주지 않는다.
+drop policy if exists "insert own diagnosis request" on ai_diagnoses;
+create policy "insert own diagnosis request" on ai_diagnoses
+  for insert to authenticated with check (auth.uid() = user_id and report is null);
+
 -- 회원가입 IP 레이트리밋: 캡차(Turnstile)와 별개로 짧은 시간 동안의 대량 가입 시도를
 -- 막는 2차 방어선. 성공/실패 관계없이 시도할 때마다 한 행씩 기록한다.
 create table if not exists signup_attempts (

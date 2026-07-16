@@ -170,3 +170,13 @@ export type ReviewSessionItem = {
   selected_choice: number | null;
   is_correct: boolean | null;
 };
+
+export type AiDiagnosis = {
+  id: string;
+  user_id: string;
+  diagnosis_date: string;
+  report: unknown | null;
+  model: string | null;
+  requested_at: string;
+  generated_at: string | null;
+};

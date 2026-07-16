@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { WrongNoteTodayCard } from "@/components/wrong-note-today-card";
+import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
+import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@/lib/format";
 import { computeStreakDays, streakTier } from "@/lib/streak";
@@ -125,6 +127,21 @@ export default async function MyPage({
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
 
+  // AI 약점 진단 배너 상태. 오늘 진단이 있으면 그 상태, 없으면 자격 판정으로 결정.
+  const todayDiag = await getTodayDiagnosis(supabase, user.id);
+  const diagEligibility = todayDiag
+    ? null
+    : await getDiagnosisEligibility(supabase, user.id);
+  const diagnosisState: DiagnosisBannerState =
+    todayDiag?.status === "ready"
+      ? "ready"
+      : todayDiag?.status === "pending"
+        ? "pending"
+        : diagEligibility?.eligible
+          ? "eligible"
+          : "locked";
+  const diagnosisHint = diagEligibility?.hint ?? null;
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-12">
       <div>
@@ -182,7 +199,13 @@ export default async function MyPage({
             roundNumberByAttemptId={roundNumberByAttemptId}
           />
         }
-        wrongNotes={<WrongNotesTab groups={wrongNoteGroups} />}
+        wrongNotes={
+          <WrongNotesTab
+            groups={wrongNoteGroups}
+            diagnosisState={diagnosisState}
+            diagnosisHint={diagnosisHint}
+          />
+        }
       />
     </div>
   );
@@ -306,7 +329,15 @@ function HistoryTab({
 
 // "오답노트" 탭: 과목별로 틀린 문제 수를 요약해서 보여주고, 과목을 누르면
 // 문제 이미지까지 모아둔 과목 오답노트 페이지로 이어준다.
-function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
+function WrongNotesTab({
+  groups,
+  diagnosisState,
+  diagnosisHint,
+}: {
+  groups: WrongNoteSubjectGroup[];
+  diagnosisState: DiagnosisBannerState;
+  diagnosisHint: string | null;
+}) {
   // 오늘 카드용: 미극복 오답이 가장 많은 과목을 고른다(같으면 display_order 순 — groups가
   // 이미 그 순서라 안정적으로 첫 번째가 잡힌다).
   const topGroup = groups
@@ -322,6 +353,7 @@ function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
         <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
         오답노트
       </h2>
+      <DiagnosisBanner initialState={diagnosisState} hint={diagnosisHint} />
       {groups.length === 0 ? (
         <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-500">
           아직 모인 오답이 없어요. CBT로 문제를 풀면 틀린 문제가 과목별로
