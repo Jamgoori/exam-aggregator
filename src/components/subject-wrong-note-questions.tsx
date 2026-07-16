@@ -167,15 +167,24 @@ export function SubjectWrongNoteQuestions({
   const hasRepeated = questions.some((q) => q.wrongCount >= 2);
 
   const chip = (active: boolean) =>
-    `shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium ${
+    `shrink-0 rounded-full px-3.5 py-2 text-sm font-medium ${
       active
         ? "bg-blue-600 text-white"
         : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
     }`;
 
+  const conceptMissing =
+    !!initialConcept && concepts.length > 0 && !concepts.includes(initialConcept);
+
   return (
     <div className="flex flex-col gap-4">
-      {playableUnresolved > 0 && (
+      {conceptMissing && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
+          &lsquo;{initialConcept}&rsquo; 개념으로 좁히지 못해 전체 문항을 보여드려요.
+        </p>
+      )}
+
+      {playableUnresolved > 0 ? (
         <div className="flex flex-col gap-1.5">
           <button
             type="button"
@@ -192,6 +201,14 @@ export function SubjectWrongNoteQuestions({
             <p className="text-center text-xs text-red-600 dark:text-red-400">{reviewError}</p>
           )}
         </div>
+      ) : (
+        // 미극복은 있는데 이미지가 없어 섞어풀기를 못 여는 경우, 버튼이 그냥 사라져
+        // 혼란스럽지 않게 이유를 알려준다.
+        unresolvedCount > 0 && (
+          <p className="rounded-xl border border-zinc-200 px-3 py-2.5 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-500">
+            아직 문제 이미지가 등록된 미극복 문항이 없어 섞어풀기를 준비 중이에요.
+          </p>
+        )
       )}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -215,7 +232,7 @@ export function SubjectWrongNoteQuestions({
           <select
             value={concept}
             onChange={(e) => setConcept(e.target.value)}
-            className="shrink-0 rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+            className="shrink-0 rounded-full border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
           >
             <option value="all">개념: 전체</option>
             {concepts.map((c) => (
@@ -228,7 +245,7 @@ export function SubjectWrongNoteQuestions({
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
-          className="ml-auto shrink-0 rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+          className="shrink-0 rounded-full border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
         >
           {SORT_LABELS.map((s) => (
             <option key={s.key} value={s.key}>

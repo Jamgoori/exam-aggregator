@@ -114,7 +114,7 @@ export function WrongNotePaperView({
               : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
           }`}
         >
-          통합 · 오답 {unresolvedCount}
+          전체 회독 · 미극복 {unresolvedCount}
         </button>
         {rounds.map((r) => (
           <button
@@ -134,7 +134,7 @@ export function WrongNotePaperView({
               }
             >
               {" "}
-              · {pct(r.score, r.totalQuestions)}점 · 오답 {r.wrong.length}
+              · {pct(r.score, r.totalQuestions)}점 · 그때 오답 {r.wrong.length}
             </span>
           </button>
         ))}

@@ -124,6 +124,56 @@ export async function createReviewSessionForUser(
   return { sessionId: session.id as string };
 }
 
+// 채점 결과에서 "틀린 문항만 다시 풀기": 넘겨받은 (문제지, 문항) 목록으로 새 세션을
+// 만든다. 정답·이미지는 채점/렌더 시점에 서버가 다시 조회하므로 목록엔 정답이 없다.
+export async function createReviewSessionFromItems(
+  supabase: Supabase,
+  userId: string,
+  items: { paperId: string; questionNumber: number }[],
+): Promise<{ sessionId?: string; error?: string }> {
+  const seen = new Set<string>();
+  const clean: { paperId: string; questionNumber: number }[] = [];
+  for (const it of items) {
+    if (!it?.paperId || !Number.isInteger(it?.questionNumber)) continue;
+    const key = `${it.paperId}#${it.questionNumber}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clean.push({ paperId: it.paperId, questionNumber: it.questionNumber });
+  }
+  if (clean.length === 0) return { error: "다시 풀 문항이 없어요." };
+
+  const picked = shuffle(clean).slice(0, MAX_LIMIT);
+  const admin = createAdminClient();
+  const { data: session, error: sessionError } = await admin
+    .from("review_sessions")
+    .insert({
+      user_id: userId,
+      subject_id: null,
+      scope: "subject",
+      only_unresolved: true,
+      total_questions: picked.length,
+    })
+    .select("id")
+    .single();
+  if (sessionError || !session) return { error: "세션 생성에 실패했어요." };
+
+  const { error: itemsError } = await admin.from("review_session_items").insert(
+    picked.map((q, i) => ({
+      session_id: session.id as string,
+      paper_id: q.paperId,
+      question_number: q.questionNumber,
+      position: i,
+      selected_choice: null,
+      is_correct: null,
+    })),
+  );
+  if (itemsError) {
+    await admin.from("review_sessions").delete().eq("id", session.id);
+    return { error: "세션 생성에 실패했어요." };
+  }
+  return { sessionId: session.id as string };
+}
+
 // 세션 하나를 화면용으로 읽는다. 본인 세션이 아니면 null. 채점 전이면 정답·출처는
 // 전부 null로 가린다.
 export async function getReviewSessionView(

@@ -73,11 +73,8 @@ export async function getDiagnosisEligibility(
 
   let hint: string | null = null;
   if (!eligible) {
-    const needWrong = DIAGNOSIS_MIN_WRONG - wrongs;
-    hint =
-      needWrong > 0
-        ? `오답 ${needWrong}개를 더 쌓거나 ${Math.max(0, DIAGNOSIS_MIN_ATTEMPTS - attempts)}회 더 응시하면 진단을 받을 수 있어요.`
-        : `${Math.max(0, DIAGNOSIS_MIN_ATTEMPTS - attempts)}회 더 응시하면 진단을 받을 수 있어요.`;
+    // "오답을 더 쌓으라"는 표현은 수험생에게 부담을 주므로, 노력(더 풀기) 기준으로 안내.
+    hint = `문제를 조금 더 풀면 진단을 받을 수 있어요 (오답 ${DIAGNOSIS_MIN_WRONG}개 또는 ${DIAGNOSIS_MIN_ATTEMPTS}회 응시).`;
   }
 
   return { eligible, wrongCount: wrongs, attemptCount: attempts, hint };

@@ -121,7 +121,7 @@ function ChoiceRow({
             className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-950/30 dark:text-orange-400"
             title="이 문항을 푼 전체 응시자 중 틀린 비율"
           >
-            오답률 {row.wrongRatePct}%
+            전국 오답률 {row.wrongRatePct}%
           </span>
         )}
         {row.resolved && (

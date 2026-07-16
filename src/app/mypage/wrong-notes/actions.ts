@@ -3,6 +3,7 @@
 import { getSessionUser } from "@/lib/supabase/session";
 import {
   createReviewSessionForUser,
+  createReviewSessionFromItems,
   submitReviewSessionForUser,
   type ReviewSessionView,
 } from "@/lib/review-session";
@@ -73,6 +74,16 @@ export async function saveQuestionMemo(input: {
   );
   if (error) return { error: "메모 저장에 실패했어요." };
   return { memo };
+}
+
+// 결과 화면 "틀린 N문항만 다시 풀기".
+export async function createReviewFromWrong(input: {
+  items: { paperId: string; questionNumber: number }[];
+}): Promise<CreateReviewResult> {
+  const items = Array.isArray(input?.items) ? input.items : [];
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  return createReviewSessionFromItems(supabase, user.id, items);
 }
 
 export type SubmitReviewResult = { error?: string; view?: ReviewSessionView };

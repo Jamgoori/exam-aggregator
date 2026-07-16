@@ -184,7 +184,7 @@ export default async function MyPage({
           <span
             className={`text-xl font-semibold ${totalUnresolved > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}
           >
-            {totalUnresolved}문제
+            {totalUnresolved}문항
           </span>
         </div>
       </div>
@@ -346,11 +346,6 @@ function WrongNotesTab({
   diagnosisState: DiagnosisBannerState;
   diagnosisHint: string | null;
 }) {
-  // 과목 배지·오늘 카드는 status 기준 미극복 수를 쓴다(섞어풀기 반영). 과목당 값은
-  // 이 헬퍼로 꺼내고, 표가 비면(백필 전) 응시 기준 unresolvedCount로 폴백한다.
-  const subjUnresolved = (g: WrongNoteSubjectGroup) =>
-    unresolvedBySubject.get(g.subject.id)?.unresolved ?? g.unresolvedCount;
-
   // 오늘 카드용: 미극복이 가장 많은 과목. status 기준으로 고르고(섞어풀기 후보와 일치),
   // status가 비어 있으면 응시 기준 groups에서 고른다.
   let topSubject: { slug: string; name: string; unresolved: number } | null = null;
@@ -401,20 +396,28 @@ function WrongNotesTab({
             dueCount={dueSubject?.due ?? 0}
           />
           <p className="text-xs text-zinc-400 dark:text-zinc-600">
-            틀린 문제를 과목별로 모아뒀어요. 가장 최근 응시에서 다시 맞힌 문제는
-            &ldquo;극복&rdquo;으로 표시돼요.
+            틀린 문항을 과목별로 모아뒀어요. 다시 맞힌 문항은 &ldquo;극복&rdquo;으로
+            표시돼요. 과목을 누르면 문항을 모아 보고 섞어풀 수 있어요.
           </p>
-          <div className="flex flex-col gap-4">
-            {groups.map((g) => (
-              <div key={g.subject.id} className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-                <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-3">
+            {groups.map((g) => {
+              const stat = unresolvedBySubject.get(g.subject.id);
+              const unresolved = stat?.unresolved ?? g.unresolvedCount;
+              return (
+                <Link
+                  key={g.subject.id}
+                  href={`/mypage/wrong-notes/${g.subject.slug}?view=questions`}
+                  className="group flex items-center gap-3 rounded-xl border border-zinc-200 p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+                >
                   <span
-                    className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(g.subject.slug)}`}
+                    className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${subjectColor(g.subject.slug)}`}
                   >
                     {g.subject.name}
                   </span>
                   <span className="text-sm text-zinc-500 dark:text-zinc-500">
-                    <span className="font-medium text-red-600 dark:text-red-400">오답 {subjUnresolved(g)}</span>
+                    <span className="font-medium text-red-600 dark:text-red-400">
+                      미극복 {unresolved}
+                    </span>
                     {g.resolvedCount > 0 && (
                       <>
                         {" · "}
@@ -424,44 +427,13 @@ function WrongNotesTab({
                       </>
                     )}
                   </span>
-                  <Link
-                    href={`/mypage/wrong-notes/${g.subject.slug}`}
-                    className="ml-auto text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
-                  >
-                    문제지 목록 →
-                  </Link>
-                </div>
-                <div className="mt-2 flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {g.papers.map((p) => (
-                    <Link
-                      key={p.paper.id}
-                      href={`/mypage/wrong-notes/${g.subject.slug}/${p.paper.id}`}
-                      className="group flex items-center gap-2 py-2.5"
-                    >
-                      <span className="truncate text-sm group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                        {p.paper.title}
-                      </span>
-                      <span className="ml-auto flex shrink-0 items-center gap-2 text-xs">
-                        <span
-                          className={`font-medium ${p.unresolvedCount > 0 ? "text-red-600 dark:text-red-400" : "text-zinc-400 dark:text-zinc-600"}`}
-                        >
-                          오답 {p.unresolvedCount}
-                        </span>
-                        {p.resolvedCount > 0 && (
-                          <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                            극복 {p.resolvedCount}
-                          </span>
-                        )}
-                        <ChevronRight
-                          size={14}
-                          className="text-zinc-300 group-hover:text-blue-600 dark:text-zinc-700 dark:group-hover:text-blue-400"
-                        />
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            ))}
+                  <span className="ml-auto flex shrink-0 items-center gap-1 text-sm font-medium text-blue-600 group-hover:underline dark:text-blue-400">
+                    문항 보기
+                    <ChevronRight size={15} />
+                  </span>
+                </Link>
+              );
+            })}
           </div>
         </>
       )}

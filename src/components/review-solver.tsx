@@ -2,8 +2,12 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { Check, ChevronLeft, ChevronRight } from "lucide-react";
-import { submitReviewSession } from "@/app/mypage/wrong-notes/actions";
+import { useRouter } from "next/navigation";
+import { Check, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import {
+  submitReviewSession,
+  createReviewFromWrong,
+} from "@/app/mypage/wrong-notes/actions";
 import type { ReviewSessionView } from "@/lib/review-session";
 
 // 섞어풀기 풀이 화면. 문제지 경계 없이 섞인 오답을 순서대로 풀고 채점한다. 풀이
@@ -12,9 +16,11 @@ import type { ReviewSessionView } from "@/lib/review-session";
 export function ReviewSolver({
   initial,
   backHref,
+  subjectSlug,
 }: {
   initial: ReviewSessionView;
   backHref: string;
+  subjectSlug: string;
 }) {
   const [view, setView] = useState<ReviewSessionView>(initial);
   const [answers, setAnswers] = useState<(number | null)[]>(
@@ -50,7 +56,7 @@ export function ReviewSolver({
   }
 
   if (submitted) {
-    return <ReviewResult view={view} backHref={backHref} />;
+    return <ReviewResult view={view} backHref={backHref} subjectSlug={subjectSlug} />;
   }
 
   const item = view.items[index];
@@ -168,15 +174,7 @@ export function ReviewSolver({
           </div>
 
           {isLast ? (
-            <button
-              type="button"
-              aria-label="제출하고 채점"
-              disabled={isPending}
-              onClick={handleSubmit}
-              className="flex shrink-0 items-center justify-center rounded-full bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
-            >
-              <Check size={22} />
-            </button>
+            <div className="w-[38px] shrink-0" aria-hidden />
           ) : (
             <button
               type="button"
@@ -188,7 +186,18 @@ export function ReviewSolver({
             </button>
           )}
         </div>
-        {!isLast && (
+        {/* 마지막 문항: 작은 아이콘 대신 라벨 있는 큰 제출 버튼. 그 외: 조기 채점 링크. */}
+        {isLast ? (
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isPending}
+            className="mx-auto mt-3 flex w-full max-w-2xl items-center justify-center gap-1.5 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
+          >
+            <Check size={18} />
+            {isPending ? "채점 중..." : `제출하고 채점 (${answeredCount}/${view.total})`}
+          </button>
+        ) : (
           <button
             type="button"
             onClick={handleSubmit}
@@ -207,10 +216,16 @@ export function ReviewSolver({
 function ReviewResult({
   view,
   backHref,
+  subjectSlug,
 }: {
   view: ReviewSessionView;
   backHref: string;
+  subjectSlug: string;
 }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
   const correct = view.score ?? 0;
   const total = view.total;
   const wrong = total - correct;
@@ -220,6 +235,23 @@ function ReviewResult({
     () => [...view.items].sort((a, b) => a.position - b.position),
     [view.items],
   );
+
+  const wrongItems = items
+    .filter((it) => it.isCorrect === false && it.paperId && it.questionNumber != null)
+    .map((it) => ({ paperId: it.paperId as string, questionNumber: it.questionNumber as number }));
+
+  function retryWrong() {
+    if (pending || wrongItems.length === 0) return;
+    setError(null);
+    start(async () => {
+      const res = await createReviewFromWrong({ items: wrongItems });
+      if (res.error || !res.sessionId) {
+        setError(res.error ?? "다시 풀기를 시작하지 못했어요.");
+        return;
+      }
+      router.push(`/mypage/wrong-notes/${subjectSlug}/review/${res.sessionId}`);
+    });
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-10">
@@ -231,17 +263,37 @@ function ReviewResult({
           </span>
           <span className="text-xs text-zinc-500">정답률 {pct}%</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
-            🎉 {correct}문항 극복
-          </span>
-          {wrong > 0 && (
-            <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/30 dark:text-red-400">
-              {wrong}문항 아직
+        {/* 하나도 못 넘겼을 때 "🎉 0문항 극복"으로 조롱하지 않도록 톤을 나눈다. */}
+        {correct > 0 ? (
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
+              🎉 {correct}문항 극복
             </span>
-          )}
-        </div>
+            {wrong > 0 && (
+              <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/30 dark:text-red-400">
+                {wrong}문항 아직
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm font-medium text-zinc-600 dark:text-zinc-400">
+            아직 못 넘겼어요. 해설을 보고 한 번 더 도전해요 💪
+          </p>
+        )}
       </div>
+
+      {wrongItems.length > 0 && (
+        <button
+          type="button"
+          onClick={retryWrong}
+          disabled={pending}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+        >
+          <RotateCcw size={16} />
+          {pending ? "준비 중..." : `틀린 ${wrongItems.length}문항만 다시 풀기`}
+        </button>
+      )}
+      {error && <p className="-mt-3 text-center text-xs text-red-600 dark:text-red-400">{error}</p>}
 
       <Link
         href={backHref}

@@ -175,7 +175,7 @@ function Report({ report }: { report: AiDiagnosisReport }) {
       )}
 
       <p className="text-center text-xs text-zinc-400 dark:text-zinc-600">
-        진단은 하루 1회 제공돼요. 내일 오답 데이터로 다시 받아보세요.
+        진단은 하루 1회예요. 오답노트 상단의 &lsquo;진단 받기&rsquo;로 새로 요청할 수 있어요.
       </p>
     </div>
   );

@@ -29,6 +29,7 @@ export default async function ReviewSessionPage({
     <ReviewSolver
       initial={view}
       backHref={`/mypage/wrong-notes/${slug}?view=questions`}
+      subjectSlug={slug}
     />
   );
 }
