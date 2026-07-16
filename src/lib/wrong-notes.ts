@@ -237,11 +237,11 @@ export type WrongNoteQuestionDetail = WrongNoteQuestionSummary & {
   explanation: QuestionExplanationContent | null;
 };
 
-type QuestionMediaEntry = { choiceCount: number | null; images: string[] };
+export type QuestionMediaEntry = { choiceCount: number | null; images: string[] };
 
 // 문제지들의 문항별 크롭 이미지(공개 URL)와 선지 수를 한 번에 받아온다.
 // questions/question_images는 public read라 사용자 세션 클라이언트로 충분하다.
-async function fetchQuestionMedia(
+export async function fetchQuestionMedia(
   supabase: Supabase,
   paperIds: string[],
 ): Promise<Map<string, Map<number, QuestionMediaEntry>>> {
