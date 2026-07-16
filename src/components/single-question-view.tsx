@@ -131,6 +131,39 @@ export function SingleQuestionView({
     if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
   }, [questionIndex]);
 
+  // 문제지 영역을 좌우로 쓸어넘기면 이전/다음 문제로 이동한다. 펜·지우개가 켜져
+  // 있을 때는 획을 긋는 동작과 겹치므로 동작하지 않고(이동 모드에서만), 세로
+  // 스크롤과 헷갈리지 않도록 가로 이동이 충분히 크고 우세할 때만 넘긴다.
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+
+  function handleTouchStart(e: React.TouchEvent) {
+    if (tool !== "move" || e.touches.length !== 1) {
+      swipeStart.current = null;
+      return;
+    }
+    swipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+
+  function handleTouchMove(e: React.TouchEvent) {
+    // 도중에 손가락이 더 닿으면(핀치 등) 스와이프로 취급하지 않는다.
+    if (e.touches.length > 1) swipeStart.current = null;
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start || tool !== "move") return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (dx < 0) {
+      if (nextIndex !== null) onNavigate(nextIndex);
+    } else if (prevIndex !== null) {
+      onNavigate(prevIndex);
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-900">
@@ -155,6 +188,9 @@ export function SingleQuestionView({
 
       <div
         ref={scrollAreaRef}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         className="min-h-0 flex-1 overflow-y-auto bg-zinc-100 px-4 py-4 dark:bg-zinc-800"
       >
         <div
