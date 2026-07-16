@@ -100,7 +100,7 @@ export default async function PaperExplanationsPage({
     questions.length - visibleGroups.reduce((sum, g) => sum + g.rows.length, 0);
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-12 print:gap-4 print:py-0">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-12 print:max-w-none print:gap-4 print:py-0">
       {hasFullAccess && isDownload && <ExplanationAutoPrint />}
 
       <div className="flex flex-col gap-3">
@@ -156,12 +156,14 @@ export default async function PaperExplanationsPage({
         )}
       </div>
 
-      {/* 인쇄(PDF 저장) 시 페이지 나눔은 카드 단위가 아니라 카드 안의 작은 블록
-          단위(이미지·답 줄·해설 항목, wrong-note-question-card.tsx의
-          break-inside-avoid)로 제어한다 — 카드 전체에 avoid를 걸면 긴 카드가
-          통째로 다음 페이지로 밀리며 반 페이지씩 비어 문항당 한 페이지를 넘겨
-          쓰게 되기 때문. 화면 표시에는 아무 영향 없음. */}
-      <div className="flex flex-col gap-4 print:gap-2.5">
+      {/* 인쇄(PDF 저장): 원본 시험지처럼 한 페이지를 좌우 2단으로 나눠 채운다
+          (CSS multi-column — flex를 print에서 block+columns-2로 전환하고, flex
+          gap 대신 카드 쪽 print:mb로 간격을 준다). 페이지/단 나눔은 카드 단위가
+          아니라 카드 안의 작은 블록 단위(이미지·답 줄·해설 항목,
+          wrong-note-question-card.tsx의 break-inside-avoid)로 제어한다 — 카드
+          전체에 avoid를 걸면 긴 카드가 통째로 다음 단으로 밀리며 반 단씩 비기
+          때문. 화면 표시에는 아무 영향 없음. */}
+      <div className="flex flex-col gap-4 print:block print:columns-2 print:gap-x-6 print:[column-rule:1px_solid_#e4e4e7]">
         {visibleGroups.map((group) => (
           <WrongNoteQuestionCard
             key={group.rows[0].questionNumber}
