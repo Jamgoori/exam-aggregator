@@ -646,6 +646,169 @@ create policy "insert own cbt attempt answers" on cbt_attempt_answers
     )
   );
 
+-- 문항 단위 통합 상태. 오답노트 "극복" 판정과 앞으로 나올 섞어풀기(오답 재풀이)가
+-- 공유하는 사용자×문항 요약이다. cbt_attempt_answers는 응시별 원본이라 "이 문항을
+-- 지금까지 몇 번 틀렸나 / 가장 최근엔 맞혔나"를 매번 응시 전체에서 재계산해야 하는데,
+-- 섞어풀기는 문제지 단위 응시가 아니라 그 파생 계산으로는 표현이 안 된다. 그래서
+-- CBT 채점과 섞어풀기 채점 양쪽이 이 테이블을 갱신하고, 극복 판정은 여기를 본다.
+--
+-- 키를 questions.id가 아니라 (paper_id, question_number)로 잡는다: 채점 원본
+-- (cbt_attempt_answers)이 이 쌍으로 기록되고, 크롭 전(questions 행이 아직 없는)
+-- 문제지도 CBT를 지원하므로 questions.id 의존을 피한다. 중복 시험지(직류만 다른
+-- 같은 시험지)는 읽는 쪽(dedup-papers 대표)에서 합친다.
+--
+-- wrong_count: 틀린 채로 제출된 횟수(제출 1회당 최대 +1). last_is_correct/
+-- last_answered_at: 가장 최근 제출 기준. source: 'cbt' | 'review'(섞어풀기).
+create table if not exists user_question_status (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  question_number int not null,
+  wrong_count int not null default 0,
+  last_is_correct boolean not null,
+  last_answered_at timestamptz not null default now(),
+  source text not null default 'cbt',
+  updated_at timestamptz not null default now(),
+  primary key (user_id, paper_id, question_number)
+);
+
+create index if not exists user_question_status_user_idx
+  on user_question_status(user_id);
+
+alter table user_question_status enable row level security;
+
+drop policy if exists "select own question status" on user_question_status;
+create policy "select own question status" on user_question_status
+  for select to authenticated using (auth.uid() = user_id);
+
+-- upsert(insert ... on conflict do update)는 insert·update 두 정책이 다 있어야 한다.
+drop policy if exists "insert own question status" on user_question_status;
+create policy "insert own question status" on user_question_status
+  for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "update own question status" on user_question_status;
+create policy "update own question status" on user_question_status
+  for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- 섞어풀기(오답 재풀이) 세션과 그 문항. 오답노트에서 고른 틀린 문항들을 무작위로
+-- 섞어 다시 CBT처럼 풀고, 결과를 user_question_status(극복 판정)에 반영한다.
+-- 정답(is_correct/채점 결과)이 담기므로, paper_answers·question_explanations와 같이
+-- 클라이언트 직접 접근을 전부 막고(정책 0개 = RLS가 모든 접근 차단) 서버 액션에서
+-- service_role로만 읽고 쓴다. 채점 전까지 score/is_correct는 null.
+create table if not exists review_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  -- null이면 전체 과목 범위. 과목이 지워져도 세션 기록은 남기려 set null.
+  subject_id uuid references subjects(id) on delete set null,
+  scope text not null default 'subject',      -- 'subject' | 'all'
+  only_unresolved boolean not null default true,
+  total_questions int not null default 0,
+  score int,                                   -- 채점 후 채워짐
+  created_at timestamptz not null default now(),
+  submitted_at timestamptz
+);
+
+create index if not exists review_sessions_user_idx
+  on review_sessions(user_id, created_at desc);
+
+alter table review_sessions enable row level security;
+-- 클라이언트 직접 접근 없음: 서버 액션에서 service_role로만.
+
+create table if not exists review_session_items (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references review_sessions(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  question_number int not null,
+  position int not null,                       -- 섞인 출제 순서(0부터)
+  selected_choice smallint,                    -- 채점 전 사용자가 고른 답
+  is_correct boolean,                          -- 채점 후 채워짐
+  unique (session_id, position)
+);
+
+create index if not exists review_session_items_session_idx
+  on review_session_items(session_id, position);
+
+alter table review_session_items enable row level security;
+-- 클라이언트 직접 접근 없음: 서버 액션에서 service_role로만.
+
+-- AI 약점 진단(일 1회). 사용자의 오답·응시 통계를 바탕으로 취약 개념·과목별 흐름을
+-- 정리한 리포트를 하루 한 번 제공한다. report가 null이면 "요청됨, 아직 생성 안 됨"
+-- 상태 — 생성기(Claude Code 배치/스크립트 또는 온디맨드 API)가 나중에 채운다.
+-- 사용자는 자기 요청 행만 만들 수 있고(report null), report 본문은 service_role만
+-- 쓴다(가짜 리포트 주입 방지).
+create table if not exists ai_diagnoses (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  -- "일 1회"를 DB 제약으로 강제(KST 기준 날짜 문자열을 서버가 넣는다).
+  diagnosis_date date not null,
+  report jsonb,                      -- null = 요청됨/생성 대기
+  model text,                        -- 생성에 쓴 모델(기록용)
+  requested_at timestamptz not null default now(),
+  generated_at timestamptz,
+  unique (user_id, diagnosis_date)
+);
+
+create index if not exists ai_diagnoses_user_idx
+  on ai_diagnoses(user_id, diagnosis_date desc);
+
+alter table ai_diagnoses enable row level security;
+
+drop policy if exists "select own diagnoses" on ai_diagnoses;
+create policy "select own diagnoses" on ai_diagnoses
+  for select to authenticated using (auth.uid() = user_id);
+
+-- 사용자는 "오늘 진단 요청"만 만들 수 있다(report는 반드시 null). report 본문 작성은
+-- service_role(생성기) 몫이라 update 정책을 주지 않는다.
+drop policy if exists "insert own diagnosis request" on ai_diagnoses;
+create policy "insert own diagnosis request" on ai_diagnoses
+  for insert to authenticated with check (auth.uid() = user_id and report is null);
+
+-- 문항 메모: 오답노트 문항별로 사용자가 남기는 개인 메모("내 노트"). 본인만 읽고 쓴다.
+create table if not exists question_memos (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  question_number int not null,
+  memo text not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, paper_id, question_number)
+);
+
+alter table question_memos enable row level security;
+
+drop policy if exists "select own memos" on question_memos;
+create policy "select own memos" on question_memos
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists "insert own memos" on question_memos;
+create policy "insert own memos" on question_memos
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists "update own memos" on question_memos;
+create policy "update own memos" on question_memos
+  for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "delete own memos" on question_memos;
+create policy "delete own memos" on question_memos
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- 전국 오답률: 문항별 "전체 응시자 중 몇 %가 틀렸나"를 집계해 돌려준다. cbt_attempt_answers는
+-- 본인 것만 select 가능한 RLS라, 전체 집계는 security definer로 우회한다. 반환값은 정답이
+-- 아니라 오답 "비율"뿐이라 정답 유출이 아니다(공개 정답지 PDF와 무관). 표본이 적은 문항은
+-- 호출부에서 배지를 숨긴다(작은 표본은 오해를 준다).
+create or replace function paper_question_wrong_rates(p_paper_ids uuid[])
+returns table(paper_id uuid, question_number int, attempts bigint, wrongs bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select a.paper_id, ans.question_number,
+         count(*) as attempts,
+         count(*) filter (where ans.is_correct = false) as wrongs
+  from cbt_attempt_answers ans
+  join cbt_attempts a on a.id = ans.attempt_id
+  where a.paper_id = any(p_paper_ids)
+  group by a.paper_id, ans.question_number
+$$;
+
+grant execute on function paper_question_wrong_rates(uuid[]) to authenticated;
+
 -- 회원가입 IP 레이트리밋: 캡차(Turnstile)와 별개로 짧은 시간 동안의 대량 가입 시도를
 -- 막는 2차 방어선. 성공/실패 관계없이 시도할 때마다 한 행씩 기록한다.
 create table if not exists signup_attempts (

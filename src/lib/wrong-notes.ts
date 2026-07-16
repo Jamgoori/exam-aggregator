@@ -3,6 +3,12 @@ import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ExamType, Subject } from "@/lib/supabase/types";
 import type { QuestionExplanationContent } from "@/components/wrong-note-question-card";
+import {
+  collidingPaperIds,
+  fetchPaperIdentitySignals,
+  representativePaperIds,
+} from "@/lib/dedup-papers";
+import { stripTrackFromTitle } from "@/lib/paper-title";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -231,11 +237,11 @@ export type WrongNoteQuestionDetail = WrongNoteQuestionSummary & {
   explanation: QuestionExplanationContent | null;
 };
 
-type QuestionMediaEntry = { choiceCount: number | null; images: string[] };
+export type QuestionMediaEntry = { choiceCount: number | null; images: string[] };
 
 // 문제지들의 문항별 크롭 이미지(공개 URL)와 선지 수를 한 번에 받아온다.
 // questions/question_images는 public read라 사용자 세션 클라이언트로 충분하다.
-async function fetchQuestionMedia(
+export async function fetchQuestionMedia(
   supabase: Supabase,
   paperIds: string[],
 ): Promise<Map<string, Map<number, QuestionMediaEntry>>> {
@@ -476,6 +482,414 @@ export async function getSubjectWrongNoteOverview(
   const groups = await getWrongNoteGroups(supabase, userId);
   const group = groups.find((g) => g.subject.id === subject.id);
   return { subject, papers: group?.papers ?? [] };
+}
+
+// ── 과목 문항 모아보기 (과목 오답을 문제지 경계 없이 문항 단위로 펼침) ──────────
+//
+// 과목 오답노트의 "문항 모아보기" 탭용. 문제지별 요약과 달리, 그 과목에서 틀린
+// 문항 전체를 이미지·정답·해설까지 붙여 한 목록으로 돌려준다. 필터·정렬은 화면
+// (클라이언트)에서 하고 여기서는 정렬 안정성을 위해 (문제지 제목, 문항 번호)
+// 순으로만 정돈해 둔다 — 세트문제(공통지문) 병합이 같은 문제지 내 연속 문항에서
+// 성립하도록.
+//
+// 중복 시험지(직류만 다른 같은 시험지) 처리: 같은 과목 안에서 track만 다른 문제지
+// 두 행에 각각 응시 기록이 있으면 같은 문항이 두 번 잡힌다. dedup-papers의 대표
+// 선정 규칙을 그대로 써서 응시를 대표 문제지 id로 접은 뒤 문항을 합친다(표시 통합과
+// 동일 기준).
+
+export type SubjectWrongNoteQuestion = {
+  paperId: string;
+  paperTitle: string;
+  paperLevel: string | null;
+  questionNumber: number;
+  wrongCount: number;
+  resolved: boolean;
+  // 가장 최근에 틀렸을 때 고른 답 (null이면 풀지 않고 넘어감).
+  selectedChoice: number | null;
+  // 가장 최근에 이 문항을 틀린 응시 시각 ("최근 틀린 순" 정렬용).
+  lastWrongAt: string;
+  correctChoice: number | null;
+  choiceCount: number;
+  images: string[];
+  explanation: QuestionExplanationContent | null;
+  // 사용자가 이 문항에 남긴 개인 메모(없으면 null).
+  memo: string | null;
+  // 전국 오답률(%). 표본이 충분한 문항만 채워지고, 적으면 null(배지 숨김).
+  wrongRatePct: number | null;
+};
+
+// 전국 오답률 배지를 띄우기 위한 최소 표본(이보다 적으면 오해를 주므로 숨긴다).
+export const WRONGRATE_MIN_SAMPLE = 10;
+
+export type SubjectWrongNoteQuestions = {
+  subject: Subject;
+  questions: SubjectWrongNoteQuestion[];
+  unresolvedCount: number;
+  resolvedCount: number;
+};
+
+// dedup 대표 선정에 필요한 필드까지 포함해 응시를 받는다. subjects/exam_types는
+// 표시용.
+type SubjectAttemptPaper = {
+  id: string;
+  title: string;
+  level: string | null;
+  choice_count: number;
+  subject_id: string;
+  exam_type_id: string;
+  year: number;
+  round: number;
+  track: string | null;
+  created_at: string;
+};
+
+type SubjectAttemptRow = {
+  id: string;
+  created_at: string;
+  exam_papers: SubjectAttemptPaper | null;
+};
+
+const SUBJECT_ATTEMPT_SELECT =
+  "id, created_at, exam_papers!inner(id, title, level, choice_count, subject_id, exam_type_id, year, round, track, created_at)";
+
+// 문항별 통합 상태(user_question_status)를 대표 문제지+문항 키로 접어 받아온다.
+// 중복 시험지는 실제 paper_id별로 상태가 흩어질 수 있어, 같은 대표+문항 중 가장
+// 최근(last_answered_at) 것을 쓴다. RLS로 본인 행만 조회된다.
+async function fetchQuestionStatusByRep(
+  supabase: Supabase,
+  userId: string,
+  realPaperIds: string[],
+  repId: (paperId: string) => string,
+): Promise<Map<string, { correct: boolean; at: string }>> {
+  const out = new Map<string, { correct: boolean; at: string }>();
+  if (realPaperIds.length === 0) return out;
+  for (const ids of chunk(realPaperIds, 200)) {
+    const { data } = await supabase
+      .from("user_question_status")
+      .select("paper_id, question_number, last_is_correct, last_answered_at")
+      .eq("user_id", userId)
+      .in("paper_id", ids);
+    for (const row of data ?? []) {
+      const key = `${repId(row.paper_id as string)}#${row.question_number as number}`;
+      const at = row.last_answered_at as string;
+      const ex = out.get(key);
+      if (!ex || at > ex.at) {
+        out.set(key, { correct: row.last_is_correct as boolean, at });
+      }
+    }
+  }
+  return out;
+}
+
+// 문항 메모(본인 것만, RLS). `${paperId}#${qnum}` → 메모.
+async function fetchMemos(
+  supabase: Supabase,
+  userId: string,
+  paperIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (paperIds.length === 0) return out;
+  for (const ids of chunk(paperIds, 200)) {
+    const { data } = await supabase
+      .from("question_memos")
+      .select("paper_id, question_number, memo")
+      .eq("user_id", userId)
+      .in("paper_id", ids);
+    for (const r of data ?? []) {
+      const memo = (r.memo as string | null)?.trim();
+      if (memo) out.set(`${r.paper_id}#${r.question_number}`, memo);
+    }
+  }
+  return out;
+}
+
+// 전국 오답률(%). paper_question_wrong_rates(security definer)로 전체 응시를 집계.
+// 표본이 WRONGRATE_MIN_SAMPLE 미만이면 넣지 않는다(작은 표본은 오해를 준다).
+async function fetchWrongRates(
+  supabase: Supabase,
+  paperIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (paperIds.length === 0) return out;
+  for (const ids of chunk(paperIds, 100)) {
+    const { data, error } = await supabase.rpc("paper_question_wrong_rates", {
+      p_paper_ids: ids,
+    });
+    if (error) continue; // 함수 미적용 환경: 배지 없이 넘어간다.
+    for (const r of (data ?? []) as { paper_id: string; question_number: number; attempts: number; wrongs: number }[]) {
+      if (r.attempts < WRONGRATE_MIN_SAMPLE) continue;
+      out.set(`${r.paper_id}#${r.question_number}`, Math.round((r.wrongs / r.attempts) * 100));
+    }
+  }
+  return out;
+}
+
+export async function getSubjectWrongNoteQuestions(
+  supabase: Supabase,
+  userId: string,
+  slug: string,
+): Promise<SubjectWrongNoteQuestions | null> {
+  const { data: subjectRow } = await supabase
+    .from("subjects")
+    .select("*")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (!subjectRow) return null;
+  const subject = subjectRow as Subject;
+
+  const { data: attemptRows } = await supabase
+    .from("cbt_attempts")
+    .select(SUBJECT_ATTEMPT_SELECT)
+    .eq("user_id", userId)
+    .eq("exam_papers.subject_id", subject.id)
+    .order("created_at", { ascending: false });
+
+  const attempts = ((attemptRows ?? []) as unknown as SubjectAttemptRow[]).filter(
+    (a) => a.exam_papers,
+  );
+  if (attempts.length === 0) {
+    return { subject, questions: [], unresolvedCount: 0, resolvedCount: 0 };
+  }
+
+  // 응시에 등장한 문제지들(중복 제거) — dedup 대표 계산 입력.
+  const distinctPapers = new Map<string, SubjectAttemptPaper>();
+  for (const a of attempts) {
+    const p = a.exam_papers!;
+    if (!distinctPapers.has(p.id)) distinctPapers.set(p.id, p);
+  }
+  const paperList = [...distinctPapers.values()];
+
+  // 겹칠 수 있는 문제지에 대해서만 정답 지문을 조회해 대표를 정한다.
+  const collidingIds = collidingPaperIds(paperList);
+  const signals =
+    collidingIds.length > 0
+      ? await fetchPaperIdentitySignals(supabase, collidingIds)
+      : undefined;
+  const { repByPaperId, finalGroupSizeByRepId } = representativePaperIds(
+    paperList,
+    signals,
+  );
+  const repId = (paperId: string) => repByPaperId.get(paperId) ?? paperId;
+
+  // 대표 문제지 표시 정보. 실제로 합쳐진(2건 이상) 대표는 title에서 track 접미사를 뗀다.
+  const repInfo = new Map<string, { title: string; level: string | null; choiceCount: number }>();
+  for (const p of paperList) {
+    if (repId(p.id) !== p.id) continue;
+    const collapsed = (finalGroupSizeByRepId.get(p.id) ?? 1) > 1;
+    repInfo.set(p.id, {
+      title: collapsed && p.track ? stripTrackFromTitle(p.title, p.track) : p.title,
+      level: p.level,
+      choiceCount: p.choice_count,
+    });
+  }
+
+  const wrongRows = await fetchWrongAnswerRows(
+    supabase,
+    attempts.map((a) => a.id),
+  );
+  const wrongByAttempt = new Map<string, WrongAnswerRow[]>();
+  for (const row of wrongRows) {
+    const list = wrongByAttempt.get(row.attempt_id) ?? [];
+    list.push(row);
+    wrongByAttempt.set(row.attempt_id, list);
+  }
+
+  // 대표별 "가장 최근 응시" = 최신순 attempts에서 처음 만나는 것. 그 응시에서
+  // 틀리지 않은 문항은 극복으로 본다.
+  const latestAttemptIdByRep = new Map<string, string>();
+  for (const a of attempts) {
+    const r = repId(a.exam_papers!.id);
+    if (!latestAttemptIdByRep.has(r)) latestAttemptIdByRep.set(r, a.id);
+  }
+  const wrongInLatestByRep = new Map<string, Set<number>>();
+  for (const [r, attemptId] of latestAttemptIdByRep) {
+    wrongInLatestByRep.set(
+      r,
+      new Set((wrongByAttempt.get(attemptId) ?? []).map((w) => w.question_number)),
+    );
+  }
+
+  // (대표 문제지, 문항 번호)로 오답을 합친다. 최신순으로 훑으므로 처음 만든 값이
+  // "가장 최근에 고른 답 / 가장 최근에 틀린 시각"이 된다.
+  type Agg = {
+    repId: string;
+    questionNumber: number;
+    wrongCount: number;
+    selectedChoice: number | null;
+    lastWrongAt: string;
+  };
+  const byRepQ = new Map<string, Agg>();
+  for (const a of attempts) {
+    const r = repId(a.exam_papers!.id);
+    for (const row of wrongByAttempt.get(a.id) ?? []) {
+      const key = `${r}#${row.question_number}`;
+      const existing = byRepQ.get(key);
+      if (existing) {
+        existing.wrongCount++;
+      } else {
+        byRepQ.set(key, {
+          repId: r,
+          questionNumber: row.question_number,
+          wrongCount: 1,
+          selectedChoice: row.selected_choice,
+          lastWrongAt: a.created_at,
+        });
+      }
+    }
+  }
+
+  const repIds = [...repInfo.keys()];
+  const [mediaByPaper, answersByPaper, explanationsByPaper, statusByRepQ, memoByRepQ, rateByRepQ] =
+    await Promise.all([
+      fetchQuestionMedia(supabase, repIds),
+      fetchCorrectAnswers(repIds),
+      fetchExplanations(repIds),
+      fetchQuestionStatusByRep(supabase, userId, paperList.map((p) => p.id), repId),
+      fetchMemos(supabase, userId, repIds),
+      fetchWrongRates(supabase, repIds),
+    ]);
+
+  const questions: SubjectWrongNoteQuestion[] = [];
+  for (const agg of byRepQ.values()) {
+    const info = repInfo.get(agg.repId);
+    if (!info) continue;
+    const media = mediaByPaper.get(agg.repId)?.get(agg.questionNumber);
+    const answers = answersByPaper.get(agg.repId);
+    // 극복 판정: user_question_status(CBT+섞어풀기 통합 최신 결과)를 우선 사용하고,
+    // 없으면(테이블 미적용/기록 없음) CBT 최신 응시 기준으로 폴백한다. 이렇게 하면
+    // 섞어풀기에서 맞힌 문항이 여기 목록·섞어풀기 후보에서 극복으로 반영된다.
+    const status = statusByRepQ.get(`${agg.repId}#${agg.questionNumber}`);
+    const resolved = status
+      ? status.correct
+      : !wrongInLatestByRep.get(agg.repId)?.has(agg.questionNumber);
+    questions.push({
+      paperId: agg.repId,
+      paperTitle: info.title,
+      paperLevel: info.level,
+      questionNumber: agg.questionNumber,
+      wrongCount: agg.wrongCount,
+      resolved,
+      selectedChoice: agg.selectedChoice,
+      lastWrongAt: agg.lastWrongAt,
+      correctChoice: answers?.[agg.questionNumber - 1] ?? null,
+      choiceCount: media?.choiceCount ?? info.choiceCount,
+      images: media?.images ?? [],
+      explanation: explanationsByPaper.get(agg.repId)?.get(agg.questionNumber) ?? null,
+      memo: memoByRepQ.get(`${agg.repId}#${agg.questionNumber}`) ?? null,
+      wrongRatePct: rateByRepQ.get(`${agg.repId}#${agg.questionNumber}`) ?? null,
+    });
+  }
+
+  // 세트문제 병합이 성립하도록 (제목, 번호) 순 안정 정렬. 화면이 다시 정렬한다.
+  questions.sort(
+    (a, b) =>
+      a.paperTitle.localeCompare(b.paperTitle, "ko") ||
+      a.questionNumber - b.questionNumber,
+  );
+  const unresolvedCount = questions.filter((q) => !q.resolved).length;
+
+  return {
+    subject,
+    questions,
+    unresolvedCount,
+    resolvedCount: questions.length - unresolvedCount,
+  };
+}
+
+// 과목별 "미극복 오답 수"를 user_question_status(CBT+섞어풀기 통합) 기준으로 센다.
+// 허브(마이페이지 오답노트 탭)의 총계·과목 배지·오늘 카드가 이 값을 쓰면, 섞어풀기로
+// 극복한 문항이 즉시 반영되고(헤드라인 숫자가 줄고), "미극복 N" 오늘 카드 수치가
+// 실제 섞어풀기 후보와 일치해 "N개라며 눌렀더니 0개" dead-end가 사라진다.
+// buildWrongNoteGroups(응시 최신 기준)과 달리 섞어풀기 결과까지 본다.
+// 복습 대상(간격 반복 lite): 미극복 오답 중 마지막으로 푼 지 이만큼 지난 문항을
+// "오늘 복습할 것"으로 본다. 별도 컬럼 없이 last_answered_at로 파생한다.
+export const REVIEW_COOLDOWN_HOURS = 24;
+
+export async function getUnresolvedCountBySubject(
+  supabase: Supabase,
+  userId: string,
+): Promise<Map<string, { name: string; slug: string; unresolved: number; due: number }>> {
+  const out = new Map<string, { name: string; slug: string; unresolved: number; due: number }>();
+  const dueCutoff = new Date(Date.now() - REVIEW_COOLDOWN_HOURS * 3600 * 1000).toISOString();
+
+  const statusRows: {
+    paper_id: string;
+    question_number: number;
+    last_is_correct: boolean;
+    last_answered_at: string;
+  }[] = [];
+  {
+    let from = 0;
+    while (true) {
+      const { data } = await supabase
+        .from("user_question_status")
+        .select("paper_id, question_number, last_is_correct, last_answered_at")
+        .eq("user_id", userId)
+        .gt("wrong_count", 0)
+        .range(from, from + BATCH_SIZE - 1);
+      if (!data || data.length === 0) break;
+      statusRows.push(...(data as typeof statusRows));
+      if (data.length < BATCH_SIZE) break;
+      from += BATCH_SIZE;
+    }
+  }
+  if (statusRows.length === 0) return out;
+
+  const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
+
+  // dedup 대표 계산 + 대표 문제지의 과목. 중복 시험지가 각각 응시됐어도 한 번만 센다.
+  type PaperMeta = {
+    id: string;
+    subject_id: string;
+    exam_type_id: string;
+    year: number;
+    round: number;
+    level: string | null;
+    title: string;
+    subjects: { id: string; name: string; slug: string } | null;
+  };
+  const papers: PaperMeta[] = [];
+  for (const ids of chunk(paperIds, 100)) {
+    const { data } = await supabase
+      .from("exam_papers")
+      .select("id, subject_id, exam_type_id, year, round, level, title, subjects(id, name, slug)")
+      .in("id", ids);
+    for (const p of (data ?? []) as unknown as PaperMeta[]) papers.push(p);
+  }
+  const { repByPaperId } = representativePaperIds(papers);
+  const repId = (paperId: string) => repByPaperId.get(paperId) ?? paperId;
+  const subjectOfPaper = new Map<string, { id: string; name: string; slug: string }>();
+  for (const p of papers) if (p.subjects) subjectOfPaper.set(p.id, p.subjects);
+
+  // (대표, 문항)별로 가장 최근 상태만 남긴다(중복 시험지의 status가 흩어져도 통합).
+  const byRepQ = new Map<string, { resolved: boolean; at: string; subjectId: string | null }>();
+  for (const r of statusRows) {
+    const rep = repId(r.paper_id);
+    const subj = subjectOfPaper.get(rep) ?? subjectOfPaper.get(r.paper_id) ?? null;
+    const key = `${rep}#${r.question_number}`;
+    const ex = byRepQ.get(key);
+    if (!ex || r.last_answered_at > ex.at) {
+      byRepQ.set(key, {
+        resolved: r.last_is_correct,
+        at: r.last_answered_at,
+        subjectId: subj?.id ?? null,
+      });
+    }
+  }
+
+  const nameSlug = new Map<string, { name: string; slug: string }>();
+  for (const s of subjectOfPaper.values()) nameSlug.set(s.id, { name: s.name, slug: s.slug });
+
+  for (const v of byRepQ.values()) {
+    if (v.resolved || !v.subjectId) continue;
+    const meta = nameSlug.get(v.subjectId);
+    if (!meta) continue;
+    const e = out.get(v.subjectId) ?? { name: meta.name, slug: meta.slug, unresolved: 0, due: 0 };
+    e.unresolved++;
+    if (v.at <= dueCutoff) e.due++;
+    out.set(v.subjectId, e);
+  }
+  return out;
 }
 
 // ── 문제지 오답노트 (과목 → 문제지 드릴다운) ───────────────────────────────

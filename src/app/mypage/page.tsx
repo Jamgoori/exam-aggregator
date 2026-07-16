@@ -4,6 +4,9 @@ import { BookOpenCheck, ChevronRight, Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
+import { WrongNoteTodayCard } from "@/components/wrong-note-today-card";
+import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
+import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@/lib/format";
 import { computeStreakDays, streakTier } from "@/lib/streak";
@@ -11,6 +14,7 @@ import { subjectColor } from "@/lib/subject-colors";
 import {
   buildWrongNoteGroups,
   fetchWrongAnswerRows,
+  getUnresolvedCountBySubject,
   type WrongNoteAttemptRow,
   type WrongNoteSubjectGroup,
 } from "@/lib/wrong-notes";
@@ -116,13 +120,32 @@ export default async function MyPage({
     myAttempts as unknown as WrongNoteAttemptRow[],
     wrongRows,
   );
-  const totalUnresolved = wrongNoteGroups.reduce(
-    (sum, g) => sum + g.unresolvedCount,
-    0,
-  );
+  // 미극복 수는 user_question_status(CBT+섞어풀기 통합) 기준으로 센다 — 섞어풀기로
+  // 극복한 게 헤드라인·과목·오늘 카드에 즉시 반영되고, 섞어풀기 후보 수와 일치한다.
+  // 표가 비어 있으면(백필 전 등) 응시 기준(buildWrongNoteGroups)으로 폴백.
+  const unresolvedBySubject = await getUnresolvedCountBySubject(supabase, user.id);
+  const totalUnresolved =
+    unresolvedBySubject.size > 0
+      ? [...unresolvedBySubject.values()].reduce((s, v) => s + v.unresolved, 0)
+      : wrongNoteGroups.reduce((sum, g) => sum + g.unresolvedCount, 0);
 
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
+
+  // AI 약점 진단 배너 상태. 오늘 진단이 있으면 그 상태, 없으면 자격 판정으로 결정.
+  const todayDiag = await getTodayDiagnosis(supabase, user.id);
+  const diagEligibility = todayDiag
+    ? null
+    : await getDiagnosisEligibility(supabase, user.id);
+  const diagnosisState: DiagnosisBannerState =
+    todayDiag?.status === "ready"
+      ? "ready"
+      : todayDiag?.status === "pending"
+        ? "pending"
+        : diagEligibility?.eligible
+          ? "eligible"
+          : "locked";
+  const diagnosisHint = diagEligibility?.hint ?? null;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-12">
@@ -161,7 +184,7 @@ export default async function MyPage({
           <span
             className={`text-xl font-semibold ${totalUnresolved > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}
           >
-            {totalUnresolved}문제
+            {totalUnresolved}문항
           </span>
         </div>
       </div>
@@ -181,7 +204,14 @@ export default async function MyPage({
             roundNumberByAttemptId={roundNumberByAttemptId}
           />
         }
-        wrongNotes={<WrongNotesTab groups={wrongNoteGroups} />}
+        wrongNotes={
+          <WrongNotesTab
+            groups={wrongNoteGroups}
+            unresolvedBySubject={unresolvedBySubject}
+            diagnosisState={diagnosisState}
+            diagnosisHint={diagnosisHint}
+          />
+        }
       />
     </div>
   );
@@ -305,13 +335,51 @@ function HistoryTab({
 
 // "오답노트" 탭: 과목별로 틀린 문제 수를 요약해서 보여주고, 과목을 누르면
 // 문제 이미지까지 모아둔 과목 오답노트 페이지로 이어준다.
-function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
+function WrongNotesTab({
+  groups,
+  unresolvedBySubject,
+  diagnosisState,
+  diagnosisHint,
+}: {
+  groups: WrongNoteSubjectGroup[];
+  unresolvedBySubject: Map<string, { name: string; slug: string; unresolved: number; due: number }>;
+  diagnosisState: DiagnosisBannerState;
+  diagnosisHint: string | null;
+}) {
+  // 오늘 카드용: 미극복이 가장 많은 과목. status 기준으로 고르고(섞어풀기 후보와 일치),
+  // status가 비어 있으면 응시 기준 groups에서 고른다.
+  let topSubject: { slug: string; name: string; unresolved: number } | null = null;
+  for (const v of unresolvedBySubject.values()) {
+    if (v.unresolved > 0 && (!topSubject || v.unresolved > topSubject.unresolved)) {
+      topSubject = { slug: v.slug, name: v.name, unresolved: v.unresolved };
+    }
+  }
+  if (!topSubject) {
+    const g = groups
+      .filter((x) => x.unresolvedCount > 0)
+      .reduce<WrongNoteSubjectGroup | null>(
+        (best, x) => (best === null || x.unresolvedCount > best.unresolvedCount ? x : best),
+        null,
+      );
+    if (g)
+      topSubject = { slug: g.subject.slug, name: g.subject.name, unresolved: g.unresolvedCount };
+  }
+
+  // 복습 대상(하루 지난 미극복)이 가장 많은 과목. 오늘 카드가 이걸 최우선으로 쓴다.
+  let dueSubject: { slug: string; name: string; due: number } | null = null;
+  for (const v of unresolvedBySubject.values()) {
+    if (v.due > 0 && (!dueSubject || v.due > dueSubject.due)) {
+      dueSubject = { slug: v.slug, name: v.name, due: v.due };
+    }
+  }
+
   return (
     <section className="flex flex-col gap-4">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
         <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
         오답노트
       </h2>
+      <DiagnosisBanner initialState={diagnosisState} hint={diagnosisHint} />
       {groups.length === 0 ? (
         <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-500">
           아직 모인 오답이 없어요. CBT로 문제를 풀면 틀린 문제가 과목별로
@@ -319,21 +387,37 @@ function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
         </p>
       ) : (
         <>
+          <WrongNoteTodayCard
+            topSubjectSlug={topSubject?.slug ?? null}
+            topSubjectName={topSubject?.name ?? null}
+            topUnresolved={topSubject?.unresolved ?? 0}
+            dueSubjectSlug={dueSubject?.slug ?? null}
+            dueSubjectName={dueSubject?.name ?? null}
+            dueCount={dueSubject?.due ?? 0}
+          />
           <p className="text-xs text-zinc-400 dark:text-zinc-600">
-            틀린 문제를 과목별로 모아뒀어요. 가장 최근 응시에서 다시 맞힌 문제는
-            &ldquo;극복&rdquo;으로 표시돼요.
+            틀린 문항을 과목별로 모아뒀어요. 다시 맞힌 문항은 &ldquo;극복&rdquo;으로
+            표시돼요. 과목을 누르면 문항을 모아 보고 섞어풀 수 있어요.
           </p>
-          <div className="flex flex-col gap-4">
-            {groups.map((g) => (
-              <div key={g.subject.id} className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
-                <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-col gap-3">
+            {groups.map((g) => {
+              const stat = unresolvedBySubject.get(g.subject.id);
+              const unresolved = stat?.unresolved ?? g.unresolvedCount;
+              return (
+                <Link
+                  key={g.subject.id}
+                  href={`/mypage/wrong-notes/${g.subject.slug}?view=questions`}
+                  className="group flex items-center gap-3 rounded-xl border border-zinc-200 p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+                >
                   <span
-                    className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(g.subject.slug)}`}
+                    className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${subjectColor(g.subject.slug)}`}
                   >
                     {g.subject.name}
                   </span>
                   <span className="text-sm text-zinc-500 dark:text-zinc-500">
-                    <span className="font-medium text-red-600 dark:text-red-400">오답 {g.unresolvedCount}</span>
+                    <span className="font-medium text-red-600 dark:text-red-400">
+                      미극복 {unresolved}
+                    </span>
                     {g.resolvedCount > 0 && (
                       <>
                         {" · "}
@@ -343,44 +427,13 @@ function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
                       </>
                     )}
                   </span>
-                  <Link
-                    href={`/mypage/wrong-notes/${g.subject.slug}`}
-                    className="ml-auto text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
-                  >
-                    문제지 목록 →
-                  </Link>
-                </div>
-                <div className="mt-2 flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {g.papers.map((p) => (
-                    <Link
-                      key={p.paper.id}
-                      href={`/mypage/wrong-notes/${g.subject.slug}/${p.paper.id}`}
-                      className="group flex items-center gap-2 py-2.5"
-                    >
-                      <span className="truncate text-sm group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                        {p.paper.title}
-                      </span>
-                      <span className="ml-auto flex shrink-0 items-center gap-2 text-xs">
-                        <span
-                          className={`font-medium ${p.unresolvedCount > 0 ? "text-red-600 dark:text-red-400" : "text-zinc-400 dark:text-zinc-600"}`}
-                        >
-                          오답 {p.unresolvedCount}
-                        </span>
-                        {p.resolvedCount > 0 && (
-                          <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                            극복 {p.resolvedCount}
-                          </span>
-                        )}
-                        <ChevronRight
-                          size={14}
-                          className="text-zinc-300 group-hover:text-blue-600 dark:text-zinc-700 dark:group-hover:text-blue-400"
-                        />
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            ))}
+                  <span className="ml-auto flex shrink-0 items-center gap-1 text-sm font-medium text-blue-600 group-hover:underline dark:text-blue-400">
+                    문항 보기
+                    <ChevronRight size={15} />
+                  </span>
+                </Link>
+              );
+            })}
           </div>
         </>
       )}
