@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/supabase/session";
 import {
   createReviewSessionForUser,
   createReviewSessionFromItems,
+  createAllReviewSessionForUser,
   submitReviewSessionForUser,
   type ReviewSessionView,
 } from "@/lib/review-session";
@@ -74,6 +75,19 @@ export async function saveQuestionMemo(input: {
   );
   if (error) return { error: "메모 저장에 실패했어요." };
   return { memo };
+}
+
+// 전 과목 섞어풀기/복습(과목 무관). onlyDue=복습, includeResolved=극복 포함.
+export async function createReviewAll(input: {
+  onlyDue?: boolean;
+  includeResolved?: boolean;
+}): Promise<CreateReviewResult> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  return createAllReviewSessionForUser(supabase, user.id, {
+    onlyDue: input?.onlyDue ?? false,
+    includeResolved: input?.includeResolved ?? false,
+  });
 }
 
 // 결과 화면 "틀린 N문항만 다시 풀기".

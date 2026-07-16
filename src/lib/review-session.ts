@@ -6,6 +6,7 @@ import {
   fetchQuestionMedia,
   REVIEW_COOLDOWN_HOURS,
 } from "@/lib/wrong-notes";
+import { representativePaperIds } from "@/lib/dedup-papers";
 import { recordQuestionResults } from "@/lib/question-status";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -122,6 +123,116 @@ export async function createReviewSessionForUser(
   }
 
   return { sessionId: session.id as string };
+}
+
+function chunkIds<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+// 전 과목 오답을 한 번에 모아 섞어풀기 후보(문제지, 문항)를 뽑는다. 과목을 가리지
+// 않으므로 회독을 끝낸 뒤 몰아 푸는 사용자가 여러 과목을 한 세션으로 풀 수 있다.
+// - onlyDue: 마지막으로 푼 지 하루 지난 것만(복습).
+// - includeResolved: 이미 극복한 문항도 포함(다시 풀고 싶은 사람용).
+// user_question_status(본인 RLS) + dedup 대표로 접고, 이미지가 있는(풀 수 있는) 문항만.
+export async function collectAllReviewCandidates(
+  supabase: Supabase,
+  userId: string,
+  opts: { onlyDue?: boolean; includeResolved?: boolean },
+): Promise<{ paperId: string; questionNumber: number }[]> {
+  const statusRows: {
+    paper_id: string;
+    question_number: number;
+    last_is_correct: boolean;
+    last_answered_at: string;
+  }[] = [];
+  {
+    let from = 0;
+    const SIZE = 1000;
+    while (true) {
+      const { data } = await supabase
+        .from("user_question_status")
+        .select("paper_id, question_number, last_is_correct, last_answered_at")
+        .eq("user_id", userId)
+        .gt("wrong_count", 0)
+        .range(from, from + SIZE - 1);
+      if (!data || data.length === 0) break;
+      statusRows.push(...(data as typeof statusRows));
+      if (data.length < SIZE) break;
+      from += SIZE;
+    }
+  }
+  if (statusRows.length === 0) return [];
+
+  const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
+
+  type PaperMeta = {
+    id: string;
+    subject_id: string;
+    exam_type_id: string;
+    year: number;
+    round: number;
+    level: string | null;
+  };
+  const papers: PaperMeta[] = [];
+  for (const ids of chunkIds(paperIds, 100)) {
+    const { data } = await supabase
+      .from("exam_papers")
+      .select("id, subject_id, exam_type_id, year, round, level")
+      .in("id", ids);
+    for (const p of (data ?? []) as PaperMeta[]) papers.push(p);
+  }
+  const { repByPaperId } = representativePaperIds(
+    papers.map((p) => ({ ...p, title: "" })),
+  );
+  const repId = (paperId: string) => repByPaperId.get(paperId) ?? paperId;
+
+  // (대표, 문항)별 최신 상태로 접기.
+  const byRepQ = new Map<string, { resolved: boolean; at: string }>();
+  for (const r of statusRows) {
+    const key = `${repId(r.paper_id)}#${r.question_number}`;
+    const ex = byRepQ.get(key);
+    if (!ex || r.last_answered_at > ex.at) {
+      byRepQ.set(key, { resolved: r.last_is_correct, at: r.last_answered_at });
+    }
+  }
+
+  const repIds = [...new Set([...byRepQ.keys()].map((k) => k.split("#")[0]))];
+  const mediaByPaper = await fetchQuestionMedia(supabase, repIds);
+  const cutoff = opts.onlyDue
+    ? new Date(Date.now() - REVIEW_COOLDOWN_HOURS * 3600 * 1000).toISOString()
+    : null;
+
+  const candidates: { paperId: string; questionNumber: number }[] = [];
+  for (const [key, v] of byRepQ) {
+    if (!opts.includeResolved && v.resolved) continue;
+    if (cutoff && v.at > cutoff) continue;
+    const [rep, qnumStr] = key.split("#");
+    const qnum = Number(qnumStr);
+    if (!mediaByPaper.get(rep)?.get(qnum)?.images.length) continue; // 풀 수 있는 것만
+    candidates.push({ paperId: rep, questionNumber: qnum });
+  }
+  return candidates;
+}
+
+// 전 과목 섞어풀기/복습 세션 생성. 후보를 모아 createReviewSessionFromItems로 넘긴다.
+export async function createAllReviewSessionForUser(
+  supabase: Supabase,
+  userId: string,
+  opts: { onlyDue?: boolean; includeResolved?: boolean },
+): Promise<{ sessionId?: string; error?: string }> {
+  const items = await collectAllReviewCandidates(supabase, userId, opts);
+  if (items.length === 0) {
+    return {
+      error: opts.onlyDue
+        ? "지금 복습할 문항이 없어요. 하루 뒤에 다시 확인해보세요."
+        : opts.includeResolved
+          ? "다시 풀 문항이 없어요."
+          : "아직 안 극복한(이미지가 있는) 오답이 없어요.",
+    };
+  }
+  return createReviewSessionFromItems(supabase, userId, items);
 }
 
 // 채점 결과에서 "틀린 문항만 다시 풀기": 넘겨받은 (문제지, 문항) 목록으로 새 세션을

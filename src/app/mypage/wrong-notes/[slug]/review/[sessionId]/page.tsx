@@ -25,11 +25,11 @@ export default async function ReviewSessionPage({
   const view = await getReviewSessionView(supabase, user.id, sessionId);
   if (!view) notFound();
 
-  return (
-    <ReviewSolver
-      initial={view}
-      backHref={`/mypage/wrong-notes/${slug}?view=questions`}
-      subjectSlug={slug}
-    />
-  );
+  // slug "all" = 전 과목 섞어풀기/복습(특정 과목 페이지가 없음). 돌아가기는 허브로.
+  const backHref =
+    slug === "all"
+      ? "/mypage?tab=wrong-notes"
+      : `/mypage/wrong-notes/${slug}?view=questions`;
+
+  return <ReviewSolver initial={view} backHref={backHref} subjectSlug={slug} />;
 }

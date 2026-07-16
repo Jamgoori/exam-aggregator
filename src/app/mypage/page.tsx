@@ -365,13 +365,14 @@ function WrongNotesTab({
       topSubject = { slug: g.subject.slug, name: g.subject.name, unresolved: g.unresolvedCount };
   }
 
-  // 복습 대상(하루 지난 미극복)이 가장 많은 과목. 오늘 카드가 이걸 최우선으로 쓴다.
-  let dueSubject: { slug: string; name: string; due: number } | null = null;
-  for (const v of unresolvedBySubject.values()) {
-    if (v.due > 0 && (!dueSubject || v.due > dueSubject.due)) {
-      dueSubject = { slug: v.slug, name: v.name, due: v.due };
-    }
-  }
+  // 전 과목 복습 대상 합계(하루 지난 미극복)와 미극복 합계. 오늘 카드가 과목을 가리지
+  // 않고 이 수를 쓴다. status가 비면(백필 전) 응시 기준으로 폴백.
+  let dueTotal = 0;
+  for (const v of unresolvedBySubject.values()) dueTotal += v.due;
+  const unresolvedTotal =
+    unresolvedBySubject.size > 0
+      ? [...unresolvedBySubject.values()].reduce((s, v) => s + v.unresolved, 0)
+      : groups.reduce((s, g) => s + g.unresolvedCount, 0);
 
   return (
     <section className="flex flex-col gap-4">
@@ -388,12 +389,9 @@ function WrongNotesTab({
       ) : (
         <>
           <WrongNoteTodayCard
+            unresolvedTotal={unresolvedTotal}
+            dueTotal={dueTotal}
             topSubjectSlug={topSubject?.slug ?? null}
-            topSubjectName={topSubject?.name ?? null}
-            topUnresolved={topSubject?.unresolved ?? 0}
-            dueSubjectSlug={dueSubject?.slug ?? null}
-            dueSubjectName={dueSubject?.name ?? null}
-            dueCount={dueSubject?.due ?? 0}
           />
           <p className="text-xs text-zinc-400 dark:text-zinc-600">
             틀린 문항을 과목별로 모아뒀어요. 다시 맞힌 문항은 &ldquo;극복&rdquo;으로
