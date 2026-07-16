@@ -545,6 +545,35 @@ type SubjectAttemptRow = {
 const SUBJECT_ATTEMPT_SELECT =
   "id, created_at, exam_papers!inner(id, title, level, choice_count, subject_id, exam_type_id, year, round, track, created_at)";
 
+// 문항별 통합 상태(user_question_status)를 대표 문제지+문항 키로 접어 받아온다.
+// 중복 시험지는 실제 paper_id별로 상태가 흩어질 수 있어, 같은 대표+문항 중 가장
+// 최근(last_answered_at) 것을 쓴다. RLS로 본인 행만 조회된다.
+async function fetchQuestionStatusByRep(
+  supabase: Supabase,
+  userId: string,
+  realPaperIds: string[],
+  repId: (paperId: string) => string,
+): Promise<Map<string, { correct: boolean; at: string }>> {
+  const out = new Map<string, { correct: boolean; at: string }>();
+  if (realPaperIds.length === 0) return out;
+  for (const ids of chunk(realPaperIds, 200)) {
+    const { data } = await supabase
+      .from("user_question_status")
+      .select("paper_id, question_number, last_is_correct, last_answered_at")
+      .eq("user_id", userId)
+      .in("paper_id", ids);
+    for (const row of data ?? []) {
+      const key = `${repId(row.paper_id as string)}#${row.question_number as number}`;
+      const at = row.last_answered_at as string;
+      const ex = out.get(key);
+      if (!ex || at > ex.at) {
+        out.set(key, { correct: row.last_is_correct as boolean, at });
+      }
+    }
+  }
+  return out;
+}
+
 export async function getSubjectWrongNoteQuestions(
   supabase: Supabase,
   userId: string,
@@ -660,11 +689,13 @@ export async function getSubjectWrongNoteQuestions(
   }
 
   const repIds = [...repInfo.keys()];
-  const [mediaByPaper, answersByPaper, explanationsByPaper] = await Promise.all([
-    fetchQuestionMedia(supabase, repIds),
-    fetchCorrectAnswers(repIds),
-    fetchExplanations(repIds),
-  ]);
+  const [mediaByPaper, answersByPaper, explanationsByPaper, statusByRepQ] =
+    await Promise.all([
+      fetchQuestionMedia(supabase, repIds),
+      fetchCorrectAnswers(repIds),
+      fetchExplanations(repIds),
+      fetchQuestionStatusByRep(supabase, userId, paperList.map((p) => p.id), repId),
+    ]);
 
   const questions: SubjectWrongNoteQuestion[] = [];
   for (const agg of byRepQ.values()) {
@@ -672,7 +703,13 @@ export async function getSubjectWrongNoteQuestions(
     if (!info) continue;
     const media = mediaByPaper.get(agg.repId)?.get(agg.questionNumber);
     const answers = answersByPaper.get(agg.repId);
-    const resolved = !wrongInLatestByRep.get(agg.repId)?.has(agg.questionNumber);
+    // 극복 판정: user_question_status(CBT+섞어풀기 통합 최신 결과)를 우선 사용하고,
+    // 없으면(테이블 미적용/기록 없음) CBT 최신 응시 기준으로 폴백한다. 이렇게 하면
+    // 섞어풀기에서 맞힌 문항이 여기 목록·섞어풀기 후보에서 극복으로 반영된다.
+    const status = statusByRepQ.get(`${agg.repId}#${agg.questionNumber}`);
+    const resolved = status
+      ? status.correct
+      : !wrongInLatestByRep.get(agg.repId)?.has(agg.questionNumber);
     questions.push({
       paperId: agg.repId,
       paperTitle: info.title,
