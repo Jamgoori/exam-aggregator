@@ -4,6 +4,7 @@ import { BookOpenCheck, ChevronRight, Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
+import { WrongNoteTodayCard } from "@/components/wrong-note-today-card";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@/lib/format";
 import { computeStreakDays, streakTier } from "@/lib/streak";
@@ -306,6 +307,15 @@ function HistoryTab({
 // "오답노트" 탭: 과목별로 틀린 문제 수를 요약해서 보여주고, 과목을 누르면
 // 문제 이미지까지 모아둔 과목 오답노트 페이지로 이어준다.
 function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
+  // 오늘 카드용: 미극복 오답이 가장 많은 과목을 고른다(같으면 display_order 순 — groups가
+  // 이미 그 순서라 안정적으로 첫 번째가 잡힌다).
+  const topGroup = groups
+    .filter((g) => g.unresolvedCount > 0)
+    .reduce<WrongNoteSubjectGroup | null>(
+      (best, g) => (best === null || g.unresolvedCount > best.unresolvedCount ? g : best),
+      null,
+    );
+
   return (
     <section className="flex flex-col gap-4">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
@@ -319,6 +329,11 @@ function WrongNotesTab({ groups }: { groups: WrongNoteSubjectGroup[] }) {
         </p>
       ) : (
         <>
+          <WrongNoteTodayCard
+            topSubjectSlug={topGroup?.subject.slug ?? null}
+            topSubjectName={topGroup?.subject.name ?? null}
+            topUnresolved={topGroup?.unresolvedCount ?? 0}
+          />
           <p className="text-xs text-zinc-400 dark:text-zinc-600">
             틀린 문제를 과목별로 모아뒀어요. 가장 최근 응시에서 다시 맞힌 문제는
             &ldquo;극복&rdquo;으로 표시돼요.
