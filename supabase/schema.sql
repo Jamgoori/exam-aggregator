@@ -563,9 +563,11 @@ drop policy if exists "select own cbt attempts" on cbt_attempts;
 create policy "select own cbt attempts" on cbt_attempts
   for select to authenticated using (auth.uid() = user_id);
 
+-- insert 정책은 의도적으로 없다: 점수·회독 수가 서버 채점 결과 그대로만 저장되도록
+-- 쓰기는 서버 액션(service_role)에서만 한다. 예전에 열려 있던 "insert own cbt
+-- attempts" 정책은 클라이언트가 REST 호출로 만점 응시를 위조해 공개 통계(회차별
+-- 평균·전국 오답률·총 응시 수)를 오염시킬 수 있어 제거했다 (2026-07-16 보안 점검).
 drop policy if exists "insert own cbt attempts" on cbt_attempts;
-create policy "insert own cbt attempts" on cbt_attempts
-  for insert to authenticated with check (auth.uid() = user_id);
 
 -- 홈 화면 "실시간 총 응시 수" 집계용: cbt_attempts는 본인 것만 select 가능한 RLS라
 -- 전체 응시 건수를 세려면 security definer로 우회해야 한다.
@@ -600,17 +602,13 @@ drop policy if exists "select own cbt attempt starts" on cbt_attempt_starts;
 create policy "select own cbt attempt starts" on cbt_attempt_starts
   for select to authenticated using (auth.uid() = user_id);
 
+-- 쓰기 정책은 의도적으로 없다: started_at은 서버(service_role)만 기록해야 한다.
+-- 예전에 열려 있던 insert/update/delete 정책으로는 클라이언트가 REST 호출로
+-- started_at을 과거로 조작해 최소 응시시간 검증을 통째로 우회할 수 있었다
+-- (2026-07-16 보안 점검에서 제거).
 drop policy if exists "upsert own cbt attempt starts" on cbt_attempt_starts;
-create policy "upsert own cbt attempt starts" on cbt_attempt_starts
-  for insert to authenticated with check (auth.uid() = user_id);
-
 drop policy if exists "update own cbt attempt starts" on cbt_attempt_starts;
-create policy "update own cbt attempt starts" on cbt_attempt_starts
-  for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
-
 drop policy if exists "delete own cbt attempt starts" on cbt_attempt_starts;
-create policy "delete own cbt attempt starts" on cbt_attempt_starts
-  for delete to authenticated using (auth.uid() = user_id);
 
 -- 문항별 응답. selected_choice가 null이면 건너뛴 문제. is_correct는 채점 시점 값을
 -- 그대로 저장해서, 나중에 관리자가 정답을 고쳐도 과거 채점 결과가 뒤바뀌지 않게 한다.
@@ -637,14 +635,11 @@ create policy "select own cbt attempt answers" on cbt_attempt_answers
     )
   );
 
+-- insert 정책은 의도적으로 없다: 문항별 정오(is_correct)는 서버 채점 결과 그대로만
+-- 저장돼야 한다. 예전에 열려 있던 insert 정책으로는 클라이언트가 가짜 정오 행을
+-- 넣어 전국 오답률(paper_question_wrong_rates) 배지를 오염시킬 수 있었다
+-- (2026-07-16 보안 점검에서 제거).
 drop policy if exists "insert own cbt attempt answers" on cbt_attempt_answers;
-create policy "insert own cbt attempt answers" on cbt_attempt_answers
-  for insert to authenticated with check (
-    exists (
-      select 1 from cbt_attempts a
-      where a.id = attempt_id and a.user_id = auth.uid()
-    )
-  );
 
 -- 문항 단위 통합 상태. 오답노트 "극복" 판정과 앞으로 나올 섞어풀기(오답 재풀이)가
 -- 공유하는 사용자×문항 요약이다. cbt_attempt_answers는 응시별 원본이라 "이 문항을
@@ -680,14 +675,12 @@ drop policy if exists "select own question status" on user_question_status;
 create policy "select own question status" on user_question_status
   for select to authenticated using (auth.uid() = user_id);
 
--- upsert(insert ... on conflict do update)는 insert·update 두 정책이 다 있어야 한다.
+-- 쓰기 정책은 의도적으로 없다: 극복 여부(last_is_correct)·오답 횟수(wrong_count)는
+-- 서버 채점 결과로만 갱신돼야 한다. 예전에 열려 있던 insert/update 정책으로는
+-- 클라이언트가 REST 호출로 오답 기록을 임의 조작할 수 있었다(2026-07-16 보안
+-- 점검에서 제거 — 쓰기는 recordQuestionResults가 service_role로 수행).
 drop policy if exists "insert own question status" on user_question_status;
-create policy "insert own question status" on user_question_status
-  for insert to authenticated with check (auth.uid() = user_id);
-
 drop policy if exists "update own question status" on user_question_status;
-create policy "update own question status" on user_question_status
-  for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- 섞어풀기(오답 재풀이) 세션과 그 문항. 오답노트에서 고른 틀린 문항들을 무작위로
 -- 섞어 다시 CBT처럼 풀고, 결과를 user_question_status(극복 판정)에 반영한다.

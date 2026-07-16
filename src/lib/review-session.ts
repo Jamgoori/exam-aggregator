@@ -8,6 +8,7 @@ import {
 } from "@/lib/wrong-notes";
 import { representativePaperIds } from "@/lib/dedup-papers";
 import { recordQuestionResults } from "@/lib/question-status";
+import { sanitizeSelectedChoice } from "@/lib/cbt-attempt";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -469,8 +470,9 @@ export async function submitReviewSessionForUser(
 
   let score = 0;
   const gradedRows = items.map((it) => {
-    const selected =
-      typeof answers[it.position] === "number" ? (answers[it.position] as number) : null;
+    // 클라이언트가 보내는 값이라 소수·거대한 수가 섞이면 smallint 저장이 통째로
+    // 실패하므로, 정상 범위 밖은 "안 푼 문제"로 정제한다.
+    const selected = sanitizeSelectedChoice(answers[it.position]);
     const correct = answersByPaper.get(it.paper_id)?.[it.question_number - 1];
     const isCorrect =
       voidedByPaper.get(it.paper_id)?.has(it.question_number) === true ||
@@ -506,7 +508,7 @@ export async function submitReviewSessionForUser(
   }
   try {
     for (const [paperId, results] of byPaper) {
-      await recordQuestionResults(supabase, userId, paperId, results, "review");
+      await recordQuestionResults(userId, paperId, results, "review");
     }
   } catch {
     // 무시: 상태 갱신 실패가 채점을 막지 않는다.

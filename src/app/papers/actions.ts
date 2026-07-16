@@ -12,7 +12,7 @@ import {
   COMMENT_PW_MIN,
   COMMENT_PW_MAX,
 } from "@/lib/comment-constraints";
-import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
+import { MIN_ATTEMPT_SECONDS, sanitizeSelectedChoice } from "@/lib/cbt-attempt";
 
 export type CommentResult = { error?: string; success?: boolean };
 
@@ -302,11 +302,15 @@ export async function startCbtAttempt(paperId: string): Promise<StartCbtAttemptR
   const id = String(paperId ?? "");
   if (!isUuid(id)) return { error: "잘못된 접근입니다." };
 
-  const { supabase, user } = await getSessionUser();
+  const { user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
+  // started_at은 반드시 서버(service_role)만 쓴다. 사용자 세션으로 쓰게 하면
+  // authenticated insert/update 정책이 필요해지고, 그 정책이 있으면 클라이언트가
+  // REST 호출로 started_at을 과거로 조작해 최소 응시시간 검증을 통째로 우회할 수 있다.
+  const admin = createAdminClient();
   const startedAt = new Date().toISOString();
-  const { error } = await supabase
+  const { error } = await admin
     .from("cbt_attempt_starts")
     .upsert(
       { user_id: user.id, paper_id: id, started_at: startedAt },
@@ -323,10 +327,14 @@ export async function submitCbtAttempt(input: {
   const paperId = String(input.paperId ?? "");
   if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
 
-  const { supabase, user } = await getSessionUser();
+  const { user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
   // 정답은 anon/authenticated에 전혀 노출하지 않으므로 service role로만 조회한다.
+  // 응시 기록(cbt_attempts/cbt_attempt_answers/cbt_attempt_starts) 쓰기도 전부
+  // service role로만 한다 — 사용자 세션 쓰기를 허용하면 클라이언트가 REST 호출로
+  // 점수·시작시각을 위조해 회독 배지와 공개 통계(회차별 평균, 전국 오답률, 총 응시
+  // 수)를 오염시킬 수 있다. 본인 확인은 위 세션 검사로 끝났고 user.id만 기록한다.
   const admin = createAdminClient();
   const { data: paperAnswers } = await admin
     .from("paper_answers")
@@ -343,7 +351,7 @@ export async function submitCbtAttempt(input: {
 
   const submitted = Array.isArray(input.answers) ? input.answers : [];
 
-  const { data: startRecord } = await supabase
+  const { data: startRecord } = await admin
     .from("cbt_attempt_starts")
     .select("started_at")
     .eq("user_id", user.id)
@@ -370,8 +378,7 @@ export async function submitCbtAttempt(input: {
   const questionResults: CbtQuestionResult[] = [];
   for (let i = 0; i < totalQuestions; i++) {
     const questionNumber = i + 1;
-    const selected =
-      typeof submitted[i] === "number" ? (submitted[i] as number) : null;
+    const selected = sanitizeSelectedChoice(submitted[i]);
     const isCorrect = voided.has(questionNumber) || selected === correctAnswers[i];
     if (isCorrect) score++;
     questionResults.push({
@@ -381,7 +388,7 @@ export async function submitCbtAttempt(input: {
     });
   }
 
-  const { data: attempt, error: attemptError } = await supabase
+  const { data: attempt, error: attemptError } = await admin
     .from("cbt_attempts")
     .insert({
       user_id: user.id,
@@ -395,26 +402,28 @@ export async function submitCbtAttempt(input: {
 
   if (attemptError || !attempt) return { error: "채점에 실패했어요." };
 
-  const { error: answersError } = await supabase.from("cbt_attempt_answers").insert(
+  const { error: answersError } = await admin.from("cbt_attempt_answers").insert(
     questionResults.map((q) => ({ attempt_id: attempt.id, ...q })),
   );
 
   if (answersError) {
-    await supabase.from("cbt_attempts").delete().eq("id", attempt.id);
+    // service_role이라 이 롤백이 실제로 지워진다 (사용자 세션에는 delete 정책이
+    // 없어서 예전엔 이 줄이 조용히 아무것도 안 지우고 고아 응시 행을 남겼다).
+    await admin.from("cbt_attempts").delete().eq("id", attempt.id);
     return { error: "채점에 실패했어요." };
   }
 
   // 문항 단위 통합 상태 갱신(오답노트 극복 판정·섞어풀기 공유). 부가 집계라 실패해도
   // 채점 결과는 그대로 돌려준다 — 마이그레이션 적용 전이면 테이블이 없어 조용히 무시된다.
   try {
-    await recordQuestionResults(supabase, user.id, paperId, questionResults, "cbt");
+    await recordQuestionResults(user.id, paperId, questionResults, "cbt");
   } catch {
     // 무시: 상태 갱신 실패가 채점을 막지 않는다.
   }
 
   // 채점에 성공했으니 시작 기록을 지워, 같은 시작 시각으로 다시 제출(replay)해
   // 대기 없이 회독을 늘리는 걸 막는다. 다음 응시는 startCbtAttempt가 새로 기록한다.
-  await supabase
+  await admin
     .from("cbt_attempt_starts")
     .delete()
     .eq("user_id", user.id)
