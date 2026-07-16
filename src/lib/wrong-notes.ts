@@ -512,7 +512,14 @@ export type SubjectWrongNoteQuestion = {
   choiceCount: number;
   images: string[];
   explanation: QuestionExplanationContent | null;
+  // 사용자가 이 문항에 남긴 개인 메모(없으면 null).
+  memo: string | null;
+  // 전국 오답률(%). 표본이 충분한 문항만 채워지고, 적으면 null(배지 숨김).
+  wrongRatePct: number | null;
 };
+
+// 전국 오답률 배지를 띄우기 위한 최소 표본(이보다 적으면 오해를 주므로 숨긴다).
+export const WRONGRATE_MIN_SAMPLE = 10;
 
 export type SubjectWrongNoteQuestions = {
   subject: Subject;
@@ -569,6 +576,49 @@ async function fetchQuestionStatusByRep(
       if (!ex || at > ex.at) {
         out.set(key, { correct: row.last_is_correct as boolean, at });
       }
+    }
+  }
+  return out;
+}
+
+// 문항 메모(본인 것만, RLS). `${paperId}#${qnum}` → 메모.
+async function fetchMemos(
+  supabase: Supabase,
+  userId: string,
+  paperIds: string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (paperIds.length === 0) return out;
+  for (const ids of chunk(paperIds, 200)) {
+    const { data } = await supabase
+      .from("question_memos")
+      .select("paper_id, question_number, memo")
+      .eq("user_id", userId)
+      .in("paper_id", ids);
+    for (const r of data ?? []) {
+      const memo = (r.memo as string | null)?.trim();
+      if (memo) out.set(`${r.paper_id}#${r.question_number}`, memo);
+    }
+  }
+  return out;
+}
+
+// 전국 오답률(%). paper_question_wrong_rates(security definer)로 전체 응시를 집계.
+// 표본이 WRONGRATE_MIN_SAMPLE 미만이면 넣지 않는다(작은 표본은 오해를 준다).
+async function fetchWrongRates(
+  supabase: Supabase,
+  paperIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (paperIds.length === 0) return out;
+  for (const ids of chunk(paperIds, 100)) {
+    const { data, error } = await supabase.rpc("paper_question_wrong_rates", {
+      p_paper_ids: ids,
+    });
+    if (error) continue; // 함수 미적용 환경: 배지 없이 넘어간다.
+    for (const r of (data ?? []) as { paper_id: string; question_number: number; attempts: number; wrongs: number }[]) {
+      if (r.attempts < WRONGRATE_MIN_SAMPLE) continue;
+      out.set(`${r.paper_id}#${r.question_number}`, Math.round((r.wrongs / r.attempts) * 100));
     }
   }
   return out;
@@ -689,12 +739,14 @@ export async function getSubjectWrongNoteQuestions(
   }
 
   const repIds = [...repInfo.keys()];
-  const [mediaByPaper, answersByPaper, explanationsByPaper, statusByRepQ] =
+  const [mediaByPaper, answersByPaper, explanationsByPaper, statusByRepQ, memoByRepQ, rateByRepQ] =
     await Promise.all([
       fetchQuestionMedia(supabase, repIds),
       fetchCorrectAnswers(repIds),
       fetchExplanations(repIds),
       fetchQuestionStatusByRep(supabase, userId, paperList.map((p) => p.id), repId),
+      fetchMemos(supabase, userId, repIds),
+      fetchWrongRates(supabase, repIds),
     ]);
 
   const questions: SubjectWrongNoteQuestion[] = [];
@@ -723,6 +775,8 @@ export async function getSubjectWrongNoteQuestions(
       choiceCount: media?.choiceCount ?? info.choiceCount,
       images: media?.images ?? [],
       explanation: explanationsByPaper.get(agg.repId)?.get(agg.questionNumber) ?? null,
+      memo: memoByRepQ.get(`${agg.repId}#${agg.questionNumber}`) ?? null,
+      wrongRatePct: rateByRepQ.get(`${agg.repId}#${agg.questionNumber}`) ?? null,
     });
   }
 
@@ -747,11 +801,16 @@ export async function getSubjectWrongNoteQuestions(
 // 극복한 문항이 즉시 반영되고(헤드라인 숫자가 줄고), "미극복 N" 오늘 카드 수치가
 // 실제 섞어풀기 후보와 일치해 "N개라며 눌렀더니 0개" dead-end가 사라진다.
 // buildWrongNoteGroups(응시 최신 기준)과 달리 섞어풀기 결과까지 본다.
+// 복습 대상(간격 반복 lite): 미극복 오답 중 마지막으로 푼 지 이만큼 지난 문항을
+// "오늘 복습할 것"으로 본다. 별도 컬럼 없이 last_answered_at로 파생한다.
+export const REVIEW_COOLDOWN_HOURS = 24;
+
 export async function getUnresolvedCountBySubject(
   supabase: Supabase,
   userId: string,
-): Promise<Map<string, { name: string; slug: string; unresolved: number }>> {
-  const out = new Map<string, { name: string; slug: string; unresolved: number }>();
+): Promise<Map<string, { name: string; slug: string; unresolved: number; due: number }>> {
+  const out = new Map<string, { name: string; slug: string; unresolved: number; due: number }>();
+  const dueCutoff = new Date(Date.now() - REVIEW_COOLDOWN_HOURS * 3600 * 1000).toISOString();
 
   const statusRows: {
     paper_id: string;
@@ -825,8 +884,9 @@ export async function getUnresolvedCountBySubject(
     if (v.resolved || !v.subjectId) continue;
     const meta = nameSlug.get(v.subjectId);
     if (!meta) continue;
-    const e = out.get(v.subjectId) ?? { name: meta.name, slug: meta.slug, unresolved: 0 };
+    const e = out.get(v.subjectId) ?? { name: meta.name, slug: meta.slug, unresolved: 0, due: 0 };
     e.unresolved++;
+    if (v.at <= dueCutoff) e.due++;
     out.set(v.subjectId, e);
   }
   return out;

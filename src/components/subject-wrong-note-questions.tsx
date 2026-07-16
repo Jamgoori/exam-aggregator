@@ -9,6 +9,7 @@ import {
   type WrongNoteCardRow,
 } from "@/components/wrong-note-question-card";
 import { createReviewSession } from "@/app/mypage/wrong-notes/actions";
+import { MemoEditor } from "@/components/memo-editor";
 import { levelColor } from "@/lib/level-colors";
 import type { SubjectWrongNoteQuestion } from "@/lib/wrong-notes";
 
@@ -29,6 +30,7 @@ function toRow(q: SubjectWrongNoteQuestion): WrongNoteCardRow {
     explanation: q.explanation,
     wrongCount: q.wrongCount,
     resolved: q.resolved,
+    wrongRatePct: q.wrongRatePct,
   };
 }
 
@@ -40,6 +42,8 @@ type Card = {
   paperLevel: string | null;
   images: string[];
   rows: WrongNoteCardRow[];
+  // 메모 등 문항 원본이 필요한 UI용(카드 아래 메모 입력).
+  source: SubjectWrongNoteQuestion[];
 };
 
 // 과목 오답노트 "문항 모아보기" 탭 본문. 문제지 경계 없이 그 과목에서 틀린 문항을
@@ -135,6 +139,7 @@ export function SubjectWrongNoteQuestions({
           paperLevel: head.paperLevel,
           images: head.images,
           rows: qs.map(toRow),
+          source: qs,
         } as Card,
         recentAt: qs.reduce((m, q) => (q.lastWrongAt > m ? q.lastWrongAt : m), qs[0].lastWrongAt),
         maxWrong: qs.reduce((m, q) => Math.max(m, q.wrongCount), 0),
@@ -263,6 +268,17 @@ export function SubjectWrongNoteQuestions({
                   </span>
                 </div>
                 <WrongNoteQuestionCard rows={card.rows} images={card.images} />
+                <div className="flex flex-col divide-y divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800/70">
+                  {card.source.map((q) => (
+                    <MemoEditor
+                      key={q.questionNumber}
+                      paperId={q.paperId}
+                      questionNumber={q.questionNumber}
+                      initialMemo={q.memo}
+                      label={card.source.length > 1 ? `${q.questionNumber}번` : undefined}
+                    />
+                  ))}
+                </div>
               </div>
             ))}
           </div>

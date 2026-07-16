@@ -38,6 +38,8 @@ export type WrongNoteCardRow = {
   // 과목별 모아보기에서만 채워지는 값들 (회차별 보기에서는 undefined).
   wrongCount?: number;
   resolved?: boolean;
+  // 전국 오답률(%). 표본 충분한 문항만(모아보기 전용).
+  wrongRatePct?: number | null;
 };
 
 // CBT 문제별 보기(cbt-solver)와 같은 규칙으로 세트문제를 묶는다: 크롭 스크립트가
@@ -112,6 +114,14 @@ function ChoiceRow({
         {row.wrongCount !== undefined && row.wrongCount >= 2 && (
           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
             {row.wrongCount}번 틀림
+          </span>
+        )}
+        {row.wrongRatePct != null && (
+          <span
+            className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700 dark:bg-orange-950/30 dark:text-orange-400"
+            title="이 문항을 푼 전체 응시자 중 틀린 비율"
+          >
+            오답률 {row.wrongRatePct}%
           </span>
         )}
         {row.resolved && (

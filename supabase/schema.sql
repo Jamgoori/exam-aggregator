@@ -762,6 +762,53 @@ drop policy if exists "insert own diagnosis request" on ai_diagnoses;
 create policy "insert own diagnosis request" on ai_diagnoses
   for insert to authenticated with check (auth.uid() = user_id and report is null);
 
+-- 문항 메모: 오답노트 문항별로 사용자가 남기는 개인 메모("내 노트"). 본인만 읽고 쓴다.
+create table if not exists question_memos (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  question_number int not null,
+  memo text not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, paper_id, question_number)
+);
+
+alter table question_memos enable row level security;
+
+drop policy if exists "select own memos" on question_memos;
+create policy "select own memos" on question_memos
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists "insert own memos" on question_memos;
+create policy "insert own memos" on question_memos
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists "update own memos" on question_memos;
+create policy "update own memos" on question_memos
+  for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "delete own memos" on question_memos;
+create policy "delete own memos" on question_memos
+  for delete to authenticated using (auth.uid() = user_id);
+
+-- 전국 오답률: 문항별 "전체 응시자 중 몇 %가 틀렸나"를 집계해 돌려준다. cbt_attempt_answers는
+-- 본인 것만 select 가능한 RLS라, 전체 집계는 security definer로 우회한다. 반환값은 정답이
+-- 아니라 오답 "비율"뿐이라 정답 유출이 아니다(공개 정답지 PDF와 무관). 표본이 적은 문항은
+-- 호출부에서 배지를 숨긴다(작은 표본은 오해를 준다).
+create or replace function paper_question_wrong_rates(p_paper_ids uuid[])
+returns table(paper_id uuid, question_number int, attempts bigint, wrongs bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select a.paper_id, ans.question_number,
+         count(*) as attempts,
+         count(*) filter (where ans.is_correct = false) as wrongs
+  from cbt_attempt_answers ans
+  join cbt_attempts a on a.id = ans.attempt_id
+  where a.paper_id = any(p_paper_ids)
+  group by a.paper_id, ans.question_number
+$$;
+
+grant execute on function paper_question_wrong_rates(uuid[]) to authenticated;
+
 -- 회원가입 IP 레이트리밋: 캡차(Turnstile)와 별개로 짧은 시간 동안의 대량 가입 시도를
 -- 막는 2차 방어선. 성공/실패 관계없이 시도할 때마다 한 행씩 기록한다.
 create table if not exists signup_attempts (

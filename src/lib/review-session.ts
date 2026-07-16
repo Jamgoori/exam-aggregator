@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getSubjectWrongNoteQuestions,
   fetchQuestionMedia,
+  REVIEW_COOLDOWN_HOURS,
 } from "@/lib/wrong-notes";
 import { recordQuestionResults } from "@/lib/question-status";
 
@@ -63,7 +64,7 @@ function shuffle<T>(arr: T[]): T[] {
 export async function createReviewSessionForUser(
   supabase: Supabase,
   userId: string,
-  input: { subjectSlug: string; onlyUnresolved: boolean; limit?: number },
+  input: { subjectSlug: string; onlyUnresolved: boolean; onlyDue?: boolean; limit?: number },
 ): Promise<{ sessionId?: string; error?: string }> {
   const note = await getSubjectWrongNoteQuestions(supabase, userId, input.subjectSlug);
   if (!note) return { error: "과목을 찾을 수 없어요." };
@@ -71,11 +72,20 @@ export async function createReviewSessionForUser(
   // 이미지가 있는 문항만 출제 가능(문제를 보여줄 수 없으면 못 푼다).
   let candidates = note.questions.filter((q) => q.images.length > 0);
   if (input.onlyUnresolved) candidates = candidates.filter((q) => !q.resolved);
+  // 복습 모드: 마지막으로 푼 지 하루 지난 미극복 오답만(간격 반복 lite).
+  if (input.onlyDue) {
+    const cutoff = new Date(
+      Date.now() - REVIEW_COOLDOWN_HOURS * 3600 * 1000,
+    ).toISOString();
+    candidates = candidates.filter((q) => q.lastWrongAt <= cutoff);
+  }
   if (candidates.length === 0) {
     return {
-      error: input.onlyUnresolved
-        ? "아직 안 극복한(이미지가 있는) 오답이 없어요."
-        : "이 과목에 다시 풀 오답이 없어요.",
+      error: input.onlyDue
+        ? "지금 복습할 문항이 없어요. 하루 뒤에 다시 확인해보세요."
+        : input.onlyUnresolved
+          ? "아직 안 극복한(이미지가 있는) 오답이 없어요."
+          : "이 과목에 다시 풀 오답이 없어요.",
     };
   }
 

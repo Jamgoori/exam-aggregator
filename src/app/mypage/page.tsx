@@ -342,7 +342,7 @@ function WrongNotesTab({
   diagnosisHint,
 }: {
   groups: WrongNoteSubjectGroup[];
-  unresolvedBySubject: Map<string, { name: string; slug: string; unresolved: number }>;
+  unresolvedBySubject: Map<string, { name: string; slug: string; unresolved: number; due: number }>;
   diagnosisState: DiagnosisBannerState;
   diagnosisHint: string | null;
 }) {
@@ -370,6 +370,14 @@ function WrongNotesTab({
       topSubject = { slug: g.subject.slug, name: g.subject.name, unresolved: g.unresolvedCount };
   }
 
+  // 복습 대상(하루 지난 미극복)이 가장 많은 과목. 오늘 카드가 이걸 최우선으로 쓴다.
+  let dueSubject: { slug: string; name: string; due: number } | null = null;
+  for (const v of unresolvedBySubject.values()) {
+    if (v.due > 0 && (!dueSubject || v.due > dueSubject.due)) {
+      dueSubject = { slug: v.slug, name: v.name, due: v.due };
+    }
+  }
+
   return (
     <section className="flex flex-col gap-4">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
@@ -388,6 +396,9 @@ function WrongNotesTab({
             topSubjectSlug={topSubject?.slug ?? null}
             topSubjectName={topSubject?.name ?? null}
             topUnresolved={topSubject?.unresolved ?? 0}
+            dueSubjectSlug={dueSubject?.slug ?? null}
+            dueSubjectName={dueSubject?.name ?? null}
+            dueCount={dueSubject?.due ?? 0}
           />
           <p className="text-xs text-zinc-400 dark:text-zinc-600">
             틀린 문제를 과목별로 모아뒀어요. 가장 최근 응시에서 다시 맞힌 문제는
