@@ -78,17 +78,25 @@ async function EmptyState({
   if (pending) {
     return (
       <p className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-8 text-center text-sm text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/20 dark:text-violet-200">
-        오늘 진단을 준비하고 있어요. 분석이 끝나면 여기에 리포트가 표시돼요.
+        오늘 진단을 준비하고 있어요. 분석이 끝나면 여기에 리포트가 표시돼요(보통 하루 안).
       </p>
     );
   }
   const eligibility = await getDiagnosisEligibility(supabase, userId);
   return (
-    <p className="rounded-2xl border border-zinc-200 px-4 py-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-500">
-      {eligibility.eligible
-        ? "아직 받은 진단이 없어요. 오답노트에서 진단을 요청해보세요."
-        : (eligibility.hint ?? "조금 더 풀면 진단을 받을 수 있어요.")}
-    </p>
+    <div className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 px-4 py-8 text-center dark:border-zinc-800">
+      <p className="text-sm text-zinc-500 dark:text-zinc-500">
+        {eligibility.eligible
+          ? "아직 받은 진단이 없어요. 오답노트에서 진단을 받아보세요."
+          : (eligibility.hint ?? "조금 더 풀면 진단을 받을 수 있어요.")}
+      </p>
+      <Link
+        href="/mypage?tab=wrong-notes"
+        className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-bold text-white hover:bg-violet-700"
+      >
+        오답노트로 가기
+      </Link>
+    </div>
   );
 }
 

@@ -14,6 +14,7 @@ import { subjectColor } from "@/lib/subject-colors";
 import {
   buildWrongNoteGroups,
   fetchWrongAnswerRows,
+  getUnresolvedCountBySubject,
   type WrongNoteAttemptRow,
   type WrongNoteSubjectGroup,
 } from "@/lib/wrong-notes";
@@ -119,10 +120,14 @@ export default async function MyPage({
     myAttempts as unknown as WrongNoteAttemptRow[],
     wrongRows,
   );
-  const totalUnresolved = wrongNoteGroups.reduce(
-    (sum, g) => sum + g.unresolvedCount,
-    0,
-  );
+  // 미극복 수는 user_question_status(CBT+섞어풀기 통합) 기준으로 센다 — 섞어풀기로
+  // 극복한 게 헤드라인·과목·오늘 카드에 즉시 반영되고, 섞어풀기 후보 수와 일치한다.
+  // 표가 비어 있으면(백필 전 등) 응시 기준(buildWrongNoteGroups)으로 폴백.
+  const unresolvedBySubject = await getUnresolvedCountBySubject(supabase, user.id);
+  const totalUnresolved =
+    unresolvedBySubject.size > 0
+      ? [...unresolvedBySubject.values()].reduce((s, v) => s + v.unresolved, 0)
+      : wrongNoteGroups.reduce((sum, g) => sum + g.unresolvedCount, 0);
 
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
@@ -202,6 +207,7 @@ export default async function MyPage({
         wrongNotes={
           <WrongNotesTab
             groups={wrongNoteGroups}
+            unresolvedBySubject={unresolvedBySubject}
             diagnosisState={diagnosisState}
             diagnosisHint={diagnosisHint}
           />
@@ -331,21 +337,38 @@ function HistoryTab({
 // 문제 이미지까지 모아둔 과목 오답노트 페이지로 이어준다.
 function WrongNotesTab({
   groups,
+  unresolvedBySubject,
   diagnosisState,
   diagnosisHint,
 }: {
   groups: WrongNoteSubjectGroup[];
+  unresolvedBySubject: Map<string, { name: string; slug: string; unresolved: number }>;
   diagnosisState: DiagnosisBannerState;
   diagnosisHint: string | null;
 }) {
-  // 오늘 카드용: 미극복 오답이 가장 많은 과목을 고른다(같으면 display_order 순 — groups가
-  // 이미 그 순서라 안정적으로 첫 번째가 잡힌다).
-  const topGroup = groups
-    .filter((g) => g.unresolvedCount > 0)
-    .reduce<WrongNoteSubjectGroup | null>(
-      (best, g) => (best === null || g.unresolvedCount > best.unresolvedCount ? g : best),
-      null,
-    );
+  // 과목 배지·오늘 카드는 status 기준 미극복 수를 쓴다(섞어풀기 반영). 과목당 값은
+  // 이 헬퍼로 꺼내고, 표가 비면(백필 전) 응시 기준 unresolvedCount로 폴백한다.
+  const subjUnresolved = (g: WrongNoteSubjectGroup) =>
+    unresolvedBySubject.get(g.subject.id)?.unresolved ?? g.unresolvedCount;
+
+  // 오늘 카드용: 미극복이 가장 많은 과목. status 기준으로 고르고(섞어풀기 후보와 일치),
+  // status가 비어 있으면 응시 기준 groups에서 고른다.
+  let topSubject: { slug: string; name: string; unresolved: number } | null = null;
+  for (const v of unresolvedBySubject.values()) {
+    if (v.unresolved > 0 && (!topSubject || v.unresolved > topSubject.unresolved)) {
+      topSubject = { slug: v.slug, name: v.name, unresolved: v.unresolved };
+    }
+  }
+  if (!topSubject) {
+    const g = groups
+      .filter((x) => x.unresolvedCount > 0)
+      .reduce<WrongNoteSubjectGroup | null>(
+        (best, x) => (best === null || x.unresolvedCount > best.unresolvedCount ? x : best),
+        null,
+      );
+    if (g)
+      topSubject = { slug: g.subject.slug, name: g.subject.name, unresolved: g.unresolvedCount };
+  }
 
   return (
     <section className="flex flex-col gap-4">
@@ -362,9 +385,9 @@ function WrongNotesTab({
       ) : (
         <>
           <WrongNoteTodayCard
-            topSubjectSlug={topGroup?.subject.slug ?? null}
-            topSubjectName={topGroup?.subject.name ?? null}
-            topUnresolved={topGroup?.unresolvedCount ?? 0}
+            topSubjectSlug={topSubject?.slug ?? null}
+            topSubjectName={topSubject?.name ?? null}
+            topUnresolved={topSubject?.unresolved ?? 0}
           />
           <p className="text-xs text-zinc-400 dark:text-zinc-600">
             틀린 문제를 과목별로 모아뒀어요. 가장 최근 응시에서 다시 맞힌 문제는
@@ -380,7 +403,7 @@ function WrongNotesTab({
                     {g.subject.name}
                   </span>
                   <span className="text-sm text-zinc-500 dark:text-zinc-500">
-                    <span className="font-medium text-red-600 dark:text-red-400">오답 {g.unresolvedCount}</span>
+                    <span className="font-medium text-red-600 dark:text-red-400">오답 {subjUnresolved(g)}</span>
                     {g.resolvedCount > 0 && (
                       <>
                         {" · "}

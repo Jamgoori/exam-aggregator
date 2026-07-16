@@ -42,23 +42,6 @@ type Card = {
   rows: WrongNoteCardRow[];
 };
 
-function comparator(sort: SortKey) {
-  return (a: SubjectWrongNoteQuestion, b: SubjectWrongNoteQuestion): number => {
-    if (sort === "recent") {
-      const t = b.lastWrongAt.localeCompare(a.lastWrongAt);
-      if (t !== 0) return t;
-    } else if (sort === "frequent") {
-      if (a.wrongCount !== b.wrongCount) return b.wrongCount - a.wrongCount;
-      const t = b.lastWrongAt.localeCompare(a.lastWrongAt);
-      if (t !== 0) return t;
-    }
-    return (
-      a.paperTitle.localeCompare(b.paperTitle, "ko") ||
-      a.questionNumber - b.questionNumber
-    );
-  };
-}
-
 // 과목 오답노트 "문항 모아보기" 탭 본문. 문제지 경계 없이 그 과목에서 틀린 문항을
 // 한 목록으로 펼치고, 미극복/반복 오답 필터와 정렬을 서버 왕복 없이 즉시 적용한다.
 export function SubjectWrongNoteQuestions({
@@ -121,30 +104,58 @@ export function SubjectWrongNoteQuestions({
     if (onlyRepeated) list = list.filter((q) => q.wrongCount >= 2);
     if (concept !== "all")
       list = list.filter((q) => q.explanation?.keywordTitle?.trim() === concept);
-    const sorted = [...list].sort(comparator(sort));
 
-    const out: Card[] = [];
-    for (const q of sorted) {
-      const last = out[out.length - 1];
-      if (
-        last &&
-        last.paperId === q.paperId &&
-        last.images.length > 0 &&
-        q.images.length === last.images.length &&
-        q.images.every((src, i) => src === last.images[i])
-      ) {
-        last.rows.push(toRow(q));
-      } else {
-        out.push({
-          paperId: q.paperId,
-          paperTitle: q.paperTitle,
-          paperLevel: q.paperLevel,
-          images: q.images,
-          rows: [toRow(q)],
-        });
+    // 먼저 세트문제(같은 문제지 + 동일 이미지 배열)를 한 그룹으로 묶은 뒤 그룹 단위로
+    // 정렬한다. 문항 단위로 정렬하면 "최근/자주 틀린 순"에서 세트 구성원이 흩어져
+    // 같은 지문 이미지가 여러 카드로 중복 렌더되던 문제를 막는다.
+    const groupMap = new Map<string, SubjectWrongNoteQuestion[]>();
+    const order: string[] = [];
+    for (const q of list) {
+      const sig =
+        q.images.length > 0
+          ? `${q.paperId}|${q.images.join("")}`
+          : `${q.paperId}|solo|${q.questionNumber}`;
+      const arr = groupMap.get(sig);
+      if (arr) arr.push(q);
+      else {
+        groupMap.set(sig, [q]);
+        order.push(sig);
       }
     }
-    return out;
+
+    // 각 그룹의 정렬 키: number는 (제목,최소번호), recent는 그룹 내 가장 최근,
+    // frequent는 그룹 내 최다 오답. 그룹 대표값으로 그룹끼리 정렬한다.
+    const groups = order.map((sig) => {
+      const qs = groupMap.get(sig)!.sort((a, b) => a.questionNumber - b.questionNumber);
+      const head = qs[0];
+      return {
+        card: {
+          paperId: head.paperId,
+          paperTitle: head.paperTitle,
+          paperLevel: head.paperLevel,
+          images: head.images,
+          rows: qs.map(toRow),
+        } as Card,
+        recentAt: qs.reduce((m, q) => (q.lastWrongAt > m ? q.lastWrongAt : m), qs[0].lastWrongAt),
+        maxWrong: qs.reduce((m, q) => Math.max(m, q.wrongCount), 0),
+        title: head.paperTitle,
+        minNumber: head.questionNumber,
+      };
+    });
+
+    groups.sort((a, b) => {
+      if (sort === "recent") {
+        const t = b.recentAt.localeCompare(a.recentAt);
+        if (t !== 0) return t;
+      } else if (sort === "frequent") {
+        if (a.maxWrong !== b.maxWrong) return b.maxWrong - a.maxWrong;
+        const t = b.recentAt.localeCompare(a.recentAt);
+        if (t !== 0) return t;
+      }
+      return a.title.localeCompare(b.title, "ko") || a.minNumber - b.minNumber;
+    });
+
+    return groups.map((g) => g.card);
   }, [questions, hideResolved, onlyRepeated, concept, sort]);
 
   const hasResolved = questions.some((q) => q.resolved);

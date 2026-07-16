@@ -50,7 +50,8 @@ export type PaperIdentitySignal = {
 
 // track을 뺀 (과목·직렬·연도·회차·급수)가 같으면 "같은 시험지 후보"로 본다.
 export function paperDedupKey(p: DedupablePaper): string {
-  // 값 안에 나타날 일이 없는 NUL을 구분자로 써서 필드 경계 충돌을 막는다.
+  // 구분자는 공백. 필드가 UUID·정수·짧은 급수 문자열이라 값 안에 공백이 없어 경계
+  // 충돌이 나지 않는다.
   return [p.subject_id, p.exam_type_id, p.year, p.round, p.level ?? ""].join(" ");
 }
 

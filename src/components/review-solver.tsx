@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { submitReviewSession } from "@/app/mypage/wrong-notes/actions";
@@ -26,6 +26,28 @@ export function ReviewSolver({
 
   const submitted = view.submitted;
   const answeredCount = answers.filter((a) => a !== null).length;
+
+  // 채점 전 답은 클라이언트 상태로만 있어 페이지를 벗어나면 사라진다. 새로고침·닫기는
+  // beforeunload로, 뒤로가기 링크는 클릭 확인으로 막는다(하나라도 풀었을 때만).
+  const dirty = !submitted && answeredCount > 0;
+  useEffect(() => {
+    if (!dirty) return;
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
+  function confirmLeave(e: React.MouseEvent) {
+    if (
+      dirty &&
+      !window.confirm("지금 나가면 푼 답이 사라져요. 그래도 나갈까요?")
+    ) {
+      e.preventDefault();
+    }
+  }
 
   if (submitted) {
     return <ReviewResult view={view} backHref={backHref} />;
@@ -69,6 +91,7 @@ export function ReviewSolver({
         <Link
           href={backHref}
           aria-label="나가기"
+          onClick={confirmLeave}
           className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
         >
           <ChevronLeft size={20} />
