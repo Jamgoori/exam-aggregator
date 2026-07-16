@@ -363,8 +363,27 @@ export async function submitCbtAttempt(input: {
     };
   }
 
-  // 저장용 duration도 클라이언트 값 대신 서버가 기록한 시작 시각 기준으로 계산한다.
-  const durationSeconds = Math.round(elapsedSeconds);
+  // 최소 대기를 통과했으면 시작 기록을 원자적으로 "선점"한다: 삭제하면서 삭제된 행을
+  // 돌려받아, 실제로 행을 지운 요청 하나만 채점을 진행한다. 이렇게 하지 않으면 한 번
+  // 대기한 뒤 동시에 여러 번 제출(두 탭·스크립트)해 같은 시작 기록으로 회독을
+  // 부풀리고(wrong_count도 두 배) MIN_ATTEMPT_SECONDS를 무력화할 수 있다(섞어풀기
+  // 제출과 같은 선점 패턴). 너무 이른 제출은 위에서 기록을 소비하지 않고 되돌아가므로
+  // 대기 후 재시도가 그대로 된다.
+  const { data: claimed } = await supabase
+    .from("cbt_attempt_starts")
+    .delete()
+    .eq("user_id", user.id)
+    .eq("paper_id", paperId)
+    .select("started_at")
+    .maybeSingle();
+  if (!claimed) {
+    return { error: "이미 채점되었어요. 새로고침 후 확인해주세요." };
+  }
+
+  // 저장용 duration도 클라이언트 값 대신 서버가 기록한(선점한) 시작 시각 기준으로 계산.
+  const durationSeconds = Math.round(
+    (Date.now() - new Date(claimed.started_at).getTime()) / 1000,
+  );
 
   let score = 0;
   const questionResults: CbtQuestionResult[] = [];
@@ -412,13 +431,7 @@ export async function submitCbtAttempt(input: {
     // 무시: 상태 갱신 실패가 채점을 막지 않는다.
   }
 
-  // 채점에 성공했으니 시작 기록을 지워, 같은 시작 시각으로 다시 제출(replay)해
-  // 대기 없이 회독을 늘리는 걸 막는다. 다음 응시는 startCbtAttempt가 새로 기록한다.
-  await supabase
-    .from("cbt_attempt_starts")
-    .delete()
-    .eq("user_id", user.id)
-    .eq("paper_id", paperId);
+  // 시작 기록은 위에서 이미 선점(삭제)했다. 다음 응시는 startCbtAttempt가 새로 기록한다.
 
   return {
     success: true,

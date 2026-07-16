@@ -283,20 +283,43 @@ export async function createAllReviewSessionForUser(
 
 // 채점 결과에서 "틀린 문항만 다시 풀기": 넘겨받은 (문제지, 문항) 목록으로 새 세션을
 // 만든다. 정답·이미지는 채점/렌더 시점에 서버가 다시 조회하므로 목록엔 정답이 없다.
+//
+// 보안: items는 클라이언트가 그대로 보내므로 신뢰하지 않는다. 반드시 "이 사용자가
+// 실제로 틀린 적 있는 문항"(user_question_status.wrong_count>0, 본인 RLS)과 교집합만
+// 남긴다. 이 검증이 없으면, 채점 후 세션 뷰가 정답(correctChoice)을 내려주는 성질을
+// 악용해 응시한 적 없는 임의 문제지의 정답표(paper_answers)를 통째로 뽑아낼 수 있다
+// (다른 후보 빌더들은 애초에 본인 통계에서 목록을 만들어 이 문제가 없다).
 export async function createReviewSessionFromItems(
   supabase: Supabase,
   userId: string,
   items: { paperId: string; questionNumber: number }[],
 ): Promise<{ sessionId?: string; error?: string }> {
   const seen = new Set<string>();
-  const clean: { paperId: string; questionNumber: number }[] = [];
+  const requested: { paperId: string; questionNumber: number }[] = [];
   for (const it of items) {
     if (!it?.paperId || !Number.isInteger(it?.questionNumber)) continue;
     const key = `${it.paperId}#${it.questionNumber}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    clean.push({ paperId: it.paperId, questionNumber: it.questionNumber });
+    requested.push({ paperId: it.paperId, questionNumber: it.questionNumber });
   }
+  if (requested.length === 0) return { error: "다시 풀 문항이 없어요." };
+
+  // 본인이 틀린 적 있는 (문제지, 문항)만 통과시킨다(RLS로 본인 행만 조회됨).
+  const requestedPaperIds = [...new Set(requested.map((r) => r.paperId))];
+  const ownedWrong = new Set<string>();
+  for (const ids of chunkIds(requestedPaperIds, 100)) {
+    const { data } = await supabase
+      .from("user_question_status")
+      .select("paper_id, question_number")
+      .eq("user_id", userId)
+      .in("paper_id", ids)
+      .gt("wrong_count", 0);
+    for (const r of (data ?? []) as { paper_id: string; question_number: number }[]) {
+      ownedWrong.add(`${r.paper_id}#${r.question_number}`);
+    }
+  }
+  const clean = requested.filter((r) => ownedWrong.has(`${r.paperId}#${r.questionNumber}`));
   if (clean.length === 0) return { error: "다시 풀 문항이 없어요." };
 
   const picked = shuffle(clean).slice(0, MAX_LIMIT);
