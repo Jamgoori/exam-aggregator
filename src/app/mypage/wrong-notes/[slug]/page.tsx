@@ -22,10 +22,10 @@ export default async function SubjectWrongNotePage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<{ view?: string; concept?: string }>;
 }) {
   const { slug } = await params;
-  const { view: viewParam } = await searchParams;
+  const { view: viewParam, concept } = await searchParams;
   const view: ViewKey = viewParam === "questions" ? "questions" : "papers";
   const supabase = await createClient();
 
@@ -48,6 +48,7 @@ export default async function SubjectWrongNotePage({
           questions={note.questions}
           unresolvedCount={note.unresolvedCount}
           subjectSlug={slug}
+          initialConcept={concept}
         />
       </SubjectWrongNoteShell>
     );

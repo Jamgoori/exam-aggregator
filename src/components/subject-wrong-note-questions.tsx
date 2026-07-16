@@ -65,14 +65,32 @@ export function SubjectWrongNoteQuestions({
   questions,
   unresolvedCount,
   subjectSlug,
+  initialConcept,
 }: {
   questions: SubjectWrongNoteQuestion[];
   unresolvedCount: number;
   subjectSlug: string;
+  // 진단 리포트에서 "이 개념 틀린 문항 모아보기"로 들어오면 그 개념으로 미리 필터.
+  initialConcept?: string;
 }) {
   const router = useRouter();
+
+  // 문항에 붙은 해설의 핵심 개념(keyword_title)으로 개념 목록을 만든다. 별도 조회 없이
+  // 이미 받은 explanation에서 뽑는다. 진단 딥링크의 개념이 목록에 있으면 초기값으로.
+  const concepts = useMemo(() => {
+    const set = new Set<string>();
+    for (const q of questions) {
+      const k = q.explanation?.keywordTitle?.trim();
+      if (k) set.add(k);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, "ko"));
+  }, [questions]);
+
   const [hideResolved, setHideResolved] = useState(false);
   const [onlyRepeated, setOnlyRepeated] = useState(false);
+  const [concept, setConcept] = useState<string>(
+    initialConcept && concepts.includes(initialConcept) ? initialConcept : "all",
+  );
   const [sort, setSort] = useState<SortKey>("number");
   const [reviewPending, startReview] = useTransition();
   const [reviewError, setReviewError] = useState<string | null>(null);
@@ -101,6 +119,8 @@ export function SubjectWrongNoteQuestions({
     let list = questions;
     if (hideResolved) list = list.filter((q) => !q.resolved);
     if (onlyRepeated) list = list.filter((q) => q.wrongCount >= 2);
+    if (concept !== "all")
+      list = list.filter((q) => q.explanation?.keywordTitle?.trim() === concept);
     const sorted = [...list].sort(comparator(sort));
 
     const out: Card[] = [];
@@ -125,7 +145,7 @@ export function SubjectWrongNoteQuestions({
       }
     }
     return out;
-  }, [questions, hideResolved, onlyRepeated, sort]);
+  }, [questions, hideResolved, onlyRepeated, concept, sort]);
 
   const hasResolved = questions.some((q) => q.resolved);
   const hasRepeated = questions.some((q) => q.wrongCount >= 2);
@@ -175,6 +195,20 @@ export function SubjectWrongNoteQuestions({
         >
           2번 이상 틀림
         </button>
+        {concepts.length > 0 && (
+          <select
+            value={concept}
+            onChange={(e) => setConcept(e.target.value)}
+            className="shrink-0 rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+          >
+            <option value="all">개념: 전체</option>
+            {concepts.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        )}
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
@@ -195,7 +229,7 @@ export function SubjectWrongNoteQuestions({
 
       {cards.length === 0 ? (
         <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-500">
-          {hideResolved || onlyRepeated
+          {hideResolved || onlyRepeated || concept !== "all"
             ? "이 조건에 맞는 문항이 없어요. 필터를 바꿔보세요."
             : "이 과목에서는 아직 틀린 문제가 없어요. CBT로 문제를 풀면 틀린 문제가 자동으로 모여요."}
         </p>
