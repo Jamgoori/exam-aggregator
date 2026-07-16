@@ -216,6 +216,52 @@ export async function collectAllReviewCandidates(
   return candidates;
 }
 
+// 선택한 시험지들의 "틀린 문제(이미지 있는)"를 모아 후보로 뽑는다. 시험지 하나면
+// 시험지별 다시풀기, 여러 개면 합쳐 풀기. 극복 여부와 무관하게 그 시험지에서 틀렸던
+// 문항 전체를 담는다("틀린 문제 다시 풀기"라는 뜻에 맞춤).
+export async function collectPaperReviewCandidates(
+  supabase: Supabase,
+  userId: string,
+  paperIds: string[],
+): Promise<{ paperId: string; questionNumber: number }[]> {
+  if (paperIds.length === 0) return [];
+  const rows: { paper_id: string; question_number: number }[] = [];
+  for (const ids of chunkIds(paperIds, 100)) {
+    const { data } = await supabase
+      .from("user_question_status")
+      .select("paper_id, question_number")
+      .eq("user_id", userId)
+      .in("paper_id", ids)
+      .gt("wrong_count", 0);
+    for (const r of (data ?? []) as typeof rows) rows.push(r);
+  }
+  if (rows.length === 0) return [];
+
+  const mediaByPaper = await fetchQuestionMedia(supabase, paperIds);
+  const seen = new Set<string>();
+  const items: { paperId: string; questionNumber: number }[] = [];
+  for (const r of rows) {
+    if (!mediaByPaper.get(r.paper_id)?.get(r.question_number)?.images.length) continue;
+    const key = `${r.paper_id}#${r.question_number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({ paperId: r.paper_id, questionNumber: r.question_number });
+  }
+  return items;
+}
+
+export async function createPaperReviewSessionForUser(
+  supabase: Supabase,
+  userId: string,
+  paperIds: string[],
+): Promise<{ sessionId?: string; error?: string }> {
+  const items = await collectPaperReviewCandidates(supabase, userId, paperIds);
+  if (items.length === 0) {
+    return { error: "다시 풀 (이미지가 있는) 틀린 문제가 없어요." };
+  }
+  return createReviewSessionFromItems(supabase, userId, items);
+}
+
 // 전 과목 섞어풀기/복습 세션 생성. 후보를 모아 createReviewSessionFromItems로 넘긴다.
 export async function createAllReviewSessionForUser(
   supabase: Supabase,

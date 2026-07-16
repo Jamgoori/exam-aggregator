@@ -5,6 +5,7 @@ import {
   createReviewSessionForUser,
   createReviewSessionFromItems,
   createAllReviewSessionForUser,
+  createPaperReviewSessionForUser,
   submitReviewSessionForUser,
   type ReviewSessionView,
 } from "@/lib/review-session";
@@ -75,6 +76,19 @@ export async function saveQuestionMemo(input: {
   );
   if (error) return { error: "메모 저장에 실패했어요." };
   return { memo };
+}
+
+// 시험지별 틀린문제 다시풀기(1개) / 여러 시험지 합쳐 풀기(다중).
+export async function createReviewFromPapers(input: {
+  paperIds: string[];
+}): Promise<CreateReviewResult> {
+  const paperIds = Array.isArray(input?.paperIds)
+    ? input.paperIds.filter((id) => typeof id === "string" && id)
+    : [];
+  if (paperIds.length === 0) return { error: "시험지를 선택해주세요." };
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  return createPaperReviewSessionForUser(supabase, user.id, paperIds);
 }
 
 // 전 과목 섞어풀기/복습(과목 무관). onlyDue=복습, includeResolved=극복 포함.
