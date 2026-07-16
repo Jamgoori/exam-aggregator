@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionUser } from "@/lib/supabase/session";
+import { recordQuestionResults } from "@/lib/question-status";
 import { getClientIp } from "@/lib/client-ip";
 import { NICKNAME_MAX, validateNickname } from "@/lib/nickname";
 import {
@@ -401,6 +402,14 @@ export async function submitCbtAttempt(input: {
   if (answersError) {
     await supabase.from("cbt_attempts").delete().eq("id", attempt.id);
     return { error: "채점에 실패했어요." };
+  }
+
+  // 문항 단위 통합 상태 갱신(오답노트 극복 판정·섞어풀기 공유). 부가 집계라 실패해도
+  // 채점 결과는 그대로 돌려준다 — 마이그레이션 적용 전이면 테이블이 없어 조용히 무시된다.
+  try {
+    await recordQuestionResults(supabase, user.id, paperId, questionResults, "cbt");
+  } catch {
+    // 무시: 상태 갱신 실패가 채점을 막지 않는다.
   }
 
   // 채점에 성공했으니 시작 기록을 지워, 같은 시작 시각으로 다시 제출(replay)해

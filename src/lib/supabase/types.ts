@@ -137,3 +137,14 @@ export type CbtAttemptAnswer = {
   selected_choice: number | null;
   is_correct: boolean;
 };
+
+export type UserQuestionStatus = {
+  user_id: string;
+  paper_id: string;
+  question_number: number;
+  wrong_count: number;
+  last_is_correct: boolean;
+  last_answered_at: string;
+  source: string;
+  updated_at: string;
+};

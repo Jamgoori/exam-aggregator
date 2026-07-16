@@ -646,6 +646,49 @@ create policy "insert own cbt attempt answers" on cbt_attempt_answers
     )
   );
 
+-- 문항 단위 통합 상태. 오답노트 "극복" 판정과 앞으로 나올 섞어풀기(오답 재풀이)가
+-- 공유하는 사용자×문항 요약이다. cbt_attempt_answers는 응시별 원본이라 "이 문항을
+-- 지금까지 몇 번 틀렸나 / 가장 최근엔 맞혔나"를 매번 응시 전체에서 재계산해야 하는데,
+-- 섞어풀기는 문제지 단위 응시가 아니라 그 파생 계산으로는 표현이 안 된다. 그래서
+-- CBT 채점과 섞어풀기 채점 양쪽이 이 테이블을 갱신하고, 극복 판정은 여기를 본다.
+--
+-- 키를 questions.id가 아니라 (paper_id, question_number)로 잡는다: 채점 원본
+-- (cbt_attempt_answers)이 이 쌍으로 기록되고, 크롭 전(questions 행이 아직 없는)
+-- 문제지도 CBT를 지원하므로 questions.id 의존을 피한다. 중복 시험지(직류만 다른
+-- 같은 시험지)는 읽는 쪽(dedup-papers 대표)에서 합친다.
+--
+-- wrong_count: 틀린 채로 제출된 횟수(제출 1회당 최대 +1). last_is_correct/
+-- last_answered_at: 가장 최근 제출 기준. source: 'cbt' | 'review'(섞어풀기).
+create table if not exists user_question_status (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  question_number int not null,
+  wrong_count int not null default 0,
+  last_is_correct boolean not null,
+  last_answered_at timestamptz not null default now(),
+  source text not null default 'cbt',
+  updated_at timestamptz not null default now(),
+  primary key (user_id, paper_id, question_number)
+);
+
+create index if not exists user_question_status_user_idx
+  on user_question_status(user_id);
+
+alter table user_question_status enable row level security;
+
+drop policy if exists "select own question status" on user_question_status;
+create policy "select own question status" on user_question_status
+  for select to authenticated using (auth.uid() = user_id);
+
+-- upsert(insert ... on conflict do update)는 insert·update 두 정책이 다 있어야 한다.
+drop policy if exists "insert own question status" on user_question_status;
+create policy "insert own question status" on user_question_status
+  for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "update own question status" on user_question_status;
+create policy "update own question status" on user_question_status
+  for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
 -- 회원가입 IP 레이트리밋: 캡차(Turnstile)와 별개로 짧은 시간 동안의 대량 가입 시도를
 -- 막는 2차 방어선. 성공/실패 관계없이 시도할 때마다 한 행씩 기록한다.
 create table if not exists signup_attempts (
