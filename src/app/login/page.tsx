@@ -35,14 +35,15 @@ export default async function LoginPage({
       <form action={signInUser} className="flex flex-col gap-4">
         <input type="hidden" name="next" value={next} />
         <div className="flex flex-col gap-1">
-          <label htmlFor="username" className="text-sm text-zinc-600 dark:text-zinc-400">
-            아이디
+          <label htmlFor="email" className="text-sm text-zinc-600 dark:text-zinc-400">
+            이메일
           </label>
           <input
-            id="username"
-            name="username"
+            id="email"
+            name="email"
+            type="email"
             required
-            autoComplete="username"
+            autoComplete="email"
             className="rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700"
           />
         </div>
@@ -55,6 +56,7 @@ export default async function LoginPage({
             name="password"
             type="password"
             required
+            autoComplete="current-password"
             className="rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700"
           />
         </div>
@@ -67,6 +69,14 @@ export default async function LoginPage({
           로그인
         </button>
       </form>
+      <div className="flex justify-between text-sm text-zinc-500 dark:text-zinc-500">
+        <Link href="/find-id" className="hover:text-blue-600 dark:hover:text-blue-400">
+          아이디 찾기
+        </Link>
+        <Link href="/forgot-password" className="hover:text-blue-600 dark:hover:text-blue-400">
+          비밀번호 찾기
+        </Link>
+      </div>
       <p className="text-sm text-zinc-500 dark:text-zinc-500">
         계정이 없나요?{" "}
         <Link

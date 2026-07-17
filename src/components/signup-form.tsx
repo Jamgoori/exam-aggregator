@@ -2,12 +2,11 @@
 
 import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { checkUsernameAvailable, signUpUser } from "@/app/actions";
+import { signUpUser } from "@/app/actions";
 import { NicknameField } from "@/components/nickname-field";
-import { USERNAME_MAX, USERNAME_MIN } from "@/lib/username";
 
 type FieldErrors = Partial<
-  Record<"username" | "nickname" | "password" | "passwordConfirm" | "general", string>
+  Record<"email" | "nickname" | "password" | "passwordConfirm" | "general", string>
 >;
 
 export function SignupForm({
@@ -18,37 +17,14 @@ export function SignupForm({
   turnstileSiteKey?: string;
 }) {
   const router = useRouter();
-  const [username, setUsername] = useState("");
-  const [usernameStatus, setUsernameStatus] = useState<"idle" | "ok" | "bad">("idle");
-  const [usernameMessage, setUsernameMessage] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
-  const [isCheckingUsername, startUsernameCheck] = useTransition();
   const [isSubmitting, startSubmit] = useTransition();
-  const isPending = isCheckingUsername || isSubmitting;
 
   function clearFieldError(field: keyof FieldErrors) {
     setFieldErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
-  }
-
-  function handleUsernameCheck() {
-    setUsernameMessage(null);
-    startUsernameCheck(async () => {
-      const result = await checkUsernameAvailable(username);
-      if (result.error) {
-        setUsernameStatus("bad");
-        setUsernameMessage(result.error);
-        return;
-      }
-      if (!result.available) {
-        setUsernameStatus("bad");
-        setUsernameMessage("이미 사용 중인 아이디예요.");
-        return;
-      }
-      setUsernameStatus("ok");
-      setUsernameMessage("사용 가능한 아이디예요.");
-    });
   }
 
   // 실패해도 화면 전체를 새로고침하지 않고 결과만 반환받아, 입력값은 그대로 두고
@@ -62,7 +38,7 @@ export function SignupForm({
 
     startSubmit(async () => {
       const result = await signUpUser({
-        username,
+        email,
         nickname,
         password,
         passwordConfirm,
@@ -81,48 +57,28 @@ export function SignupForm({
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <label htmlFor="username" className="text-sm text-zinc-600 dark:text-zinc-400">
-          아이디
+        <label htmlFor="email" className="text-sm text-zinc-600 dark:text-zinc-400">
+          이메일 (로그인 아이디로 사용돼요)
         </label>
         <input
-          id="username"
-          name="username"
-          value={username}
+          id="email"
+          name="email"
+          type="email"
+          value={email}
           onChange={(e) => {
-            setUsername(e.target.value);
-            setUsernameStatus("idle");
-            setUsernameMessage(null);
-            clearFieldError("username");
+            setEmail(e.target.value);
+            clearFieldError("email");
           }}
           required
-          minLength={USERNAME_MIN}
-          maxLength={USERNAME_MAX}
-          pattern="[a-zA-Z0-9_]+"
-          title="영문 소문자, 숫자, _만 사용할 수 있어요"
-          autoComplete="username"
+          autoComplete="email"
           className={`rounded border px-3 py-2 ${
-            fieldErrors.username ? "border-red-400 dark:border-red-700" : "border-zinc-300 dark:border-zinc-700"
+            fieldErrors.email ? "border-red-400 dark:border-red-700" : "border-zinc-300 dark:border-zinc-700"
           }`}
         />
-        <button
-          type="button"
-          onClick={handleUsernameCheck}
-          disabled={isPending || !username}
-          className="rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
-        >
-          중복확인
-        </button>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          영문 소문자, 숫자, _ 조합 {USERNAME_MIN}~{USERNAME_MAX}자
+          아이디/비밀번호 찾기에 쓰이니 실제로 받는 이메일을 입력해주세요.
         </p>
-        {usernameMessage && (
-          <p
-            className={`text-sm ${usernameStatus === "bad" ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}
-          >
-            {usernameMessage}
-          </p>
-        )}
-        {fieldErrors.username && <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.username}</p>}
+        {fieldErrors.email && <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.email}</p>}
       </div>
 
       <div className="flex flex-col gap-1">
@@ -182,7 +138,7 @@ export function SignupForm({
 
       <button
         type="submit"
-        disabled={isPending}
+        disabled={isSubmitting}
         className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
       >
         {isSubmitting ? "가입 중..." : "가입하기"}
