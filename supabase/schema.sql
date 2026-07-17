@@ -802,33 +802,11 @@ $$;
 
 grant execute on function paper_question_wrong_rates(uuid[]) to authenticated;
 
--- 회원가입 IP 레이트리밋: 캡차(Turnstile)와 별개로 짧은 시간 동안의 대량 가입 시도를
--- 막는 2차 방어선. 성공/실패 관계없이 시도할 때마다 한 행씩 기록한다.
-create table if not exists signup_attempts (
-  id uuid primary key default gen_random_uuid(),
-  ip_address text not null,
-  created_at timestamptz not null default now()
-);
-
-create index if not exists signup_attempts_ip_idx on signup_attempts(ip_address, created_at desc);
-
-alter table signup_attempts enable row level security;
--- 클라이언트에서는 직접 못 건드리고, 서버 액션에서 service_role로만 기록/조회한다.
--- (anon/authenticated에 아무 정책도 주지 않으므로 RLS가 모든 접근을 막는다.)
-
--- 아이디(이메일) 찾기 / 비밀번호 재설정 요청의 IP 레이트리밋. signup_attempts와 같은
--- 패턴이지만 액션별로 한도를 다르게 두기 위해 action 컬럼으로 구분한다.
-create table if not exists auth_attempts (
-  id uuid primary key default gen_random_uuid(),
-  ip_address text not null,
-  action text not null check (action in ('find_id', 'reset_password')),
-  created_at timestamptz not null default now()
-);
-
-create index if not exists auth_attempts_ip_action_idx on auth_attempts(ip_address, action, created_at desc);
-
-alter table auth_attempts enable row level security;
--- signup_attempts와 동일하게 anon/authenticated 정책 없이 서버 액션의 service_role만 접근.
+-- 이메일/비밀번호 가입이 폐쇄되고 소셜 로그인(구글·카카오) 전용이 되면서, 자체 가입
+-- 레이트리밋 테이블(signup_attempts)과 아이디/비밀번호 찾기 레이트리밋(auth_attempts)은
+-- 더 이상 쓰지 않는다. 봇/대량 가입 방어는 provider(구글·카카오) 계정 생성 절차에 위임.
+drop table if exists signup_attempts;
+drop table if exists auth_attempts;
 
 -- 초기 과목 데이터 (필요에 맞게 추가/수정하세요)
 insert into subjects (slug, name, display_order) values
