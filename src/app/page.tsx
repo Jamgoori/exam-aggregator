@@ -65,9 +65,11 @@ export default async function Home({
                 : "기출문제를 업로드해보세요"}
             </span>
             <h1 className="text-3xl font-bold sm:text-4xl dark:text-zinc-100">
-              공무원 기출문제,
+              나만의{" "}
+              <span className="text-blue-600 dark:text-blue-400">데이터</span>
+              로,
               <br />
-              한 곳에서 빠르게
+              전략적으로 공부해요
             </h1>
             {/* 모바일은 첫 화면에 카드 목록이 보이도록 통계 타일을 걷어내고
                 "총 자료 수"만 이 문장에 통합한 압축 버전, PC(sm 이상)는 아래
