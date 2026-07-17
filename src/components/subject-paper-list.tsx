@@ -79,7 +79,7 @@ export function SubjectPaperList({
             className={`flex flex-col gap-3 rounded-xl border p-4 transition-colors ${
               checked
                 ? "border-blue-400 bg-blue-50/50 dark:border-blue-700 dark:bg-blue-950/20"
-                : "border-zinc-200 dark:border-zinc-800"
+                : "border-zinc-200 dark:border-zinc-700"
             }`}
           >
             <div className="flex items-start gap-2.5">

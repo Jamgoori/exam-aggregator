@@ -62,7 +62,7 @@ function PageButtons({
         onMouseDown={keepFocus}
         onClick={() => onNavigate(Math.max(1, prevBlockPage))}
         disabled={prevBlockPage < 1}
-        className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600 disabled:pointer-events-none disabled:opacity-40 dark:border-zinc-800 dark:text-zinc-500 dark:hover:border-blue-700 dark:hover:text-blue-400"
+        className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600 disabled:pointer-events-none disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-blue-700 dark:hover:text-blue-400"
       >
         ‹
       </button>
@@ -75,7 +75,7 @@ function PageButtons({
           className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium ${
             p === currentPage
               ? "bg-blue-600 text-white"
-              : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
+              : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
           }`}
         >
           {p}
@@ -86,7 +86,7 @@ function PageButtons({
         onMouseDown={keepFocus}
         onClick={() => onNavigate(Math.min(totalPages, nextBlockPage))}
         disabled={nextBlockPage > totalPages}
-        className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600 disabled:pointer-events-none disabled:opacity-40 dark:border-zinc-800 dark:text-zinc-500 dark:hover:border-blue-700 dark:hover:text-blue-400"
+        className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 hover:border-blue-300 hover:text-blue-600 disabled:pointer-events-none disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-blue-700 dark:hover:text-blue-400"
       >
         ›
       </button>
@@ -300,21 +300,21 @@ export function HomeExamBrowser({
             (page.tsx의 모바일 전용 소개 문단). PC는 검색창(596px)과 같은 폭으로
             위 소개 문단 줄 끝과 나란히 보이게 한다. */}
         <div className="mt-4 hidden w-full max-w-[596px] grid-cols-3 gap-3 text-center sm:grid">
-          <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-700">
             <FileStack size={20} className="text-blue-500" />
             <span className="whitespace-nowrap text-sm font-medium text-zinc-600 dark:text-zinc-400">
               총 자료 수
             </span>
             <strong className="text-lg tabular-nums">{totalCount ?? 0}건</strong>
           </div>
-          <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-700">
             <Download size={20} className="text-blue-500" />
             <span className="whitespace-nowrap text-sm font-medium text-zinc-600 dark:text-zinc-400">
               누적 다운로드
             </span>
             <strong className="text-lg tabular-nums">{totalDownloads ?? 0}회</strong>
           </div>
-          <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-700">
             <Users size={20} className="text-blue-500" />
             <span className="whitespace-nowrap text-sm font-medium text-zinc-600 dark:text-zinc-400">
               실시간 총 응시 수
@@ -331,7 +331,7 @@ export function HomeExamBrowser({
           className={`mt-2 flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium ${
             effectiveFavOnly
               ? "border border-amber-300 bg-amber-50 text-amber-600 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400"
-              : "border border-zinc-200 text-zinc-600 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-amber-800 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
+              : "border border-zinc-200 text-zinc-600 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-amber-800 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
           }`}
         >
           <Star size={14} fill={effectiveFavOnly ? "currentColor" : "none"} />
@@ -347,7 +347,7 @@ export function HomeExamBrowser({
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               !level
                 ? "bg-zinc-800 text-white dark:bg-zinc-700"
-                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
@@ -360,7 +360,7 @@ export function HomeExamBrowser({
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 level === lv
                   ? levelColor(lv)
-                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
               }`}
             >
               {lv}

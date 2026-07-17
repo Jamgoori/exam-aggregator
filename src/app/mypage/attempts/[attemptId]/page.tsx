@@ -101,7 +101,7 @@ export default async function AttemptWrongNotePage({
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
           <span className="text-xs text-zinc-500 dark:text-zinc-500">점수</span>
           <div className="flex items-baseline gap-1.5">
             <span className="text-xl font-semibold">{pct}점</span>
@@ -110,7 +110,7 @@ export default async function AttemptWrongNotePage({
             </span>
           </div>
         </div>
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
           <span className="text-xs text-zinc-500 dark:text-zinc-500">오답</span>
           <span
             className={`text-xl font-semibold ${questions.length > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}
@@ -121,7 +121,7 @@ export default async function AttemptWrongNotePage({
       </div>
 
       {questions.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-zinc-200 py-16 text-center dark:border-zinc-800">
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-zinc-200 py-16 text-center dark:border-zinc-700">
           <PartyPopper size={32} className="text-amber-500" />
           <p className="font-semibold">이 회차는 모두 맞혔어요!</p>
           <p className="text-sm text-zinc-500 dark:text-zinc-500">복습할 오답이 없어요. 다음 회차도 파이팅!</p>

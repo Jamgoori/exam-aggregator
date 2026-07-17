@@ -28,7 +28,7 @@ export function MyPageTabs({
 
   return (
     <>
-      <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-3 dark:border-zinc-800">
+      <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-3 dark:border-zinc-700">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -37,7 +37,7 @@ export function MyPageTabs({
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               activeTab === t.key
                 ? "bg-blue-600 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
+                : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
             }`}
           >
             {t.label}

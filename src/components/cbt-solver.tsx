@@ -408,7 +408,7 @@ export function CbtSolver({
     <div className="flex h-[100dvh] flex-col lg:h-[calc(100dvh-65px)]">
       {/* 헤더/탭/펜 색상 바를 하나의 그룹으로 묶어서, 각 줄마다 구분선이 겹겹이
           쌓이지 않게 내부 구분선 없이 콘텐츠와 닿는 맨 아래에만 선을 둔다. */}
-      <div className="shrink-0 border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="shrink-0 border-b border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
         <header>
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
             <div className="flex min-w-0 items-center gap-2">
@@ -636,7 +636,7 @@ export function CbtSolver({
           </div>
 
           <OmrPanel
-            className="hidden w-[240px] shrink-0 flex-col border-l border-zinc-200 lg:flex dark:border-zinc-800"
+            className="hidden w-[240px] shrink-0 flex-col border-l border-zinc-200 lg:flex dark:border-zinc-700"
             totalQuestions={totalQuestions}
             choiceCount={choiceCount}
             answers={answers}
@@ -659,7 +659,7 @@ export function CbtSolver({
             className="absolute inset-0 bg-black/40"
           />
           <div className="relative flex max-h-[65dvh] flex-col rounded-t-2xl bg-white shadow-xl dark:bg-zinc-900">
-            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2 dark:border-zinc-800">
+            <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-2 dark:border-zinc-700">
               <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">답안 입력</h2>
               <button
                 type="button"

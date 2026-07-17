@@ -205,7 +205,7 @@ export default async function SubjectPage({
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               !level
                 ? "bg-zinc-800 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
@@ -217,7 +217,7 @@ export default async function SubjectPage({
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 level === lv
                   ? levelColor(lv)
-                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
               }`}
             >
               {lv}
@@ -236,7 +236,7 @@ export default async function SubjectPage({
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               selectedExamTypeIds.size === 0
                 ? "bg-zinc-800 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
@@ -254,7 +254,7 @@ export default async function SubjectPage({
                 className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                   isSelected
                     ? examTypeTabColor(et.name)
-                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
                 }`}
               >
                 {et.name}

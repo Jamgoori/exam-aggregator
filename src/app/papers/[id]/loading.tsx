@@ -12,7 +12,7 @@ function Block({ className = "" }: { className?: string }) {
 // 3px씩 커짐)을 그대로 흉내낸다.
 function DifficultyGaugeSkeleton() {
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+    <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
       <Block className="h-4 w-16" />
       <Block className="h-4 w-32" />
       <div className="flex flex-col gap-1 pt-8">
@@ -34,7 +34,7 @@ function DifficultyGaugeSkeleton() {
 // 보기 자리를 그대로 맞춘 카드 스켈레톤.
 function ExamCardSkeleton() {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+    <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Block className="h-5 w-10 rounded" />
@@ -43,7 +43,7 @@ function ExamCardSkeleton() {
         <Block className="h-7 w-7 shrink-0 rounded-full" />
       </div>
       <Block className="h-4 w-full" />
-      <div className="mt-auto flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-800">
+      <div className="mt-auto flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-700">
         <Block className="h-5 w-16 rounded-full" />
         <Block className="h-4 w-16" />
       </div>
@@ -101,7 +101,7 @@ export default function PaperDetailLoading() {
             <Block className="h-16 w-full rounded-lg" />
             <Block className="h-9 w-24 self-end rounded-lg" />
           </div>
-          <div className="flex flex-col gap-4 divide-y divide-zinc-100 dark:divide-zinc-800">
+          <div className="flex flex-col gap-4 divide-y divide-zinc-100 dark:divide-zinc-700">
             {Array.from({ length: 2 }, (_, i) => (
               <div key={i} className="flex flex-col gap-2 pt-4 first:pt-0">
                 <div className="flex items-center gap-2">
@@ -116,7 +116,7 @@ export default function PaperDetailLoading() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 border-t border-zinc-100 pt-14 dark:border-zinc-800">
+      <div className="flex flex-col gap-4 border-t border-zinc-100 pt-14 dark:border-zinc-700">
         <div className="flex items-center justify-between gap-4">
           <Block className="h-5 w-40" />
           <Block className="h-4 w-14" />

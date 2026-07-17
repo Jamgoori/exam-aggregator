@@ -304,7 +304,7 @@ function RelatedPapersSection({
   }
 
   return (
-    <div className="flex flex-col gap-4 border-t border-zinc-100 pt-14 dark:border-zinc-800">
+    <div className="flex flex-col gap-4 border-t border-zinc-100 pt-14 dark:border-zinc-700">
       <div className="flex items-center justify-between gap-4">
         <h2 className="text-lg font-semibold">
           {subject.name} 기출문제 목록
@@ -324,7 +324,7 @@ function RelatedPapersSection({
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               !level
                 ? "bg-zinc-800 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
@@ -336,7 +336,7 @@ function RelatedPapersSection({
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 level === lv
                   ? levelColor(lv)
-                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
               }`}
             >
               {lv}
@@ -355,7 +355,7 @@ function RelatedPapersSection({
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               selectedExamTypeIds.size === 0
                 ? "bg-zinc-800 text-white"
-                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+                : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
@@ -373,7 +373,7 @@ function RelatedPapersSection({
                 className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                   isSelected
                     ? examTypeTabColor(et.name)
-                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-zinc-600"
+                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
                 }`}
               >
                 {et.name}

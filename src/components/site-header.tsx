@@ -11,7 +11,7 @@ export function SiteHeader({
   user: { nickname: string } | null;
 }) {
   return (
-    <header className="border-b border-zinc-200 print:hidden dark:border-zinc-800">
+    <header className="border-b border-zinc-200 print:hidden dark:border-zinc-700">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
         <Link href="/" className="flex items-center gap-2">
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
