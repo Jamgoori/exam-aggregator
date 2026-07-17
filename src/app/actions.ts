@@ -125,6 +125,11 @@ export async function updateNickname(formData: FormData) {
 
   // 온보딩처럼 성공 후 완전히 다른 페이지로 넘어가는 경우엔 메시지 없이 그대로 보내고,
   // 같은 폼으로 되돌아오는 경우(마이페이지 수정)에만 성공 메시지를 붙인다.
+  // 온보딩 경유 = 신규 가입 완료이므로 GA4 sign_up 이벤트용 표식(signup=1)을 붙인다
+  // (SignupEventTracker가 이벤트 전송 후 URL에서 지운다).
+  if (formPath.startsWith("/onboarding/nickname")) {
+    redirect(withQuery(successPath, "signup", "1"));
+  }
   redirect(
     successPath === formPath
       ? withQuery(successPath, "message", "닉네임을 변경했어요.")

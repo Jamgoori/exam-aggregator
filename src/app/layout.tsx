@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import { Analytics } from "@vercel/analytics/next";
 import { GoogleAnalytics } from "@next/third-parties/google";
+import { SignupEventTracker } from "@/components/signup-event-tracker";
 import { SiteHeaderGate } from "@/components/site-header-gate";
 import { SiteFooter } from "@/components/site-footer";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
@@ -63,7 +65,14 @@ export default async function RootLayout({
         <SiteFooter />
         <Analytics />
         {process.env.NEXT_PUBLIC_GA_ID && (
-          <GoogleAnalytics gaId={process.env.NEXT_PUBLIC_GA_ID} />
+          <>
+            <GoogleAnalytics gaId={process.env.NEXT_PUBLIC_GA_ID} />
+            {/* useSearchParams를 쓰는 클라이언트 컴포넌트는 Suspense 경계가 필요
+                (없으면 프리렌더 시 상위 트리 전체가 CSR로 강등된다). */}
+            <Suspense fallback={null}>
+              <SignupEventTracker />
+            </Suspense>
+          </>
         )}
         {process.env.NEXT_PUBLIC_CLARITY_ID && (
           <MicrosoftClarity projectId={process.env.NEXT_PUBLIC_CLARITY_ID} />

@@ -34,6 +34,7 @@ import { DEFAULT_PEN_WIDTH, type DrawTool } from "@/components/pdf-canvas-viewer
 import { SingleQuestionView } from "@/components/single-question-view";
 import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
 import { formatDuration } from "@/lib/format";
+import { trackEvent } from "@/lib/ga-events";
 
 // pdf.js는 브라우저 전용 API(Worker, canvas 등)에 의존해서 서버에서 미리 렌더링하면
 // 안 되므로, 이 컴포넌트는 클라이언트에서만 로드한다.
@@ -371,6 +372,15 @@ export function CbtSolver({
         setError(res.error);
         return;
       }
+      // 광고 성과 측정용 전환 이벤트: 어떤 유입이 실제 응시까지 이어지는지 본다.
+      trackEvent("cbt_submit", {
+        paper_id: paperId,
+        ...(typeof res.score === "number" && res.totalQuestions
+          ? {
+              score_pct: Math.round((res.score / res.totalQuestions) * 100),
+            }
+          : {}),
+      });
       setOmrOpen(false);
       setResult(res);
     });
