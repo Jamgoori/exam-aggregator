@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   getSubjectWrongNoteQuestions,
   fetchQuestionMedia,
+  fetchWrongNoteMarks,
   REVIEW_COOLDOWN_HOURS,
 } from "@/lib/wrong-notes";
 import { representativePaperIds } from "@/lib/dedup-papers";
@@ -166,6 +167,8 @@ export async function collectAllReviewCandidates(
   }
   if (statusRows.length === 0) return [];
 
+  const marks = await fetchWrongNoteMarks(supabase, userId);
+
   const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
 
   type PaperMeta = {
@@ -189,10 +192,18 @@ export async function collectAllReviewCandidates(
   );
   const repId = (paperId: string) => repByPaperId.get(paperId) ?? paperId;
 
+  // 완전 삭제 마크를 대표 키로 정규화해 후보에서 뺀다.
+  const deletedRepKeys = new Set<string>();
+  for (const k of marks.deleted) {
+    const idx = k.lastIndexOf("#");
+    deletedRepKeys.add(`${repId(k.slice(0, idx))}#${k.slice(idx + 1)}`);
+  }
+
   // (대표, 문항)별 최신 상태로 접기.
   const byRepQ = new Map<string, { resolved: boolean; at: string }>();
   for (const r of statusRows) {
     const key = `${repId(r.paper_id)}#${r.question_number}`;
+    if (deletedRepKeys.has(key)) continue;
     const ex = byRepQ.get(key);
     if (!ex || r.last_answered_at > ex.at) {
       byRepQ.set(key, { resolved: r.last_is_correct, at: r.last_answered_at });
@@ -238,12 +249,16 @@ export async function collectPaperReviewCandidates(
   }
   if (rows.length === 0) return [];
 
-  const mediaByPaper = await fetchQuestionMedia(supabase, paperIds);
+  const [mediaByPaper, marks] = await Promise.all([
+    fetchQuestionMedia(supabase, paperIds),
+    fetchWrongNoteMarks(supabase, userId, paperIds),
+  ]);
   const seen = new Set<string>();
   const items: { paperId: string; questionNumber: number }[] = [];
   for (const r of rows) {
     if (!mediaByPaper.get(r.paper_id)?.get(r.question_number)?.images.length) continue;
     const key = `${r.paper_id}#${r.question_number}`;
+    if (marks.deleted.has(key)) continue;
     if (seen.has(key)) continue;
     seen.add(key);
     items.push({ paperId: r.paper_id, questionNumber: r.question_number });

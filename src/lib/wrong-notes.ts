@@ -76,6 +76,41 @@ type WrongAnswerRow = {
   selected_choice: number | null;
 };
 
+// 오답노트 문항 마크. deleted는 오답노트에서 완전히 제외한 문항(실수/지엽 문항),
+// pinned는 "다시 볼 문제" 체크. 키는 `${paper_id}#${question_number}`.
+// 응시 원본은 건드리지 않고 조회·집계·섞어풀기 후보에서만 걸러내는 방식이라,
+// 테이블이 아직 없는 환경에서도(마이그레이션 전) 빈 마크로 안전하게 동작한다.
+export type WrongNoteMarks = { deleted: Set<string>; pinned: Set<string> };
+
+export const EMPTY_MARKS: WrongNoteMarks = { deleted: new Set(), pinned: new Set() };
+
+export async function fetchWrongNoteMarks(
+  supabase: Supabase,
+  userId: string,
+  paperIds?: string[],
+): Promise<WrongNoteMarks> {
+  const deleted = new Set<string>();
+  const pinned = new Set<string>();
+  if (paperIds && paperIds.length === 0) return { deleted, pinned };
+
+  const idChunks = paperIds ? chunk(paperIds, 200) : [null];
+  for (const ids of idChunks) {
+    let query = supabase
+      .from("wrong_note_marks")
+      .select("paper_id, question_number, pinned, deleted")
+      .eq("user_id", userId);
+    if (ids) query = query.in("paper_id", ids);
+    const { data, error } = await query;
+    if (error) return { deleted: new Set(), pinned: new Set() };
+    for (const r of data ?? []) {
+      const key = `${r.paper_id}#${r.question_number}`;
+      if (r.deleted) deleted.add(key);
+      if (r.pinned) pinned.add(key);
+    }
+  }
+  return { deleted, pinned };
+}
+
 // PostgREST는 range() 없이는 한 번에 최대 1000행만 돌려주므로(cbt-availability.ts와
 // 같은 이유), 응시가 많은 사용자도 오답이 잘리지 않게 끝까지 이어받는다.
 const BATCH_SIZE = 1000;
@@ -111,9 +146,19 @@ export async function fetchWrongAnswerRows(
 export function buildWrongNoteGroups(
   attempts: WrongNoteAttemptRow[],
   wrongRows: WrongAnswerRow[],
+  // 완전 삭제된 문항(`${paperId}#${qnum}`)은 집계에서 뺀다.
+  deletedKeys?: Set<string>,
 ): WrongNoteSubjectGroup[] {
+  const paperByAttempt = new Map<string, string>();
+  for (const a of attempts) {
+    if (a.exam_papers) paperByAttempt.set(a.id, a.exam_papers.id);
+  }
   const wrongByAttempt = new Map<string, WrongAnswerRow[]>();
   for (const row of wrongRows) {
+    if (deletedKeys?.size) {
+      const paperId = paperByAttempt.get(row.attempt_id);
+      if (paperId && deletedKeys.has(`${paperId}#${row.question_number}`)) continue;
+    }
     const list = wrongByAttempt.get(row.attempt_id) ?? [];
     list.push(row);
     wrongByAttempt.set(row.attempt_id, list);
@@ -222,11 +267,14 @@ export async function getWrongNoteGroups(
   const attempts = (attemptRows ?? []) as unknown as WrongNoteAttemptRow[];
   if (attempts.length === 0) return [];
 
-  const wrongRows = await fetchWrongAnswerRows(
-    supabase,
-    attempts.map((a) => a.id),
-  );
-  return buildWrongNoteGroups(attempts, wrongRows);
+  const [wrongRows, marks] = await Promise.all([
+    fetchWrongAnswerRows(
+      supabase,
+      attempts.map((a) => a.id),
+    ),
+    fetchWrongNoteMarks(supabase, userId),
+  ]);
+  return buildWrongNoteGroups(attempts, wrongRows, marks.deleted);
 }
 
 // 화면에 그릴 수 있게 이미지/정답/해설까지 붙인 문제 상세.
@@ -235,6 +283,8 @@ export type WrongNoteQuestionDetail = WrongNoteQuestionSummary & {
   choiceCount: number;
   images: string[];
   explanation: QuestionExplanationContent | null;
+  // "다시 볼 문제" 체크 여부.
+  pinned: boolean;
 };
 
 export type QuestionMediaEntry = { choiceCount: number | null; images: string[] };
@@ -451,6 +501,7 @@ function toQuestionDetail(
   media: Map<number, QuestionMediaEntry> | undefined,
   answers: number[] | undefined,
   explanations: Map<number, QuestionExplanationContent> | undefined,
+  pinnedKeys?: Set<string>,
 ): WrongNoteQuestionDetail {
   const entry = media?.get(q.questionNumber);
   return {
@@ -459,6 +510,7 @@ function toQuestionDetail(
     choiceCount: entry?.choiceCount ?? paper.choice_count,
     images: entry?.images ?? [],
     explanation: explanations?.get(q.questionNumber) ?? null,
+    pinned: pinnedKeys?.has(`${paper.id}#${q.questionNumber}`) ?? false,
   };
 }
 
@@ -516,6 +568,8 @@ export type SubjectWrongNoteQuestion = {
   memo: string | null;
   // 전국 오답률(%). 표본이 충분한 문항만 채워지고, 적으면 null(배지 숨김).
   wrongRatePct: number | null;
+  // "다시 볼 문제" 체크 여부.
+  pinned: boolean;
 };
 
 // 전국 오답률 배지를 띄우기 위한 최소 표본(이보다 적으면 오해를 주므로 숨긴다).
@@ -739,7 +793,7 @@ export async function getSubjectWrongNoteQuestions(
   }
 
   const repIds = [...repInfo.keys()];
-  const [mediaByPaper, answersByPaper, explanationsByPaper, statusByRepQ, memoByRepQ, rateByRepQ] =
+  const [mediaByPaper, answersByPaper, explanationsByPaper, statusByRepQ, memoByRepQ, rateByRepQ, rawMarks] =
     await Promise.all([
       fetchQuestionMedia(supabase, repIds),
       fetchCorrectAnswers(repIds),
@@ -747,10 +801,25 @@ export async function getSubjectWrongNoteQuestions(
       fetchQuestionStatusByRep(supabase, userId, paperList.map((p) => p.id), repId),
       fetchMemos(supabase, userId, repIds),
       fetchWrongRates(supabase, repIds),
+      fetchWrongNoteMarks(supabase, userId, paperList.map((p) => p.id)),
     ]);
+
+  // 마크는 실제 paper_id로 저장돼 있을 수 있어(문제지 드릴다운에서 찍은 것) 대표
+  // 키로 정규화해 비교한다.
+  const normalizeMarkKeys = (keys: Set<string>) => {
+    const out = new Set<string>();
+    for (const k of keys) {
+      const idx = k.lastIndexOf("#");
+      out.add(`${repId(k.slice(0, idx))}#${k.slice(idx + 1)}`);
+    }
+    return out;
+  };
+  const deletedRepKeys = normalizeMarkKeys(rawMarks.deleted);
+  const pinnedRepKeys = normalizeMarkKeys(rawMarks.pinned);
 
   const questions: SubjectWrongNoteQuestion[] = [];
   for (const agg of byRepQ.values()) {
+    if (deletedRepKeys.has(`${agg.repId}#${agg.questionNumber}`)) continue;
     const info = repInfo.get(agg.repId);
     if (!info) continue;
     const media = mediaByPaper.get(agg.repId)?.get(agg.questionNumber);
@@ -777,6 +846,7 @@ export async function getSubjectWrongNoteQuestions(
       explanation: explanationsByPaper.get(agg.repId)?.get(agg.questionNumber) ?? null,
       memo: memoByRepQ.get(`${agg.repId}#${agg.questionNumber}`) ?? null,
       wrongRatePct: rateByRepQ.get(`${agg.repId}#${agg.questionNumber}`) ?? null,
+      pinned: pinnedRepKeys.has(`${agg.repId}#${agg.questionNumber}`),
     });
   }
 
@@ -835,6 +905,8 @@ export async function getUnresolvedCountBySubject(
   }
   if (statusRows.length === 0) return out;
 
+  const marks = await fetchWrongNoteMarks(supabase, userId);
+
   const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
 
   // dedup 대표 계산 + 대표 문제지의 과목. 중복 시험지가 각각 응시됐어도 한 번만 센다.
@@ -861,10 +933,18 @@ export async function getUnresolvedCountBySubject(
   const subjectOfPaper = new Map<string, { id: string; name: string; slug: string }>();
   for (const p of papers) if (p.subjects) subjectOfPaper.set(p.id, p.subjects);
 
+  // 완전 삭제 마크를 대표 키로 정규화(드릴다운에서 실제 paper_id로 찍혔을 수 있다).
+  const deletedRepKeys = new Set<string>();
+  for (const k of marks.deleted) {
+    const idx = k.lastIndexOf("#");
+    deletedRepKeys.add(`${repId(k.slice(0, idx))}#${k.slice(idx + 1)}`);
+  }
+
   // (대표, 문항)별로 가장 최근 상태만 남긴다(중복 시험지의 status가 흩어져도 통합).
   const byRepQ = new Map<string, { resolved: boolean; at: string; subjectId: string | null }>();
   for (const r of statusRows) {
     const rep = repId(r.paper_id);
+    if (deletedRepKeys.has(`${rep}#${r.question_number}`)) continue;
     const subj = subjectOfPaper.get(rep) ?? subjectOfPaper.get(r.paper_id) ?? null;
     const key = `${rep}#${r.question_number}`;
     const ex = byRepQ.get(key);
@@ -931,10 +1011,13 @@ export async function getPaperWrongNote(
   const paper = attempts.find((a) => a.exam_papers)?.exam_papers;
   if (!paper) return null;
 
-  const wrongRows = await fetchWrongAnswerRows(
-    supabase,
-    attempts.map((a) => a.id),
-  );
+  const [wrongRows, marks] = await Promise.all([
+    fetchWrongAnswerRows(
+      supabase,
+      attempts.map((a) => a.id),
+    ),
+    fetchWrongNoteMarks(supabase, userId, [paperId]),
+  ]);
 
   const wrongByAttempt = new Map<string, PaperWrongNoteRound["wrong"]>();
   for (const row of wrongRows) {
@@ -956,7 +1039,7 @@ export async function getPaperWrongNote(
 
   // 오답이 하나도 없으면(전부 만점) 통합 목록은 비지만 회독 기록은 그대로 보여준다.
   // 응시가 전부 한 문제지 것이므로 결과는 과목 하나 → 문제지 하나로 좁혀진다.
-  const group = buildWrongNoteGroups(attempts, wrongRows)[0]?.papers[0];
+  const group = buildWrongNoteGroups(attempts, wrongRows, marks.deleted)[0]?.papers[0];
   if (!group) {
     return { paper, rounds, questions: [], unresolvedCount: 0, resolvedCount: 0 };
   }
@@ -977,6 +1060,7 @@ export async function getPaperWrongNote(
         mediaByPaper.get(paper.id),
         answersByPaper.get(paper.id),
         explanationsByPaper.get(paper.id),
+        marks.pinned,
       ),
     ),
     unresolvedCount: group.unresolvedCount,

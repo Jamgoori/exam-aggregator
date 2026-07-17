@@ -1037,3 +1037,33 @@ create index if not exists explanation_access_log_user_idx
   on explanation_access_log(user_id, action, created_at desc);
 
 alter table explanation_access_log enable row level security;
+
+-- 오답노트 문항 마크: pinned("다시 볼 문제" 체크), deleted(오답노트에서 완전 제외).
+-- 응시 원본(cbt_attempt_answers)은 점수·전국 오답률에 쓰이므로 지우지 않고,
+-- 오답노트 조회·집계·섞어풀기 후보에서만 걸러낸다. 본인만 읽고 쓴다.
+create table if not exists wrong_note_marks (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  question_number int not null,
+  pinned boolean not null default false,
+  deleted boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, paper_id, question_number)
+);
+
+create index if not exists wrong_note_marks_user_idx on wrong_note_marks(user_id);
+
+alter table wrong_note_marks enable row level security;
+
+drop policy if exists "select own wrong note marks" on wrong_note_marks;
+create policy "select own wrong note marks" on wrong_note_marks
+  for select to authenticated using (auth.uid() = user_id);
+drop policy if exists "insert own wrong note marks" on wrong_note_marks;
+create policy "insert own wrong note marks" on wrong_note_marks
+  for insert to authenticated with check (auth.uid() = user_id);
+drop policy if exists "update own wrong note marks" on wrong_note_marks;
+create policy "update own wrong note marks" on wrong_note_marks
+  for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "delete own wrong note marks" on wrong_note_marks;
+create policy "delete own wrong note marks" on wrong_note_marks
+  for delete to authenticated using (auth.uid() = user_id);

@@ -34,9 +34,8 @@ export default async function PaperWrongNotePage({
   // 잘못된 주소(다른 과목의 문제지 등)로 들어오면 404.
   if (!note || note.paper.subjects?.slug !== slug) notFound();
 
-  const { paper, rounds, questions, unresolvedCount, resolvedCount } = note;
+  const { paper, rounds, questions, unresolvedCount } = note;
   const subject = paper.subjects!;
-  const totalWrong = questions.length;
 
   const viewQuestions: PaperViewQuestion[] = questions.map((q) => ({
     questionNumber: q.questionNumber,
@@ -47,6 +46,7 @@ export default async function PaperWrongNotePage({
     explanation: q.explanation,
     wrongCount: q.wrongCount,
     resolved: q.resolved,
+    pinned: q.pinned,
   }));
 
   return (
@@ -72,40 +72,20 @@ export default async function PaperWrongNotePage({
             </span>
           )}
         </div>
-        <h1 className="text-2xl font-semibold leading-snug">{paper.title}</h1>
-        <div className="flex flex-wrap items-center gap-3">
-          {totalWrong > 0 ? (
-            <p className="text-sm text-zinc-500 dark:text-zinc-500">
-              {rounds.length}회독 동안 틀려본 문제 {totalWrong}개 중{" "}
-              <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                {resolvedCount}개
-              </span>
-              를 극복했어요.
-            </p>
-          ) : (
-            <p className="text-sm text-zinc-500 dark:text-zinc-500">
-              {rounds.length}회독 동안 틀린 문제가 하나도 없어요.
-            </p>
-          )}
-          <span className="ml-auto flex shrink-0 items-center gap-2">
-            <Link
-              href={`/papers/${paper.id}`}
-              className="text-xs font-medium text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400"
-            >
-              문제지 보기
-            </Link>
-            <Link
-              href={`/papers/${paper.id}/cbt`}
-              className="flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"
-            >
-              <Monitor size={12} />
-              다시 풀기
-            </Link>
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold leading-snug">{paper.title}</h1>
+          <Link
+            href={`/papers/${paper.id}/cbt`}
+            className="flex shrink-0 items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"
+          >
+            <Monitor size={12} />
+            다시 풀기
+          </Link>
         </div>
       </div>
 
       <WrongNotePaperView
+        paperId={paper.id}
         questions={viewQuestions}
         rounds={rounds}
         unresolvedCount={unresolvedCount}

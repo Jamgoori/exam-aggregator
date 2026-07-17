@@ -71,10 +71,13 @@ function ChoiceRow({
   row,
   showNumberBadge,
   showSelection,
+  actions,
 }: {
   row: WrongNoteCardRow;
   showNumberBadge: boolean;
   showSelection: boolean;
+  // 세트문제(카드에 답 줄 여러 개)에서 줄마다 붙는 문항 액션(다시보기 체크·삭제).
+  actions?: React.ReactNode;
 }) {
   // 전체 해설 페이지처럼 "내가 고른 답" 개념이 없는 화면에서는 풀지 않음 배지를 숨긴다.
   const skipped = showSelection && row.selectedChoice === null;
@@ -129,6 +132,7 @@ function ChoiceRow({
             극복
           </span>
         )}
+        {actions}
       </div>
     </div>
   );
@@ -144,17 +148,23 @@ export function WrongNoteQuestionCard({
   // 해설 페이지(?download=1)는 로드 직후 window.print()를 띄우는데, lazy 이미지는
   // 브라우저에 따라 화면 밖 문항이 안 실린 채 인쇄될 수 있어 eager로 전환한다.
   eagerImages = false,
+  // 오답노트 화면에서 문항별 액션(다시보기 체크·삭제)을 붙일 때 쓴다. 단일 문항
+  // 카드는 번호 헤더 우측 끝에, 세트문제는 답 줄마다 붙는다.
+  renderRowActions,
 }: {
   rows: WrongNoteCardRow[];
   images: string[];
   explanationsOpen?: boolean;
   showSelection?: boolean;
   eagerImages?: boolean;
+  renderRowActions?: (questionNumber: number) => React.ReactNode;
 }) {
   const firstNumber = rows[0]?.questionNumber;
   const lastNumber = rows[rows.length - 1]?.questionNumber;
   const numberLabel =
     firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`;
+  const headerActions =
+    rows.length === 1 && renderRowActions ? renderRowActions(rows[0].questionNumber) : null;
 
   return (
     // print:mb-3: 해설 인쇄가 2단(columns) 레이아웃으로 전환되면 flex gap이 안
@@ -162,8 +172,9 @@ export function WrongNoteQuestionCard({
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white print:mb-3 dark:border-zinc-700 dark:bg-zinc-900">
       {/* print [break-after:avoid]: 단/페이지 끝에 번호 헤더만 남고 본문이 다음
           단으로 넘어가는 고아 헤더를 막는다. */}
-      <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 print:py-1 print:[break-after:avoid] dark:border-zinc-700 dark:bg-zinc-800/50">
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 print:py-1 print:[break-after:avoid] dark:border-zinc-700 dark:bg-zinc-800/50">
         <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{numberLabel}</span>
+        {headerActions && <span className="print:hidden">{headerActions}</span>}
       </div>
 
       {images.length > 0 ? (
@@ -202,6 +213,11 @@ export function WrongNoteQuestionCard({
             row={row}
             showNumberBadge={rows.length > 1}
             showSelection={showSelection}
+            actions={
+              rows.length > 1 && renderRowActions
+                ? renderRowActions(row.questionNumber)
+                : undefined
+            }
           />
         ))}
       </div>

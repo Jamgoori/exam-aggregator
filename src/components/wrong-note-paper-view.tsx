@@ -7,6 +7,10 @@ import {
   WrongNoteQuestionCard,
   type QuestionExplanationContent,
 } from "@/components/wrong-note-question-card";
+import {
+  WrongNoteMarkActions,
+  WrongNoteUndoToast,
+} from "@/components/wrong-note-mark-actions";
 
 export type PaperViewQuestion = {
   questionNumber: number;
@@ -17,6 +21,7 @@ export type PaperViewQuestion = {
   explanation: QuestionExplanationContent | null;
   wrongCount: number;
   resolved: boolean;
+  pinned: boolean;
 };
 
 export type PaperViewRound = {
@@ -43,10 +48,12 @@ function formatDate(iso: string): string {
 // 문제지 오답노트의 본문. 회독 전환과 극복 필터가 서버 왕복 없이 즉시 바뀌어야
 // 해서 클라이언트 컴포넌트로 뒀다 (과목 페이지 필터와 같은 이유).
 export function WrongNotePaperView({
+  paperId,
   questions,
   rounds,
   unresolvedCount,
 }: {
+  paperId: string;
   questions: PaperViewQuestion[];
   rounds: PaperViewRound[];
   unresolvedCount: number;
@@ -55,9 +62,28 @@ export function WrongNotePaperView({
   // "아직 틀리는 문제만" 필터는 통합 보기에서만 의미가 있다.
   const [hideResolved, setHideResolved] = useState(false);
 
+  // 다시보기 체크/완전 삭제 — 서버 왕복 없이 즉시 반영.
+  const [pinnedNumbers, setPinnedNumbers] = useState<Set<number>>(
+    () => new Set(questions.filter((q) => q.pinned).map((q) => q.questionNumber)),
+  );
+  const [deletedNumbers, setDeletedNumbers] = useState<Set<number>>(new Set());
+  // 마지막으로 삭제한 문항 — 되돌리기 토스트용.
+  const [lastDeleted, setLastDeleted] = useState<number | null>(null);
+
+  const visibleQuestions = useMemo(
+    () => questions.filter((q) => !deletedNumbers.has(q.questionNumber)),
+    [questions, deletedNumbers],
+  );
+  const visibleUnresolved = useMemo(() => {
+    const removed = questions.filter(
+      (q) => !q.resolved && deletedNumbers.has(q.questionNumber),
+    ).length;
+    return Math.max(0, unresolvedCount - removed);
+  }, [questions, deletedNumbers, unresolvedCount]);
+
   const byNumber = useMemo(
-    () => new Map(questions.map((q) => [q.questionNumber, q])),
-    [questions],
+    () => new Map(visibleQuestions.map((q) => [q.questionNumber, q])),
+    [visibleQuestions],
   );
 
   const selectedRound =
@@ -67,7 +93,7 @@ export function WrongNotePaperView({
   // 회독이면 그 회독의 오답만(그 회독에서 고른 답 기준).
   const items = useMemo(() => {
     if (!selectedRound) {
-      return questions
+      return visibleQuestions
         .filter((q) => !hideResolved || !q.resolved)
         .map((q) => ({
           images: q.images,
@@ -97,14 +123,15 @@ export function WrongNotePaperView({
       })
       .filter((row): row is NonNullable<typeof row> => row !== null)
       .sort((a, b) => a.questionNumber - b.questionNumber);
-  }, [questions, selectedRound, hideResolved, byNumber]);
+  }, [visibleQuestions, selectedRound, hideResolved, byNumber]);
 
   const groups = useMemo(() => groupRowsBySharedImages(items), [items]);
 
   return (
     <div className="flex flex-col gap-4">
-      {/* 회독 스트립: 통합 + 회독별 점수/오답 수. 모바일에서는 가로 스크롤. */}
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
+      {/* 회독 스트립: 통합 + 회독별 점수. 가로 스크롤 대신 항상 줄바꿈해서 회독이
+          많아져도 페이지 폭이 밀리지 않는다(상세는 선택 시 아래 컨텍스트 줄에서). */}
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => setView("all")}
@@ -114,7 +141,7 @@ export function WrongNotePaperView({
               : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
           }`}
         >
-          전체 회독 · 미극복 {unresolvedCount}
+          전체 회독 · 미극복 {visibleUnresolved}
         </button>
         {rounds.map((r) => (
           <button
@@ -134,7 +161,7 @@ export function WrongNotePaperView({
               }
             >
               {" "}
-              · {pct(r.score, r.totalQuestions)}점 · 그때 오답 {r.wrong.length}
+              {pct(r.score, r.totalQuestions)}점
             </span>
           </button>
         ))}
@@ -152,7 +179,7 @@ export function WrongNotePaperView({
           <p className="text-xs text-zinc-500 dark:text-zinc-500">
             모든 회독을 합친 보기예요. 답 표시는 가장 최근에 틀렸을 때 기준이에요.
           </p>
-          {questions.some((q) => q.resolved) && (
+          {visibleQuestions.some((q) => q.resolved) && (
             <label className="flex cursor-pointer select-none items-center gap-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400">
               <input
                 type="checkbox"
@@ -181,10 +208,46 @@ export function WrongNotePaperView({
                 key={`${view}-${group.rows[0].questionNumber}`}
                 rows={group.rows}
                 images={group.images}
+                renderRowActions={(questionNumber) => (
+                  <WrongNoteMarkActions
+                    paperId={paperId}
+                    questionNumber={questionNumber}
+                    pinned={pinnedNumbers.has(questionNumber)}
+                    onPinnedChange={(p) =>
+                      setPinnedNumbers((prev) => {
+                        const next = new Set(prev);
+                        if (p) next.add(questionNumber);
+                        else next.delete(questionNumber);
+                        return next;
+                      })
+                    }
+                    onDeleted={() => {
+                      setDeletedNumbers((prev) => new Set(prev).add(questionNumber));
+                      setLastDeleted(questionNumber);
+                    }}
+                  />
+                )}
               />
             ))}
           </div>
         </>
+      )}
+
+      {lastDeleted != null && (
+        <WrongNoteUndoToast
+          key={lastDeleted}
+          paperId={paperId}
+          questionNumber={lastDeleted}
+          onRestored={() => {
+            setDeletedNumbers((prev) => {
+              const next = new Set(prev);
+              next.delete(lastDeleted);
+              return next;
+            });
+            setLastDeleted(null);
+          }}
+          onDismiss={() => setLastDeleted(null)}
+        />
       )}
     </div>
   );

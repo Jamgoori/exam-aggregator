@@ -13,6 +13,10 @@ import {
   createReviewFromWrong,
 } from "@/app/mypage/wrong-notes/actions";
 import { MemoEditor } from "@/components/memo-editor";
+import {
+  WrongNoteMarkActions,
+  WrongNoteUndoToast,
+} from "@/components/wrong-note-mark-actions";
 import { levelColor } from "@/lib/level-colors";
 import type { SubjectWrongNoteQuestion } from "@/lib/wrong-notes";
 
@@ -55,35 +59,44 @@ export function SubjectWrongNoteQuestions({
   questions,
   unresolvedCount,
   subjectSlug,
-  initialConcept,
 }: {
   questions: SubjectWrongNoteQuestion[];
   unresolvedCount: number;
   subjectSlug: string;
-  // 진단 리포트에서 "이 개념 틀린 문항 모아보기"로 들어오면 그 개념으로 미리 필터.
-  initialConcept?: string;
 }) {
   const router = useRouter();
 
-  // 문항에 붙은 해설의 핵심 개념(keyword_title)으로 개념 목록을 만든다. 별도 조회 없이
-  // 이미 받은 explanation에서 뽑는다. 진단 딥링크의 개념이 목록에 있으면 초기값으로.
-  const concepts = useMemo(() => {
-    const set = new Set<string>();
-    for (const q of questions) {
-      const k = q.explanation?.keywordTitle?.trim();
-      if (k) set.add(k);
-    }
-    return [...set].sort((a, b) => a.localeCompare(b, "ko"));
-  }, [questions]);
-
   const [hideResolved, setHideResolved] = useState(false);
   const [onlyRepeated, setOnlyRepeated] = useState(false);
-  const [concept, setConcept] = useState<string>(
-    initialConcept && concepts.includes(initialConcept) ? initialConcept : "all",
-  );
+  const [onlyPinned, setOnlyPinned] = useState(false);
   const [sort, setSort] = useState<SortKey>("number");
   const [reviewPending, startReview] = useTransition();
   const [reviewError, setReviewError] = useState<string | null>(null);
+
+  // 다시보기 체크/완전 삭제는 서버 왕복 없이 즉시 반영한다. 키는 `${paperId}#${qnum}`.
+  const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(
+    () => new Set(questions.filter((q) => q.pinned).map((q) => `${q.paperId}#${q.questionNumber}`)),
+  );
+  const [deletedKeys, setDeletedKeys] = useState<Set<string>>(new Set());
+  // 마지막으로 삭제한 문항 — 되돌리기 토스트용.
+  const [lastDeleted, setLastDeleted] = useState<{
+    key: string;
+    paperId: string;
+    questionNumber: number;
+  } | null>(null);
+
+  // 삭제된 문항을 뺀 "지금 화면의 전체 목록". 카운트·필터·섞어풀기 후보가 전부
+  // 이 목록 기준이라 삭제가 숫자에도 바로 반영된다.
+  const visible = useMemo(
+    () => questions.filter((q) => !deletedKeys.has(`${q.paperId}#${q.questionNumber}`)),
+    [questions, deletedKeys],
+  );
+  const visibleUnresolved = useMemo(() => {
+    const removedUnresolved = questions.filter(
+      (q) => !q.resolved && deletedKeys.has(`${q.paperId}#${q.questionNumber}`),
+    ).length;
+    return Math.max(0, unresolvedCount - removedUnresolved);
+  }, [questions, deletedKeys, unresolvedCount]);
 
   // 문항 선택 → 선택한 것만 섞어풀기. 극복한 문항도 목록에 뜨므로(미극복만 필터 끄면)
   // 골라서 다시 풀 수 있다. 키는 `${paperId}#${questionNumber}`.
@@ -121,8 +134,8 @@ export function SubjectWrongNoteQuestions({
   // 이미지가 있어 실제로 풀 수 있는 미극복 오답만 섞어풀기 대상이 된다(서버도 같은
   // 기준으로 거른다). 0개면 버튼을 숨긴다.
   const playableUnresolved = useMemo(
-    () => questions.filter((q) => !q.resolved && q.images.length > 0).length,
-    [questions],
+    () => visible.filter((q) => !q.resolved && q.images.length > 0).length,
+    [visible],
   );
 
   function startShuffle() {
@@ -139,11 +152,11 @@ export function SubjectWrongNoteQuestions({
   }
 
   const cards = useMemo(() => {
-    let list = questions;
+    let list = visible;
     if (hideResolved) list = list.filter((q) => !q.resolved);
     if (onlyRepeated) list = list.filter((q) => q.wrongCount >= 2);
-    if (concept !== "all")
-      list = list.filter((q) => q.explanation?.keywordTitle?.trim() === concept);
+    if (onlyPinned)
+      list = list.filter((q) => pinnedKeys.has(`${q.paperId}#${q.questionNumber}`));
 
     // 먼저 세트문제(같은 문제지 + 동일 이미지 배열)를 한 그룹으로 묶은 뒤 그룹 단위로
     // 정렬한다. 문항 단위로 정렬하면 "최근/자주 틀린 순"에서 세트 구성원이 흩어져
@@ -197,10 +210,20 @@ export function SubjectWrongNoteQuestions({
     });
 
     return groups.map((g) => g.card);
-  }, [questions, hideResolved, onlyRepeated, concept, sort]);
+  }, [visible, hideResolved, onlyRepeated, onlyPinned, pinnedKeys, sort]);
 
-  const hasResolved = questions.some((q) => q.resolved);
-  const hasRepeated = questions.some((q) => q.wrongCount >= 2);
+  const hasResolved = visible.some((q) => q.resolved);
+  const hasRepeated = visible.some((q) => q.wrongCount >= 2);
+  const hasPinned = pinnedKeys.size > 0;
+
+  function markPinned(key: string, pinned: boolean) {
+    setPinnedKeys((prev) => {
+      const next = new Set(prev);
+      if (pinned) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
 
   const chip = (active: boolean) =>
     `shrink-0 rounded-full px-3.5 py-2 text-sm font-medium ${
@@ -209,17 +232,8 @@ export function SubjectWrongNoteQuestions({
         : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
     }`;
 
-  const conceptMissing =
-    !!initialConcept && concepts.length > 0 && !concepts.includes(initialConcept);
-
   return (
     <div className={`flex flex-col gap-4 ${selected.size > 0 ? "pb-24" : ""}`}>
-      {conceptMissing && (
-        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/20 dark:text-amber-300">
-          &lsquo;{initialConcept}&rsquo; 개념으로 좁히지 못해 전체 문항을 보여드려요.
-        </p>
-      )}
-
       {playableUnresolved > 0 ? (
         <div className="flex flex-col gap-1.5">
           <button
@@ -240,7 +254,7 @@ export function SubjectWrongNoteQuestions({
       ) : (
         // 미극복은 있는데 이미지가 없어 섞어풀기를 못 여는 경우, 버튼이 그냥 사라져
         // 혼란스럽지 않게 이유를 알려준다.
-        unresolvedCount > 0 && (
+        visibleUnresolved > 0 && (
           <p className="rounded-xl border border-zinc-200 px-3 py-2.5 text-center text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-500">
             아직 문제 이미지가 등록된 미극복 문항이 없어 섞어풀기를 준비 중이에요.
           </p>
@@ -264,20 +278,14 @@ export function SubjectWrongNoteQuestions({
         >
           2번 이상 틀림
         </button>
-        {concepts.length > 0 && (
-          <select
-            value={concept}
-            onChange={(e) => setConcept(e.target.value)}
-            className="shrink-0 rounded-full border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
-          >
-            <option value="all">개념: 전체</option>
-            {concepts.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        )}
+        <button
+          type="button"
+          onClick={() => setOnlyPinned((v) => !v)}
+          disabled={!hasPinned && !onlyPinned}
+          className={`${chip(onlyPinned)} disabled:cursor-not-allowed disabled:opacity-40`}
+        >
+          다시 볼 문제만
+        </button>
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
@@ -293,12 +301,12 @@ export function SubjectWrongNoteQuestions({
 
       <p className="text-xs text-zinc-500 dark:text-zinc-500">
         이 과목에서 틀린 문항을 문제지 구분 없이 모았어요. 답 표시는 가장 최근에
-        틀렸을 때 기준이에요. 전체 오답 {questions.length}개 · 미극복 {unresolvedCount}개.
+        틀렸을 때 기준이에요. 전체 오답 {visible.length}개 · 미극복 {visibleUnresolved}개.
       </p>
 
       {cards.length === 0 ? (
         <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-500">
-          {hideResolved || onlyRepeated || concept !== "all"
+          {hideResolved || onlyRepeated || onlyPinned
             ? "이 조건에 맞는 문항이 없어요. 필터를 바꿔보세요."
             : "이 과목에서는 아직 틀린 문제가 없어요. CBT로 문제를 풀면 틀린 문제가 자동으로 모여요."}
         </p>
@@ -320,7 +328,29 @@ export function SubjectWrongNoteQuestions({
                     {card.paperTitle}
                   </span>
                 </div>
-                <WrongNoteQuestionCard rows={card.rows} images={card.images} />
+                <WrongNoteQuestionCard
+                  rows={card.rows}
+                  images={card.images}
+                  renderRowActions={(questionNumber) => {
+                    const key = `${card.paperId}#${questionNumber}`;
+                    return (
+                      <WrongNoteMarkActions
+                        paperId={card.paperId}
+                        questionNumber={questionNumber}
+                        pinned={pinnedKeys.has(key)}
+                        onPinnedChange={(p) => markPinned(key, p)}
+                        onDeleted={() => {
+                          setDeletedKeys((prev) => new Set(prev).add(key));
+                          setLastDeleted({
+                            key,
+                            paperId: card.paperId,
+                            questionNumber,
+                          });
+                        }}
+                      />
+                    );
+                  }}
+                />
                 <div className="flex flex-col divide-y divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-700 dark:border-zinc-700/70">
                   {card.source.map((q) => {
                     const key = `${q.paperId}#${q.questionNumber}`;
@@ -380,6 +410,24 @@ export function SubjectWrongNoteQuestions({
         <p className="fixed inset-x-0 bottom-20 z-30 text-center text-xs text-red-600 dark:text-red-400">
           {selError}
         </p>
+      )}
+
+      {lastDeleted && (
+        <WrongNoteUndoToast
+          key={lastDeleted.key}
+          paperId={lastDeleted.paperId}
+          questionNumber={lastDeleted.questionNumber}
+          bottomClass={selected.size > 0 ? "bottom-[4.5rem]" : "bottom-4"}
+          onRestored={() => {
+            setDeletedKeys((prev) => {
+              const next = new Set(prev);
+              next.delete(lastDeleted.key);
+              return next;
+            });
+            setLastDeleted(null);
+          }}
+          onDismiss={() => setLastDeleted(null)}
+        />
       )}
     </div>
   );

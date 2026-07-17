@@ -78,6 +78,91 @@ export async function saveQuestionMemo(input: {
   return { memo };
 }
 
+export type MarkResult = { error?: string };
+
+// "다시 볼 문제" 체크 토글. paper_id는 오답노트에 뜬(대표) 문제지 id를 그대로 쓴다.
+export async function setQuestionPinned(input: {
+  paperId: string;
+  questionNumber: number;
+  pinned: boolean;
+}): Promise<MarkResult> {
+  const paperId = String(input?.paperId ?? "");
+  const questionNumber = Number(input?.questionNumber);
+  if (!paperId || !Number.isInteger(questionNumber)) {
+    return { error: "잘못된 접근입니다." };
+  }
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  const { error } = await supabase.from("wrong_note_marks").upsert(
+    {
+      user_id: user.id,
+      paper_id: paperId,
+      question_number: questionNumber,
+      pinned: Boolean(input.pinned),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,paper_id,question_number" },
+  );
+  if (error) return { error: "저장에 실패했어요." };
+  return {};
+}
+
+// 오답노트에서 문항 완전 삭제(실수로 틀렸거나 지엽 문항). 응시 원본은 남기고
+// 오답노트 조회·집계·섞어풀기 후보에서만 제외한다.
+export async function deleteWrongNoteQuestion(input: {
+  paperId: string;
+  questionNumber: number;
+}): Promise<MarkResult> {
+  const paperId = String(input?.paperId ?? "");
+  const questionNumber = Number(input?.questionNumber);
+  if (!paperId || !Number.isInteger(questionNumber)) {
+    return { error: "잘못된 접근입니다." };
+  }
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  const { error } = await supabase.from("wrong_note_marks").upsert(
+    {
+      user_id: user.id,
+      paper_id: paperId,
+      question_number: questionNumber,
+      deleted: true,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,paper_id,question_number" },
+  );
+  if (error) return { error: "삭제에 실패했어요." };
+  return {};
+}
+
+// 완전 삭제 직후 "되돌리기". 삭제 마크만 해제한다(응시 원본은 애초에 안 지웠다).
+export async function restoreWrongNoteQuestion(input: {
+  paperId: string;
+  questionNumber: number;
+}): Promise<MarkResult> {
+  const paperId = String(input?.paperId ?? "");
+  const questionNumber = Number(input?.questionNumber);
+  if (!paperId || !Number.isInteger(questionNumber)) {
+    return { error: "잘못된 접근입니다." };
+  }
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  const { error } = await supabase.from("wrong_note_marks").upsert(
+    {
+      user_id: user.id,
+      paper_id: paperId,
+      question_number: questionNumber,
+      deleted: false,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id,paper_id,question_number" },
+  );
+  if (error) return { error: "되돌리지 못했어요." };
+  return {};
+}
+
 // 시험지별 틀린문제 다시풀기(1개) / 여러 시험지 합쳐 풀기(다중).
 export async function createReviewFromPapers(input: {
   paperIds: string[];
