@@ -193,7 +193,9 @@ export function WrongNoteQuestionCard({
         </p>
       )}
 
-      <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 print:gap-1 print:py-1.5 dark:border-zinc-800">
+      {/* print:hidden: 인쇄물에서 정답 원 줄은 공간만 차지한다 — 정답은 해설의
+          "정답" 요약 줄과 선지별 해설의 에메랄드 번호로 이미 전달된다. */}
+      <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 print:hidden dark:border-zinc-800">
         {rows.map((row) => (
           <ChoiceRow
             key={row.questionNumber}
@@ -212,12 +214,28 @@ export function WrongNoteQuestionCard({
             .filter((row) => row.explanation)
             .map((row) => (
               <details key={row.questionNumber} open={explanationsOpen} className="group">
-                <summary className="flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-blue-600 hover:underline [&::-webkit-details-marker]:hidden dark:text-blue-400">
+                {/* 인쇄에서 "해설 보기" 토글 줄은 숨긴다. 단, 세트문제(카드에 해설
+                    여러 개)는 이 줄이 몇 번 해설인지 알려주는 유일한 라벨이라
+                    남기고, 토글 화살표만 뺀다. */}
+                <summary
+                  className={`flex cursor-pointer list-none items-center gap-1 text-sm font-medium text-blue-600 hover:underline [&::-webkit-details-marker]:hidden dark:text-blue-400 ${
+                    rows.length > 1
+                      ? "print:text-xs print:text-zinc-800"
+                      : "print:hidden"
+                  }`}
+                >
                   <ChevronRight
                     size={14}
-                    className="shrink-0 transition-transform group-open:rotate-90"
+                    className="shrink-0 transition-transform group-open:rotate-90 print:hidden"
                   />
-                  {rows.length > 1 ? `${row.questionNumber}번 해설 보기` : "해설 보기"}
+                  {rows.length > 1 ? (
+                    <>
+                      <span className="print:hidden">{row.questionNumber}번 해설 보기</span>
+                      <span className="hidden print:inline">{row.questionNumber}번 해설</span>
+                    </>
+                  ) : (
+                    "해설 보기"
+                  )}
                 </summary>
                 <ExplanationBody
                   explanation={row.explanation!}
