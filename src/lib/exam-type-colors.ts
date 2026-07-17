@@ -40,20 +40,21 @@ export function examTypeTabColor(name: string) {
 }
 
 // 시험 카드 배지: 급수(level) 배지처럼 배경을 꽉 채운 스타일. 흰 글자 대비가
-// 낮은 색상(cyan/amber/sky/lime/teal)은 600대로 한 단계 진하게 써서 가독성을 맞춘다.
+// WCAG AA 기준(4.5:1) 이상이 되는 최소 명도 단계로 각 색상 계산해서 골랐다
+// (예: emerald-500은 2.54:1로 미달이라 emerald-700=5.48:1을 씀).
 const EXAM_TYPE_FILLED_COLORS: Record<string, string> = {
-  국가직: "bg-indigo-500 text-white",
-  지방직: "bg-emerald-500 text-white",
-  지역인재: "bg-pink-500 text-white",
-  서울시: "bg-cyan-600 text-white",
-  법원직: "bg-amber-600 text-white",
-  경찰: "bg-slate-600 text-white",
-  해경: "bg-sky-600 text-white",
-  소방: "bg-red-500 text-white",
-  계리직: "bg-lime-600 text-white",
-  기상직: "bg-teal-600 text-white",
-  간호직: "bg-fuchsia-500 text-white",
-  국회직: "bg-violet-500 text-white",
+  국가직: "bg-indigo-600 text-white", // 6.29:1
+  지방직: "bg-emerald-700 text-white", // 5.48:1
+  지역인재: "bg-pink-600 text-white", // 4.60:1
+  서울시: "bg-cyan-700 text-white", // 5.36:1
+  법원직: "bg-amber-700 text-white", // 5.02:1
+  경찰: "bg-slate-600 text-white", // 7.58:1
+  해경: "bg-sky-700 text-white", // 5.93:1
+  소방: "bg-red-600 text-white", // 4.83:1
+  계리직: "bg-lime-700 text-white", // 4.99:1
+  기상직: "bg-teal-700 text-white", // 5.47:1
+  간호직: "bg-fuchsia-600 text-white", // 4.71:1
+  국회직: "bg-violet-600 text-white", // 5.70:1
 };
 
 export function examTypeFilledColor(name: string) {
