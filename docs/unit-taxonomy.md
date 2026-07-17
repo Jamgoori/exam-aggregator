@@ -72,7 +72,8 @@ AI 약점진단·약점 히트맵·맞춤 모의고사의 공통 전제인 문�
 ## 다음 단계
 
 1. 소유자 리뷰: 이 설계 + `scripts/unit-taxonomy.json` 태그 목록 확정.
-2. 경로 A 스크립트 작성(`unit_tag IS NULL` + 해설 텍스트 있는 문항 대상).
+2. ~~경로 A 스크립트 작성~~ 완료 — 실행 방법은 `docs/tagging-pipeline.md` 참조
+   (next-tagging-chunk / save-unit-tags / tag-stats + Sonnet 분류 프롬프트).
 3. 표본 이중 태깅 + 분포 검사 → 임계값 통과 후 전량 실행.
 4. 해설 루틴 프롬프트에 unit_tag 저장 지시 추가(경로 B).
 5. 히트맵·맞춤 모의고사 UI 개발 시작.
