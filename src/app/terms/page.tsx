@@ -1,0 +1,180 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "이용약관",
+};
+
+// 법적 고지 문서라 정적 페이지로 둔다. 서비스 기능(소셜 로그인 전용, CBT, 오답노트,
+// AI 해설·진단, 댓글, PDF 다운로드)이 크게 바뀌면 이 문서도 함께 갱신할 것.
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-lg font-semibold">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+export default function TermsPage() {
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 py-12 text-sm leading-6 text-zinc-700 dark:text-zinc-300">
+      <div>
+        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">이용약관</h1>
+        <p className="mt-2 text-zinc-500 dark:text-zinc-500">
+          이 약관은 공모아(이하 &ldquo;서비스&rdquo;)의 이용 조건과 운영자·이용자의 권리와 의무를
+          정합니다.
+        </p>
+      </div>
+
+      <Section title="제1조 (목적과 서비스의 내용)">
+        <p>서비스는 공무원 시험 준비를 돕기 위해 다음 기능을 제공합니다.</p>
+        <ul className="list-disc pl-5">
+          <li>공무원 기출문제·정답 자료의 열람과 PDF 다운로드</li>
+          <li>CBT 방식의 온라인 문제 풀이와 채점, 응시 기록 관리</li>
+          <li>오답노트, 복습, 문항 메모, 북마크 등 학습 관리 기능</li>
+          <li>AI가 생성한 문항 해설과 약점 진단 리포트</li>
+          <li>문제지에 대한 댓글과 난이도 평가</li>
+        </ul>
+      </Section>
+
+      <Section title="제2조 (약관의 효력과 변경)">
+        <ul className="list-disc pl-5">
+          <li>이 약관은 서비스 화면에 게시함으로써 효력이 생깁니다.</li>
+          <li>
+            운영자는 관련 법령을 위반하지 않는 범위에서 약관을 변경할 수 있으며, 변경 시
+            적용일 7일 전(이용자에게 불리한 변경은 30일 전)부터 서비스 내 공지로 알립니다.
+          </li>
+          <li>변경 적용일 이후 서비스를 계속 이용하면 변경 약관에 동의한 것으로 봅니다.</li>
+        </ul>
+      </Section>
+
+      <Section title="제3조 (회원가입과 계정)">
+        <ul className="list-disc pl-5">
+          <li>
+            회원가입은 구글 또는 카카오 계정 로그인으로만 할 수 있으며, 첫 로그인 시 가입이
+            함께 이뤄집니다. 로그인하면 이 약관과{" "}
+            <Link
+              href="/privacy"
+              className="text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+            >
+              개인정보처리방침
+            </Link>
+            에 동의한 것으로 봅니다.
+          </li>
+          <li>만 14세 미만은 서비스에 가입할 수 없습니다.</li>
+          <li>
+            닉네임은 다른 이용자에게 공개되므로 운영진 사칭, 비속어, 타인의 권리를 침해하는
+            표현을 쓸 수 없으며, 이에 해당하면 등록이 제한되거나 변경이 요구될 수 있습니다.
+          </li>
+          <li>
+            계정은 본인만 이용해야 하며 타인에게 양도·대여할 수 없습니다. 소셜 계정 자체의
+            보안(비밀번호 등) 관리는 해당 소셜 서비스와 이용자의 책임입니다.
+          </li>
+          <li>회원 탈퇴는 개인정보처리방침에 안내된 연락처로 요청할 수 있습니다.</li>
+        </ul>
+      </Section>
+
+      <Section title="제4조 (자료와 콘텐츠의 저작권)">
+        <ul className="list-disc pl-5">
+          <li>
+            서비스가 제공하는 기출문제·정답 자료는 출제 기관이 공개한 자료를 정리한
+            것입니다. 자료 자체의 권리는 해당 출제 기관에 있습니다.
+          </li>
+          <li>
+            서비스의 화면 구성, 편집물, AI 해설·진단 리포트 등 서비스가 만든 콘텐츠는
+            개인 학습 목적으로만 이용할 수 있으며, 영리 목적의 복제·재배포·2차 제공은
+            금지됩니다.
+          </li>
+          <li>이용자가 작성한 댓글의 책임과 권리는 작성자에게 있습니다.</li>
+        </ul>
+      </Section>
+
+      <Section title="제5조 (AI 생성 콘텐츠에 대한 고지)">
+        <ul className="list-disc pl-5">
+          <li>
+            문항 해설과 약점 진단 리포트는 AI가 생성한 것으로, 사실과 다르거나 불완전한
+            내용이 포함될 수 있습니다. 학습 참고용으로만 활용해야 하며, 최종 확인은 공식
+            해설·법령·교재로 해야 합니다.
+          </li>
+          <li>
+            법령 관련 문항의 해설은 현행 법령 기준으로 작성되며 출제 당시와 다를 수
+            있습니다. 정답 번호는 출제 당시 공식 발표를 따릅니다.
+          </li>
+          <li>
+            운영자는 AI 생성 콘텐츠의 정확성·완전성을 보증하지 않으며, 이를 신뢰하여 발생한
+            결과(시험 결과 등)에 대해 고의·중과실이 없는 한 책임을 지지 않습니다.
+          </li>
+        </ul>
+      </Section>
+
+      <Section title="제6조 (이용자의 금지 행위)">
+        <ul className="list-disc pl-5">
+          <li>타인 사칭, 욕설·비방·차별·음란물 등 부적절한 게시물 작성</li>
+          <li>도배 등 서비스의 정상 운영을 방해하는 행위</li>
+          <li>자동화 수단(크롤러 등)을 이용한 대량 수집·대량 다운로드</li>
+          <li>서비스의 취약점을 이용한 부정 접근, 권한 없는 데이터 접근 시도</li>
+          <li>기타 관련 법령이나 이 약관을 위반하는 행위</li>
+        </ul>
+      </Section>
+
+      <Section title="제7조 (게시물 관리)">
+        <ul className="list-disc pl-5">
+          <li>
+            제6조를 위반하거나 타인의 권리를 침해하는 게시물은 사전 통지 없이 삭제될 수
+            있습니다.
+          </li>
+          <li>
+            비회원 댓글은 작성 시 설정한 비밀번호로 본인이 수정·삭제할 수 있습니다.
+          </li>
+        </ul>
+      </Section>
+
+      <Section title="제8조 (서비스의 변경과 중단)">
+        <ul className="list-disc pl-5">
+          <li>
+            운영자는 서비스의 내용을 변경하거나 점검·장애·불가피한 사정으로 서비스 제공을
+            일시 중단할 수 있습니다. 중요한 변경·중단은 사전에 공지합니다.
+          </li>
+          <li>
+            현재 서비스는 무료로 제공됩니다. 유료 기능을 도입하는 경우 결제 조건 등을 담은
+            약관을 사전에 공지하고 동의를 받습니다.
+          </li>
+        </ul>
+      </Section>
+
+      <Section title="제9조 (이용 제한)">
+        <p>
+          이용자가 이 약관을 위반한 경우 운영자는 위반 정도에 따라 경고, 게시물 삭제, 이용
+          제한, 탈퇴 처리를 할 수 있습니다. 조치에 이의가 있으면 개인정보처리방침의
+          연락처로 소명할 수 있습니다.
+        </p>
+      </Section>
+
+      <Section title="제10조 (면책)">
+        <ul className="list-disc pl-5">
+          <li>
+            운영자는 자료의 오탈자·누락, 출제 기관의 정답 정정 미반영 등으로 발생한 손해에
+            대해 고의·중과실이 없는 한 책임을 지지 않습니다.
+          </li>
+          <li>
+            천재지변, 통신 장애, 위탁 인프라(호스팅 등)의 장애 등 운영자가 통제할 수 없는
+            사유로 인한 서비스 중단에 대해 책임을 지지 않습니다.
+          </li>
+          <li>이용자 간 또는 이용자와 제3자 간 분쟁에 운영자는 개입하지 않습니다.</li>
+        </ul>
+      </Section>
+
+      <Section title="제11조 (준거법과 관할)">
+        <p>
+          이 약관은 대한민국 법령에 따라 해석되며, 서비스 이용과 관련한 분쟁은 민사소송법에
+          따른 관할 법원에 제기합니다.
+        </p>
+      </Section>
+
+      <Section title="부칙">
+        <p>이 약관은 2026년 7월 17일부터 적용됩니다.</p>
+      </Section>
+    </div>
+  );
+}

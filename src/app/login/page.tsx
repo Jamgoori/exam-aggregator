@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { signInWithGoogle, signInWithKakao } from "@/app/actions";
 import { GoogleIcon } from "@/components/google-icon";
 import { KakaoIcon } from "@/components/kakao-icon";
@@ -48,8 +49,21 @@ export default async function LoginPage({
       {message && <p className="text-sm text-green-600 dark:text-green-400">{message}</p>}
 
       <p className="text-xs text-zinc-400 dark:text-zinc-500">
-        로그인은 회원가입을 겸하며, 계정 관리(비밀번호·복구)는 구글/카카오 계정 설정을
-        따라요.
+        로그인하면{" "}
+        <Link
+          href="/terms"
+          className="underline underline-offset-2 hover:text-zinc-600 dark:hover:text-zinc-300"
+        >
+          이용약관
+        </Link>
+        과{" "}
+        <Link
+          href="/privacy"
+          className="underline underline-offset-2 hover:text-zinc-600 dark:hover:text-zinc-300"
+        >
+          개인정보처리방침
+        </Link>
+        에 동의한 것으로 간주돼요. 계정 관리(비밀번호·복구)는 구글/카카오 계정 설정을 따라요.
       </p>
     </div>
   );

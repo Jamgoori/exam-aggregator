@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { GoogleAnalytics } from "@next/third-parties/google";
 import { SiteHeaderGate } from "@/components/site-header-gate";
+import { SiteFooter } from "@/components/site-footer";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
 import { createClient } from "@/lib/supabase/server";
 import "./globals.css";
@@ -59,6 +60,7 @@ export default async function RootLayout({
       <body className="min-h-full">
         <SiteHeaderGate user={headerUser} />
         {children}
+        <SiteFooter />
         <Analytics />
         {process.env.NEXT_PUBLIC_GA_ID && (
           <GoogleAnalytics gaId={process.env.NEXT_PUBLIC_GA_ID} />
