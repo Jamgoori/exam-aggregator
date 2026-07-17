@@ -53,6 +53,12 @@ export async function getPaperDetailData(
   const userId = claimsData?.claims.sub ?? null;
   const loggedIn = !!userId;
 
+  // 정답표는 (시험종류+연도+급수+회차)당 1장이 원칙이고 track은 대개 null이다 —
+  // 법원직처럼 정답표 한 장에 전 직류가 실려 있기 때문. track 붙은 문제지(서기보 등)
+  // 에서 track 일치만 요구하면 정답표를 못 찾아 "정답 열기/다운로드" 버튼이 아예
+  // 사라진다(2026-07-17 실측, docs/agents/answer-keys-tracks.md의 세 번째 track 버그).
+  // 그래서 track 조건 없이 다 받아 exact track 정답표(근로감독 등 특수모집 전용)를
+  // 우선하고, 없으면 공용(track null) 정답표로 폴백한다.
   let answerKeyQuery = supabase
     .from("answer_keys")
     .select("*")
@@ -62,9 +68,6 @@ export async function getPaperDetailData(
   answerKeyQuery = paper.level
     ? answerKeyQuery.eq("level", paper.level)
     : answerKeyQuery.is("level", null);
-  answerKeyQuery = paper.track
-    ? answerKeyQuery.eq("track", paper.track)
-    : answerKeyQuery.is("track", null);
 
   // "같은 과목 목록"은 미리보기 성격이라 최근 RELATED_PAPERS_LIMIT개만 보여주고,
   // 전체 목록은 /subjects/[slug] 페이지(페이지네이션 적용됨)로 넘긴다.
@@ -85,7 +88,7 @@ export async function getPaperDetailData(
   const [
     { data: comments },
     { data: ratings },
-    { data: answerKey },
+    { data: answerKeyRows },
     { data: hasCbtAnswers },
     { data: roundAverageRows },
     { data: subjectPapers },
@@ -104,7 +107,7 @@ export async function getPaperDetailData(
       .eq("paper_id", paper.id)
       .order("created_at", { ascending: true }),
     supabase.from("difficulty_ratings").select("score").eq("paper_id", paper.id),
-    answerKeyQuery.maybeSingle(),
+    answerKeyQuery,
     supabase.rpc("has_cbt_answers", { target_paper_id: paper.id }),
     supabase.rpc("avg_score_by_round", { target_paper_id: paper.id }),
     subjectPapersQuery
@@ -253,7 +256,12 @@ export async function getPaperDetailData(
   const { data: paperFileUrl } = supabase.storage
     .from("exam-papers")
     .getPublicUrl(paper.file_path);
-  const typedAnswerKey = answerKey as AnswerKey | null;
+  // exact track 정답표 우선, 없으면 공용(track null) 정답표.
+  const answerKeys = (answerKeyRows ?? []) as AnswerKey[];
+  const typedAnswerKey =
+    answerKeys.find((k) => k.track != null && k.track === paper.track) ??
+    answerKeys.find((k) => k.track == null) ??
+    null;
   const answerKeyFileUrl = typedAnswerKey
     ? supabase.storage.from("exam-papers").getPublicUrl(typedAnswerKey.file_path)
         .data.publicUrl
