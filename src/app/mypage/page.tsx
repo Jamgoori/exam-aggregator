@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { BookOpenCheck, ChevronRight, Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
+import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { WrongNoteTodayCard } from "@/components/wrong-note-today-card";
 import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
@@ -18,7 +19,7 @@ import {
   type WrongNoteAttemptRow,
   type WrongNoteSubjectGroup,
 } from "@/lib/wrong-notes";
-import type { ExamPaper } from "@/lib/supabase/types";
+import type { ExamPaper, Subject } from "@/lib/supabase/types";
 
 const TAB_KEYS: MyPageTabKey[] = ["bookmarks", "history", "wrong-notes"];
 
@@ -74,14 +75,19 @@ export default async function MyPage({
 
   const initialTab: MyPageTabKey = TAB_KEYS.includes(tab as MyPageTabKey)
     ? (tab as MyPageTabKey)
-    : "bookmarks";
+    : "wrong-notes";
 
   const nickname =
     (user.user_metadata?.nickname as string | undefined) ??
     user.email?.split("@")[0] ??
     "회원";
 
-  const [{ data: bookmarkRows }, { data: attemptRows }] = await Promise.all([
+  const [
+    { data: bookmarkRows },
+    { data: attemptRows },
+    { data: subjectRows },
+    { data: subjectBookmarkRows },
+  ] = await Promise.all([
     supabase
       .from("bookmarks")
       .select("id, created_at, exam_papers(*, subjects(*), exam_types(*))")
@@ -94,7 +100,14 @@ export default async function MyPage({
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),
+    supabase.from("subjects").select("*").order("name"),
+    supabase.from("subject_bookmarks").select("subject_id").eq("user_id", user.id),
   ]);
+
+  const allSubjects = (subjectRows ?? []) as Subject[];
+  const bookmarkedSubjectIds = (subjectBookmarkRows ?? []).map(
+    (r) => r.subject_id as string,
+  );
 
   const bookmarkedPapers = (
     (bookmarkRows ?? []) as unknown as { exam_papers: ExamPaper | null }[]
@@ -165,7 +178,7 @@ export default async function MyPage({
   const diagnosisHint = diagEligibility?.hint ?? null;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-12">
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 pb-12 pt-6 sm:pt-8">
       <div>
         <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">
           ← 홈으로
@@ -220,6 +233,8 @@ export default async function MyPage({
             papers={bookmarkedPapers}
             attemptsByPaper={attemptsByPaper}
             cbtAvailability={cbtAvailability}
+            allSubjects={allSubjects}
+            bookmarkedSubjectIds={bookmarkedSubjectIds}
           />
         }
         history={
@@ -241,19 +256,27 @@ export default async function MyPage({
   );
 }
 
-// "즐겨찾기" 탭: 북마크한 문제지 카드 그리드.
+// "즐겨찾기" 탭: 즐겨찾는 과목 편집 영역 + 북마크한 문제지 카드 그리드.
 function BookmarksTab({
   papers,
   attemptsByPaper,
   cbtAvailability,
+  allSubjects,
+  bookmarkedSubjectIds,
 }: {
   papers: ExamPaper[];
   attemptsByPaper: Map<string, MyAttempt[]>;
   cbtAvailability: Set<string>;
+  allSubjects: Subject[];
+  bookmarkedSubjectIds: string[];
 }) {
   return (
     <section className="flex flex-col gap-4">
-      <h2 className="flex items-center gap-2 text-lg font-semibold">
+      <FavoriteSubjectsEditor
+        subjects={allSubjects}
+        initialBookmarkedIds={bookmarkedSubjectIds}
+      />
+      <h2 className="mt-2 flex items-center gap-2 text-lg font-semibold">
         <Star size={18} className="text-amber-400" />
         즐겨찾기한 문제 ({papers.length})
       </h2>

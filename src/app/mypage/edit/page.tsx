@@ -33,7 +33,7 @@ export default async function EditAccountPage({
     user.user_metadata?.default_cbt_view_mode === "full" ? "full" : "single";
 
   return (
-    <div className="mx-auto flex w-full max-w-sm flex-col gap-8 px-4 py-12">
+    <div className="mx-auto flex w-full max-w-sm flex-col gap-8 px-4 pb-12 pt-6 sm:pt-8">
       <div>
         <Link href="/mypage" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">
           ← 마이페이지

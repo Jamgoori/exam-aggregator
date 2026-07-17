@@ -121,7 +121,7 @@ function SubjectWrongNoteShell({
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-12">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pb-12 pt-6 sm:pt-8">
       <div className="flex flex-col gap-3">
         <Link
           href="/mypage?tab=wrong-notes"

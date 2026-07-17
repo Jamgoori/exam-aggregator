@@ -3,9 +3,9 @@
 import { useState, type ReactNode } from "react";
 
 const TABS = [
-  { key: "bookmarks", label: "즐겨찾기" },
-  { key: "history", label: "내 시험 기록" },
   { key: "wrong-notes", label: "오답노트" },
+  { key: "history", label: "내 시험 기록" },
+  { key: "bookmarks", label: "즐겨찾기" },
 ] as const;
 
 export type MyPageTabKey = (typeof TABS)[number]["key"];
@@ -45,14 +45,14 @@ export function MyPageTabs({
         ))}
       </div>
 
-      <div className={activeTab === "bookmarks" ? "contents" : "hidden"}>
-        {bookmarks}
+      <div className={activeTab === "wrong-notes" ? "contents" : "hidden"}>
+        {wrongNotes}
       </div>
       <div className={activeTab === "history" ? "contents" : "hidden"}>
         {history}
       </div>
-      <div className={activeTab === "wrong-notes" ? "contents" : "hidden"}>
-        {wrongNotes}
+      <div className={activeTab === "bookmarks" ? "contents" : "hidden"}>
+        {bookmarks}
       </div>
     </>
   );

@@ -38,7 +38,7 @@ export default async function DiagnosisPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-10">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pb-10 pt-6 sm:pt-8">
       <div className="flex flex-col gap-2">
         <Link
           href="/mypage?tab=wrong-notes"

@@ -37,6 +37,7 @@ export async function toggleSubjectBookmark(
     if (error) return { error: "즐겨찾기 해제에 실패했어요." };
 
     revalidatePath("/");
+    revalidatePath("/mypage");
     return { success: true, bookmarked: false };
   }
 
@@ -46,5 +47,6 @@ export async function toggleSubjectBookmark(
   if (error) return { error: "즐겨찾기에 실패했어요." };
 
   revalidatePath("/");
+  revalidatePath("/mypage");
   return { success: true, bookmarked: true };
 }

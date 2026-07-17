@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
 import { requestDiagnosis } from "@/app/mypage/actions";
 
 export type DiagnosisBannerState = "ready" | "pending" | "eligible" | "locked";
@@ -25,16 +24,10 @@ export function DiagnosisBanner({
 
   const shell =
     "flex items-center gap-3 rounded-2xl border px-4 py-3.5 border-violet-200 bg-violet-50 dark:border-violet-900/50 dark:bg-violet-950/20";
-  const icon = (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white">
-      <Sparkles size={17} />
-    </span>
-  );
 
   if (state === "locked") {
     return (
       <div className={shell}>
-        {icon}
         <div className="min-w-0">
           <p className="text-sm font-bold text-violet-900 dark:text-violet-200">
             AI 약점 진단
@@ -53,7 +46,6 @@ export function DiagnosisBanner({
         href="/mypage/diagnosis"
         className={`${shell} transition-colors hover:bg-violet-100 dark:hover:bg-violet-950/40`}
       >
-        {icon}
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1.5 text-sm font-bold text-violet-900 dark:text-violet-200">
             오늘의 약점 진단이 준비됐어요
@@ -70,7 +62,6 @@ export function DiagnosisBanner({
   if (state === "pending") {
     return (
       <div className={shell}>
-        {icon}
         <div className="min-w-0">
           <p className="text-sm font-bold text-violet-900 dark:text-violet-200">
             진단을 준비하고 있어요
@@ -99,12 +90,11 @@ export function DiagnosisBanner({
 
   return (
     <div className={`${shell} flex-wrap`}>
-      {icon}
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 text-sm font-bold text-violet-900 dark:text-violet-200">
           AI 약점 진단 받기
           <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-            하루 1회
+            일 1회
           </span>
         </p>
         <p className="text-xs text-violet-700/80 dark:text-violet-300/70">

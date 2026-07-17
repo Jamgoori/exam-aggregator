@@ -8,7 +8,6 @@ import { createReviewAll } from "@/app/mypage/wrong-notes/actions";
 
 // 마이페이지 최상단 "오늘 할 일" 카드. 전 과목 미극복 오답을 한 번에 다시 푼다.
 // (복습 대상 수 = 미극복 수와 항상 일치 — 채점 후 극복한 만큼만 줄어든다.)
-// 극복한 문항까지 다시 풀고 싶으면 하단 링크로.
 export function WrongNoteTodayCard({
   unresolvedTotal,
   topSubjectSlug,
@@ -65,10 +64,8 @@ export function WrongNoteTodayCard({
   }
 
   return (
-    <div className="rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 p-5 text-white">
-      <p className="flex items-center gap-1 text-xs font-semibold opacity-85">
-        <RotateCcw size={13} /> 오늘 할 일
-      </p>
+    <div className="rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-500 p-5 text-white">
+      <p className="text-xs font-semibold opacity-85">오늘 할 일</p>
       <h3 className="mt-1.5 text-lg font-bold">복습할 문항 {unresolvedTotal}개가 기다려요</h3>
       <p className="mt-1 text-sm opacity-90">
         아직 못 넘긴 오답이에요. 과목 상관없이 한 번에 섞어 풀어 극복해요.
@@ -92,14 +89,6 @@ export function WrongNoteTodayCard({
           </Link>
         )}
       </div>
-      <button
-        type="button"
-        onClick={() => launch({ includeResolved: true })}
-        disabled={pending}
-        className="mt-2.5 text-xs font-medium text-blue-100 underline underline-offset-2 hover:text-white disabled:opacity-60"
-      >
-        극복한 문항까지 전체 다시 풀기
-      </button>
       {error && <p className="mt-2 text-xs text-red-100">{error}</p>}
     </div>
   );

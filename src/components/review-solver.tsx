@@ -1,18 +1,33 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Eraser,
+  Hand,
+  PenLine,
+  RotateCcw,
+} from "lucide-react";
 import {
   submitReviewSession,
   createReviewFromWrong,
 } from "@/app/mypage/wrong-notes/actions";
+import { CbtDrawingToolbar, PEN_COLORS } from "@/components/cbt-drawing-toolbar";
+import {
+  attachDrawing,
+  DEFAULT_PEN_WIDTH,
+  type DrawTool,
+} from "@/components/pdf-canvas-viewer";
 import type { ReviewSessionView } from "@/lib/review-session";
 
 // 섞어풀기 풀이 화면. 문제지 경계 없이 섞인 오답을 순서대로 풀고 채점한다. 풀이
 // 중에는 출처(문제지·번호)와 정답을 숨겨 힌트가 되지 않게 하고, 채점 후에만 공개한다.
-// CBT 솔버(PDF·필기·최소응시시간)와 달리 순수 문항 리스트라 가볍게 따로 뒀다.
+// CBT 솔버(PDF·최소응시시간)와 달리 순수 문항 리스트라 가볍게 따로 뒀지만, 필기
+// (펜·지우개·색상·굵기)는 CBT 문제별 풀기와 같은 캔버스 방식을 그대로 쓴다.
 export function ReviewSolver({
   initial,
   backHref,
@@ -32,6 +47,80 @@ export function ReviewSolver({
 
   const submitted = view.submitted;
   const answeredCount = answers.filter((a) => a !== null).length;
+
+  // 필기 도구 상태. CBT 문제별 풀기(SingleQuestionView)와 같은 attachDrawing 캔버스를
+  // 문제 카드 위에 덮는다. 최신 값은 ref로 넘겨 캔버스 이벤트 핸들러가 항상 참조한다.
+  const [tool, setTool] = useState<DrawTool>("move");
+  const [penColor, setPenColor] = useState(PEN_COLORS[0]);
+  const [penWidth, setPenWidth] = useState(DEFAULT_PEN_WIDTH);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const toolRef = useRef(tool);
+  const penColorRef = useRef(penColor);
+  const penWidthRef = useRef(penWidth);
+  const zoomRef = useRef(1);
+
+  useEffect(() => {
+    toolRef.current = tool;
+    if (canvasRef.current) {
+      canvasRef.current.style.pointerEvents = tool === "move" ? "none" : "auto";
+    }
+  }, [tool]);
+
+  useEffect(() => {
+    penColorRef.current = penColor;
+  }, [penColor]);
+
+  useEffect(() => {
+    penWidthRef.current = penWidth;
+  }, [penWidth]);
+
+  function clearDrawing() {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  // 문제 이미지 아래 남는 빈 공간까지 필기 캔버스로 덮는다. 캔버스 크기는 문제
+  // 영역(이미지 높이 또는 화면에 보이는 높이 중 더 큰 값)에 맞춰 리사이즈 옵저버로
+  // 계속 맞춰주고, 내부 픽셀 버퍼는 dpr배로 키워 고해상도 화면에서도 선명하게 그린다.
+  useEffect(() => {
+    if (submitted) return;
+    const scrollArea = scrollAreaRef.current;
+    const content = contentRef.current;
+    const canvas = canvasRef.current;
+    if (!scrollArea || !content || !canvas) return;
+
+    attachDrawing(canvas, toolRef, penColorRef, zoomRef, penWidthRef);
+
+    function syncSize() {
+      const width = content!.clientWidth;
+      const height = Math.max(content!.clientHeight, scrollArea!.clientHeight);
+      const dpr = window.devicePixelRatio || 1;
+      const pixelWidth = Math.round(width * dpr);
+      const pixelHeight = Math.round(height * dpr);
+      if (canvas!.width !== pixelWidth || canvas!.height !== pixelHeight) {
+        canvas!.width = pixelWidth;
+        canvas!.height = pixelHeight;
+        canvas!.style.width = `${width}px`;
+        canvas!.style.height = `${height}px`;
+      }
+    }
+
+    syncSize();
+    const observer = new ResizeObserver(syncSize);
+    observer.observe(scrollArea);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [submitted]);
+
+  // 문항을 넘기면 이미지가 통째로 바뀌어 좌표가 더 이상 의미 없으므로 필기를 지운다.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }, [index]);
 
   // 채점 전 답은 클라이언트 상태로만 있어 페이지를 벗어나면 사라진다. 새로고침·닫기는
   // beforeunload로, 뒤로가기 링크는 클릭 확인으로 막는다(하나라도 풀었을 때만).
@@ -105,10 +194,66 @@ export function ReviewSolver({
         <h1 className="truncate text-sm font-medium text-zinc-700 dark:text-zinc-300">
           섞어풀기{view.subjectName ? ` · ${view.subjectName}` : ""}
         </h1>
-        <span className="shrink-0 text-sm font-semibold tabular-nums text-zinc-500 dark:text-zinc-400">
-          {index + 1} / {view.total}
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">
+            <button
+              type="button"
+              onClick={() => setTool("move")}
+              aria-label="화면 이동"
+              aria-pressed={tool === "move"}
+              className={`flex items-center justify-center rounded-md p-1.5 ${
+                tool === "move"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
+              }`}
+            >
+              <Hand size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTool("pen")}
+              aria-label="펜"
+              aria-pressed={tool === "pen"}
+              className={`flex items-center justify-center rounded-md p-1.5 ${
+                tool === "pen"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
+              }`}
+            >
+              <PenLine size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTool("eraser")}
+              aria-label="지우개"
+              aria-pressed={tool === "eraser"}
+              className={`flex items-center justify-center rounded-md p-1.5 ${
+                tool === "eraser"
+                  ? "bg-blue-600 text-white"
+                  : "text-zinc-600 hover:bg-zinc-200 dark:text-zinc-400 dark:hover:bg-zinc-700"
+              }`}
+            >
+              <Eraser size={18} />
+            </button>
+          </div>
+          <span className="text-sm font-semibold tabular-nums text-zinc-500 dark:text-zinc-400">
+            {index + 1} / {view.total}
+          </span>
+        </div>
       </header>
+
+      {tool !== "move" && (
+        <div className="shrink-0 border-b border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
+          <CbtDrawingToolbar
+            tool={tool}
+            penColor={penColor}
+            onPenColorChange={setPenColor}
+            penWidth={penWidth}
+            onPenWidthChange={setPenWidth}
+            onClearDrawing={clearDrawing}
+          />
+        </div>
+      )}
 
       {/* 진행도 */}
       <div className="h-1 shrink-0 bg-zinc-100 dark:bg-zinc-800">
@@ -118,8 +263,14 @@ export function ReviewSolver({
         />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto bg-zinc-100 px-4 py-4 dark:bg-zinc-800">
-        <div className="mx-auto flex max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
+      <div
+        ref={scrollAreaRef}
+        className="min-h-0 flex-1 overflow-y-auto bg-zinc-100 px-4 py-4 dark:bg-zinc-800"
+      >
+        <div
+          ref={contentRef}
+          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+        >
           {item.images.length === 0 ? (
             <p className="py-24 text-center text-sm text-zinc-400 dark:text-zinc-600">
               이 문제의 이미지가 없어요.
@@ -130,6 +281,11 @@ export function ReviewSolver({
               <img key={i} src={src} alt={`문제 ${index + 1} 이미지 ${i + 1}`} className="w-full" />
             ))
           )}
+          <canvas
+            ref={canvasRef}
+            className="absolute left-0 top-0"
+            style={{ touchAction: "none" }}
+          />
         </div>
         <p className="mx-auto mt-3 max-w-2xl text-center text-xs text-zinc-400 dark:text-zinc-600">
           출처와 정답은 채점 후에 공개돼요.
