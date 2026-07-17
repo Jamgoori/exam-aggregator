@@ -816,6 +816,20 @@ alter table signup_attempts enable row level security;
 -- 클라이언트에서는 직접 못 건드리고, 서버 액션에서 service_role로만 기록/조회한다.
 -- (anon/authenticated에 아무 정책도 주지 않으므로 RLS가 모든 접근을 막는다.)
 
+-- 아이디(이메일) 찾기 / 비밀번호 재설정 요청의 IP 레이트리밋. signup_attempts와 같은
+-- 패턴이지만 액션별로 한도를 다르게 두기 위해 action 컬럼으로 구분한다.
+create table if not exists auth_attempts (
+  id uuid primary key default gen_random_uuid(),
+  ip_address text not null,
+  action text not null check (action in ('find_id', 'reset_password')),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists auth_attempts_ip_action_idx on auth_attempts(ip_address, action, created_at desc);
+
+alter table auth_attempts enable row level security;
+-- signup_attempts와 동일하게 anon/authenticated 정책 없이 서버 액션의 service_role만 접근.
+
 -- 초기 과목 데이터 (필요에 맞게 추가/수정하세요)
 insert into subjects (slug, name, display_order) values
   ('korean', '국어', 1),
@@ -898,23 +912,8 @@ $$;
 
 grant execute on function is_nickname_taken(text, uuid) to anon, authenticated;
 
--- 아이디 중복확인: 아이디는 실제로는 `${username}@users.invalid` 형태의 가짜 이메일로
--- auth.users에 저장되므로, 그 이메일이 이미 존재하는지로 판별한다. auth 스키마는
--- 클라이언트에서 직접 조회할 수 없어 위와 같은 이유로 security definer를 쓴다.
-create or replace function is_username_taken(check_username text)
-returns boolean
-language sql
-security definer
-set search_path = public
-stable
-as $$
-  select exists (
-    select 1 from auth.users
-    where email = lower(check_username) || '@users.invalid'
-  );
-$$;
-
-grant execute on function is_username_taken(text) to anon, authenticated;
+-- 로그인 아이디가 이메일 자체로 바뀌면서(가짜 도메인 트릭 폐기) 더 이상 쓰지 않는다.
+drop function if exists is_username_taken(text);
 
 -- 문제지 상세페이지 "내 기록보기"에서, 내 점수와 함께 "다른 사람들은 몇 회독에 평균
 -- 몇 점이었는지" 보여주기 위한 집계. cbt_attempts는 본인 것만 select 가능한 RLS라

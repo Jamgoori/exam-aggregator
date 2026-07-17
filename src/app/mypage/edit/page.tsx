@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import { updatePassword } from "@/app/actions";
 import { NicknameField } from "@/components/nickname-field";
 import { CbtViewModeField } from "@/components/cbt-view-mode-field";
-import { accountLabel } from "@/lib/username";
 
 export default async function EditAccountPage({
   searchParams,
@@ -31,7 +30,6 @@ export default async function EditAccountPage({
 
   // 구글 로그인 등 OAuth로만 가입한 계정은 비밀번호 자체가 없으므로 변경 폼을 보여주지 않는다.
   const hasPassword = user.app_metadata?.provider === "email";
-  const isUsernameAccount = Boolean(user.user_metadata?.username);
   // 계정에 명시적으로 잠긴 값이 없으면 사이트 기본값인 "문제별 풀기"를 보여준다
   // (CbtSolver의 시작 모드 결정 로직과 동일한 기본값).
   const defaultCbtViewMode =
@@ -112,8 +110,8 @@ export default async function EditAccountPage({
       )}
 
       <div className="flex flex-col gap-1 border-t border-zinc-100 pt-6 dark:border-zinc-700">
-        <span className="text-sm text-zinc-500 dark:text-zinc-500">{isUsernameAccount ? "아이디" : "이메일"}</span>
-        <span className="text-sm text-zinc-700 dark:text-zinc-300">{accountLabel(user)}</span>
+        <span className="text-sm text-zinc-500 dark:text-zinc-500">이메일</span>
+        <span className="text-sm text-zinc-700 dark:text-zinc-300">{user.email}</span>
       </div>
     </div>
   );
