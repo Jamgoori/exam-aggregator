@@ -57,8 +57,12 @@ async function main() {
   const examTypeById = new Map(examTypes.map((t) => [t.id, t.name]));
   const answeredPaperIds = new Set((answeredRows ?? []).map((r) => r.paper_id));
 
+  // track은 키에 넣지 않는다. 법원직 정답표(track null) 한 장이 법원사무/등기사무/
+  // 전산서기보/사서서기보 문제지 전체를 커버하기 때문 — 예전에는 track까지 키에 넣어
+  // track 붙은 문제지가 어느 정답표에도 안 묶였고, 미입력 106건이 "미처리 0건"으로
+  // 보고됐다 (2026-07-17 실측). track이 지정된 정답표(특수모집 전용)만 그 직류로 좁힌다.
   const keyOf = (r) =>
-    [r.exam_type_id, r.year, r.level ?? "", r.round ?? 1, r.track ?? ""].join("::");
+    [r.exam_type_id, r.year, r.level ?? "", r.round ?? 1].join("::");
 
   const papersByKey = new Map();
   for (const p of papers) {
@@ -69,7 +73,9 @@ async function main() {
 
   const pending = [];
   for (const ak of answerKeys) {
-    const matched = papersByKey.get(keyOf(ak)) ?? [];
+    const matched = (papersByKey.get(keyOf(ak)) ?? []).filter(
+      (p) => !ak.track || p.track === ak.track,
+    );
     const missing = matched.filter((p) => !answeredPaperIds.has(p.id));
     if (missing.length === 0) continue;
     pending.push({ answerKey: ak, matched, missing });
