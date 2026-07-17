@@ -111,7 +111,8 @@ export default async function PaperExplanationsPage({
           ← 문제지로
         </Link>
 
-        <div className="flex flex-wrap items-center gap-2">
+        {/* 급수/시험/과목 뱃지 줄 — 인쇄물에서는 제목에 다 있는 정보라 숨긴다. */}
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
           {paper.level && (
             <span className={`rounded px-2 py-0.5 text-xs font-bold ${levelColor(paper.level)}`}>
               {paper.level}
@@ -133,9 +134,13 @@ export default async function PaperExplanationsPage({
           )}
         </div>
 
-        <h1 className="text-2xl font-semibold leading-snug">{displayTitle} 해설</h1>
+        {/* 인쇄 시 대제목은 화면(24px=18pt)보다 4pt 작게. */}
+        <h1 className="text-2xl font-semibold leading-snug print:text-[14pt]">
+          {displayTitle} 해설
+        </h1>
 
-        <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-500 dark:text-zinc-500">
+        {/* "N문항 해설" 줄 — 버튼·범례 포함 전부 화면 전용이라 인쇄에서 통째로 숨긴다. */}
+        <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-500 print:hidden dark:text-zinc-500">
           <span>{questions.length}문항 해설</span>
           <span className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-500">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
