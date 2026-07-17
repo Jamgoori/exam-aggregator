@@ -11,11 +11,20 @@ Next.js + Supabase 기반. 관리자가 연도/시험/과목 라벨을 붙여 PD
    - 개인정보가 없는 공개 기출문제 PDF이므로 public으로 두고 URL로 바로 서빙
 4. Authentication > Users > Add user 에서 관리자 계정(본인 이메일/비밀번호) 1개 생성
    - 이 계정으로 `/admin/login`에 로그인해야 업로드 가능
-5. Authentication > Providers > Email > **Confirm email을 반드시 끈다**
-   - 일반 회원가입(`/signup`)은 이메일이 아니라 아이디로 가입하는데, Supabase Auth가 이메일
-     형식만 지원해서 내부적으로 `아이디@users.invalid` 같은 실존하지 않는 주소로 저장한다.
-     이 주소는 실제로 메일을 받을 수 없으므로, Confirm email이 켜져 있으면 가입 후 아무도
-     로그인할 수 없다.
+5. 일반 사용자 로그인은 소셜 로그인(구글·카카오) 전용이다 — 이메일/비밀번호 회원가입은
+   폐쇄됐고, Email provider는 4번의 관리자 계정 로그인(`/admin/login`)용으로만 남는다.
+   - Authentication > Providers > **Google**: Google Cloud Console에서 OAuth 클라이언트를
+     만들어 Client ID/Secret 등록. 승인된 리디렉션 URI에 Supabase가 보여주는
+     `https://<프로젝트>.supabase.co/auth/v1/callback`을 넣는다.
+   - Authentication > Providers > **Kakao**: Kakao Developers에서 앱 생성 후 REST API 키를
+     Client ID로, 보안 > Client Secret을 발급해 등록. 카카오 로그인 활성화 + Redirect URI에
+     위와 같은 callback 주소를 넣고, 동의항목에서 **카카오계정(이메일)** 을 설정한다
+     (이메일 동의가 없으면 계정에 이메일이 비어 저장될 수 있다).
+   - Authentication > URL Configuration > Redirect URLs에 사이트 주소(`http://localhost:3000/**`,
+     프로덕션 도메인)를 등록해야 로그인 후 돌아올 수 있다.
+   - 대시보드에 이메일 신규 가입 차단 옵션이 있으면 꺼두는 것을 권장 — 앱에는 가입 경로가
+     없지만 raw API로 이메일 가입을 시도하는 것까지 서버 수준에서 막힌다 (관리자 로그인은
+     sign-in이라 영향 없음).
 
 ## 2. 환경변수
 

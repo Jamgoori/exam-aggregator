@@ -4,15 +4,9 @@ import { useState, useTransition } from "react";
 import { checkNicknameAvailable, setNickname } from "@/app/actions";
 import { NICKNAME_MAX, NICKNAME_MIN } from "@/lib/nickname";
 
-export function NicknameField({
-  defaultValue = "",
-  // "edit": 중복확인은 확인만 하고, "적용" 버튼을 눌러야 실제로 저장됨 (마이페이지 수정 화면)
-  // "signup": 중복확인만 하고, 실제 저장은 회원가입 폼 제출 시 서버에서 한 번 더 검증함
-  mode,
-}: {
-  defaultValue?: string;
-  mode: "edit" | "signup";
-}) {
+// 마이페이지 수정 화면용: 중복확인은 확인만 하고, "적용" 버튼을 눌러야 실제로 저장된다.
+// (최초 닉네임은 소셜 로그인 후 /onboarding/nickname의 폼 제출로 받는다.)
+export function NicknameField({ defaultValue = "" }: { defaultValue?: string }) {
   const [value, setValue] = useState(defaultValue);
   const [status, setStatus] = useState<"idle" | "ok" | "bad">("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -79,16 +73,14 @@ export function NicknameField({
         >
           중복확인
         </button>
-        {mode === "edit" && (
-          <button
-            type="button"
-            onClick={handleApply}
-            disabled={isPending || !value}
-            className="flex-1 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            적용
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={handleApply}
+          disabled={isPending || !value}
+          className="flex-1 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >
+          적용
+        </button>
       </div>
       <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
         {NICKNAME_MIN}~{NICKNAME_MAX}자로 입력해주세요.
