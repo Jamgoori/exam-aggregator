@@ -1,9 +1,8 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { ChevronRight, MapPin, Monitor } from "lucide-react";
-import { subjectColor } from "@/lib/subject-colors";
 import { levelColor } from "@/lib/level-colors";
-import { examTypeColor } from "@/lib/exam-type-colors";
+import { examTypeFilledColor } from "@/lib/exam-type-colors";
 import { getRoundTier } from "@/lib/round-tier";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
@@ -30,7 +29,6 @@ export function ExamCard({
   // CBT 정답이 등록돼 있어 "바로 풀기"로 온라인 응시로 바로 넘어갈 수 있는지
   hasCbtAnswers?: boolean;
 }) {
-  const subject = paper.subjects;
   const examType = paper.exam_types;
   const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
   const roundTier = myRoundCount ? getRoundTier(myRoundCount) : null;
@@ -68,16 +66,9 @@ export function ExamCard({
           )}
           {examType && (
             <span
-              className={`rounded px-2 py-0.5 text-xs font-bold ${examTypeColor(examType.name)}`}
+              className={`rounded px-2 py-0.5 text-xs font-bold ${examTypeFilledColor(examType.name)}`}
             >
               {examType.name}
-            </span>
-          )}
-          {subject && (
-            <span
-              className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(subject.slug)}`}
-            >
-              {subject.name}
             </span>
           )}
           {!isCurrent && roundTier && (

@@ -38,3 +38,24 @@ const EXAM_TYPE_TAB_COLORS: Record<string, string> = {
 export function examTypeTabColor(name: string) {
   return EXAM_TYPE_TAB_COLORS[name] ?? "border border-zinc-400 bg-zinc-100 text-zinc-700";
 }
+
+// 시험 카드 배지: 급수(level) 배지처럼 배경을 꽉 채운 스타일. 흰 글자 대비가
+// 낮은 색상(cyan/amber/sky/lime/teal)은 600대로 한 단계 진하게 써서 가독성을 맞춘다.
+const EXAM_TYPE_FILLED_COLORS: Record<string, string> = {
+  국가직: "bg-indigo-500 text-white",
+  지방직: "bg-emerald-500 text-white",
+  지역인재: "bg-pink-500 text-white",
+  서울시: "bg-cyan-600 text-white",
+  법원직: "bg-amber-600 text-white",
+  경찰: "bg-slate-600 text-white",
+  해경: "bg-sky-600 text-white",
+  소방: "bg-red-500 text-white",
+  계리직: "bg-lime-600 text-white",
+  기상직: "bg-teal-600 text-white",
+  간호직: "bg-fuchsia-500 text-white",
+  국회직: "bg-violet-500 text-white",
+};
+
+export function examTypeFilledColor(name: string) {
+  return EXAM_TYPE_FILLED_COLORS[name] ?? "bg-zinc-500 text-white";
+}
