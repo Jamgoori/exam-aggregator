@@ -10,7 +10,7 @@ export function PrintButton() {
     <button
       type="button"
       onClick={() => window.print()}
-      className="flex shrink-0 items-center gap-1 rounded-full border border-zinc-200 px-3 py-1 text-xs font-medium text-zinc-600 hover:border-blue-300 hover:text-blue-600 print:hidden dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
+      className="flex shrink-0 items-center gap-1 rounded-full border border-zinc-200 px-3 py-1 text-xs font-medium text-zinc-600 hover:border-blue-300 hover:text-blue-600 print:hidden dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
     >
       <Printer size={13} />
       인쇄 / PDF 저장

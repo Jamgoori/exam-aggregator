@@ -33,7 +33,7 @@ export function OmrPanel({
 
   return (
     <div className={className}>
-      <div className="shrink-0 border-b border-zinc-100 px-4 py-2 dark:border-zinc-800">
+      <div className="shrink-0 border-b border-zinc-100 px-4 py-2 dark:border-zinc-700">
         <p className="text-sm text-zinc-500 dark:text-zinc-500">
           {answeredCount}/{totalQuestions} 문항 표기
         </p>
@@ -53,7 +53,7 @@ export function OmrPanel({
                     ? questionResult?.is_correct
                       ? "border-emerald-200 bg-emerald-50 dark:border-emerald-800/60 dark:bg-emerald-950/30"
                       : "border-red-200 bg-red-50 dark:border-red-800/60 dark:bg-red-950/30"
-                    : "border-zinc-200 dark:border-zinc-800"
+                    : "border-zinc-200 dark:border-zinc-700"
                 }`}
               >
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-white dark:bg-zinc-700">
@@ -84,7 +84,7 @@ export function OmrPanel({
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+      <div className="shrink-0 border-t border-zinc-100 px-4 py-3 dark:border-zinc-700">
         {error && <p className="mb-2 text-sm text-red-600 dark:text-red-400">{error}</p>}
         <button
           type="button"

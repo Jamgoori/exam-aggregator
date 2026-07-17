@@ -41,7 +41,7 @@ export function ExamCard({
   const className = `relative flex flex-col gap-3 rounded-xl border p-4 transition-colors ${
     isCurrent
       ? "border-2 border-blue-500 bg-blue-50/50 dark:bg-blue-950/20"
-      : "border-zinc-200 hover:border-blue-300 hover:shadow-sm dark:border-zinc-800 dark:hover:border-blue-700"
+      : "border-zinc-200 hover:border-blue-300 hover:shadow-sm dark:border-zinc-700 dark:hover:border-blue-700"
   }`;
 
   return (
@@ -118,7 +118,7 @@ export function ExamCard({
       <p className="font-medium leading-snug">{displayTitle}</p>
 
       {!isCurrent && (
-        <div className="mt-auto flex items-center border-t border-zinc-100 pt-3 text-xs dark:border-zinc-800">
+        <div className="mt-auto flex items-center border-t border-zinc-100 pt-3 text-xs dark:border-zinc-700">
           {hasCbtAnswers && (
             // 카드 전체 링크(상세페이지)와 다른 목적지로 가야 해서 z-10으로 그
             // 위에서 따로 클릭되게 한다. "자세히 보기"는 목적지가 같으므로

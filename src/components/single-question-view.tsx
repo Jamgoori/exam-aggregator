@@ -166,7 +166,7 @@ export function SingleQuestionView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2 dark:border-zinc-700 dark:bg-zinc-900">
         <div>
           <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
             {firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`}
@@ -195,7 +195,7 @@ export function SingleQuestionView({
       >
         <div
           ref={contentRef}
-          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
         >
           {images.length === 0 ? (
             <p className="pt-24 text-center text-sm text-zinc-400 dark:text-zinc-600">
@@ -220,7 +220,7 @@ export function SingleQuestionView({
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-zinc-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="shrink-0 border-t border-zinc-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-900">
         {error && (
           <p className="mx-auto mb-2 max-w-2xl text-center text-xs text-red-600 dark:text-red-400">
             {error}

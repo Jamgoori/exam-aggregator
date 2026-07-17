@@ -70,7 +70,7 @@ export default async function AnswersListPage({
         </button>
       </form>
 
-      <div className="flex flex-col divide-y divide-zinc-100 rounded border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
+      <div className="flex flex-col divide-y divide-zinc-100 rounded border border-zinc-200 dark:divide-zinc-700 dark:border-zinc-700">
         {(papers ?? []).length === 0 && (
           <p className="p-4 text-sm text-zinc-500 dark:text-zinc-500">문제지가 없습니다.</p>
         )}

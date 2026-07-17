@@ -75,7 +75,7 @@ export function DifficultyRating({
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+    <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
       {/* 로그인 여부와 상관없이 제목은 항상 그대로 보여줘서, 블러 처리된 영역이
           "난이도 평가 칸"이라는 걸 알 수 있게 한다. 평균/참여자 수는 집계 데이터라
           비로그인 사용자에게는 블러 영역 안에 숨긴다. */}

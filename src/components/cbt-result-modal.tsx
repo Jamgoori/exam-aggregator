@@ -23,7 +23,7 @@ export function CbtResultModal({
         <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">
           {result.score} / {result.totalQuestions}
         </p>
-        <div className="flex w-full divide-x divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800">
+        <div className="flex w-full divide-x divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-700 dark:border-zinc-700">
           <div className="flex-1 py-3">
             <p className="text-xs text-zinc-400 dark:text-zinc-500">정답률</p>
             <p className="mt-1 font-semibold text-zinc-700 dark:text-zinc-300">

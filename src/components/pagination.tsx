@@ -43,7 +43,7 @@ function PageBlock({
       <Link
         href={buildHref(basePath, params, Math.max(1, prevBlockPage))}
         aria-disabled={prevBlockPage < 1}
-        className={`flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 dark:border-zinc-800 dark:text-zinc-500 ${
+        className={`flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 dark:border-zinc-700 dark:text-zinc-500 ${
           prevBlockPage < 1
             ? "pointer-events-none opacity-40"
             : "hover:border-blue-300 hover:text-blue-600 dark:hover:border-blue-700 dark:hover:text-blue-400"
@@ -59,7 +59,7 @@ function PageBlock({
           className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium ${
             p === currentPage
               ? "bg-blue-600 text-white"
-              : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
+              : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
           }`}
         >
           {p}
@@ -69,7 +69,7 @@ function PageBlock({
       <Link
         href={buildHref(basePath, params, Math.min(totalPages, nextBlockPage))}
         aria-disabled={nextBlockPage > totalPages}
-        className={`flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 dark:border-zinc-800 dark:text-zinc-500 ${
+        className={`flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 dark:border-zinc-700 dark:text-zinc-500 ${
           nextBlockPage > totalPages
             ? "pointer-events-none opacity-40"
             : "hover:border-blue-300 hover:text-blue-600 dark:hover:border-blue-700 dark:hover:text-blue-400"

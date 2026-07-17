@@ -181,7 +181,7 @@ export function CbtDrawingToolbar({
                 >
                   <span
                     style={{ backgroundColor: customColor }}
-                    className="h-full w-full rounded-full border border-white dark:border-zinc-900"
+                    className="h-full w-full rounded-full border border-white dark:border-zinc-700"
                   />
                 </span>
               ) : (
@@ -277,7 +277,7 @@ export function CbtDrawingToolbar({
         {tool === "pen" && (
           <div
             ref={widthMenuRef}
-            className="relative shrink-0 border-l border-zinc-200 pl-2 dark:border-zinc-800"
+            className="relative shrink-0 border-l border-zinc-200 pl-2 dark:border-zinc-700"
           >
             <button
               type="button"

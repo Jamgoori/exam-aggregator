@@ -93,7 +93,7 @@ export function ReviewSolver({
 
   return (
     <div className="flex h-[100dvh] flex-col lg:h-[calc(100dvh-65px)]">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-900">
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-900">
         <Link
           href={backHref}
           aria-label="나가기"
@@ -119,7 +119,7 @@ export function ReviewSolver({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-zinc-100 px-4 py-4 dark:bg-zinc-800">
-        <div className="mx-auto flex max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+        <div className="mx-auto flex max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
           {item.images.length === 0 ? (
             <p className="py-24 text-center text-sm text-zinc-400 dark:text-zinc-600">
               이 문제의 이미지가 없어요.
@@ -136,7 +136,7 @@ export function ReviewSolver({
         </p>
       </div>
 
-      <div className="shrink-0 border-t border-zinc-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="shrink-0 border-t border-zinc-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-900">
         {error && (
           <p className="mx-auto mb-2 max-w-2xl text-center text-xs text-red-600 dark:text-red-400">
             {error}
@@ -306,9 +306,9 @@ function ReviewResult({
         {items.map((it) => (
           <div
             key={it.position}
-            className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+            className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
           >
-            <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-4 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-800/50">
+            <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50 px-4 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-800/50">
               <span className="font-medium text-zinc-600 dark:text-zinc-400">
                 {it.position + 1}번
                 {it.paperTitle ? ` · ${it.paperTitle} ${it.questionNumber}번` : ""}
@@ -331,7 +331,7 @@ function ReviewResult({
                 ))}
               </div>
             )}
-            <div className="flex flex-wrap items-center gap-1.5 border-t border-zinc-100 px-4 py-3 dark:border-zinc-800">
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-zinc-100 px-4 py-3 dark:border-zinc-700">
               {Array.from({ length: it.choiceCount }, (_, c) => c + 1).map((choice) => {
                 const isCorrect = it.correctChoice === choice;
                 const isMyWrong = !isCorrect && it.selectedChoice === choice;

@@ -27,13 +27,13 @@ export function SubjectIndexTabs({
       {/* 모바일에서는 원형 버튼 14개가 두 줄로 쌓여 첫 화면에서 카드 목록을 밀어내던
           것을, 옆으로 스와이프하는 한 줄로 압축한다(스크롤바는 숨김). 폭이 넉넉한
           sm 이상에서는 기존처럼 전부 펼쳐 보여준다. */}
-      <div className="flex gap-x-2 overflow-x-auto border-t border-zinc-100 pt-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:gap-x-3 sm:gap-y-2 sm:overflow-visible sm:pb-0 dark:border-zinc-800">
+      <div className="flex gap-x-2 overflow-x-auto border-t border-zinc-100 pt-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:gap-x-3 sm:gap-y-2 sm:overflow-visible sm:pb-0 dark:border-zinc-700">
         {CONSONANTS.map((c) => (
           <button
             key={c}
             type="button"
             onClick={() => setActive(c)}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-200 text-sm font-medium text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-200 text-sm font-medium text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
           >
             {c}
           </button>
@@ -68,7 +68,7 @@ export function SubjectIndexTabs({
                 {filtered.map((s) => (
                   <div
                     key={s.id}
-                    className="flex items-center gap-1 rounded-lg border border-zinc-200 pl-3 pr-1.5 py-1 text-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-800 dark:hover:border-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
+                    className="flex items-center gap-1 rounded-lg border border-zinc-200 pl-3 pr-1.5 py-1 text-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-700 dark:hover:border-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
                   >
                     <Link
                       href={`/subjects/${s.slug}`}

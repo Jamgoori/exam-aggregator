@@ -84,7 +84,7 @@ async function EmptyState({
   }
   const eligibility = await getDiagnosisEligibility(supabase, userId);
   return (
-    <div className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 px-4 py-8 text-center dark:border-zinc-800">
+    <div className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 px-4 py-8 text-center dark:border-zinc-700">
       <p className="text-sm text-zinc-500 dark:text-zinc-500">
         {eligibility.eligible
           ? "아직 받은 진단이 없어요. 오답노트에서 진단을 받아보세요."
@@ -128,7 +128,7 @@ function Report({ report }: { report: AiDiagnosisReport }) {
           {report.weakConcepts.map((c, i) => (
             <div
               key={`${c.concept}-${i}`}
-              className="rounded-xl border border-zinc-200 p-3.5 dark:border-zinc-800"
+              className="rounded-xl border border-zinc-200 p-3.5 dark:border-zinc-700"
             >
               <div className="flex items-center gap-2">
                 <span className="text-sm font-bold">
@@ -163,7 +163,7 @@ function Report({ report }: { report: AiDiagnosisReport }) {
           {report.subjectTrends.map((t, i) => (
             <div
               key={`${t.subject}-${i}`}
-              className="flex items-start gap-2 border-b border-zinc-100 py-2.5 text-sm last:border-none dark:border-zinc-800"
+              className="flex items-start gap-2 border-b border-zinc-100 py-2.5 text-sm last:border-none dark:border-zinc-700"
             >
               {trendIcon(t.trend)}
               <p className="leading-relaxed text-zinc-700 dark:text-zinc-300">

@@ -206,7 +206,7 @@ export function SubjectWrongNoteQuestions({
     `shrink-0 rounded-full px-3.5 py-2 text-sm font-medium ${
       active
         ? "bg-blue-600 text-white"
-        : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
+        : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
     }`;
 
   const conceptMissing =
@@ -241,7 +241,7 @@ export function SubjectWrongNoteQuestions({
         // 미극복은 있는데 이미지가 없어 섞어풀기를 못 여는 경우, 버튼이 그냥 사라져
         // 혼란스럽지 않게 이유를 알려준다.
         unresolvedCount > 0 && (
-          <p className="rounded-xl border border-zinc-200 px-3 py-2.5 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-500">
+          <p className="rounded-xl border border-zinc-200 px-3 py-2.5 text-center text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-500">
             아직 문제 이미지가 등록된 미극복 문항이 없어 섞어풀기를 준비 중이에요.
           </p>
         )
@@ -268,7 +268,7 @@ export function SubjectWrongNoteQuestions({
           <select
             value={concept}
             onChange={(e) => setConcept(e.target.value)}
-            className="shrink-0 rounded-full border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+            className="shrink-0 rounded-full border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
           >
             <option value="all">개념: 전체</option>
             {concepts.map((c) => (
@@ -281,7 +281,7 @@ export function SubjectWrongNoteQuestions({
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
-          className="shrink-0 rounded-full border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+          className="shrink-0 rounded-full border border-zinc-200 bg-white px-3.5 py-2 text-sm font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
         >
           {SORT_LABELS.map((s) => (
             <option key={s.key} value={s.key}>
@@ -321,7 +321,7 @@ export function SubjectWrongNoteQuestions({
                   </span>
                 </div>
                 <WrongNoteQuestionCard rows={card.rows} images={card.images} />
-                <div className="flex flex-col divide-y divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-800 dark:border-zinc-800/70">
+                <div className="flex flex-col divide-y divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-700 dark:border-zinc-700/70">
                   {card.source.map((q) => {
                     const key = `${q.paperId}#${q.questionNumber}`;
                     return (

@@ -64,7 +64,7 @@ export default async function Home({
                 ? `${latestYear}년 자료 업데이트 완료`
                 : "기출문제를 업로드해보세요"}
             </span>
-            <h1 className="text-3xl font-bold text-black sm:text-4xl">
+            <h1 className="text-3xl font-bold text-black sm:text-4xl dark:text-zinc-100">
               나만의{" "}
               <span className="text-blue-600 dark:text-blue-400">데이터</span>
               로,

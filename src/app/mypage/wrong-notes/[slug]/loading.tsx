@@ -6,7 +6,7 @@ function Block({ className = "" }: { className?: string }) {
 
 function PaperCardSkeleton() {
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+    <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
       <div className="flex items-center gap-2">
         <Block className="h-5 w-10 rounded" />
         <Block className="h-5 w-56" />

@@ -54,13 +54,13 @@ export default async function EditAccountPage({
         <NicknameField mode="edit" defaultValue={nickname} />
       </section>
 
-      <section className="flex flex-col gap-4 border-t border-zinc-100 pt-6 dark:border-zinc-800">
+      <section className="flex flex-col gap-4 border-t border-zinc-100 pt-6 dark:border-zinc-700">
         <h2 className="text-lg font-semibold">CBT 시작 화면</h2>
         <CbtViewModeField defaultValue={defaultCbtViewMode} />
       </section>
 
       {hasPassword && (
-        <section className="flex flex-col gap-4 border-t border-zinc-100 pt-6 dark:border-zinc-800">
+        <section className="flex flex-col gap-4 border-t border-zinc-100 pt-6 dark:border-zinc-700">
           <h2 className="text-lg font-semibold">비밀번호 변경</h2>
           <form action={updatePassword} className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
@@ -111,7 +111,7 @@ export default async function EditAccountPage({
         </section>
       )}
 
-      <div className="flex flex-col gap-1 border-t border-zinc-100 pt-6 dark:border-zinc-800">
+      <div className="flex flex-col gap-1 border-t border-zinc-100 pt-6 dark:border-zinc-700">
         <span className="text-sm text-zinc-500 dark:text-zinc-500">{isUsernameAccount ? "아이디" : "이메일"}</span>
         <span className="text-sm text-zinc-700 dark:text-zinc-300">{accountLabel(user)}</span>
       </div>

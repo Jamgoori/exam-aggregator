@@ -186,11 +186,11 @@ export default async function MyPage({
       )}
 
       <div className="flex flex-wrap gap-3">
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
           <span className="text-xs text-zinc-500 dark:text-zinc-500">CBT 응시</span>
           <span className="text-xl font-semibold">{myAttempts.length}</span>
         </div>
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
           <span className="text-xs text-zinc-500 dark:text-zinc-500">연속 학습</span>
           <div className="flex items-baseline gap-1.5">
             <span className="text-xl font-semibold">{streakDays}일</span>
@@ -203,7 +203,7 @@ export default async function MyPage({
             )}
           </div>
         </div>
-        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
           <span className="text-xs text-zinc-500 dark:text-zinc-500">남은 오답</span>
           <span
             className={`text-xl font-semibold ${totalUnresolved > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}
@@ -301,7 +301,7 @@ function HistoryTab({
           눌러보세요.
         </p>
       ) : (
-        <div className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
+        <div className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-700">
           {attempts.map((a) => {
             const pct =
               a.total_questions > 0
@@ -396,7 +396,7 @@ function WrongNotesTab({
                 <Link
                   key={g.subject.id}
                   href={`/mypage/wrong-notes/${g.subject.slug}`}
-                  className="group flex items-center gap-3 rounded-xl border border-zinc-200 p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-800 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+                  className="group flex items-center gap-3 rounded-xl border border-zinc-200 p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-700 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
                 >
                   <span
                     className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${subjectColor(g.subject.slug)}`}

@@ -159,10 +159,10 @@ export function WrongNoteQuestionCard({
   return (
     // print:mb-3: 해설 인쇄가 2단(columns) 레이아웃으로 전환되면 flex gap이 안
     // 먹어서 카드 간격을 margin으로 준다 (화면에는 영향 없음).
-    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white print:mb-3 dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white print:mb-3 dark:border-zinc-700 dark:bg-zinc-900">
       {/* print [break-after:avoid]: 단/페이지 끝에 번호 헤더만 남고 본문이 다음
           단으로 넘어가는 고아 헤더를 막는다. */}
-      <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 print:py-1 print:[break-after:avoid] dark:border-zinc-800 dark:bg-zinc-800/50">
+      <div className="border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 print:py-1 print:[break-after:avoid] dark:border-zinc-700 dark:bg-zinc-800/50">
         <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{numberLabel}</span>
       </div>
 
@@ -195,7 +195,7 @@ export function WrongNoteQuestionCard({
 
       {/* print:hidden: 인쇄물에서 정답 원 줄은 공간만 차지한다 — 정답은 해설의
           "정답" 요약 줄과 선지별 해설의 에메랄드 번호로 이미 전달된다. */}
-      <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 print:hidden dark:border-zinc-800">
+      <div className="flex flex-col gap-2 border-t border-zinc-100 px-4 py-3 print:hidden dark:border-zinc-700">
         {rows.map((row) => (
           <ChoiceRow
             key={row.questionNumber}
@@ -209,7 +209,7 @@ export function WrongNoteQuestionCard({
       {/* 해설: 먼저 스스로 다시 풀어보게 기본은 접어두고, 누르면 펼친다. 서버/클라이언트
           어느 트리에서든 그대로 동작해야 해서 JS 없는 네이티브 details/summary를 쓴다. */}
       {rows.some((row) => row.explanation) && (
-        <div className="flex flex-col gap-1 border-t border-zinc-100 px-4 py-3 print:py-1.5 dark:border-zinc-800">
+        <div className="flex flex-col gap-1 border-t border-zinc-100 px-4 py-3 print:py-1.5 dark:border-zinc-700">
           {rows
             .filter((row) => row.explanation)
             .map((row) => (

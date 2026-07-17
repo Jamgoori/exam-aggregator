@@ -75,7 +75,7 @@ export function MyCbtRecordModal({
                 return (
                   <div
                     key={a.id}
-                    className="rounded-xl border border-zinc-100 bg-zinc-50 px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-800/50"
+                    className="rounded-xl border border-zinc-100 bg-zinc-50 px-3.5 py-3 dark:border-zinc-700 dark:bg-zinc-800/50"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -94,7 +94,7 @@ export function MyCbtRecordModal({
                       </div>
                     </div>
 
-                    <div className="mt-2 flex items-center justify-between border-t border-zinc-200 pt-2 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-500">
+                    <div className="mt-2 flex items-center justify-between border-t border-zinc-200 pt-2 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-500">
                       {avg && diff !== null ? (
                         <>
                           <span>
