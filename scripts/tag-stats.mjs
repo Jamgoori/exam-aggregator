@@ -8,7 +8,7 @@
 // 봇 계정 로그인으로 실행 (questions는 public read라 사실 로그인 없어도 되지만,
 // 다른 태깅 스크립트와 실행 환경을 동일하게 유지한다).
 
-import { createClient } from "@supabase/supabase-js";
+import { createTaggingClient } from "./next-tagging-chunk.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -74,21 +74,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const subjectFilter = args.subject ? String(args.subject) : null;
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (!supabaseUrl || !publishableKey) {
-    console.error(
-      "환경변수 필요: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
-    );
-    process.exit(1);
-  }
-
-  const supabase = createClient(supabaseUrl, publishableKey);
-  const botEmail = process.env.EXPLANATION_BOT_EMAIL;
-  const botPassword = process.env.EXPLANATION_BOT_PASSWORD;
-  if (botEmail && botPassword) {
-    await supabase.auth.signInWithPassword({ email: botEmail, password: botPassword });
-  }
+  const supabase = await createTaggingClient();
 
   const totals = await fetchTotalCounts(supabase, subjectFilter);
   const rows = await fetchAllTagged(supabase, subjectFilter);

@@ -49,28 +49,25 @@ export function resolveTaxonomy(taxonomy, subjectName) {
   return null;
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  const targetSize = Number(args["target-size"] ?? 40);
-  // 한 번에 훑어올 후보 수. 과목별로 몰아 처리하기 위해 target보다 넉넉히 가져온다.
-  const fetchLimit = Math.max(targetSize * 10, 400);
-
+// service role 키가 있으면 그걸로(로그인 불필요), 없으면 봇 계정 로그인으로 클라이언트를
+// 만든다. 루틴 환경은 봇 계정뿐이고 소유자 로컬/일회성 실행은 service role이라 둘 다 지원.
+export async function createTaggingClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   const botEmail = process.env.EXPLANATION_BOT_EMAIL;
   const botPassword = process.env.EXPLANATION_BOT_PASSWORD;
 
-  if (!supabaseUrl || !publishableKey || !botEmail || !botPassword) {
+  if (!supabaseUrl || (!serviceRoleKey && !(publishableKey && botEmail && botPassword))) {
     console.error(
-      "환경변수 필요: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, EXPLANATION_BOT_EMAIL, EXPLANATION_BOT_PASSWORD",
+      "환경변수 필요: NEXT_PUBLIC_SUPABASE_URL + (SUPABASE_SERVICE_ROLE_KEY 또는 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/EXPLANATION_BOT_EMAIL/EXPLANATION_BOT_PASSWORD)",
     );
     process.exit(1);
   }
 
-  const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const taxonomy = JSON.parse(
-    await readFile(join(scriptDir, "unit-taxonomy.json"), "utf-8"),
-  );
+  if (serviceRoleKey) {
+    return createClient(supabaseUrl, serviceRoleKey);
+  }
 
   const supabase = createClient(supabaseUrl, publishableKey);
   const { error: authError } = await supabase.auth.signInWithPassword({
@@ -81,10 +78,27 @@ async function main() {
     console.error(`봇 계정 로그인 실패: ${authError.message}`);
     process.exit(1);
   }
+  return supabase;
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const targetSize = Number(args["target-size"] ?? 40);
+  // 표본 검증 등 특정 과목만 뽑고 싶을 때 --subject "국어" 로 지정.
+  const subjectFilter = args.subject ? String(args.subject) : null;
+  // 한 번에 훑어올 후보 수. 과목별로 몰아 처리하기 위해 target보다 넉넉히 가져온다.
+  const fetchLimit = Math.max(targetSize * 10, 400);
+
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  const taxonomy = JSON.parse(
+    await readFile(join(scriptDir, "unit-taxonomy.json"), "utf-8"),
+  );
+
+  const supabase = await createTaggingClient();
 
   // 해설이 있는데 아직 태그가 없는 문항. questions를 !inner로 걸어 unit_tag null
   // 필터가 부모 행(해설)까지 걸러내게 한다.
-  const { data: rows, error } = await supabase
+  let query = supabase
     .from("question_explanations")
     .select(
       "question_id, question_text, keyword_title, correct_choice_summary, " +
@@ -92,6 +106,10 @@ async function main() {
     )
     .is("questions.unit_tag", null)
     .limit(fetchLimit);
+  if (subjectFilter) {
+    query = query.eq("questions.exam_papers.subjects.name", subjectFilter);
+  }
+  const { data: rows, error } = await query;
   if (error) {
     console.error(`후보 조회 실패: ${error.message}`);
     process.exit(1);
