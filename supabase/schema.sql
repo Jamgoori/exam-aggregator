@@ -1067,3 +1067,74 @@ create policy "update own wrong note marks" on wrong_note_marks
 drop policy if exists "delete own wrong note marks" on wrong_note_marks;
 create policy "delete own wrong note marks" on wrong_note_marks
   for delete to authenticated using (auth.uid() = user_id);
+
+-- 해설 "내용" 표본감사 (2026-07-18 신설). 자세한 설계는
+-- scripts/sql/2026-07-18-explanation-content-audits.sql 및 docs/agents/ 참조.
+-- verify_question_answer()가 못 잡는 해설 내용 오류(조문 오인용/날짜·수치 환각 등)를
+-- 표본감사 루틴이 Opus로 채점해 여기 쌓는다. failed면 question_explanations.verified를
+-- false로 내려 숨긴다(기존 숨김 메커니즘 재사용).
+create table if not exists explanation_content_audits (
+  id uuid primary key default gen_random_uuid(),
+  question_id uuid not null references questions(id) on delete cascade,
+  status text not null check (status in ('passed', 'failed')),
+  issues text,
+  model_version text,
+  audited_at timestamptz not null default now()
+);
+
+create unique index if not exists explanation_content_audits_question_uidx
+  on explanation_content_audits(question_id);
+
+alter table explanation_content_audits enable row level security;
+
+drop policy if exists "admin read explanation_content_audits" on explanation_content_audits;
+create policy "admin read explanation_content_audits" on explanation_content_audits
+  for select to authenticated using (is_admin());
+drop policy if exists "admin insert explanation_content_audits" on explanation_content_audits;
+create policy "admin insert explanation_content_audits" on explanation_content_audits
+  for insert to authenticated with check (is_admin());
+drop policy if exists "admin update explanation_content_audits" on explanation_content_audits;
+create policy "admin update explanation_content_audits" on explanation_content_audits
+  for update to authenticated using (is_admin());
+drop policy if exists "admin delete explanation_content_audits" on explanation_content_audits;
+create policy "admin delete explanation_content_audits" on explanation_content_audits
+  for delete to authenticated using (is_admin());
+
+create or replace function sample_unaudited_explanations(sample_size int)
+returns table (
+  question_id uuid,
+  paper_id uuid,
+  question_number int,
+  keyword_title text,
+  keyword_explanation text,
+  question_text text,
+  correct_choice_number smallint,
+  correct_choice_summary text,
+  choice_explanations jsonb,
+  current_answer_status text,
+  current_answer_note text,
+  law_basis_date text,
+  image_paths text[]
+)
+language sql
+stable
+as $$
+  select
+    qe.question_id, q.paper_id, q.question_number,
+    qe.keyword_title, qe.keyword_explanation, qe.question_text,
+    qe.correct_choice_number, qe.correct_choice_summary, qe.choice_explanations,
+    qe.current_answer_status, qe.current_answer_note, qe.law_basis_date,
+    (
+      select array_agg(img.image_path order by img.order_index)
+      from question_images img
+      where img.question_id = qe.question_id
+    ) as image_paths
+  from question_explanations qe
+  join questions q on q.id = qe.question_id
+  left join explanation_content_audits a on a.question_id = qe.question_id
+  where a.id is null and qe.verified = true
+  order by random()
+  limit greatest(1, least(coalesce(sample_size, 10), 50));
+$$;
+
+grant execute on function sample_unaudited_explanations(int) to authenticated;
