@@ -37,6 +37,11 @@ const ANSWER_SCHEMA = {
             type: "string",
             description: "문제지 목록에 주어진 과목명 중 정확히 하나",
           },
+          track: {
+            type: ["string", "null"],
+            description:
+              "이 정답 열이 속한 직류(track). 주어진 직류 목록 중 하나, 직렬 구분이 없는 정답표면 null",
+          },
           answers: {
             type: "array",
             items: { type: "integer" },
@@ -45,10 +50,11 @@ const ANSWER_SCHEMA = {
           voided_questions: {
             type: "array",
             items: { type: "integer" },
-            description: "전항정답/복수정답으로 처리된 문제 번호 (없으면 빈 배열)",
+            description:
+              "전항정답/복수정답/정답없음으로 처리된 문제 번호 (없으면 빈 배열)",
           },
         },
-        required: ["subject_name", "answers", "voided_questions"],
+        required: ["subject_name", "track", "answers", "voided_questions"],
         additionalProperties: false,
       },
     },
@@ -57,12 +63,25 @@ const ANSWER_SCHEMA = {
   additionalProperties: false,
 };
 
-function buildPrompt(subjectNames) {
+function buildPrompt(subjectNames, trackNames) {
+  const trackGuide =
+    trackNames.length > 0
+      ? `- 이 시험의 문제지에는 다음 직류(track)가 등록돼 있어: ${trackNames.join(", ")}.
+  법원직처럼 정답표가 "◉ 법원사무직렬", "◉ 전산직렬" 등 직렬별 표로 나뉘어 있으면,
+  각 (직렬, 과목) 조합마다 별도 항목을 만들고 track에 위 직류 목록에서 대응되는 값을
+  정확히 넣어줘 (예: "전산직렬" 표 → "전산서기보"). 같은 과목이라도 직렬에 따라 문항
+  수가 다를 수 있으니(예: 서기보 국어 15문항 vs 법원사무 국어 25문항) 각 표에 실제로
+  인쇄된 개수만큼만 뽑아야 해.
+- 직렬 구분이 없는 단일 정답표면 track은 null로 해줘.`
+      : `- track은 항상 null로 해줘.`;
   return `첨부된 PDF는 공무원 시험 정답표야. 이 시험에 포함된 과목별로 1번 문제부터 순서대로 정답 번호를 뽑아줘.
 
 - subject_name은 반드시 다음 목록 중 하나와 정확히 일치해야 해: ${subjectNames.join(", ")}
 - 이 목록에 없는 과목은 결과에서 제외해줘.
-- "전항정답"이나 "복수정답" 표시가 있는 문제 번호는 voided_questions에 넣어줘 (없으면 빈 배열).
+${trackGuide}
+- 책형이 여러 개면(①책형/②책형) ①책형 기준으로만 뽑아줘.
+- "전항정답"/"복수정답"/"정답없음" 표시가 있는 문제 번호는 voided_questions에 넣어줘
+  (없으면 빈 배열). 그 문제의 answers 값은 표기된 번호 중 첫 번째(정답없음이면 1)로 채워줘.
 - 정답 값은 1~${MAX_CHOICE_COUNT} 사이 숫자여야 해.`;
 }
 
@@ -124,6 +143,34 @@ async function main() {
     "base64",
   );
 
+  // 이 시험에 실제로 등록된 문제지들을 먼저 모아, 직류(track) 목록을 프롬프트에 넘기고
+  // 추출 결과를 문제지 단위로 대조한다. 법원직처럼 한 정답표 안에 직렬별 표가 여러 개
+  // 있는 경우(track별 문제지가 따로 있는 경우)를 놓치지 않기 위한 것 — 예전에는
+  // answerKey.track(null)과 정확히 일치하는 문제지만 찾아서, track 붙은 문제지 전체가
+  // "일치하는 문제지 없음"으로 조용히 스킵됐다 (2026-07-17 법원직 106건 미등록 사고).
+  let candidatesQuery = supabase
+    .from("exam_papers")
+    .select("id, title, subject_id, track, question_count")
+    .eq("exam_type_id", answerKey.exam_type_id)
+    .eq("year", answerKey.year)
+    .eq("round", answerKey.round);
+  candidatesQuery = answerKey.level
+    ? candidatesQuery.eq("level", answerKey.level)
+    : candidatesQuery.is("level", null);
+  // answer_keys.track이 지정된 정답표(근로감독 등 특수모집 전용)는 그 직류만 대상.
+  if (answerKey.track) candidatesQuery = candidatesQuery.eq("track", answerKey.track);
+
+  const { data: candidatePapers, error: candidatesError } = await candidatesQuery;
+  if (candidatesError) throw candidatesError;
+  if (!candidatePapers || candidatePapers.length === 0) {
+    console.error("이 시험 조건에 해당하는 문제지가 없습니다.");
+    process.exit(1);
+  }
+
+  const trackNames = [
+    ...new Set(candidatePapers.map((p) => p.track).filter(Boolean)),
+  ];
+
   console.log(`Claude에게 정답표 분석 요청 중... (${answerKey.file_name})`);
 
   // 단순 표 형태의 정답을 옮겨 적는 작업이라 Haiku로도 되긴 하지만, 실제 학생 채점에
@@ -144,7 +191,10 @@ async function main() {
               data: base64Pdf,
             },
           },
-          { type: "text", text: buildPrompt(subjects.map((s) => s.name)) },
+          {
+            type: "text",
+            text: buildPrompt(subjects.map((s) => s.name), trackNames),
+          },
         ],
       },
     ],
@@ -163,83 +213,122 @@ async function main() {
 
   const { subjects: extracted } = JSON.parse(textBlock.text);
 
-  let updated = 0;
+  // 값 검증을 먼저 통과한 항목만 대조에 쓴다.
+  const validEntries = [];
   const skipped = [];
-
   for (const item of extracted) {
     const subjectId = subjectByName.get(item.subject_name);
     if (!subjectId) {
       skipped.push(`${item.subject_name} (등록되지 않은 과목명)`);
       continue;
     }
-
-    const answers = item.answers;
     if (
-      answers.length === 0 ||
-      answers.some(
+      item.answers.length === 0 ||
+      item.answers.some(
         (n) => !Number.isInteger(n) || n < 1 || n > MAX_CHOICE_COUNT,
       )
     ) {
       skipped.push(
-        `${item.subject_name} (정답 값이 1~${MAX_CHOICE_COUNT} 범위를 벗어남)`,
+        `${item.subject_name}${item.track ? ` (${item.track})` : ""} (정답 값이 1~${MAX_CHOICE_COUNT} 범위를 벗어남)`,
       );
       continue;
     }
+    validEntries.push({ ...item, subject_id: subjectId });
+  }
 
-    let papersQuery = supabase
-      .from("exam_papers")
-      .select("id, title")
-      .eq("exam_type_id", answerKey.exam_type_id)
-      .eq("year", answerKey.year)
-      .eq("round", answerKey.round)
-      .eq("subject_id", subjectId);
-    papersQuery = answerKey.level
-      ? papersQuery.eq("level", answerKey.level)
-      : papersQuery.is("level", null);
-    papersQuery = answerKey.track
-      ? papersQuery.eq("track", answerKey.track)
-      : papersQuery.is("track", null);
+  // 추출 항목이 아니라 "문제지" 기준으로 순회한다. 정답표에 있는데 대응 문제지가
+  // 없으면 아래에서 따로 경고하고, 문제지가 있는데 대응 항목이 없으면 여기서 바로
+  // 드러난다 — 어느 쪽도 조용히 사라지지 않게 하는 게 핵심.
+  const entrySignature = (e) =>
+    JSON.stringify([e.answers, e.voided_questions ?? []]);
+  const usedEntries = new Set();
+  let updated = 0;
 
-    const { data: papers, error: papersError } = await papersQuery;
-    if (papersError) throw papersError;
+  for (const paper of candidatePapers) {
+    const entries = validEntries.filter((e) => e.subject_id === paper.subject_id);
+    if (entries.length === 0) continue; // 이 과목은 정답표에 없음 (아래에서 집계)
 
-    if (!papers || papers.length === 0) {
-      skipped.push(`${item.subject_name} (일치하는 문제지 없음)`);
-      continue;
-    }
-
-    const choiceCount = Math.max(4, ...answers);
-
-    for (const paper of papers) {
-      const { error: paperUpdateError } = await supabase
-        .from("exam_papers")
-        .update({ choice_count: choiceCount, question_count: answers.length })
-        .eq("id", paper.id);
-
-      if (paperUpdateError) {
-        skipped.push(
-          `${paper.title} (문제지 업데이트 실패: ${paperUpdateError.message})`,
+    // 1순위: 직류가 정확히 일치하는 항목.
+    let pick = entries.find((e) => (e.track ?? null) === (paper.track ?? null));
+    if (!pick) {
+      // 2순위: 문항 수가 이미 알려져 있으면 길이가 유일하게 일치하는 항목.
+      if (paper.question_count != null) {
+        const byLength = entries.filter(
+          (e) => e.answers.length === paper.question_count,
         );
-        continue;
+        if (new Set(byLength.map(entrySignature)).size === 1) pick = byLength[0];
       }
+      // 3순위: 모든 직렬의 정답이 완전히 동일하면 무엇을 써도 같으므로 사용.
+      if (!pick && new Set(entries.map(entrySignature)).size === 1) {
+        pick = entries[0];
+      }
+      // 4순위: track 없는 문제지(공통과목 원본)는 가장 긴 판이 유일하면 그걸 쓴다.
+      // (법원직: 서기보 국어 15문항 vs 법원사무 국어 25문항 — null-track 문제지는 25문항 판)
+      if (!pick && paper.track == null) {
+        const maxLen = Math.max(...entries.map((e) => e.answers.length));
+        const longest = entries.filter((e) => e.answers.length === maxLen);
+        if (new Set(longest.map(entrySignature)).size === 1) pick = longest[0];
+      }
+    }
 
-      const { error: upsertError } = await supabase.from("paper_answers").upsert(
-        {
-          paper_id: paper.id,
-          answers,
-          voided_questions: item.voided_questions ?? [],
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "paper_id" },
+    if (!pick) {
+      skipped.push(
+        `${paper.title} (직류 대응 항목을 확정할 수 없음 — 정답표 직렬 구분 확인 필요)`,
       );
+      continue;
+    }
 
-      if (upsertError) {
-        skipped.push(`${paper.title} (정답 저장 실패: ${upsertError.message})`);
-        continue;
-      }
+    // 안전장치: 문항 수가 이미 등록된 문제지에 길이가 다른 정답을 덮어쓰지 않는다.
+    // (실측 사고: 25문항 정답을 15문항짜리 서기보 문제지에 복사해 CBT 문항 수가 깨짐)
+    if (
+      paper.question_count != null &&
+      paper.question_count !== pick.answers.length
+    ) {
+      skipped.push(
+        `${paper.title} (문항 수 불일치: 문제지 ${paper.question_count} vs 정답 ${pick.answers.length}개 — 직류별 문항 수 확인 필요)`,
+      );
+      continue;
+    }
 
-      updated++;
-      console.log(`완료: ${paper.title}`);
+    usedEntries.add(pick);
+    const choiceCount = Math.max(4, ...pick.answers);
+
+    const { error: paperUpdateError } = await supabase
+      .from("exam_papers")
+      .update({ choice_count: choiceCount, question_count: pick.answers.length })
+      .eq("id", paper.id);
+    if (paperUpdateError) {
+      skipped.push(
+        `${paper.title} (문제지 업데이트 실패: ${paperUpdateError.message})`,
+      );
+      continue;
+    }
+
+    const { error: upsertError } = await supabase.from("paper_answers").upsert(
+      {
+        paper_id: paper.id,
+        answers: pick.answers,
+        voided_questions: pick.voided_questions ?? [],
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "paper_id" },
+    );
+    if (upsertError) {
+      skipped.push(`${paper.title} (정답 저장 실패: ${upsertError.message})`);
+      continue;
+    }
+
+    updated++;
+    console.log(`완료: ${paper.title} (${pick.answers.length}문항)`);
+  }
+
+  // 정답표에서 뽑혔는데 어느 문제지에도 안 쓰인 항목 — 문제지 미업로드이거나 직류
+  // 대응 실패. 조용히 넘어가지 않고 알려준다.
+  for (const e of validEntries) {
+    if (!usedEntries.has(e)) {
+      skipped.push(
+        `${e.subject_name}${e.track ? ` (${e.track})` : ""} (정답은 추출됐지만 대응 문제지 없음)`,
+      );
     }
   }
 
