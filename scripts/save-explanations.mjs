@@ -1,4 +1,12 @@
-// 사용법: node scripts/save-explanations.mjs <결과파일.json>
+// 사용법: node scripts/save-explanations.mjs <결과파일.json> [결과파일2.json ...]
+//
+// 결과 파일을 여러 개 주면 전부 이어붙여 한 번에 저장한다 (병렬 서브에이전트가
+// 청크별로 따로 쓴 파일을 배치 저장할 때 사용). 저장 로직은 파일 1개일 때와 동일.
+// 단, 일부 파일이 없거나/깨졌거나/빈 배열이어도 전체를 중단하지 않는다 — 그 파일만
+// 건너뛰고(stdout의 skipped_files로 보고) 나머지 정상 파일은 저장한다. 병렬 생성에서
+// 서브에이전트 하나가 실패했다고 나머지의 완성된 해설까지 버리면 안 되기 때문.
+// 저장할 항목이 하나도 없을 때만 exit 1. 같은 question_id가 여러 파일에 있으면
+// 마지막 항목만 저장한다 (재시도 결과 파일이 뒤에 오는 관례; deduplicated로 보고).
 //
 // next-explanation-chunk.mjs가 내려준 청크에 대해 생성한 해설을 저장한다.
 // 입력 JSON 형식 (배열):
@@ -37,9 +45,9 @@ import { createClient } from "@supabase/supabase-js";
 import { readFile } from "node:fs/promises";
 
 async function main() {
-  const inputPath = process.argv[2];
-  if (!inputPath) {
-    console.error("사용법: node scripts/save-explanations.mjs <결과파일.json>");
+  const inputPaths = process.argv.slice(2);
+  if (inputPaths.length === 0) {
+    console.error("사용법: node scripts/save-explanations.mjs <결과파일.json> [결과파일2.json ...]");
     process.exit(1);
   }
 
@@ -55,11 +63,35 @@ async function main() {
     process.exit(1);
   }
 
-  const items = JSON.parse(await readFile(inputPath, "utf-8"));
-  if (!Array.isArray(items) || items.length === 0) {
-    console.error("입력 JSON은 최소 1개 이상의 항목을 가진 배열이어야 합니다.");
+  const items = [];
+  const skippedFiles = [];
+  for (const inputPath of inputPaths) {
+    let parsed;
+    try {
+      parsed = JSON.parse(await readFile(inputPath, "utf-8"));
+    } catch (e) {
+      skippedFiles.push({ file: inputPath, reason: e.message });
+      continue;
+    }
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      skippedFiles.push({ file: inputPath, reason: "빈 배열이거나 배열이 아닌 JSON" });
+      continue;
+    }
+    items.push(...parsed);
+  }
+  for (const s of skippedFiles) {
+    console.error(`입력 파일 건너뜀: ${s.file} — ${s.reason}`);
+  }
+  if (items.length === 0) {
+    console.error("저장할 항목이 없습니다 (모든 입력 파일이 무효).");
     process.exit(1);
   }
+
+  // 같은 question_id가 여러 입력에 있으면 마지막 것만 저장 (재시도 파일이 뒤에 오는 관례)
+  const byId = new Map();
+  for (const item of items) byId.set(item.question_id, item);
+  const deduplicated = items.length - byId.size;
+  const uniqueItems = [...byId.values()];
 
   const supabase = createClient(supabaseUrl, publishableKey);
   const { error: authError } = await supabase.auth.signInWithPassword({
@@ -74,7 +106,7 @@ async function main() {
   const mismatched = [];
   const saved = [];
 
-  for (const item of items) {
+  for (const item of uniqueItems) {
     const { data: verified, error: verifyError } = await supabase.rpc("verify_question_answer", {
       target_question_id: item.question_id,
       proposed_answer: item.correct_choice_number,
@@ -113,7 +145,12 @@ async function main() {
     }
   }
 
-  console.log(JSON.stringify({ saved_count: saved.length, mismatched }, null, 2));
+  console.log(
+    JSON.stringify({ saved_count: saved.length, mismatched, skipped_files: skippedFiles, deduplicated }, null, 2),
+  );
 }
 
-main();
+main().catch((e) => {
+  console.error(`실행 실패: ${e?.message ?? e}`);
+  process.exit(1);
+});
