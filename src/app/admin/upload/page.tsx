@@ -41,6 +41,12 @@ export default async function UploadPage() {
       <Link href="/admin/answers" className="text-sm text-blue-600 underline dark:text-blue-400">
         CBT 정답 입력하기 →
       </Link>
+      <Link
+        href="/admin/explanations"
+        className="text-sm text-blue-600 underline dark:text-blue-400"
+      >
+        미검증 해설 검수하기 →
+      </Link>
       <UploadForm
         subjects={(subjects ?? []) as Subject[]}
         examTypes={(examTypes ?? []) as ExamType[]}
