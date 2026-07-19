@@ -13,7 +13,7 @@ export function SiteFooter() {
   if (isImmersiveSolvePage) return null;
 
   return (
-    <footer className="mt-6 border-t border-zinc-100 dark:border-zinc-800">
+    <footer className="mt-6 border-t border-zinc-100 print:hidden dark:border-zinc-800">
       <div className="mx-auto flex max-w-5xl flex-col gap-2 px-4 py-6 text-xs text-zinc-400 dark:text-zinc-500">
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           <Link href="/terms" className="hover:text-zinc-600 dark:hover:text-zinc-300">
