@@ -169,7 +169,10 @@ export function WrongNoteQuestionCard({
   return (
     // print:mb-3: 해설 인쇄가 2단(columns) 레이아웃으로 전환되면 flex gap이 안
     // 먹어서 카드 간격을 margin으로 준다 (화면에는 영향 없음).
-    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white print:mb-3 dark:border-zinc-700 dark:bg-zinc-900">
+    // print:break-inside-avoid: 카드가 이미지 부분과 해설 부분으로 단이 갈라져
+    // 찢기는 문제(실측) 방지 — 카드 전체를 한 단위로 묶어 안 들어가면 통째로
+    // 다음 단으로 넘긴다. column-fill:auto는 크롬 인쇄 빈 페이지 버그로 폐기.
+    <div className="overflow-hidden break-inside-avoid rounded-xl border border-zinc-200 bg-white print:mb-3 dark:border-zinc-700 dark:bg-zinc-900">
       {/* print:hidden: 문제 이미지에 이미 번호가 있어 인쇄물에서는 중복이라 뺀다. */}
       <div className="flex items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 print:hidden dark:border-zinc-700 dark:bg-zinc-800/50">
         <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{numberLabel}</span>
