@@ -167,11 +167,10 @@ export default async function PaperExplanationsPage({
           아니라 카드 안의 작은 블록 단위(이미지·답 줄·해설 항목,
           wrong-note-question-card.tsx의 break-inside-avoid)로 제어한다 — 카드
           전체에 avoid를 걸면 긴 카드가 통째로 다음 단으로 밀리며 반 단씩 비기
-          때문. column-fill:auto는 필수 — 기본값 balance는 마지막 페이지에서만
-          두 단 높이를 억지로 맞추려 들어서, 마지막 문제가 남는 공간을 두고도
-          중간에 단이 갈린다(실측). auto로 고정해 앞 페이지들과 똑같이 한 단을
-          끝까지 채운 뒤 다음 단으로 넘어가게 한다. 화면 표시에는 아무 영향 없음. */}
-      <div className="flex flex-col gap-4 print:block print:columns-2 print:gap-x-6 print:[column-fill:auto] print:[column-rule:1px_solid_#e4e4e7]">
+          때문. column-fill:auto는 시도했다가 되돌림 — 크롬이 컬럼 높이 계산을
+          꼬아 마지막 문제 뒤로 빈 페이지가 대량 생기는 인쇄 버그 발생(실측).
+          기본값(balance) 유지. 화면 표시에는 아무 영향 없음. */}
+      <div className="flex flex-col gap-4 print:block print:columns-2 print:gap-x-6 print:[column-rule:1px_solid_#e4e4e7]">
         {visibleGroups.map((group) => (
           <WrongNoteQuestionCard
             key={group.rows[0].questionNumber}
