@@ -148,6 +148,11 @@ export function buildWrongNoteGroups(
   wrongRows: WrongAnswerRow[],
   // 완전 삭제된 문항(`${paperId}#${qnum}`)은 집계에서 뺀다.
   deletedKeys?: Set<string>,
+  // user_question_status(CBT+섞어풀기 통합) 기준 극복 여부. 있으면 "가장 최근 CBT
+  // 응시에서 맞았는지"보다 우선한다 — 섞어풀기로 극복한 문항이 시험지별 보기에도
+  // 즉시 반영되게 하려는 것(문항 모아보기 쪽과 판정 기준을 맞춤). 키는
+  // `${paperId}#${questionNumber}`.
+  statusOverrides?: Map<string, boolean>,
 ): WrongNoteSubjectGroup[] {
   const paperByAttempt = new Map<string, string>();
   for (const a of attempts) {
@@ -179,6 +184,7 @@ export function buildWrongNoteGroups(
       (x, y) => new Date(y.created_at).getTime() - new Date(x.created_at).getTime(),
     );
     const latest = sorted[0];
+    const paperId = latest.exam_papers!.id;
     const wrongInLatest = new Set(
       (wrongByAttempt.get(latest.id) ?? []).map((r) => r.question_number),
     );
@@ -191,10 +197,11 @@ export function buildWrongNoteGroups(
         if (existing) {
           existing.wrongCount++;
         } else {
+          const override = statusOverrides?.get(`${paperId}#${row.question_number}`);
           byNumber.set(row.question_number, {
             questionNumber: row.question_number,
             wrongCount: 1,
-            resolved: !wrongInLatest.has(row.question_number),
+            resolved: override ?? !wrongInLatest.has(row.question_number),
             lastSelectedChoice: row.selected_choice,
           });
         }
@@ -267,14 +274,16 @@ export async function getWrongNoteGroups(
   const attempts = (attemptRows ?? []) as unknown as WrongNoteAttemptRow[];
   if (attempts.length === 0) return [];
 
-  const [wrongRows, marks] = await Promise.all([
+  const paperIds = [...new Set(attempts.map((a) => a.exam_papers?.id).filter((id): id is string => !!id))];
+  const [wrongRows, marks, statusOverrides] = await Promise.all([
     fetchWrongAnswerRows(
       supabase,
       attempts.map((a) => a.id),
     ),
     fetchWrongNoteMarks(supabase, userId),
+    fetchQuestionStatusMap(supabase, userId, paperIds),
   ]);
-  return buildWrongNoteGroups(attempts, wrongRows, marks.deleted);
+  return buildWrongNoteGroups(attempts, wrongRows, marks.deleted, statusOverrides);
 }
 
 // 화면에 그릴 수 있게 이미지/정답/해설까지 붙인 문제 상세.
@@ -632,6 +641,19 @@ async function fetchQuestionStatusByRep(
       }
     }
   }
+  return out;
+}
+
+// buildWrongNoteGroups용 statusOverrides. fetchQuestionStatusByRep을 항등 매핑(중복
+// 시험지 접기 없이 실제 paper_id 그대로)으로 불러 극복 여부만 남긴다.
+export async function fetchQuestionStatusMap(
+  supabase: Supabase,
+  userId: string,
+  paperIds: string[],
+): Promise<Map<string, boolean>> {
+  const raw = await fetchQuestionStatusByRep(supabase, userId, paperIds, (id) => id);
+  const out = new Map<string, boolean>();
+  for (const [key, v] of raw) out.set(key, v.correct);
   return out;
 }
 
@@ -1011,12 +1033,13 @@ export async function getPaperWrongNote(
   const paper = attempts.find((a) => a.exam_papers)?.exam_papers;
   if (!paper) return null;
 
-  const [wrongRows, marks] = await Promise.all([
+  const [wrongRows, marks, statusOverrides] = await Promise.all([
     fetchWrongAnswerRows(
       supabase,
       attempts.map((a) => a.id),
     ),
     fetchWrongNoteMarks(supabase, userId, [paperId]),
+    fetchQuestionStatusMap(supabase, userId, [paperId]),
   ]);
 
   const wrongByAttempt = new Map<string, PaperWrongNoteRound["wrong"]>();
@@ -1039,7 +1062,7 @@ export async function getPaperWrongNote(
 
   // 오답이 하나도 없으면(전부 만점) 통합 목록은 비지만 회독 기록은 그대로 보여준다.
   // 응시가 전부 한 문제지 것이므로 결과는 과목 하나 → 문제지 하나로 좁혀진다.
-  const group = buildWrongNoteGroups(attempts, wrongRows, marks.deleted)[0]?.papers[0];
+  const group = buildWrongNoteGroups(attempts, wrongRows, marks.deleted, statusOverrides)[0]?.papers[0];
   if (!group) {
     return { paper, rounds, questions: [], unresolvedCount: 0, resolvedCount: 0 };
   }

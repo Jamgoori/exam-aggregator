@@ -14,6 +14,7 @@ import { computeStreakDays, streakTier } from "@/lib/streak";
 import { subjectColor } from "@/lib/subject-colors";
 import {
   buildWrongNoteGroups,
+  fetchQuestionStatusMap,
   fetchWrongAnswerRows,
   fetchWrongNoteMarks,
   getUnresolvedCountBySubject,
@@ -126,17 +127,24 @@ export default async function MyPage({
 
   // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고,
   // 문항별 오답 행만 추가로 조회한다.
-  const [wrongRows, wrongNoteMarks] = await Promise.all([
+  const myAttemptPaperIds = [
+    ...new Set(
+      myAttempts.map((a) => a.exam_papers?.id).filter((id): id is string => !!id),
+    ),
+  ];
+  const [wrongRows, wrongNoteMarks, wrongNoteStatusOverrides] = await Promise.all([
     fetchWrongAnswerRows(
       supabase,
       myAttempts.map((a) => a.id),
     ),
     fetchWrongNoteMarks(supabase, user.id),
+    fetchQuestionStatusMap(supabase, user.id, myAttemptPaperIds),
   ]);
   const wrongNoteGroups = buildWrongNoteGroups(
     myAttempts as unknown as WrongNoteAttemptRow[],
     wrongRows,
     wrongNoteMarks.deleted,
+    wrongNoteStatusOverrides,
   );
   // 미극복 수는 user_question_status(CBT+섞어풀기 통합) 기준으로 센다 — 섞어풀기로
   // 극복한 게 헤드라인·과목·오늘 카드에 즉시 반영되고, 섞어풀기 후보 수와 일치한다.
