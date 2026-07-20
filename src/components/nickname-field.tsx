@@ -32,6 +32,10 @@ export function NicknameField({ defaultValue = "" }: { defaultValue?: string }) 
   }
 
   function handleApply() {
+    if (status !== "ok") {
+      setMessage("먼저 중복확인을 해주세요.");
+      return;
+    }
     setMessage(null);
     startTransition(async () => {
       const result = await setNickname(value);
@@ -76,7 +80,7 @@ export function NicknameField({ defaultValue = "" }: { defaultValue?: string }) 
         <button
           type="button"
           onClick={handleApply}
-          disabled={isPending || !value}
+          disabled={isPending || !value || status !== "ok"}
           className="flex-1 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           적용

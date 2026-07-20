@@ -91,6 +91,12 @@ async function persistNickname(
   const { error } = await supabase.auth.updateUser({ data: { nickname } });
   if (error) return { error: "닉네임 변경에 실패했어요." };
 
+  // updateUser는 기존 access token JWT를 그대로 재사용해서 user_metadata를
+  // 갱신해도 JWT 안의 claims는 그대로다. layout.tsx가 getClaims()(=JWT 디코딩,
+  // Auth 서버 왕복 없음)로 헤더 닉네임을 읽기 때문에, 토큰을 여기서 갱신해두지
+  // 않으면 가입 직후 헤더에 닉네임이 안 뜨는 문제가 생긴다.
+  await supabase.auth.refreshSession();
+
   // 헤더 등 여러 서버 컴포넌트가 user_metadata.nickname을 읽어 렌더링하므로,
   // 이번 응답 이후 방문하는 페이지에 새 닉네임이 곧바로 반영되게 한다.
   revalidatePath("/", "layout");
