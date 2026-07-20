@@ -195,7 +195,7 @@ export function SingleQuestionView({
       >
         <div
           ref={contentRef}
-          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white"
         >
           {images.length === 0 ? (
             <p className="pt-24 text-center text-sm text-zinc-400 dark:text-zinc-600">
