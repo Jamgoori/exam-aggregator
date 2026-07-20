@@ -167,13 +167,12 @@ export function WrongNoteQuestionCard({
     rows.length === 1 && renderRowActions ? renderRowActions(rows[0].questionNumber) : null;
 
   return (
-    // print:mb-3: 해설 인쇄가 2단(columns) 레이아웃으로 전환되면 flex gap이 안
-    // 먹어서 카드 간격을 margin으로 준다 (화면에는 영향 없음).
-    // print:last:break-inside-avoid: 마지막 카드만 이미지/해설로 단이 갈라져
-    // 찢기는 문제(실측) 방지 — 마지막 카드만 통째로 묶는다. 중간 카드들까지
-    // avoid를 걸면 긴 카드가 반 단씩 비우며 밀린다(기존 이유 그대로 유지).
-    // column-fill:auto는 크롬 인쇄 빈 페이지 버그로 폐기.
-    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white print:mb-3 print:last:break-inside-avoid dark:border-zinc-700 dark:bg-zinc-900">
+    // print:mb-3: 해설 인쇄가 2단 그리드로 전환되면(page.tsx의 print:grid) 그리드
+    // 줄 간격을 이 아래 margin으로 준다. 화면에는 영향 없음.
+    // 페이지/줄 나눔은 카드 통째가 아니라 카드 안 작은 블록 단위(이미지·답 줄·
+    // 해설 항목)의 break-inside-avoid로 제어한다 — 카드 전체에 avoid를 걸면 긴
+    // 카드가 통째로 다음 페이지로 밀리며 아래가 비기 때문.
+    <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white print:mb-3 dark:border-zinc-700 dark:bg-zinc-900">
       {/* print:hidden: 문제 이미지에 이미 번호가 있어 인쇄물에서는 중복이라 뺀다. */}
       <div className="flex items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 print:hidden dark:border-zinc-700 dark:bg-zinc-800/50">
         <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{numberLabel}</span>

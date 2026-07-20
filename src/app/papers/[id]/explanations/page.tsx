@@ -161,16 +161,14 @@ export default async function PaperExplanationsPage({
         )}
       </div>
 
-      {/* 인쇄(PDF 저장): 원본 시험지처럼 한 페이지를 좌우 2단으로 나눠 채운다
-          (CSS multi-column — flex를 print에서 block+columns-2로 전환하고, flex
-          gap 대신 카드 쪽 print:mb로 간격을 준다). 페이지/단 나눔은 카드 단위가
-          아니라 카드 안의 작은 블록 단위(이미지·답 줄·해설 항목,
-          wrong-note-question-card.tsx의 break-inside-avoid)로 제어한다 — 카드
-          전체에 avoid를 걸면 긴 카드가 통째로 다음 단으로 밀리며 반 단씩 비기
-          때문. column-fill:auto는 시도했다가 되돌림 — 크롬이 컬럼 높이 계산을
-          꼬아 마지막 문제 뒤로 빈 페이지가 대량 생기는 인쇄 버그 발생(실측).
-          기본값(balance) 유지. 화면 표시에는 아무 영향 없음. */}
-      <div className="flex flex-col gap-4 print:block print:columns-2 print:gap-x-6 print:[column-rule:1px_solid_#e4e4e7]">
+      {/* 인쇄(PDF 저장): 카드를 좌우 2단 그리드로 채운다. CSS 멀티컬럼(columns-2)은
+          크롬이 인쇄에서 균형 배치를 페이지 단위로 처리하지 못해 오른쪽 단이 통째로
+          비는 버그가 있어(#96~#99 반복 재발) 폐기. 대신 grid-cols-2 + 기본
+          가로우선 배치(grid-auto-flow: row)를 쓰면 카드가 1·2번(윗줄) → 3·4번
+          (아랫줄) 순서로 좌→우, 위→아래로 읽히고 페이지도 그 순서로 넘어간다.
+          items-start로 한 줄의 짧은 카드가 옆 카드 높이만큼 늘어나지 않게 한다.
+          줄 간격은 카드의 print:mb-3가 준다. */}
+      <div className="flex flex-col gap-4 print:grid print:grid-cols-2 print:items-start print:gap-x-6">
         {visibleGroups.map((group) => (
           <WrongNoteQuestionCard
             key={group.rows[0].questionNumber}
