@@ -10,6 +10,8 @@ import { levelColor } from "@/lib/level-colors";
 import {
   filterPapers,
   matchSubjectIds,
+  parseSearchQuery,
+  getExamTypeNames,
   groupByYearAndSubject,
   type LightPaper,
 } from "@/lib/paper-search";
@@ -185,21 +187,47 @@ export function HomeExamBrowser({
   // 카드 목록을 다시 그리는 데 쓰는 값만 한 박자 늦춰(useDeferredValue) 리액트가
   // 클릭 같은 다급한 이벤트를 이 재배치보다 먼저 처리하게 한다.
   const deferredQuery = useDeferredValue(query);
-  const isSearching = deferredQuery.trim().length > 0;
+  // 검색창에 "7급 컴퓨터일반", "2024 국가직 행정법"처럼 급수·연도·시행처가 섞여
+  // 있으면 순서·위치와 무관하게 뽑아내 각각 필터로 쓰고, 나머지 텍스트로만
+  // 과목명을 매칭한다. 급수 버튼을 따로 누르지 않아도 검색어의 급수가 우선
+  // 적용된다(연도·시행처는 버튼 UI가 없어 검색어가 유일한 입력 경로다).
+  const examTypeNames = useMemo(() => getExamTypeNames(allPapers), [allPapers]);
+  const {
+    level: queryLevel,
+    year: queryYear,
+    examType: queryExamType,
+    subjectQuery,
+  } = useMemo(
+    () => parseSearchQuery(deferredQuery, examTypeNames),
+    [deferredQuery, examTypeNames],
+  );
+  const effectiveLevel = queryLevel ?? level;
+  const isSearching = subjectQuery.trim().length > 0;
   const matchedSubjectIds = useMemo(
-    () => matchSubjectIds(subjects, deferredQuery),
-    [subjects, deferredQuery],
+    () => matchSubjectIds(subjects, subjectQuery),
+    [subjects, subjectQuery],
   );
   const filtered = useMemo(
     () =>
       filterPapers(allPapers, {
-        level,
+        level: effectiveLevel,
+        year: queryYear,
+        examType: queryExamType,
         matchedSubjectIds,
         isSearching,
         favOnly: effectiveFavOnly,
         bookmarkedSubjectIds: bookmarkedSubjectSet,
       }),
-    [allPapers, level, matchedSubjectIds, isSearching, effectiveFavOnly, bookmarkedSubjectSet],
+    [
+      allPapers,
+      effectiveLevel,
+      queryYear,
+      queryExamType,
+      matchedSubjectIds,
+      isSearching,
+      effectiveFavOnly,
+      bookmarkedSubjectSet,
+    ],
   );
 
   // 즐겨찾기 모드는 "연도별 → 과목별" 구조로 보여주지만, 여러 과목을 즐겨찾기해
@@ -345,7 +373,7 @@ export function HomeExamBrowser({
             type="button"
             onClick={() => handleLevelChange(undefined)}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-              !level
+              !effectiveLevel
                 ? "bg-zinc-800 text-white dark:bg-zinc-700"
                 : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
@@ -358,7 +386,7 @@ export function HomeExamBrowser({
               type="button"
               onClick={() => handleLevelChange(lv)}
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-                level === lv
+                effectiveLevel === lv
                   ? levelColor(lv)
                   : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
               }`}
@@ -398,7 +426,7 @@ export function HomeExamBrowser({
                         <ExamCard
                           key={paper.id}
                           paper={paper as unknown as ExamPaper}
-                          linkLevel={level}
+                          linkLevel={effectiveLevel}
                           myRoundCount={myRoundCounts[paper.id]}
                           isBookmarked={bookmarkedSet.has(paper.id)}
                           loggedIn={loggedIn}
@@ -417,7 +445,7 @@ export function HomeExamBrowser({
               <ExamCard
                 key={paper.id}
                 paper={paper as unknown as ExamPaper}
-                linkLevel={level}
+                linkLevel={effectiveLevel}
                 myRoundCount={myRoundCounts[paper.id]}
                 isBookmarked={bookmarkedSet.has(paper.id)}
                 loggedIn={loggedIn}

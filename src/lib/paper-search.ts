@@ -47,16 +47,83 @@ export function matchSubjectIds(subjects: Subject[], rawQuery: string): string[]
   ).map((s) => s.id);
 }
 
+const YEAR_TOKEN_RE = /^(19|20)\d{2}$/;
+
+// papers에 실제로 등장하는 시행처(exam_types.name) 집합을 뽑는다. "국가직",
+// "경찰"처럼 검색어 토큰과 정확히 일치할 때만 매칭에 쓸 후보 목록이라, DB에 없는
+// 이름을 오매칭할 일이 없다.
+export function getExamTypeNames(papers: LightPaper[]): string[] {
+  const set = new Set<string>();
+  for (const p of papers) {
+    if (p.exam_types?.name) set.add(p.exam_types.name);
+  }
+  return [...set];
+}
+
+// 검색어에 "7급 컴퓨터일반" / "컴퓨터일반 7급" / "7급컴퓨터일반"처럼 급수·연도·
+// 시행처가 섞여 있으면 위치·순서와 무관하게 뽑아내고, 나머지를 과목명 검색어로
+// 돌려준다. 급수는 붙여 써도("7급컴퓨터일반") 인식하도록 문자열 어디서나
+// \d+급 패턴을 찾지만, 연도·시행처는 "경찰학"처럼 시행처 이름을 포함하는 과목명과
+// 헷갈리지 않도록 공백으로 구분된 토큰이 정확히 일치할 때만 뽑아낸다.
+export function parseSearchQuery(
+  rawQuery: string,
+  examTypeNames: string[] = [],
+): {
+  level?: string;
+  year?: number;
+  examType?: string;
+  subjectQuery: string;
+} {
+  const trimmed = rawQuery.trim();
+  if (!trimmed) return { subjectQuery: "" };
+
+  const levelMatch = trimmed.match(/\d+급/);
+  const afterLevel =
+    levelMatch && levelMatch.index !== undefined
+      ? (
+          trimmed.slice(0, levelMatch.index) +
+          trimmed.slice(levelMatch.index + levelMatch[0].length)
+        )
+          .replace(/\s+/g, " ")
+          .trim()
+      : trimmed;
+
+  const examTypeSet = new Set(examTypeNames);
+  let year: number | undefined;
+  let examType: string | undefined;
+  const rest: string[] = [];
+  for (const token of afterLevel.split(/\s+/).filter(Boolean)) {
+    if (year === undefined && YEAR_TOKEN_RE.test(token)) {
+      year = Number(token);
+    } else if (examType === undefined && examTypeSet.has(token)) {
+      examType = token;
+    } else {
+      rest.push(token);
+    }
+  }
+
+  return {
+    level: levelMatch?.[0],
+    year,
+    examType,
+    subjectQuery: rest.join(" "),
+  };
+}
+
 export function filterPapers(
   papers: LightPaper[],
   {
     level,
+    year,
+    examType,
     matchedSubjectIds,
     isSearching,
     favOnly,
     bookmarkedSubjectIds,
   }: {
     level?: string;
+    year?: number;
+    examType?: string;
     matchedSubjectIds: string[];
     isSearching: boolean;
     // "즐겨찾기한 과목만 보기" 토글 상태. true면 즐겨찾기한 과목의 문제지만 남긴다.
@@ -66,6 +133,8 @@ export function filterPapers(
 ): LightPaper[] {
   return papers.filter((p) => {
     if (level && p.level !== level) return false;
+    if (year && p.year !== year) return false;
+    if (examType && p.exam_types?.name !== examType) return false;
     if (isSearching && !matchedSubjectIds.includes(p.subject_id)) return false;
     if (favOnly && !bookmarkedSubjectIds?.has(p.subject_id)) return false;
     return true;
