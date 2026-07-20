@@ -67,7 +67,8 @@ export default async function SubjectWrongNotePage({
       {totalWrong > 0 && (
         <p className="-mt-2 text-sm text-zinc-500 dark:text-zinc-500">
           시험지마다 &lsquo;틀린 문제 다시 풀기&rsquo;로 바로 풀 수 있어요. 여러 시험지를
-          체크하면 합쳐서 풀 수 있고, 시험지를 누르면 회독·해설을 볼 수 있어요.
+          체크하면 합쳐서 풀 수 있고, 시험지를 누르면 회독 기록과 해설을 볼 수 있어요.
+          다시 풀어서 맞힌 문제는 &lsquo;극복&rsquo;으로 바뀌어요.
         </p>
       )}
 

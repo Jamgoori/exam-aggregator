@@ -192,7 +192,7 @@ export function ReviewSolver({
           <ChevronLeft size={20} />
         </Link>
         <h1 className="truncate text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          섞어풀기{view.subjectName ? ` · ${view.subjectName}` : ""}
+          오답 다시 풀기{view.subjectName ? ` · ${view.subjectName}` : ""}
         </h1>
         <div className="flex shrink-0 items-center gap-2">
           <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">

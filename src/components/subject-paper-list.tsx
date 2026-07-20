@@ -113,7 +113,7 @@ export function SubjectPaperList({
                     </span>
                     {pctLabel && <span>최근 {pctLabel}</span>}
                     <span className="font-medium text-red-600 dark:text-red-400">
-                      미극복 {p.unresolved}
+                      남은 오답 {p.unresolved}
                     </span>
                   </div>
                 </div>

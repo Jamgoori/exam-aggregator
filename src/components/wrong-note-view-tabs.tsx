@@ -55,8 +55,8 @@ export function WrongNoteViewTabs({
   return (
     <>
       <div className="flex gap-2">
-        {tab("papers", "문제지별")}
-        {tab("questions", "문항 모아보기")}
+        {tab("papers", "시험지별")}
+        {tab("questions", "문제만 모아보기")}
       </div>
       <div className={pending ? "pointer-events-none opacity-50 transition-opacity" : ""}>
         {children}

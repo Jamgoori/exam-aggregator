@@ -149,7 +149,7 @@ function Report({ report }: { report: AiDiagnosisReport }) {
                   href={`/mypage/wrong-notes/${c.subjectSlug}?view=questions`}
                   className="mt-2 inline-block rounded-lg bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-100 dark:bg-violet-950/30 dark:text-violet-300 dark:hover:bg-violet-900/30"
                 >
-                  이 과목 틀린 문항 모아보기 →
+                  이 과목 틀린 문제 모아보기 →
                 </Link>
               )}
             </div>

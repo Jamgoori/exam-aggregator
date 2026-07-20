@@ -66,9 +66,10 @@ export function WrongNoteTodayCard({
   return (
     <div className="rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-500 p-5 text-white">
       <p className="text-xs font-semibold opacity-85">오늘 할 일</p>
-      <h3 className="mt-1.5 text-lg font-bold">복습할 문항 {unresolvedTotal}개가 기다려요</h3>
+      <h3 className="mt-1.5 text-lg font-bold">다시 풀 오답 {unresolvedTotal}개가 기다려요</h3>
       <p className="mt-1 text-sm opacity-90">
-        아직 못 넘긴 오답이에요. 과목 상관없이 한 번에 섞어 풀어 극복해요.
+        틀렸던 문제를 다시 풀어서 맞히면 &lsquo;극복&rsquo;으로 바뀌어요. 과목 상관없이
+        한 번에 풀 수 있어요.
       </p>
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
         <button
@@ -78,14 +79,14 @@ export function WrongNoteTodayCard({
           className="inline-flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-sm font-bold text-blue-700 disabled:opacity-70"
         >
           <RotateCcw size={15} />
-          {pending ? "준비 중..." : "복습 시작하기"}
+          {pending ? "준비 중..." : "지금 다시 풀기"}
         </button>
         {topSubjectSlug && (
           <Link
             href={`/mypage/wrong-notes/${topSubjectSlug}`}
             className="rounded-lg bg-white/15 px-3.5 py-2 text-sm font-medium text-white hover:bg-white/25"
           >
-            시험지 보기
+            오답 보기
           </Link>
         )}
       </div>

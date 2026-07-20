@@ -385,6 +385,34 @@ function HistoryTab({
   );
 }
 
+// 오답노트가 돌아가는 사이클을 처음 온 사람에게 한 줄로 알려주는 스트립.
+// "극복"이라는 용어의 정의가 앱 어디에도 없어서 여기서 처음 가르친다.
+function HowItWorksStrip() {
+  const steps = [
+    { n: 1, text: "CBT에서 틀린 문제가 자동으로 저장돼요" },
+    { n: 2, text: "모아서 다시 풀어요" },
+    { n: 3, text: "다시 맞히면 '극복'으로 바뀌어요" },
+  ];
+  return (
+    <div className="flex flex-col gap-2 rounded-xl bg-zinc-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3 dark:bg-zinc-800/50">
+      {steps.map((s) => (
+        <div key={s.n} className="flex items-center gap-2">
+          <span
+            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+              s.n === 3
+                ? "bg-emerald-500 text-white"
+                : "bg-zinc-300 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-300"
+            }`}
+          >
+            {s.n}
+          </span>
+          <span className="text-xs text-zinc-600 dark:text-zinc-400">{s.text}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // "오답노트" 탭: 과목별로 틀린 문제 수를 요약해서 보여주고, 과목을 누르면
 // 문제 이미지까지 모아둔 과목 오답노트 페이지로 이어준다.
 function WrongNotesTab({
@@ -405,27 +433,34 @@ function WrongNotesTab({
         오답노트
       </h2>
       <DiagnosisBanner initialState={diagnosisState} hint={diagnosisHint} />
+      <HowItWorksStrip />
       {groups.length === 0 ? (
-        <p className="py-12 text-center text-sm text-zinc-500 dark:text-zinc-500">
-          아직 모인 오답이 없어요. CBT로 문제를 풀면 틀린 문제가 과목별로
-          자동으로 정리돼요.
-        </p>
-      ) : (
-        <>
-          <p className="text-xs text-zinc-400 dark:text-zinc-600">
-            틀린 문항을 과목별로 모아뒀어요. 다시 맞힌 문항은 &ldquo;극복&rdquo;으로
-            표시돼요. 과목을 누르면 시험지별로 다시 풀거나 문항을 모아 볼 수 있어요.
+        <div className="flex flex-col items-center gap-4 py-12">
+          <p className="text-center text-sm text-zinc-500 dark:text-zinc-500">
+            아직 모인 오답이 없어요. CBT로 문제를 풀면 틀린 문제가 과목별로
+            자동으로 정리돼요.
           </p>
-          <div className="flex flex-col gap-3">
-            {groups.map((g) => {
-              const stat = unresolvedBySubject.get(g.subject.id);
-              const unresolved = stat?.unresolved ?? g.unresolvedCount;
-              return (
-                <Link
-                  key={g.subject.id}
-                  href={`/mypage/wrong-notes/${g.subject.slug}`}
-                  className="group flex items-center gap-3 rounded-xl border border-zinc-200 p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-700 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
-                >
+          <Link
+            href="/"
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700"
+          >
+            문제 풀러 가기
+          </Link>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {groups.map((g) => {
+            const stat = unresolvedBySubject.get(g.subject.id);
+            const unresolved = stat?.unresolved ?? g.unresolvedCount;
+            const total = unresolved + g.resolvedCount;
+            const pct = total > 0 ? Math.round((g.resolvedCount / total) * 100) : 0;
+            return (
+              <Link
+                key={g.subject.id}
+                href={`/mypage/wrong-notes/${g.subject.slug}`}
+                className="group flex flex-col gap-2.5 rounded-xl border border-zinc-200 p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-700 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+              >
+                <div className="flex items-center gap-3">
                   <span
                     className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${subjectColor(g.subject.slug)}`}
                   >
@@ -433,7 +468,7 @@ function WrongNotesTab({
                   </span>
                   <span className="text-sm text-zinc-500 dark:text-zinc-500">
                     <span className="font-medium text-red-600 dark:text-red-400">
-                      미극복 {unresolved}
+                      남은 오답 {unresolved}
                     </span>
                     {g.resolvedCount > 0 && (
                       <>
@@ -445,14 +480,28 @@ function WrongNotesTab({
                     )}
                   </span>
                   <span className="ml-auto flex shrink-0 items-center gap-1 text-sm font-medium text-blue-600 group-hover:underline dark:text-blue-400">
-                    시험지 보기
+                    오답 보기
                     <ChevronRight size={15} />
                   </span>
-                </Link>
-              );
-            })}
-          </div>
-        </>
+                </div>
+                {/* 극복 진행률 — "이 바를 초록으로 채우는 게 목표"라는 걸 한눈에 보여준다. */}
+                {total > 0 && (
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                      <div
+                        className="h-full rounded-full bg-emerald-500 transition-[width]"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="shrink-0 text-[11px] font-medium text-zinc-400 dark:text-zinc-600">
+                      극복 {pct}%
+                    </span>
+                  </div>
+                )}
+              </Link>
+            );
+          })}
+        </div>
       )}
     </section>
   );

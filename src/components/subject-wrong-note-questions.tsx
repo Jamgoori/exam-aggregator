@@ -144,7 +144,7 @@ export function SubjectWrongNoteQuestions({
     startReview(async () => {
       const res = await createReviewSession({ subjectSlug, onlyUnresolved: true });
       if (res.error || !res.sessionId) {
-        setReviewError(res.error ?? "섞어풀기를 시작하지 못했어요.");
+        setReviewError(res.error ?? "다시 풀기를 시작하지 못했어요.");
         return;
       }
       router.push(`/mypage/wrong-notes/${subjectSlug}/review/${res.sessionId}`);
@@ -244,8 +244,8 @@ export function SubjectWrongNoteQuestions({
           >
             <Shuffle size={16} />
             {reviewPending
-              ? "섞는 중..."
-              : `섞어풀기 — 미극복 ${playableUnresolved}문항 · 순서 섞기`}
+              ? "준비 중..."
+              : `남은 오답 ${playableUnresolved}개 섞어서 다시 풀기`}
           </button>
           {reviewError && (
             <p className="text-center text-xs text-red-600 dark:text-red-400">{reviewError}</p>
@@ -256,7 +256,7 @@ export function SubjectWrongNoteQuestions({
         // 혼란스럽지 않게 이유를 알려준다.
         visibleUnresolved > 0 && (
           <p className="rounded-xl border border-zinc-200 px-3 py-2.5 text-center text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-500">
-            아직 문제 이미지가 등록된 미극복 문항이 없어 섞어풀기를 준비 중이에요.
+            아직 문제 이미지가 등록된 오답이 없어 다시 풀기를 준비 중이에요.
           </p>
         )
       )}
@@ -268,7 +268,7 @@ export function SubjectWrongNoteQuestions({
           disabled={!hasResolved}
           className={`${chip(hideResolved)} disabled:cursor-not-allowed disabled:opacity-40`}
         >
-          미극복만
+          남은 오답만
         </button>
         <button
           type="button"
@@ -300,8 +300,8 @@ export function SubjectWrongNoteQuestions({
       </div>
 
       <p className="text-xs text-zinc-500 dark:text-zinc-500">
-        이 과목에서 틀린 문항을 문제지 구분 없이 모았어요. 답 표시는 가장 최근에
-        틀렸을 때 기준이에요. 전체 오답 {visible.length}개 · 미극복 {visibleUnresolved}개.
+        이 과목에서 틀린 문제를 시험지 구분 없이 모았어요. 답 표시는 가장 최근에
+        틀렸을 때 기준이에요. 전체 오답 {visible.length}개 · 남은 오답 {visibleUnresolved}개.
       </p>
 
       {cards.length === 0 ? (
@@ -401,7 +401,7 @@ export function SubjectWrongNoteQuestions({
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
             >
               <Shuffle size={15} />
-              {selPending ? "준비 중..." : `선택한 ${selected.size}개 섞어풀기`}
+              {selPending ? "준비 중..." : `선택한 ${selected.size}개 다시 풀기`}
             </button>
           </div>
         </div>

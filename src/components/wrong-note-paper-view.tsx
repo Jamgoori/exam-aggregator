@@ -141,7 +141,7 @@ export function WrongNotePaperView({
               : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
           }`}
         >
-          전체 회독 · 미극복 {visibleUnresolved}
+          전체 회독 · 남은 오답 {visibleUnresolved}
         </button>
         {rounds.map((r) => (
           <button

@@ -41,7 +41,7 @@ export function WrongNoteMarkActions({
   function remove() {
     if (
       !window.confirm(
-        "이 문항을 오답노트에서 완전히 삭제할까요?\n오답 목록·통계·섞어풀기에서 더 이상 보이지 않아요. (삭제 직후 '되돌리기'로 복구할 수 있어요)",
+        "이 문항을 오답노트에서 완전히 삭제할까요?\n오답 목록·통계·다시 풀기에서 더 이상 보이지 않아요. (삭제 직후 '되돌리기'로 복구할 수 있어요)",
       )
     ) {
       return;
