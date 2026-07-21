@@ -51,7 +51,7 @@ async function cropOnePaper(supabase, paper, { dryRun, scale }) {
 
   let cropped;
   try {
-    cropped = await extractQuestionsFromPdf(pdfBuffer, { scale });
+    cropped = await extractQuestionsFromPdf(pdfBuffer, { scale, expectedCount: paper.question_count });
   } catch (err) {
     return { paper, error: err.message };
   }

@@ -47,8 +47,15 @@ function parseArgs(argv) {
 // 문제지(옛날 PDF 등)는 같은 조각에 "문 11. ..."처럼 붙어 나온다 — 이 경우도
 // 놓치지 않도록 선택적 "문" 접두사를 허용한다.
 // 마침표 뒤에 공백 없이 본문이 붙는 조판은 이 엄격형으로는 안 잡힌다 — 아래
-// RELAXED_QUESTION_MARKER_RE가 "빠진 번호 메우기" 용도로만 따로 처리한다.
-const QUESTION_MARKER_RE = /^(?:문\s*)?(\d{1,3})\.(?:\s|$)/;
+// RELAXED_QUESTION_MARKER_RE가 "빠진 번호 메우기" 용도로만 따로 처리한다. 다만
+// 마침표 바로 뒤에 「(법령·문헌명 인용 여는 낫표)가 오는 경우는 예외로 엄격형에
+// 포함한다 — 이 조합("5.「수사첩보및처리규칙」상…")은 법령 인용이 잦은 수사/경찰
+// 과목에서 흔한데(실측: 2014 경찰 공채 1차 수사, 2017 경찰 공채 2차 수사), 한
+// 칼럼의 마커 전부가 이 형태라 완화형 "빠진 번호 메우기"조차 기준 여백을 못
+// 구해 실패했다(그 칼럼에 엄격형 마커가 단 하나도 없어 docMarginX가 통째로
+// 안 잡힘). 「는 문단 중간 목록 항목 맨 앞에 거의 안 나오는 문자라(법령명 인용은
+// 항상 그 인용이 시작하는 지점에서만 낫표가 열린다) 공백과 똑같이 신뢰할 수 있다.
+const QUESTION_MARKER_RE = /^(?:문\s*)?(\d{1,3})\.(?:\s|「|$)/;
 
 // 완화형 마커: 마침표 뒤에 공백 없이 본문이 곧장 붙는 조판을 잡는다(실측: 2017
 // 경찰간부 경찰학개론 `4.「경찰법」과 …`가 40문항 중 14개, 2014 경찰간부
@@ -166,11 +173,18 @@ function findAnnotationLines(items, half) {
   return { keys, groups };
 }
 
-async function findQuestionMarkers(page) {
+// columnSplitX: 실측 칼럼 경계(computeColumnSplitX). 아직 모르는 최초 호출(1차
+// 패스)에서는 생략해 페이지 폭 절반으로 대체한다 — 안내문 줄 분류(findAnnotationLines의
+// col)가 틀리면, 우측 칼럼 마커가 좌측 여백의 안내문과 같은 줄로 잘못 묶여 안내문
+// 텍스트로 오인되고 통째로 사라진다(실측: 2026 국회직 8급 상황판단 20번 마커가
+// "[문 19.∼문 20.]" 안내문과 같은 줄(y=966, 둘 다 x<페이지폭/2)로 오인 병합되어
+// 소실). extractQuestionsFromPdf가 1차 패스로 대략의 columnSplitX를 구한 뒤,
+// 이를 넘겨 2차로 다시 호출해 정확한 안내문 분류로 재추출한다.
+async function findQuestionMarkers(page, columnSplitX) {
   const viewport = page.getViewport({ scale: 1 });
   const textContent = await page.getTextContent();
   const items = textContent.items.filter((i) => "str" in i);
-  const half = viewport.width / 2;
+  const half = columnSplitX ?? viewport.width / 2;
   const { keys: annotationKeys, groups } = findAnnotationLines(items, half);
 
   // "문"이 단독 조각으로 떨어져 나온 자리들을 (같은 줄, x) 기준으로 미리 모아둔다
@@ -283,11 +297,82 @@ const DOC_MARGIN_TOLERANCE_PT = 10;
 // 흔들리는 문제지를 잘못 걸러내지 않기 위한 안전장치).
 const DOC_MARGIN_MIN_SHARE = 0.5;
 
+// 2단 편집인지, 그리고 좌/우 칼럼의 경계 x가 얼마인지를 실측 마커 위치에서
+// 직접 구한다. 예전에는 "페이지 폭의 정확히 절반(pageWidthPt/2)"을 경계로
+// 썼는데, 이 가정이 깨지는 조판이 있다(실측: 국회직 PDF는 폭 729pt에 우측 칼럼이
+// x=360에서 시작 — 정확한 절반 364.5보다 4.5pt 왼쪽). 이 정도면 "우측 칼럼
+// 마커가 하나도 없음"으로 오판되어(hasRightColumnMarker 기준 미달) 문서 전체가
+// 1단으로 취급되고, filterMarginMarkers가 좌/우 마커를 한 덩어리로 놓고 클러스터링
+// 하면서 소수인 우측 칼럼 마커 전부가 "지문 속 번호"로 오인되어 통째로 사라진다
+// (실측: 2025 국회직 9급 건축계획 20문항 중 9개 소실, 다른 국회직 문제지 다수
+// 동일 증상). 페이지 폭 절반 대신, 문서 전체 마커 x를 정렬해 가장 큰 간격을
+// 찾는다 — 진짜 칼럼 경계(보통 300pt 이상)는 같은 칼럼 안의 자릿수/조각분리
+// 흔들림(최대 ~25pt, MARGIN_CLUSTER_GAP_PT 참고)보다 훨씬 크므로 이 둘은 항상
+// 뚜렷하게 갈린다.
+const COLUMN_SPLIT_MIN_GAP_PT = 80;
+// 진짜 칼럼 여백은 "그 문서에서 가장 많이 반복되는 x"다 — 매 문제마다 같은
+// 자리에서 시작하기 때문이다. 반면 지문 속 표/목록의 가짜 번호는 특정 목록
+// 안에서만 몇 번 반복되고 문서 전체로 보면 드물다. 그래서 단순히 "가장 큰
+// 간격"으로 경계를 잡으면(예전 구현) 드물게 아주 멀리 튄 가짜 번호 하나에도
+// 흔들린다(실측: 2025 국가직 7급 상황판단 — 표 안 날짜 "12. 31." 같은 가짜
+// 번호가 x=662~668에 단 몇 개 있었는데, 그게 최대 간격을 만들어 버렸다).
+// 대신 x를 반올림해 근접한 값끼리 묶고(자릿수/조각분리로 인한 지터가 실측
+// 최대 ~25pt라 그보다 넉넉한 값으로 묶는다), 묶음별 등장 횟수가 가장 많은
+// 두 묶음을 찾는다 — 그 둘이 서로 80pt 이상 떨어져 있으면 진짜 좌/우 칼럼
+// 여백으로 본다.
+const COLUMN_CLUSTER_TOLERANCE_PT = 25;
+export function computeColumnSplitX(pageMarkerDataList) {
+  const xs = pageMarkerDataList
+    .flatMap((d) => d.markers.map((m) => m.x))
+    .sort((a, b) => a - b);
+  if (xs.length < 4) return null;
+
+  const clusters = [];
+  let current = [xs[0]];
+  for (let i = 1; i < xs.length; i++) {
+    if (xs[i] - current[current.length - 1] <= COLUMN_CLUSTER_TOLERANCE_PT) {
+      current.push(xs[i]);
+    } else {
+      clusters.push(current);
+      current = [xs[i]];
+    }
+  }
+  clusters.push(current);
+  if (clusters.length < 2) return null;
+
+  const summarized = clusters
+    .map((c) => ({
+      min: c[0],
+      max: c[c.length - 1],
+      count: c.length,
+      x: c.reduce((a, b) => a + b, 0) / c.length,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const first = summarized[0];
+  const second = summarized.find((c) => Math.abs(c.x - first.x) >= COLUMN_SPLIT_MIN_GAP_PT);
+  if (!second) return null;
+
+  const [left, right] = first.x < second.x ? [first, second] : [second, first];
+  // 경계를 두 마커 클러스터의 정중앙이 아니라 우측 마커 바로 앞(여유 buffer만큼)에
+  // 잡는다. 마커는 항상 각 칼럼의 왼쪽 끝에 붙지만, 안내문("※ 다음 글을...")
+  // 같은 본문 텍스트는 그보다 훨씬 오른쪽까지(때로는 실제 칼럼 폭 절반 가까이)
+  // 뻗어 나온다 — 정중앙을 경계로 쓰면 이런 안내문 조각이 실제로는 좌측 칼럼에
+  // 속하는데도 우측으로 잘못 분류돼, 좌측에 있던 안내문의 나머지 조각과 다른
+  // 줄로 갈라지면서 안내문 인식 자체가 깨진다(실측: 2025 국회직 8급 언어논리 —
+  // "[문 19. ∼ 문 20.]" 부분이 x=197로 정중앙(약 187)보다 오른쪽에 있어 우측
+  // 취급되며 19번 마커가 안내문과 뒤섞여 사라졌다). 우측 마커 바로 앞으로 당겨
+  // 두면 마커 분류(splitIntoColumns)는 여전히 정확하면서(실측 우측 여백보다
+  // 왼쪽은 전부 좌측으로 잡히므로) 좌측 칼럼 본문에 훨씬 넉넉한 여유를 준다.
+  const COLUMN_SPLIT_RIGHT_BUFFER_PT = 30;
+  return Math.max(left.max + 1, right.min - COLUMN_SPLIT_RIGHT_BUFFER_PT);
+}
+
 // 문서 전체 마커에서 칼럼별 최빈 x를 구한다. "문" 신호가 하나라도 있으면
 // 기존의 신뢰 마커 기반 필터가 더 정확하므로 계산하지 않는다(null 반환).
-export function computeDocMarginX(pageMarkerDataList) {
+export function computeDocMarginX(pageMarkerDataList, columnSplitX) {
   const all = pageMarkerDataList.flatMap((d) =>
-    d.markers.map((m) => ({ ...m, col: m.x < d.pageWidthPt / 2 ? "L" : "R" })),
+    d.markers.map((m) => ({ ...m, col: m.x < (columnSplitX ?? d.pageWidthPt / 2) ? "L" : "R" })),
   );
   if (all.length === 0 || all.some((m) => m.hasMun)) return null;
   const result = {};
@@ -322,7 +407,7 @@ export function computeDocMarginX(pageMarkerDataList) {
 // 채워 넣는다. 완화형을 처음부터 일반 마커로 쓰면 지문 속 번호 목록까지 걸려
 // 멀쩡하던 문제지가 깨지므로(실측: 국가직 5·7급 상황판단), 이렇게 "구멍 메우기"
 // 로만 제한한다.
-export function fillMissingNumbersFromRelaxed(pageMarkerDataList, docMarginX) {
+export function fillMissingNumbersFromRelaxed(pageMarkerDataList, docMarginX, columnSplitX) {
   if (docMarginX == null) return;
   const strictNumbers = new Set();
   for (const data of pageMarkerDataList) for (const m of data.markers) strictNumbers.add(m.number);
@@ -332,7 +417,7 @@ export function fillMissingNumbersFromRelaxed(pageMarkerDataList, docMarginX) {
   // 같은 번호의 완화형 후보가 여러 개면 여백에 가장 가까운 하나만 쓴다.
   const candidates = new Map();
   for (const data of pageMarkerDataList) {
-    const half = data.pageWidthPt / 2;
+    const half = columnSplitX ?? data.pageWidthPt / 2;
     for (const m of data.relaxedMarkers ?? []) {
       if (strictNumbers.has(m.number)) continue;
       const margin = m.x < half ? docMarginX.L : docMarginX.R;
@@ -356,11 +441,11 @@ export function fillMissingNumbersFromRelaxed(pageMarkerDataList, docMarginX) {
   }
 }
 
-export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX) {
+export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSplitX) {
   if (docMarginX == null) return;
   const byNumber = new Map();
   for (const data of pageMarkerDataList) {
-    const half = data.pageWidthPt / 2;
+    const half = columnSplitX ?? data.pageWidthPt / 2;
     for (const m of data.markers) {
       const margin = m.x < half ? docMarginX.L : docMarginX.R;
       const dev = margin == null ? Infinity : Math.abs(m.x - margin);
@@ -411,8 +496,11 @@ function filterMarginMarkers(columnMarkers) {
 // 왼쪽 여백(x<half)에서만 나오는 편집이라, 오른쪽으로 안 나누는 것 자체가
 // 이미 올바른 동작이다 — findAnnotationLines의 col 분류(x<half → "L")와도
 // 자연히 맞아떨어진다.
-function splitIntoColumns(markers, pageWidthPt, columnMode) {
-  const half = pageWidthPt / 2;
+// columnSplitX는 computeColumnSplitX가 실측한 진짜 칼럼 경계다(있으면). 페이지
+// 폭 절반이 경계와 어긋나는 조판(국회직 등)에서도 정확히 좌/우를 가르기 위해
+// pageWidthPt/2 대신 이 값을 우선한다.
+function splitIntoColumns(markers, pageWidthPt, columnMode, columnSplitX) {
+  const half = columnSplitX ?? pageWidthPt / 2;
   if (columnMode === "single") {
     const left = filterMarginMarkers(markers).sort((a, b) => b.y - a.y);
     return { left, right: [], half };
@@ -534,11 +622,12 @@ async function cropQuestionsFromPage(
   scale,
   carriedStrips = new Map(),
   columnMode = "double",
+  columnSplitX = null,
 ) {
   const { markers, groups, pageWidthPt, pageHeightPt } = markerData;
   if (markers.length === 0) return { results: [], pendingStrips: carriedStrips };
 
-  const { left, right, half } = splitIntoColumns(markers, pageWidthPt, columnMode);
+  const { left, right, half } = splitIntoColumns(markers, pageWidthPt, columnMode, columnSplitX);
   const { buffer: pageImage, width: pageWidthPx, height: pageHeightPx } =
     await renderPageToPng(page, scale);
 
@@ -691,39 +780,57 @@ async function cropQuestionsFromPage(
   return { results, pendingStrips };
 }
 
-// PDF 버퍼 전체를 문항별로 잘라 { number, image } 목록을 반환한다. 페이지 순회,
-// 정렬, 번호 중복 검사까지 여기서 끝내고, 호출자는 결과를 업로드/DB 반영만 하면
-// 된다 — main()의 단일 문제지 흐름과 batch-crop-questions.mjs의 여러 문제지 순회가
-// 이 함수 하나를 공유한다. 중복 번호가 감지되면(레이아웃 오인식) 에러를 던진다.
-export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage } = {}) {
-  const pdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
-
-  // 1차 패스: 렌더링 없이 텍스트만 뽑아 이 문제지가 좌우 2단인지 전체 폭 1단인지
-  // 판단한다. 페이지 하나만 보고 정하면 마커가 몇 개 안 남는 마지막 페이지 같은
-  // 데서 우연히 한쪽에만 몰려 2단을 1단으로 오판할 수 있어(반대로 1단인데 지문
-  // 속 텍스트가 어쩌다 half를 넘어 2단으로 오판할 수도 있고), 문서 전체의 마커를
-  // 모아 한 번만 정한다 — 실측상 진짜 2단이면 문서 전체에 오른쪽 마커가 여럿
-  // 나오고, 진짜 1단이면 전체를 통틀어 단 하나도 안 나온다. 여기서 얻은 결과를
-  // 2차(실제 크롭) 패스가 그대로 재사용해 페이지당 텍스트 추출을 두 번 하지 않는다.
-  const pageMarkerData = [];
-  let hasRightColumnMarker = false;
+// 한 문서에 대해 마커 인식 → 정리 → 크롭까지 한 번의 "전략"으로 끝까지 돌린다.
+// useColumnSplitOverride가 false면 예전(이번 세션 이전) 그대로 페이지 폭 절반만
+// 칼럼 경계로 쓴다 — 이미 통하던 문서에 대한 100% 동일 동작을 보장하기 위한
+// 값이다. true면 실측 마커 클러스터 기반 경계(computeColumnSplitX)를 우선한다 —
+// 페이지 폭 정확히 절반이 경계와 어긋나는 조판(국회직 등)에서 우측 칼럼 마커가
+// 통째로 사라지는 걸 막는다. 아래 extractQuestionsFromPdf가 두 전략을 순서대로
+// 시도해 더 나은 쪽을 고른다.
+async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
+  // 1차 패스: 렌더링 없이 텍스트만 뽑아 페이지 폭 절반 기준으로 findQuestionMarkers를
+  // 한 번 돌려본다.
+  const roughMarkerData = [];
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
     const data = await findQuestionMarkers(page);
-    pageMarkerData.push({ page, data });
-    if (data.markers.some((m) => m.x >= data.pageWidthPt / 2)) hasRightColumnMarker = true;
+    roughMarkerData.push({ page, data });
   }
-  const columnMode = hasRightColumnMarker ? "double" : "single";
+  const roughColumnSplitX = useColumnSplitOverride
+    ? computeColumnSplitX(roughMarkerData.map((d) => d.data))
+    : null;
+
+  // 2차 패스: 1차에서 구한 칼럼 경계로 안내문 줄 분류를 다시 정확히 해서
+  // 페이지당 마커를 재추출한다 — 그렇지 않으면 우측 칼럼 마커가 좌측 여백의
+  // 안내문과 같은 줄로 오인 병합돼 사라지는 문제가 남는다(실측: 2026 국회직
+  // 8급 상황판단 20번 — "[문 19.∼문 20.]" 안내문과 같은 y, 둘 다 페이지폭
+  // 절반보다 왼쪽이라 잘못 같은 줄로 묶임). 문서 전체의 마커를 모아 한 번만
+  // 정한다 — 페이지 하나만 보면 마커가 몇 개 안 남는 마지막 페이지 같은 데서
+  // 우연히 한쪽에만 몰려 오판할 수 있다.
+  const pageMarkerData = [];
+  for (const { page } of roughMarkerData) {
+    const data = await findQuestionMarkers(page, roughColumnSplitX);
+    pageMarkerData.push({ page, data });
+  }
+  const columnSplitX = useColumnSplitOverride
+    ? (computeColumnSplitX(pageMarkerData.map((d) => d.data)) ?? roughColumnSplitX)
+    : null;
+  const columnMode =
+    columnSplitX != null || pageMarkerData.some((d) => d.data.markers.some((m) => m.x >= d.data.pageWidthPt / 2))
+      ? "double"
+      : "single";
   // "문" 표기가 없는 조판(경찰 간부후보 등)은 문서 전체 기준 여백 x를 구해
   // 빠진 번호 메우기와 중복 번호 정리의 기준으로 쓴다.
-  const docMarginX = computeDocMarginX(pageMarkerData.map((d) => d.data));
+  const docMarginX = computeDocMarginX(pageMarkerData.map((d) => d.data), columnSplitX);
   fillMissingNumbersFromRelaxed(
     pageMarkerData.map((d) => d.data),
     docMarginX,
+    columnSplitX,
   );
   pruneDuplicateMarkers(
     pageMarkerData.map((d) => d.data),
     docMarginX,
+    columnSplitX,
   );
 
   const cropped = [];
@@ -736,7 +843,7 @@ export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage } =
       scale,
       carriedStrips,
       columnMode,
-      docMarginX,
+      columnSplitX,
     );
     carriedStrips = pendingStrips;
     cropped.push(...pageResults);
@@ -754,6 +861,57 @@ export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage } =
   }
 
   return cropped;
+}
+
+// PDF 버퍼 전체를 문항별로 잘라 { number, image } 목록을 반환한다. 페이지 순회,
+// 정렬, 번호 중복 검사까지 여기서 끝내고, 호출자는 결과를 업로드/DB 반영만 하면
+// 된다 — main()의 단일 문제지 흐름과 batch-crop-questions.mjs의 여러 문제지 순회가
+// 이 함수 하나를 공유한다. 중복 번호가 감지되면(레이아웃 오인식) 에러를 던진다.
+//
+// expectedCount(exam_papers.question_count)를 넘기면 두 전략을 시도해 더 정확한
+// 쪽을 고른다: 먼저 예전 방식(페이지 폭 절반 기준)으로 시도해 정확히
+// expectedCount개가 나오면 그걸 그대로 쓴다 — 이미 잘 크롭되던 수천 장의 기존
+// 문제지에 대해 100% 예전과 동일한 동작을 보장하기 위해서다(실측 사고: 실측
+// 마커 클러스터 기반 경계 추정이 지문 속 표/목록의 가짜 번호 분포에 따라 오히려
+// 더 나쁜 결과를 낼 수 있는 문서가 있었다 — 2025 국가직 7급 상황판단). 예전
+// 방식이 실패(에러 또는 개수 불일치)할 때만 실측 클러스터 기반 경계 추정으로
+// 재시도하고, 그 결과가 더 나으면(에러 없음 + expectedCount와 일치하거나, 최소
+// 예전 방식보다 인식 개수가 많으면) 그걸 쓴다. expectedCount를 안 넘기면(옛
+// 호출자와의 호환) 예전 방식이 에러 없이 끝나는 한 그대로 쓴다.
+export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage, expectedCount } = {}) {
+  const pdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
+
+  let legacyResult;
+  let legacyError;
+  try {
+    legacyResult = await extractWithStrategy(pdf, scale, onPage, false);
+  } catch (err) {
+    legacyError = err;
+  }
+  if (legacyResult && (expectedCount == null || legacyResult.length === expectedCount)) {
+    return legacyResult;
+  }
+
+  let overrideResult;
+  let overrideError;
+  try {
+    overrideResult = await extractWithStrategy(pdf, scale, onPage, true);
+  } catch (err) {
+    overrideError = err;
+  }
+  if (overrideResult && (expectedCount == null || overrideResult.length === expectedCount)) {
+    return overrideResult;
+  }
+
+  // 어느 쪽도 정확히 맞아떨어지지 않으면(오류거나 여전히 개수가 다르면) 더 많이
+  // 인식한 쪽을 돌려준다 — 둘 다 실패면 호출자가 익숙한 예전 방식의 오류를
+  // 그대로 보고 원인을 진단할 수 있게 legacyError를 우선한다.
+  if (legacyResult && overrideResult) {
+    return overrideResult.length > legacyResult.length ? overrideResult : legacyResult;
+  }
+  if (legacyResult) return legacyResult;
+  if (overrideResult) return overrideResult;
+  throw legacyError ?? overrideError;
 }
 
 async function main() {
@@ -804,6 +962,7 @@ async function main() {
   try {
     cropped = await extractQuestionsFromPdf(pdfBuffer, {
       scale,
+      expectedCount: paper.question_count,
       onPage: (p, pageResults) =>
         console.log(`페이지 ${p}: 문제 ${pageResults.map((r) => r.number).join(", ") || "(없음)"}`),
     });
