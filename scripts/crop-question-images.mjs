@@ -46,7 +46,18 @@ function parseArgs(argv) {
 // 앞의 "문" 표시는 보통 번호와 별도 조각으로 떨어지지만("문" / "1. ...") 일부
 // 문제지(옛날 PDF 등)는 같은 조각에 "문 11. ..."처럼 붙어 나온다 — 이 경우도
 // 놓치지 않도록 선택적 "문" 접두사를 허용한다.
+// 마침표 뒤에 공백 없이 본문이 붙는 조판은 이 엄격형으로는 안 잡힌다 — 아래
+// RELAXED_QUESTION_MARKER_RE가 "빠진 번호 메우기" 용도로만 따로 처리한다.
 const QUESTION_MARKER_RE = /^(?:문\s*)?(\d{1,3})\.(?:\s|$)/;
+
+// 완화형 마커: 마침표 뒤에 공백 없이 본문이 곧장 붙는 조판을 잡는다(실측: 2017
+// 경찰간부 경찰학개론 `4.「경찰법」과 …`가 40문항 중 14개, 2014 경찰간부
+// 형사소송법 `10.상소에 관한 …`이 1개 통째로 누락). 다만 이 형태를 처음부터
+// 일반 마커로 쓰면 지문 속 번호 목록("1.한국은 …")까지 걸려 멀쩡하던 문제지가
+// 깨진다(실측: 국가직 5·7급 상황판단, 지방직 7급 국어). 그래서 아래
+// extractQuestionsFromPdf에서 "엄격형으로 찾은 번호 사이에 빠진 번호"를 메울
+// 때만 후보로 쓴다.
+const RELAXED_QUESTION_MARKER_RE = /^(?:문\s*)?(\d{1,3})\.(?!\d)/;
 
 // 문제 번호 마커의 텍스트 상단(marker.y 기준 위쪽 여백). 다음 문제와의 간격이
 // 실측상 최소 30pt 이상이라 10pt 정도는 어느 쪽 문제 내용도 침범하지 않는다.
@@ -188,6 +199,7 @@ async function findQuestionMarkers(page) {
   }
 
   const markers = [];
+  const relaxedMarkers = [];
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const str = item.str.trim();
@@ -209,6 +221,20 @@ async function findQuestionMarkers(page) {
       continue;
     }
 
+    // 완화형은 따로 모아둔다 — 빠진 번호를 메울 때만 쓴다.
+    const relaxedMatch = RELAXED_QUESTION_MARKER_RE.exec(str);
+    if (relaxedMatch) {
+      const [, , , , x, y] = item.transform;
+      relaxedMarkers.push({
+        number: Number(relaxedMatch[1]),
+        x,
+        y,
+        height: item.height,
+        hasMun,
+      });
+      continue;
+    }
+
     const bareMatch = BARE_NUMBER_RE.exec(str);
     if (!bareMatch) continue;
     const next = items[i + 1];
@@ -219,7 +245,13 @@ async function findQuestionMarkers(page) {
     if (Math.abs(y1 - y2) > 2 || x2 < x1 || x2 - x1End > 20) continue;
     markers.push({ number: Number(bareMatch[1]), x: x1, y: y1, height: item.height, hasMun });
   }
-  return { markers, groups, pageWidthPt: viewport.width, pageHeightPt: viewport.height };
+  return {
+    markers,
+    relaxedMarkers,
+    groups,
+    pageWidthPt: viewport.width,
+    pageHeightPt: viewport.height,
+  };
 }
 
 // 국어·영어·한국사처럼 지문이 있는 과목은 지문 안에 번호 매긴 보기/조항이
@@ -240,6 +272,116 @@ async function findQuestionMarkers(page) {
 // 페이지에 하나도 없는 극히 드문 경우에만 예전 클러스터링으로 폴백한다.
 const MARGIN_CLUSTER_GAP_PT = 25;
 const TRUSTED_MARGIN_TOLERANCE_PT = 5;
+// "문" 신호가 아예 없는 문제지(경찰 간부후보 등 "1." 형태만 쓰는 조판)에서
+// 쓰는 문서 전체 기준 여백 x의 허용 오차. 지문 속 인용 번호가 진짜 마커보다
+// 겨우 7pt 안쪽으로 들여쓰인 사례가 있어(실측: 2017 경찰간부 한국사, 2018
+// 경찰간부 세법개론 — 진짜 375pt vs 지문 382pt) 페이지 단위 25pt 클러스터링
+// 으로는 구분이 안 됐다.
+const DOC_MARGIN_TOLERANCE_PT = 10;
+// 문서 전체 마커 중 최빈 x가 이 비율 미만이면 여백이 흔들리는 조판으로 보고
+// 예전 클러스터링으로 되돌린다(1단 편집 등에서 자릿수/조각분리로 x가 크게
+// 흔들리는 문제지를 잘못 걸러내지 않기 위한 안전장치).
+const DOC_MARGIN_MIN_SHARE = 0.5;
+
+// 문서 전체 마커에서 칼럼별 최빈 x를 구한다. "문" 신호가 하나라도 있으면
+// 기존의 신뢰 마커 기반 필터가 더 정확하므로 계산하지 않는다(null 반환).
+export function computeDocMarginX(pageMarkerDataList) {
+  const all = pageMarkerDataList.flatMap((d) =>
+    d.markers.map((m) => ({ ...m, col: m.x < d.pageWidthPt / 2 ? "L" : "R" })),
+  );
+  if (all.length === 0 || all.some((m) => m.hasMun)) return null;
+  const result = {};
+  for (const col of ["L", "R"]) {
+    const xs = all.filter((m) => m.col === col).map((m) => Math.round(m.x));
+    if (xs.length === 0) continue;
+    const counts = new Map();
+    for (const x of xs) counts.set(x, (counts.get(x) ?? 0) + 1);
+    const [modeX, modeCount] = [...counts].sort((a, b) => b[1] - a[1])[0];
+    // 최빈 x가 그 칼럼에서 가장 왼쪽이 아니면 여백이 아니라 지문 속 번호 목록일
+    // 수 있다 — 실측(국가직 5·7급 상황판단, 지방직 7급 국어)에서 지문 번호가
+    // 진짜 마커보다 많아 최빈값을 차지했고, 그걸 여백으로 믿으면 진짜 마커가
+    // 통째로 지워졌다. 이런 문제지에서는 아예 기준을 세우지 않고(=null) 예전
+    // 동작(클러스터링)에 맡긴다.
+    const minX = Math.min(...xs);
+    if (modeCount / xs.length >= DOC_MARGIN_MIN_SHARE && modeX - minX <= DOC_MARGIN_TOLERANCE_PT) {
+      result[col] = modeX;
+    }
+  }
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+// 여백 x만으로는 진짜 마커와 지문 속 인용 번호를 못 가르는 경우가 있다 — 실측상
+// 진짜 마커가 여백에서 6pt 안쪽으로 들어간 문제지(2024 경찰간부 범죄학 37번,
+// 2025 재정학 4번)와, 지문 속 가짜 번호가 여백에서 7pt 들어간 문제지(2017
+// 경찰간부 한국사)가 둘 다 있어 어떤 임계값도 한쪽을 반드시 틀린다.
+// 다행히 가짜는 예외 없이 "이미 다른 자리에 있는 번호의 중복"으로 나타나므로,
+// 같은 번호가 문서 안에서 여러 번 잡히면 여백에 가장 가까운 것 하나만 남긴다.
+// (남기지 않으면 extractQuestionsFromPdf의 중복 감지가 하드 에러로 멈춘다.)
+// 엄격형 마커(마침표 뒤 공백)로 찾은 번호들 사이에 빠진 번호가 있으면, 그 번호에
+// 한해 완화형 후보(마침표 뒤 본문이 곧장 붙는 형태)를 여백 x가 맞는 것만 골라
+// 채워 넣는다. 완화형을 처음부터 일반 마커로 쓰면 지문 속 번호 목록까지 걸려
+// 멀쩡하던 문제지가 깨지므로(실측: 국가직 5·7급 상황판단), 이렇게 "구멍 메우기"
+// 로만 제한한다.
+export function fillMissingNumbersFromRelaxed(pageMarkerDataList, docMarginX) {
+  if (docMarginX == null) return;
+  const strictNumbers = new Set();
+  for (const data of pageMarkerDataList) for (const m of data.markers) strictNumbers.add(m.number);
+  if (strictNumbers.size === 0) return;
+  const maxNumber = Math.max(...strictNumbers);
+
+  // 같은 번호의 완화형 후보가 여러 개면 여백에 가장 가까운 하나만 쓴다.
+  const candidates = new Map();
+  for (const data of pageMarkerDataList) {
+    const half = data.pageWidthPt / 2;
+    for (const m of data.relaxedMarkers ?? []) {
+      if (strictNumbers.has(m.number)) continue;
+      const margin = m.x < half ? docMarginX.L : docMarginX.R;
+      if (margin == null) continue;
+      const dev = Math.abs(m.x - margin);
+      if (dev > DOC_MARGIN_TOLERANCE_PT) continue;
+      const prev = candidates.get(m.number);
+      if (!prev || dev < prev.dev) candidates.set(m.number, { marker: m, dev, data });
+    }
+  }
+  // 사이에 빠진 번호는 그대로 채우고, 마지막 번호 뒤쪽은 끊기지 않고 이어지는
+  // 만큼만 채운다 — 마지막 문제가 완화형인 경우가 있어서다(실측: 2016 경찰간부
+  // 경찰학개론 `40.「경찰 감찰 규칙」…`). 번호가 한 칸이라도 비면 거기서 멈춰
+  // 지문 속 번호가 딸려 들어오지 않게 한다.
+  for (const [number, { marker, data }] of candidates) {
+    if (number < maxNumber) data.markers.push(marker);
+  }
+  for (let n = maxNumber + 1; candidates.has(n); n++) {
+    const { marker, data } = candidates.get(n);
+    data.markers.push(marker);
+  }
+}
+
+export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX) {
+  if (docMarginX == null) return;
+  const byNumber = new Map();
+  for (const data of pageMarkerDataList) {
+    const half = data.pageWidthPt / 2;
+    for (const m of data.markers) {
+      const margin = m.x < half ? docMarginX.L : docMarginX.R;
+      const dev = margin == null ? Infinity : Math.abs(m.x - margin);
+      if (!byNumber.has(m.number)) byNumber.set(m.number, []);
+      byNumber.get(m.number).push({ marker: m, dev, data });
+    }
+  }
+  for (const rawEntries of byNumber.values()) {
+    if (rawEntries.length < 2) continue;
+    // 여백 x를 확정하지 못한 칼럼(마커 x가 흔들려 최빈값 비율이 낮은 경우)의
+    // 마커는 어느 쪽이 진짜인지 판단할 근거가 없으므로 손대지 않는다 — 여기서
+    // 무리하게 지우면 진짜 마커가 사라진다(실측: 2026 지방직 9급 국어 2번).
+    const entries = rawEntries.filter((e) => Number.isFinite(e.dev));
+    if (entries.length !== rawEntries.length || entries.length < 2) continue;
+    const best = entries.reduce((a, b) => (b.dev < a.dev ? b : a));
+    for (const e of entries) {
+      if (e === best) continue;
+      e.data.markers = e.data.markers.filter((m) => m !== e.marker);
+    }
+  }
+}
 
 function filterMarginMarkers(columnMarkers) {
   if (columnMarkers.length === 0) return columnMarkers;
@@ -386,7 +528,13 @@ async function stackVertically(topBuffer, bottomBuffer) {
 // 있어서(마지막 페이지만 보면 마커가 몇 개 안 남아 우연히 한쪽에만 몰릴 수
 // 있다) extractQuestionsFromPdf가 모든 페이지를 먼저 훑어 한 번만 정하고, 그
 // 김에 얻은 결과를 여기서 재사용해 페이지당 텍스트 추출을 두 번 하지 않는다.
-async function cropQuestionsFromPage(page, markerData, scale, carriedStrips = new Map(), columnMode = "double") {
+async function cropQuestionsFromPage(
+  page,
+  markerData,
+  scale,
+  carriedStrips = new Map(),
+  columnMode = "double",
+) {
   const { markers, groups, pageWidthPt, pageHeightPt } = markerData;
   if (markers.length === 0) return { results: [], pendingStrips: carriedStrips };
 
@@ -566,6 +714,17 @@ export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage } =
     if (data.markers.some((m) => m.x >= data.pageWidthPt / 2)) hasRightColumnMarker = true;
   }
   const columnMode = hasRightColumnMarker ? "double" : "single";
+  // "문" 표기가 없는 조판(경찰 간부후보 등)은 문서 전체 기준 여백 x를 구해
+  // 빠진 번호 메우기와 중복 번호 정리의 기준으로 쓴다.
+  const docMarginX = computeDocMarginX(pageMarkerData.map((d) => d.data));
+  fillMissingNumbersFromRelaxed(
+    pageMarkerData.map((d) => d.data),
+    docMarginX,
+  );
+  pruneDuplicateMarkers(
+    pageMarkerData.map((d) => d.data),
+    docMarginX,
+  );
 
   const cropped = [];
   let carriedStrips = new Map();
@@ -577,6 +736,7 @@ export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage } =
       scale,
       carriedStrips,
       columnMode,
+      docMarginX,
     );
     carriedStrips = pendingStrips;
     cropped.push(...pageResults);

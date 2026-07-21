@@ -17,6 +17,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | 법령 문항 해설 (생성·재생성·삭제·판별) | `docs/agents/law-explanations.md` |
 | 중복 시험지 표시 통합 (`dedup-papers.ts`, 목록에 같은 시험지가 여러 장 보이는 문제) | `docs/agents/dedup-papers.md` |
 | 정답 등록·검수 (`extract-answer-keys.mjs`, `list-pending-answer-keys.mjs`, `paper_answers` 직접 조작) | `docs/agents/answer-keys-tracks.md` |
+| 통합본 PDF 과목별 분리 (`split-by-toc.mjs`/`split-combined-pdf.mjs`/`split-by-subject-header.mjs`) | `docs/agents/split-combined-pdfs.md` |
 
 # 금지선 (문서 안 읽었어도 이것만은 절대)
 

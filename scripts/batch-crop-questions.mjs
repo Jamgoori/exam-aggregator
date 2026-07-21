@@ -170,9 +170,12 @@ async function main() {
   const scale = args.scale ? Number(args.scale) : 3;
   const force = Boolean(args.force);
 
-  if (!examTypeName || !level) {
+  // 급수(level)가 없는 시험(경찰 공채/간부후보 등)은 --track으로 대상을 좁힌다.
+  // 둘 다 없으면 그 시험유형 전체가 대상이 되어 의도치 않게 크게 도는 걸 막는다.
+  const track = args.track;
+  if (!examTypeName || (!level && !track)) {
     console.error(
-      "사용법: npm run batch-crop-questions -- --exam-type <시험유형명> --level <급수> [--dry-run] [--concurrency 2] [--limit N] [--force]",
+      "사용법: npm run batch-crop-questions -- --exam-type <시험유형명> (--level <급수> | --track <직류>) [--dry-run] [--concurrency 2] [--limit N] [--force]",
     );
     process.exit(1);
   }
@@ -199,7 +202,12 @@ async function main() {
     supabase,
     "exam_papers",
     "id, title, year, round, level, file_path, question_count, choice_count",
-    (q) => q.eq("exam_type_id", examType.id).eq("level", level),
+    (q) => {
+      let built = q.eq("exam_type_id", examType.id);
+      if (level) built = built.eq("level", level);
+      if (track) built = built.eq("track", track);
+      return built;
+    },
   );
 
   const questionRows = await fetchAllRows(supabase, "questions", "id, paper_id");
@@ -214,7 +222,7 @@ async function main() {
   if (limit) targets = targets.slice(0, limit);
 
   console.log(
-    `${examTypeName} ${level}: 전체 ${papers.length}개 중 ${paperIdsAlreadyCropped.size}개 이미 크롭됨, ${targets.length}개 처리 대상${force ? " (--force: 이미 크롭된 것도 다시)" : ""}${dryRun ? " (dry-run)" : ""} (동시성 ${concurrency})\n`,
+    `${examTypeName} ${level ?? track}: 전체 ${papers.length}개 중 ${paperIdsAlreadyCropped.size}개 이미 크롭됨, ${targets.length}개 처리 대상${force ? " (--force: 이미 크롭된 것도 다시)" : ""}${dryRun ? " (dry-run)" : ""} (동시성 ${concurrency})\n`,
   );
 
   if (targets.length === 0) {

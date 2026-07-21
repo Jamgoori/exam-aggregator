@@ -38,11 +38,16 @@ const EXAM_TYPE_KEYWORDS = {
   지역인재: "지역인재",
   계리: "계리직",
   간호: "간호직",
+  // "해양경찰"이 먼저 매칭되도록 일반 "경찰"은 맨 뒤에 둔다.
+  경찰: "경찰",
 };
 
 // 같은 연도/급수를 공유하는 특수모집 분야 키워드 -> exam_papers.track과 동일한 값으로 매핑
 const TRACK_KEYWORDS = {
   근로감독: "근로감독 및 산업안전분야",
+  // 경찰 간부후보(경위 공채)는 같은 해 순경 공채와 정답표가 별개다. track을 안 붙이면
+  // (exam_type_id, year, level, round, track) unique upsert에서 서로 덮어쓴다.
+  간부후보: "간부후보",
 };
 
 async function main() {
