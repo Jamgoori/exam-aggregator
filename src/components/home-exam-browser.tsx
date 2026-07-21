@@ -13,7 +13,10 @@ import {
   parseSearchQuery,
   getExamTypeNames,
   groupByYearAndSubject,
+  decodePapers,
+  type ExamTypeRef,
   type LightPaper,
+  type PaperWire,
 } from "@/lib/paper-search";
 import type { Subject } from "@/lib/supabase/types";
 import type { ExamPaper } from "@/lib/supabase/types";
@@ -98,14 +101,15 @@ function PageButtons({
 
 export function HomeExamBrowser({
   heroText,
-  allPapers,
+  papers,
   subjects,
+  examTypes,
   initialQuery,
   initialLevel,
   initialPage,
   bookmarkedIds,
   bookmarkedSubjectIds,
-  cbtAvailableIds,
+  cbtMask,
   myRoundCounts,
   loggedIn,
   totalCount,
@@ -116,14 +120,18 @@ export function HomeExamBrowser({
   // 넘겨받는다 — 검색 인터랙션(SearchInput)과 같은 히어로 섹션 안에
   // 나란히 있어야 하는 원래 레이아웃을 유지하기 위한 슬롯이다.
   heroText: ReactNode;
-  allPapers: LightPaper[];
+  // 문제지 전체 목록은 전송량을 줄인 튜플 표현으로 받아(paper-search의 PaperWire),
+  // 여기서 한 번만 화면용 모양으로 복원한다.
+  papers: PaperWire[];
   subjects: Subject[];
+  examTypes: ExamTypeRef[];
   initialQuery: string;
   initialLevel?: string;
   initialPage: number;
   bookmarkedIds: string[];
   bookmarkedSubjectIds: string[];
-  cbtAvailableIds: string[];
+  // papers와 같은 순서로 "바로 풀기 가능 여부"를 담은 0/1 문자열 (home-data.ts 참고)
+  cbtMask: string;
   myRoundCounts: Record<string, number>;
   loggedIn: boolean;
   totalCount: number | null;
@@ -132,6 +140,12 @@ export function HomeExamBrowser({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  // 압축 표현 → 화면용 목록 복원. 과목·시행처 객체는 문제지끼리 공유하므로
+  // (decodePapers 주석 참고) 배열 한 번 순회 수준의 비용이다.
+  const allPapers = useMemo(
+    () => decodePapers({ subjects, examTypes, papers }),
+    [subjects, examTypes, papers],
+  );
   // 검색/급수/페이지 이동은 서버 왕복을 피하려고 라우터 대신 history.replaceState로만
   // URL을 바꾼다(아래 useEffect). 그래서 Next 라우터는 이 변경들을 모르고, 카드 → 문제
   // 상세로 갔다가 뒤로 오면 이 컴포넌트가 Next가 캐시해둔(검색 전) 트리로 다시
@@ -177,7 +191,13 @@ export function HomeExamBrowser({
     () => new Set(bookmarkedSubjectIds),
     [bookmarkedSubjectIds],
   );
-  const cbtAvailableSet = useMemo(() => new Set(cbtAvailableIds), [cbtAvailableIds]);
+  const cbtAvailableSet = useMemo(() => {
+    const set = new Set<string>();
+    for (let i = 0; i < allPapers.length; i++) {
+      if (cbtMask[i] === "1") set.add(allPapers[i].id);
+    }
+    return set;
+  }, [allPapers, cbtMask]);
   // 로그아웃 상태에서는 로컬에 저장된 favOnly 값이 남아있어도 필터를 걸지 않는다.
   const effectiveFavOnly = favOnly && loggedIn;
 

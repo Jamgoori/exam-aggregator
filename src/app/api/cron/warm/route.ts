@@ -29,6 +29,6 @@ export async function GET(request: Request) {
   return Response.json({
     ok: true,
     at: new Date().toISOString(),
-    papers: data.allPapers.length,
+    papers: data.papers.length,
   });
 }

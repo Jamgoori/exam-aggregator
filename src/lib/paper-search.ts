@@ -4,7 +4,7 @@ import type { Subject } from "@/lib/supabase/types";
 // 홈 화면 카드 렌더링/필터링/정렬에 필요한 필드만 담은 가벼운 문제지 타입.
 // 전체 목록을 클라이언트에 통째로 보내는 방식이라 필드를 최소로 유지한다
 // (풀 ExamPaper에는 이 검색·목록에 안 쓰는 필드도 많다).
-export type LightPaper = {
+export type PaperCore = {
   id: string;
   title: string;
   level: string | null;
@@ -15,9 +15,86 @@ export type LightPaper = {
   round: number;
   subject_id: string;
   exam_type_id: string;
+};
+
+// 화면에서 실제로 쓰는 형태 — 과목·시행처 객체가 붙어 있다. 서버가 이 모양
+// 그대로 보내면 과목(163개)·시행처(14개) 객체가 문제지 행마다 복사돼 전송량이
+// 두 배 이상으로 불어나므로, 전송은 아래 PaperWire로 하고 클라이언트에서
+// decodePapers로 이 모양을 복원한다.
+export type LightPaper = PaperCore & {
   subjects: { id: string; name: string; slug: string } | null;
   exam_types: { id: string; name: string } | null;
 };
+
+// 서버 → 클라이언트 전송용 압축 표현.
+//
+// 왜 튜플인가: 홈은 문제지 전체 목록(2026-07 기준 3383건)을 클라이언트로 통째로
+// 넘겨 브라우저에서 즉시 검색·필터하는 구조다. 키 이름과 중첩 객체를 그대로
+// 실어보내면 RSC 페이로드가 1.3MB까지 커져서, 서버 직렬화와 브라우저 파싱이
+// 첫 로딩을 눈에 띄게 늦춘다. 키 이름을 없애고 과목·시행처를 각각의 배열
+// 인덱스로 대체하면 같은 정보가 약 1/4 크기로 줄어든다.
+//
+// 순서: [id, title, level, track, year, round, subjectIdx, examTypeIdx]
+// subjectIdx/examTypeIdx는 HomePayload.subjects / HomePayload.examTypes의 인덱스이며,
+// 대응하는 행이 없으면 -1이다.
+export type PaperWire = [
+  string,
+  string,
+  string | null,
+  string | null,
+  number,
+  number,
+  number,
+  number,
+];
+
+export type ExamTypeRef = { id: string; name: string };
+
+export type HomePayload = {
+  subjects: Subject[];
+  examTypes: ExamTypeRef[];
+  papers: PaperWire[];
+};
+
+export function encodePapers(
+  papers: PaperCore[],
+  subjects: Subject[],
+  examTypes: ExamTypeRef[],
+): PaperWire[] {
+  const subjectIdx = new Map(subjects.map((s, i) => [s.id, i]));
+  const examTypeIdx = new Map(examTypes.map((t, i) => [t.id, i]));
+  return papers.map((p) => [
+    p.id,
+    p.title,
+    p.level,
+    p.track,
+    p.year,
+    p.round,
+    subjectIdx.get(p.subject_id) ?? -1,
+    examTypeIdx.get(p.exam_type_id) ?? -1,
+  ]);
+}
+
+// 압축 표현을 화면용 LightPaper로 되돌린다. 과목·시행처는 "복사"하지 않고 같은
+// 객체를 여러 문제지가 함께 가리키게 하므로(163+14개만 존재), 복원 비용은
+// 배열 순회 한 번 수준이다.
+export function decodePapers({ subjects, examTypes, papers }: HomePayload): LightPaper[] {
+  const subjectRefs = subjects.map((s) => ({ id: s.id, name: s.name, slug: s.slug }));
+  return papers.map(
+    ([id, title, level, track, year, round, sIdx, tIdx]): LightPaper => ({
+      id,
+      title,
+      level,
+      track,
+      year,
+      round,
+      subject_id: subjects[sIdx]?.id ?? "",
+      exam_type_id: examTypes[tIdx]?.id ?? "",
+      subjects: subjectRefs[sIdx] ?? null,
+      exam_types: examTypes[tIdx] ?? null,
+    }),
+  );
+}
 
 // 검색어와 매치되는 과목 id 목록을 계산한다. 서버(page.tsx)와 클라이언트
 // (home-exam-browser.tsx) 양쪽에서 똑같은 로직을 써야 첫 렌더(SSR)와 이후
