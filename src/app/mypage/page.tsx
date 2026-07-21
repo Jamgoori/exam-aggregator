@@ -157,21 +157,6 @@ export default async function MyPage({
 
   // 오늘 할 일 카드 — 마이페이지 진입 즉시 최상단. 전 과목 미극복 합계 기준(복습 대상
   // 수 = 미극복 수라 채점 후 극복한 만큼만 줄어 개수가 어긋나지 않는다).
-  let topSubjectSlug: string | null = null;
-  let topSubjectN = 0;
-  for (const v of unresolvedBySubject.values()) {
-    if (v.unresolved > topSubjectN) {
-      topSubjectN = v.unresolved;
-      topSubjectSlug = v.slug;
-    }
-  }
-  if (!topSubjectSlug) {
-    const g = wrongNoteGroups
-      .filter((x) => x.unresolvedCount > 0)
-      .sort((a, b) => b.unresolvedCount - a.unresolvedCount)[0];
-    if (g) topSubjectSlug = g.subject.slug;
-  }
-
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
 
@@ -205,10 +190,7 @@ export default async function MyPage({
       </div>
 
       {wrongNoteGroups.length > 0 && (
-        <WrongNoteTodayCard
-          unresolvedTotal={totalUnresolved}
-          topSubjectSlug={topSubjectSlug}
-        />
+        <WrongNoteTodayCard unresolvedTotal={totalUnresolved} />
       )}
 
       <div className="flex flex-wrap gap-3">
