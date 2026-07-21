@@ -8,6 +8,11 @@ import {
   type DrawTool,
 } from "@/components/pdf-canvas-viewer";
 
+// 문제별 보기에서 zoom 100%일 때 문제 이미지가 차지하는 최대 너비(px). 전체보기와
+// 같은 max-w-2xl(672px)로 두면 PC에서 문항 하나가 지나치게 크게 보여 80%로 줄였다.
+// 모바일 화면 폭보다 넉넉히 커서, 좁은 화면에서는 예전처럼 화면 전체를 채운다.
+const BASE_CONTENT_WIDTH = 538;
+
 type QuestionAnswerState = {
   number: number;
   choiceCount: number;
@@ -33,6 +38,7 @@ export function SingleQuestionView({
   submitted,
   answeredCount,
   error,
+  zoom = 1,
 }: {
   questionIndex: number;
   totalQuestions: number;
@@ -52,6 +58,7 @@ export function SingleQuestionView({
   submitted: boolean;
   answeredCount: number;
   error?: string | null;
+  zoom?: number;
 }) {
   const firstNumber = questions[0]?.number ?? questionIndex + 1;
   const lastNumber = questions[questions.length - 1]?.number ?? firstNumber;
@@ -63,7 +70,9 @@ export function SingleQuestionView({
   const toolRef = useRef(tool);
   const penColorRef = useRef(penColor);
   const penWidthRef = useRef(penWidth);
-  // 문제별 보기는 전체보기의 확대/축소(zoom)와 무관하게 항상 원본 배율로 그린다.
+  // 문제별 보기의 확대/축소는 CSS zoom이 아니라 문제 영역의 실제 너비를 키우는
+  // 방식이라(아래 maxWidth), 캔버스도 리사이즈 옵저버로 같이 커진다. 즉 캔버스
+  // 좌표계와 화면 크기가 늘 1:1이므로 필기 좌표 보정 배율은 항상 1이다.
   const zoomRef = useRef(1);
 
   useEffect(() => {
@@ -195,7 +204,8 @@ export function SingleQuestionView({
       >
         <div
           ref={contentRef}
-          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white"
+          style={{ maxWidth: `${Math.round(BASE_CONTENT_WIDTH * zoom)}px` }}
+          className="relative mx-auto flex min-h-full w-full flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white"
         >
           {images.length === 0 ? (
             <p className="pt-24 text-center text-sm text-zinc-400 dark:text-zinc-600">

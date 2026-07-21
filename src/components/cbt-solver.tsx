@@ -631,6 +631,7 @@ export function CbtSolver({
                 submitted={!!result}
                 answeredCount={answeredCount}
                 error={error}
+                zoom={zoom}
               />
             )}
           </div>
