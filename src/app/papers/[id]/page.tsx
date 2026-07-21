@@ -1,3 +1,14 @@
+// 이 라우트가 어느 진입점에서든 즉시(정적 셸로) 이동되는지 빌드가 검증하게 한다 —
+// Suspense 경계가 잘못 옮겨져 이동이 다시 막히면 빌드 에러로 잡힌다. level·examTypes는
+// 하단 "같은 과목 목록" 필터 탭이 쓰는 검색 파라미터라 있음/없음 둘 다 선언해둔다.
+export const unstable_instant = {
+  prefetch: "static",
+  samples: [
+    { params: { id: "sample-paper-id" }, searchParams: { level: null, examTypes: null } },
+    { params: { id: "sample-paper-id" }, searchParams: { level: "9급", examTypes: "국가직" } },
+  ],
+};
+
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";

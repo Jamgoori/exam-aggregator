@@ -1,3 +1,13 @@
+// 홈 진입이 항상 즉시(정적 셸) 이동되는지 빌드가 검증하게 한다. level·q·page는
+// 검색창·급수 탭·페이지네이션이 쓰는 검색 파라미터라 있음/없음 둘 다 선언해둔다.
+export const unstable_instant = {
+  prefetch: "static",
+  samples: [
+    { searchParams: { level: null, q: null, page: null } },
+    { searchParams: { level: "9급", q: "국어", page: "2" } },
+  ],
+};
+
 import { createClient } from "@/lib/supabase/server";
 import { HomeExamBrowser } from "@/components/home-exam-browser";
 import { getMyRoundCounts } from "@/lib/my-round-counts";

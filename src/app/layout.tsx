@@ -1,7 +1,9 @@
+import { Suspense } from "react";
 import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { GoogleAnalytics } from "@next/third-parties/google";
 import { SiteHeaderGate } from "@/components/site-header-gate";
+import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
 import { createClient } from "@/lib/supabase/server";
@@ -24,16 +26,16 @@ export const viewport: Viewport = {
   interactiveWidget: "resizes-visual",
 };
 
-export default async function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+// 헤더에 닉네임을 보여주기 위한 용도라 인증 서버까지 왕복하는 getUser() 대신
+// JWT를 로컬에서 검증하는 getClaims()를 쓴다 (모든 페이지가 이 레이아웃을 거치므로
+// 페이지마다 인증 서버 왕복이 하나씩 붙는 것을 없애준다). 세션 갱신은 프록시
+// 미들웨어가 담당하고, 실제 데이터 접근 권한은 각 쿼리의 RLS가 검증한다.
+//
+// cookies() 접근은 런타임 데이터라 Cache Components에서는 Suspense 경계 뒤에
+// 있어야 한다 — 레이아웃 본문에서 바로 읽으면 정적 셸이 아예 안 만들어지므로,
+// 헤더만 비동기 컴포넌트로 분리해 스트리밍한다.
+async function StreamedSiteHeader() {
   const supabase = await createClient();
-  // 헤더에 닉네임을 보여주기 위한 용도라 인증 서버까지 왕복하는 getUser() 대신
-  // JWT를 로컬에서 검증하는 getClaims()를 쓴다 (모든 페이지가 이 레이아웃을 거치므로
-  // 페이지마다 인증 서버 왕복이 하나씩 붙는 것을 없애준다). 세션 갱신은 프록시
-  // 미들웨어가 담당하고, 실제 데이터 접근 권한은 각 쿼리의 RLS가 검증한다.
   const { data } = await supabase.auth.getClaims();
   const claims = data?.claims;
 
@@ -46,6 +48,14 @@ export default async function RootLayout({
       }
     : null;
 
+  return <SiteHeaderGate user={headerUser} />;
+}
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html lang="ko" className="h-full antialiased" suppressHydrationWarning>
       <head>
@@ -58,9 +68,18 @@ export default async function RootLayout({
         />
       </head>
       <body className="min-h-full">
-        <SiteHeaderGate user={headerUser} />
+        {/* 폴백은 정적 셸에 들어가므로 usePathname(런타임 데이터)을 쓰는
+            SiteHeaderGate 대신 순수한 SiteHeader를 깔아둔다. 몰입형(CBT) 화면
+            여부에 따른 숨김은 실제 헤더가 스트리밍되면서 적용된다. */}
+        <Suspense fallback={<SiteHeader user="pending" />}>
+          <StreamedSiteHeader />
+        </Suspense>
         {children}
-        <SiteFooter />
+        {/* 푸터도 usePathname으로 몰입형 화면을 판별하므로 Suspense 뒤에 둔다 —
+            페이지 맨 아래라 잠깐 비어 있어도 눈에 띄지 않는다. */}
+        <Suspense fallback={null}>
+          <SiteFooter />
+        </Suspense>
         <Analytics />
         {process.env.NEXT_PUBLIC_GA_ID && (
           <GoogleAnalytics gaId={process.env.NEXT_PUBLIC_GA_ID} />

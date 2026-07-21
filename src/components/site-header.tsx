@@ -5,10 +5,12 @@ import { SignOutButton } from "@/components/sign-out-button";
 import { LoginLink } from "@/components/login-link";
 import { ThemeToggle } from "@/components/theme-toggle";
 
+// user가 "pending"이면 아직 인증 확인(getClaims)이 스트리밍 중이라는 뜻 —
+// 로그인 버튼을 잘못 깜빡이지 않도록 그 자리에 스켈레톤 알약을 깔아둔다.
 export function SiteHeader({
   user,
 }: {
-  user: { nickname: string } | null;
+  user: { nickname: string } | null | "pending";
 }) {
   return (
     <header className="border-b border-zinc-200 print:hidden dark:border-zinc-700">
@@ -22,7 +24,9 @@ export function SiteHeader({
 
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          {user ? (
+          {user === "pending" ? (
+            <div className="skeleton h-8 w-24 rounded-full" />
+          ) : user ? (
             <div className="flex items-center gap-2">
               <Link
                 href="/mypage"
