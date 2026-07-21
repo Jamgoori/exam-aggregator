@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
-import { WrongNoteTodayCard } from "@/components/wrong-note-today-card";
 import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
 import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getCbtAvailability } from "@/lib/cbt-availability";
@@ -155,8 +154,6 @@ export default async function MyPage({
       ? [...unresolvedBySubject.values()].reduce((s, v) => s + v.unresolved, 0)
       : wrongNoteGroups.reduce((sum, g) => sum + g.unresolvedCount, 0);
 
-  // 오늘 할 일 카드 — 마이페이지 진입 즉시 최상단. 전 과목 미극복 합계 기준(복습 대상
-  // 수 = 미극복 수라 채점 후 극복한 만큼만 줄어 개수가 어긋나지 않는다).
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
 
@@ -188,10 +185,6 @@ export default async function MyPage({
           </Link>
         </div>
       </div>
-
-      {wrongNoteGroups.length > 0 && (
-        <WrongNoteTodayCard unresolvedTotal={totalUnresolved} />
-      )}
 
       <div className="flex flex-wrap gap-3">
         <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
