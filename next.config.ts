@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Cache Components: 캐싱은 'use cache' 지시어로 명시하고, 나머지 동적 데이터는
+  // Suspense 경계 뒤에서 스트리밍한다. 정적 셸을 미리 만들어 첫 표시가 빨라지고,
+  // 경계가 빠진 곳은 빌드가 에러로 잡아준다.
+  cacheComponents: true,
   async headers() {
     return [
       {

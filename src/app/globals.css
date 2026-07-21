@@ -255,4 +255,7 @@ button:not(:disabled) {
   );
   transform: translateX(-100%);
   animation: skeleton-sweep 1.8s ease-in-out infinite;
+  /* 블록마다 --skeleton-delay를 달리 주면 하이라이트가 위에서 아래로 순서대로
+     훑고 지나가는 폭포(cascade) 연출이 된다. 안 주면 기존처럼 동시에 반짝인다. */
+  animation-delay: var(--skeleton-delay, 0s);
 }

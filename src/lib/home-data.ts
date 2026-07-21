@@ -1,5 +1,5 @@
 import "server-only";
-import { unstable_cache } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 import { createPublicClient } from "@/lib/supabase/public";
 import { fetchAllExamPapers } from "@/lib/all-papers";
 import { getAllCbtAvailability } from "@/lib/cbt-availability";
@@ -14,25 +14,27 @@ import type { LightPaper } from "@/lib/paper-search";
 // 않는다(예전 값을 즉시 주고 뒤에서 갱신). 새 업로드 즉시 반영은 revalidateTag(
 // "home-data")로 처리한다(admin/actions.ts).
 //
-// cookies()를 건드리지 않는 createPublicClient를 써야 unstable_cache 안에서 안전하다.
-export const getCachedHomeData = unstable_cache(
-  async (): Promise<{
-    subjects: Subject[];
-    allPapers: LightPaper[];
-    cbtAvailableIds: string[];
-  }> => {
-    const supabase = createPublicClient();
-    const [{ data: subjects }, allPapers, cbtAvailability] = await Promise.all([
-      supabase.from("subjects").select("*").order("name"),
-      fetchAllExamPapers(supabase),
-      getAllCbtAvailability(supabase),
-    ]);
-    return {
-      subjects: (subjects ?? []) as Subject[],
-      allPapers,
-      cbtAvailableIds: [...cbtAvailability],
-    };
-  },
-  ["home-data-v1"],
-  { revalidate: 300, tags: ["home-data"] },
-);
+// cookies()를 건드리지 않는 createPublicClient를 써야 'use cache' 안에서 안전하다.
+// (Cache Components 전환으로 unstable_cache에서 'use cache' 지시어로 이전 —
+// revalidate 300초·태그 "home-data" 동작은 cacheLife/cacheTag로 그대로 유지.)
+export async function getCachedHomeData(): Promise<{
+  subjects: Subject[];
+  allPapers: LightPaper[];
+  cbtAvailableIds: string[];
+}> {
+  "use cache";
+  cacheLife({ revalidate: 300 });
+  cacheTag("home-data");
+
+  const supabase = createPublicClient();
+  const [{ data: subjects }, allPapers, cbtAvailability] = await Promise.all([
+    supabase.from("subjects").select("*").order("name"),
+    fetchAllExamPapers(supabase),
+    getAllCbtAvailability(supabase),
+  ]);
+  return {
+    subjects: (subjects ?? []) as Subject[],
+    allPapers,
+    cbtAvailableIds: [...cbtAvailability],
+  };
+}
