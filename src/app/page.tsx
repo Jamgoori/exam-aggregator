@@ -1,36 +1,22 @@
-import { Suspense } from "react";
+// 홈 진입이 항상 즉시(정적 셸) 이동되는지 빌드가 검증하게 한다. level·q·page는
+// 검색창·급수 탭·페이지네이션이 쓰는 검색 파라미터라 있음/없음 둘 다 선언해둔다.
+export const unstable_instant = {
+  prefetch: "static",
+  samples: [
+    { searchParams: { level: null, q: null, page: null } },
+    { searchParams: { level: "9급", q: "국어", page: "2" } },
+  ],
+};
+
 import { createClient } from "@/lib/supabase/server";
 import { HomeExamBrowser } from "@/components/home-exam-browser";
-import { HomeSkeleton } from "@/components/home-skeleton";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
 import { getHomeStats } from "@/lib/home-stats";
 import { getCachedHomeData } from "@/lib/home-data";
 
-// 홈은 데이터가 다 모여야 첫 바이트가 나가던 구조였다 — 캐시가 비어 있으면
-// 문제지 전체 조회(실측 2초)가 끝날 때까지 브라우저는 흰 화면만 본다. 데이터가
-// 필요한 부분을 Suspense 안으로 밀어넣으면 껍데기(헤더·레이아웃·스켈레톤)가
-// 먼저 나가고, 내용은 준비되는 대로 이어서 스트리밍된다.
 export default async function Home({
-  searchParams,
-}: {
-  searchParams: Promise<{
-    level?: string;
-    q?: string;
-    page?: string;
-  }>;
-}) {
-  return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
-      <Suspense fallback={<HomeSkeleton />}>
-        <HomeContent searchParams={searchParams} />
-      </Suspense>
-    </div>
-  );
-}
-
-async function HomeContent({
   searchParams,
 }: {
   searchParams: Promise<{
@@ -49,10 +35,8 @@ async function HomeContent({
   const userId = claimsData?.claims.sub ?? null;
 
   // 전역 데이터(문제지 전체·과목·CBT 가능 목록)는 로그인 여부와 무관하게 모두에게
-  // 같은 값이라 캐싱해서 받는다(getCachedHomeData). 매 접속마다 3000여 건을 새로
-  // 받던 무거운 조회(실측 2초, NANO 공유 CPU라 편차 큼)를 대부분 캐시 히트로 없앤다.
-  // 반면 회독수·즐겨찾기는 사용자별 값이라 요청마다 그때그때 조회한다(작고 인덱스로
-  // 빨라 캐싱 불필요).
+  // 같은 값이라 캐싱해서 받는다(getCachedHomeData). 반면 회독수·즐겨찾기는 사용자별
+  // 값이라 요청마다 그때그때 조회한다(작고 인덱스로 빨라 캐싱 불필요).
   const [
     { subjects, examTypes, papers, cbtMask },
     homeStats,
@@ -82,59 +66,61 @@ async function HomeContent({
   const latestYear = papers[0]?.[4];
 
   return (
-    <HomeExamBrowser
-      heroText={
-        <>
-          <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
-            {latestYear
-              ? `${latestYear}년 자료 업데이트 완료`
-              : "기출문제를 업로드해보세요"}
-          </span>
-          <h1 className="text-3xl font-bold text-black sm:text-4xl dark:text-zinc-100">
-            나만의{" "}
-            <span className="text-blue-600 dark:text-blue-400">데이터</span>
-            로,
-            <br />
-            합격까지 빠르게
-          </h1>
-          {/* 모바일은 첫 화면에 카드 목록이 보이도록 통계 타일을 걷어내고
-              "총 자료 수"만 이 문장에 통합한 압축 버전, PC(sm 이상)는 아래
-              통계 타일 3개(home-exam-browser.tsx)가 그대로 보이므로 숫자 없는
-              원래 문장을 쓴다. */}
-          <p className="text-zinc-600 sm:hidden dark:text-zinc-400">
-            국가직·지방직·소방·경찰 등 주요 공무원 시험 기출문제{" "}
-            {totalCount ? (
-              <>
-                <strong className="font-semibold text-zinc-800 dark:text-zinc-200">
-                  {totalCount.toLocaleString()}건
-                </strong>
-                을{" "}
-              </>
-            ) : (
-              "를 "
-            )}
-            연도별·과목별로 정리했어요.
-          </p>
-          <p className="hidden text-zinc-600 sm:block dark:text-zinc-400">
-            국가직·지방직·소방·경찰 등 주요 공무원 시험 기출문제를 연도별·과목별로
-            정리했어요.
-          </p>
-        </>
-      }
-      papers={papers}
-      subjects={subjects}
-      examTypes={examTypes}
-      initialQuery={q ?? ""}
-      initialLevel={level}
-      initialPage={currentPage}
-      bookmarkedIds={[...bookmarkedIds]}
-      bookmarkedSubjectIds={[...bookmarkedSubjectIds]}
-      cbtMask={cbtMask}
-      myRoundCounts={Object.fromEntries(myRoundCounts)}
-      loggedIn={!!userId}
-      totalCount={totalCount}
-      totalDownloads={totalDownloads}
-      totalAttempts={totalAttempts}
-    />
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
+      <HomeExamBrowser
+        heroText={
+          <>
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
+              {latestYear
+                ? `${latestYear}년 자료 업데이트 완료`
+                : "기출문제를 업로드해보세요"}
+            </span>
+            <h1 className="text-3xl font-bold text-black sm:text-4xl dark:text-zinc-100">
+              나만의{" "}
+              <span className="text-blue-600 dark:text-blue-400">데이터</span>
+              로,
+              <br />
+              합격까지 빠르게
+            </h1>
+            {/* 모바일은 첫 화면에 카드 목록이 보이도록 통계 타일을 걷어내고
+                "총 자료 수"만 이 문장에 통합한 압축 버전, PC(sm 이상)는 아래
+                통계 타일 3개(home-exam-browser.tsx)가 그대로 보이므로 숫자 없는
+                원래 문장을 쓴다. */}
+            <p className="text-zinc-600 sm:hidden dark:text-zinc-400">
+              국가직·지방직·소방·경찰 등 주요 공무원 시험 기출문제{" "}
+              {totalCount ? (
+                <>
+                  <strong className="font-semibold text-zinc-800 dark:text-zinc-200">
+                    {totalCount.toLocaleString()}건
+                  </strong>
+                  을{" "}
+                </>
+              ) : (
+                "를 "
+              )}
+              연도별·과목별로 정리했어요.
+            </p>
+            <p className="hidden text-zinc-600 sm:block dark:text-zinc-400">
+              국가직·지방직·소방·경찰 등 주요 공무원 시험 기출문제를 연도별·과목별로
+              정리했어요.
+            </p>
+          </>
+        }
+        papers={papers}
+        subjects={subjects}
+        examTypes={examTypes}
+        initialQuery={q ?? ""}
+        initialLevel={level}
+        initialPage={currentPage}
+        bookmarkedIds={[...bookmarkedIds]}
+        bookmarkedSubjectIds={[...bookmarkedSubjectIds]}
+        cbtMask={cbtMask}
+        myRoundCounts={Object.fromEntries(myRoundCounts)}
+        loggedIn={!!userId}
+        totalCount={totalCount}
+        totalDownloads={totalDownloads}
+        totalAttempts={totalAttempts}
+      />
+    </div>
   );
 }

@@ -16,6 +16,7 @@ export type SubjectPaperItem = {
   latestTotal: number | null;
   lastAttemptAt: string;
   unresolved: number;
+  resolved: number;
 };
 
 // 과목 오답노트 "문제지별" 탭. 시험지 중심 재풀이: 카드마다 "틀린 문제 다시 풀기",
@@ -59,6 +60,9 @@ export function SubjectPaperList({
     });
   }
 
+  // 시험지가 2장 이상일 때만 "합쳐 풀기"가 의미 있어, 체크박스·안내를 그때만 노출한다.
+  const multiSelectable = papers.length > 1;
+
   return (
     <div className={`flex flex-col gap-3 ${selected.size > 0 ? "pb-24" : ""}`}>
       {error && (
@@ -73,6 +77,9 @@ export function SubjectPaperList({
             ? `${Math.round((p.latestScore / p.latestTotal) * 100)}점`
             : null;
         const checked = selected.has(p.paperId);
+        const total = p.resolved + p.unresolved;
+        const resolvedPct = total > 0 ? Math.round((p.resolved / total) * 100) : 0;
+        const cleared = p.unresolved === 0;
         return (
           <div
             key={p.paperId}
@@ -83,13 +90,15 @@ export function SubjectPaperList({
             }`}
           >
             <div className="flex items-start gap-2.5">
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() => toggle(p.paperId)}
-                aria-label="시험지 선택"
-                className="mt-1 h-4 w-4 shrink-0 accent-blue-600"
-              />
+              {multiSelectable && (
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(p.paperId)}
+                  aria-label="시험지 선택"
+                  className="mt-1 h-4 w-4 shrink-0 accent-blue-600"
+                />
+              )}
               <Link
                 href={`/mypage/wrong-notes/${subjectSlug}/${p.paperId}`}
                 className="group flex min-w-0 flex-1 items-start gap-2"
@@ -103,18 +112,53 @@ export function SubjectPaperList({
                         {p.level}
                       </span>
                     )}
-                    <span className="font-medium leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                    <span className="font-semibold leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400">
                       {p.title}
                     </span>
                   </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-zinc-500 dark:text-zinc-500">
-                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 font-medium dark:bg-zinc-800 dark:text-zinc-400">
-                      {p.attemptCount}회독
+
+                  {/* 진행률: 극복 vs 남은 오답을 바로 눈에 보이게 */}
+                  {total > 0 && (
+                    <div className="mt-3">
+                      <div className="mb-1.5 flex items-center justify-between text-xs">
+                        <span className="font-semibold text-zinc-600 dark:text-zinc-300">
+                          극복 {p.resolved} / {total}문항
+                        </span>
+                        {cleared ? (
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                            모두 극복 🎉
+                          </span>
+                        ) : (
+                          <span className="font-semibold text-red-600 dark:text-red-400">
+                            남은 오답 {p.unresolved}
+                          </span>
+                        )}
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                        <div
+                          className="h-full rounded-full bg-emerald-500 transition-all"
+                          style={{ width: `${resolvedPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 라벨 붙은 메타: 각 숫자의 뜻을 분명히 */}
+                  <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-500">
+                    <span>
+                      회독{" "}
+                      <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                        {p.attemptCount}회
+                      </span>
                     </span>
-                    {pctLabel && <span>최근 {pctLabel}</span>}
-                    <span className="font-medium text-red-600 dark:text-red-400">
-                      남은 오답 {p.unresolved}
-                    </span>
+                    {pctLabel && (
+                      <span>
+                        최근 점수{" "}
+                        <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                          {pctLabel}
+                        </span>
+                      </span>
+                    )}
                   </div>
                 </div>
                 <ChevronRight
@@ -131,11 +175,21 @@ export function SubjectPaperList({
               className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
             >
               <RotateCcw size={15} />
-              {pending && activePaper === p.paperId ? "준비 중..." : "틀린 문제 다시 풀기"}
+              {pending && activePaper === p.paperId
+                ? "준비 중..."
+                : cleared
+                  ? "틀렸던 문제 복습하기"
+                  : "틀린 문제 다시 풀기"}
             </button>
           </div>
         );
       })}
+
+      {multiSelectable && selected.size === 0 && (
+        <p className="mt-1 text-center text-xs text-zinc-400 dark:text-zinc-500">
+          여러 시험지를 체크하면 합쳐서 한 번에 풀 수 있어요
+        </p>
+      )}
 
       {/* 여러 시험지 선택 → 합쳐 풀기. */}
       {selected.size > 0 && (

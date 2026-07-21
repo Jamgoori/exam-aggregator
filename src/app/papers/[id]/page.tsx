@@ -1,3 +1,15 @@
+// 이 라우트가 어느 진입점에서든 즉시(정적 셸로) 이동되는지 빌드가 검증하게 한다 —
+// Suspense 경계가 잘못 옮겨져 이동이 다시 막히면 빌드 에러로 잡힌다. level·examTypes는
+// 하단 "같은 과목 목록" 필터 탭이 쓰는 검색 파라미터라 있음/없음 둘 다 선언해둔다.
+export const unstable_instant = {
+  prefetch: "static",
+  samples: [
+    { params: { id: "sample-paper-id" }, searchParams: { level: null, examTypes: null } },
+    { params: { id: "sample-paper-id" }, searchParams: { level: "9급", examTypes: "국가직" } },
+  ],
+};
+
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BookOpenCheck, Download, ExternalLink, Monitor } from "lucide-react";
@@ -10,7 +22,11 @@ import { ExamCard } from "@/components/exam-card";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { MyCbtRecordModal } from "@/components/my-cbt-record-modal";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
-import { getPaper, getPaperDetailData } from "./paper-detail-data";
+import {
+  getPaper,
+  getPaperDetailData,
+  getRelatedPapersData,
+} from "./paper-detail-data";
 import type { ExamPaper } from "@/lib/supabase/types";
 import type { Metadata } from "next";
 
@@ -67,16 +83,10 @@ export default async function PaperDetailPage({
     hasFullExplanations,
     roundAverages,
     myCbtRecordItems,
-    subjectPapers,
-    availableLevels,
-    availableExamTypes,
-    myRoundCounts,
-    subjectBookmarkedIds,
-    subjectCbtAvailability,
     paperFileUrl,
     answerKey,
     answerKeyFileUrl,
-  } = await getPaperDetailData(paper, level, selectedExamTypeIds);
+  } = await getPaperDetailData(paper);
 
   const subject = paper.subjects;
   const examType = paper.exam_types;
@@ -243,21 +253,91 @@ export default async function PaperDetailPage({
       />
       </div>
 
-      {subject && subjectPapers?.length ? (
-        <RelatedPapersSection
-          subject={subject}
-          papers={subjectPapers}
-          availableLevels={availableLevels}
-          level={level}
-          availableExamTypes={availableExamTypes}
-          selectedExamTypeIds={selectedExamTypeIds}
-          currentPaperId={paper.id}
-          myRoundCounts={myRoundCounts}
-          bookmarkedIds={subjectBookmarkedIds}
-          cbtAvailability={subjectCbtAvailability}
-          loggedIn={loggedIn}
-        />
+      {/* 하단 "같은 과목 목록"은 목록 조회 → 중복 통합 신호 → 카드 배지 확인이
+          직렬로 이어지는 가장 느린 구간이라, 상단(제목·버튼·평점·댓글)을 먼저
+          보여주고 이 섹션만 Suspense 뒤에서 스트리밍한다. */}
+      {subject ? (
+        <Suspense fallback={<RelatedPapersSkeleton />}>
+          <RelatedPapers
+            paper={paper}
+            subject={subject}
+            level={level}
+            selectedExamTypeIds={selectedExamTypeIds}
+          />
+        </Suspense>
       ) : null}
+    </div>
+  );
+}
+
+// Suspense 경계 안에서 자기 데이터를 직접 기다렸다가 그리는 비동기 섹션.
+async function RelatedPapers({
+  paper,
+  subject,
+  level,
+  selectedExamTypeIds,
+}: {
+  paper: ExamPaper;
+  subject: NonNullable<ExamPaper["subjects"]>;
+  level?: string;
+  selectedExamTypeIds: Set<string>;
+}) {
+  const related = await getRelatedPapersData(paper, level, selectedExamTypeIds);
+  if (!related || related.subjectPapers.length === 0) return null;
+
+  return (
+    <RelatedPapersSection
+      subject={subject}
+      papers={related.subjectPapers}
+      availableLevels={related.availableLevels}
+      level={level}
+      availableExamTypes={related.availableExamTypes}
+      selectedExamTypeIds={selectedExamTypeIds}
+      currentPaperId={paper.id}
+      myRoundCounts={related.myRoundCounts}
+      bookmarkedIds={related.subjectBookmarkedIds}
+      cbtAvailability={related.subjectCbtAvailability}
+      loggedIn={related.loggedIn}
+    />
+  );
+}
+
+// 스트리밍이 끝나기 전 하단 섹션 자리에 깔리는 스켈레톤 — loading.tsx의 하단
+// 블록과 같은 모양이라, 전체 스켈레톤에서 실제 페이지로 바뀔 때 이 자리만
+// 그대로 이어져 화면이 덜컹거리지 않는다.
+function RelatedPapersSkeleton() {
+  return (
+    <div className="flex flex-col gap-4 border-t border-zinc-100 pt-14 dark:border-zinc-700">
+      <div className="flex items-center justify-between gap-4">
+        <div className="skeleton h-5 w-40 rounded-lg" />
+        <div className="skeleton h-4 w-14 rounded-lg" />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {Array.from({ length: 3 }, (_, i) => (
+          <div key={i} className="skeleton h-8 w-14 rounded-full" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }, (_, i) => (
+          <div
+            key={i}
+            className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="skeleton h-5 w-10 rounded" />
+                <div className="skeleton h-5 w-14 rounded" />
+              </div>
+              <div className="skeleton h-7 w-7 shrink-0 rounded-full" />
+            </div>
+            <div className="skeleton h-4 w-full rounded-lg" />
+            <div className="mt-auto flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-700">
+              <div className="skeleton h-5 w-16 rounded-full" />
+              <div className="skeleton h-4 w-16 rounded-lg" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -1,3 +1,15 @@
+// 홈 → 마이페이지 이동이 항상 즉시(스켈레톤 셸) 뜨는지 빌드가 검증하게 한다.
+// tab 쿼리스트링이 실제로 쓰이는 세 가지 모양(없음/history/wrong-notes)을
+// 샘플로 선언해야 검증이 "선언 안 된 검색 파라미터 접근"으로 막지 않는다.
+export const unstable_instant = {
+  prefetch: "static",
+  samples: [
+    { searchParams: { tab: null } },
+    { searchParams: { tab: "history" } },
+    { searchParams: { tab: "wrong-notes" } },
+  ],
+};
+
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BookOpenCheck, ChevronRight, Star, Trophy } from "lucide-react";
@@ -5,7 +17,6 @@ import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
-import { WrongNoteTodayCard } from "@/components/wrong-note-today-card";
 import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
 import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getCbtAvailability } from "@/lib/cbt-availability";
@@ -14,6 +25,7 @@ import { computeStreakDays, streakTier } from "@/lib/streak";
 import { subjectColor } from "@/lib/subject-colors";
 import {
   buildWrongNoteGroups,
+  fetchQuestionStatusMap,
   fetchWrongAnswerRows,
   fetchWrongNoteMarks,
   getUnresolvedCountBySubject,
@@ -126,17 +138,24 @@ export default async function MyPage({
 
   // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고,
   // 문항별 오답 행만 추가로 조회한다.
-  const [wrongRows, wrongNoteMarks] = await Promise.all([
+  const myAttemptPaperIds = [
+    ...new Set(
+      myAttempts.map((a) => a.exam_papers?.id).filter((id): id is string => !!id),
+    ),
+  ];
+  const [wrongRows, wrongNoteMarks, wrongNoteStatusOverrides] = await Promise.all([
     fetchWrongAnswerRows(
       supabase,
       myAttempts.map((a) => a.id),
     ),
     fetchWrongNoteMarks(supabase, user.id),
+    fetchQuestionStatusMap(supabase, user.id, myAttemptPaperIds),
   ]);
   const wrongNoteGroups = buildWrongNoteGroups(
     myAttempts as unknown as WrongNoteAttemptRow[],
     wrongRows,
     wrongNoteMarks.deleted,
+    wrongNoteStatusOverrides,
   );
   // 미극복 수는 user_question_status(CBT+섞어풀기 통합) 기준으로 센다 — 섞어풀기로
   // 극복한 게 헤드라인·과목·오늘 카드에 즉시 반영되고, 섞어풀기 후보 수와 일치한다.
@@ -146,23 +165,6 @@ export default async function MyPage({
     unresolvedBySubject.size > 0
       ? [...unresolvedBySubject.values()].reduce((s, v) => s + v.unresolved, 0)
       : wrongNoteGroups.reduce((sum, g) => sum + g.unresolvedCount, 0);
-
-  // 오늘 할 일 카드 — 마이페이지 진입 즉시 최상단. 전 과목 미극복 합계 기준(복습 대상
-  // 수 = 미극복 수라 채점 후 극복한 만큼만 줄어 개수가 어긋나지 않는다).
-  let topSubjectSlug: string | null = null;
-  let topSubjectN = 0;
-  for (const v of unresolvedBySubject.values()) {
-    if (v.unresolved > topSubjectN) {
-      topSubjectN = v.unresolved;
-      topSubjectSlug = v.slug;
-    }
-  }
-  if (!topSubjectSlug) {
-    const g = wrongNoteGroups
-      .filter((x) => x.unresolvedCount > 0)
-      .sort((a, b) => b.unresolvedCount - a.unresolvedCount)[0];
-    if (g) topSubjectSlug = g.subject.slug;
-  }
 
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
@@ -195,13 +197,6 @@ export default async function MyPage({
           </Link>
         </div>
       </div>
-
-      {wrongNoteGroups.length > 0 && (
-        <WrongNoteTodayCard
-          unresolvedTotal={totalUnresolved}
-          topSubjectSlug={topSubjectSlug}
-        />
-      )}
 
       <div className="flex flex-wrap gap-3">
         <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">

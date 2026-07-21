@@ -90,39 +90,47 @@ export async function fetchPaperIdentitySignals(
     signals.set(id, { questionCount: 0, answerSignature: null, answerLength: null });
   }
 
-  // 문항 수 (공개 읽기)
-  const { data: questionRows } = await supabase
+  // 문항 수(공개 읽기)와 정답 지문(service_role 전용)은 서로 의존이 없으므로
+  // 동시에 조회한다 — 이 함수는 목록 조회 뒤에 이어지는 직렬 구간이라 왕복을
+  // 하나라도 줄이는 게 체감 속도에 그대로 반영된다.
+  const questionRowsPromise = supabase
     .from("questions")
     .select("paper_id")
     .in("paper_id", paperIds);
+  // service_role 키가 없는 환경에서는 정답 대조를 조용히 건너뛰고 문항 수만 쓴다.
+  // (여기서 null을 돌려줘야 아래 await 전에 거절된 프로미스가 생기지 않는다.)
+  const answerRowsPromise = (async () => {
+    try {
+      const admin = createAdminClient();
+      return await admin
+        .from("paper_answers")
+        .select("paper_id, answers, voided_questions")
+        .in("paper_id", paperIds);
+    } catch {
+      return null;
+    }
+  })();
+
+  const { data: questionRows } = await questionRowsPromise;
   for (const row of questionRows ?? []) {
     const s = signals.get((row as { paper_id: string }).paper_id);
     if (s) s.questionCount += 1;
   }
 
-  // 정답 지문 (service_role 전용). 키가 없거나 조회가 막히면 문항 수만으로 판별.
-  try {
-    const admin = createAdminClient();
-    const { data: answerRows, error } = await admin
-      .from("paper_answers")
-      .select("paper_id, answers, voided_questions")
-      .in("paper_id", paperIds);
-    if (!error) {
-      for (const row of answerRows ?? []) {
-        const r = row as {
-          paper_id: string;
-          answers: number[] | null;
-          voided_questions: number[] | null;
-        };
-        const s = signals.get(r.paper_id);
-        if (!s) continue;
-        const answers = r.answers ?? [];
-        s.answerSignature = JSON.stringify([answers, r.voided_questions ?? []]);
-        s.answerLength = answers.length;
-      }
+  const answerResult = await answerRowsPromise;
+  if (answerResult && !answerResult.error) {
+    for (const row of answerResult.data ?? []) {
+      const r = row as {
+        paper_id: string;
+        answers: number[] | null;
+        voided_questions: number[] | null;
+      };
+      const s = signals.get(r.paper_id);
+      if (!s) continue;
+      const answers = r.answers ?? [];
+      s.answerSignature = JSON.stringify([answers, r.voided_questions ?? []]);
+      s.answerLength = answers.length;
     }
-  } catch {
-    // service_role 키가 없는 환경: 정답 대조 생략.
   }
 
   return signals;

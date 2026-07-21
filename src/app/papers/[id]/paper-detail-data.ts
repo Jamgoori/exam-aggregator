@@ -35,14 +35,13 @@ export const getPaper = cache(async (id: string) => {
   return data as ExamPaper | null;
 });
 
-// 상세페이지 렌더링에 필요한 모든 데이터를 모아서 돌려준다. 어떤 쿼리를 어떻게
-// 묶어서 날리는지(왕복 횟수)는 전부 여기서 결정하고, 페이지 컴포넌트는 받은 값을
+// 상세페이지 상단(제목·버튼·평점·댓글)에 필요한 데이터만 모아서 돌려준다.
+// 하단 "같은 과목 목록"은 getRelatedPapersData로 분리해 Suspense로 스트리밍한다 —
+// 그 섹션은 목록 조회 뒤에 dedup 신호·북마크 확인이 직렬로 이어져 왕복이 많아,
+// 페이지 전체 첫 표시를 그만큼 잡아먹고 있었다. 어떤 쿼리를 어떻게 묶어서
+// 날리는지(왕복 횟수)는 전부 이 파일에서 결정하고, 페이지 컴포넌트는 받은 값을
 // 그리기만 한다.
-export async function getPaperDetailData(
-  paper: ExamPaper,
-  level?: string,
-  examTypeIds?: Set<string>,
-) {
+export async function getPaperDetailData(paper: ExamPaper) {
   const supabase = await createClient();
 
   // 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — 아래의 개인화 쿼리
@@ -69,36 +68,16 @@ export async function getPaperDetailData(
     ? answerKeyQuery.eq("level", paper.level)
     : answerKeyQuery.is("level", null);
 
-  // "같은 과목 목록"은 미리보기 성격이라 최근 RELATED_PAPERS_LIMIT개만 보여주고,
-  // 전체 목록은 /subjects/[slug] 페이지(페이지네이션 적용됨)로 넘긴다.
-  // 급수 탭은 이 과목에 존재하는 급수 종류만 필요하므로 level 컬럼만 가볍게 조회한다.
-  let subjectPapersQuery = paper.subject_id
-    ? supabase
-        .from("exam_papers")
-        .select("*, subjects(*), exam_types(*)")
-        .eq("subject_id", paper.subject_id)
-    : null;
-  if (subjectPapersQuery && level) {
-    subjectPapersQuery = subjectPapersQuery.eq("level", level);
-  }
-  if (subjectPapersQuery && examTypeIds && examTypeIds.size > 0) {
-    subjectPapersQuery = subjectPapersQuery.in("exam_type_id", [...examTypeIds]);
-  }
-
   const [
     { data: comments },
     { data: ratings },
     { data: answerKeyRows },
     { data: hasCbtAnswers },
     { data: roundAverageRows },
-    { data: subjectPapers },
-    { data: subjectLevelRows },
-    { data: subjectExamTypeRows },
     { data: isAdminData },
     { data: bookmarkData },
     { data: myRatingData },
     { data: myCbtAttemptRows },
-    myRoundCounts,
     explanationCount,
   ] = await Promise.all([
     supabase
@@ -110,25 +89,6 @@ export async function getPaperDetailData(
     answerKeyQuery,
     supabase.rpc("has_cbt_answers", { target_paper_id: paper.id }),
     supabase.rpc("avg_score_by_round", { target_paper_id: paper.id }),
-    subjectPapersQuery
-      ? subjectPapersQuery
-          .order("year", { ascending: false })
-          .order("round", { ascending: false })
-          .limit(RELATED_FETCH_LIMIT)
-      : Promise.resolve({ data: null }),
-    paper.subject_id
-      ? supabase
-          .from("exam_papers")
-          .select("level")
-          .eq("subject_id", paper.subject_id)
-      : Promise.resolve({ data: null }),
-    // 직렬 탭도 급수 탭과 같은 이유로, 이 과목에 실제 존재하는 직렬만 가볍게 조회한다.
-    paper.subject_id
-      ? supabase
-          .from("exam_papers")
-          .select("exam_type_id, exam_types(id, name, display_order)")
-          .eq("subject_id", paper.subject_id)
-      : Promise.resolve({ data: null }),
     loggedIn ? supabase.rpc("is_admin") : Promise.resolve({ data: false }),
     userId
       ? supabase
@@ -154,10 +114,6 @@ export async function getPaperDetailData(
           .eq("user_id", userId)
           .order("created_at", { ascending: true })
       : Promise.resolve({ data: null }),
-    // "같은 과목 목록" 카드에 회독 배지를 달아주기 위한 문제지별 응시 횟수.
-    userId
-      ? getMyRoundCounts(supabase, userId)
-      : Promise.resolve(new Map<string, number>()),
     // "해설 열기" 버튼 노출 판단용. question_explanations는 관리자 전용 RLS라
     // service role로 개수만 센다 (해설 내용은 /papers/[id]/explanations에서 렌더링).
     countPaperExplanations(paper.id),
@@ -196,6 +152,91 @@ export async function getPaperDetailData(
     totalQuestions: a.total_questions,
     createdAt: a.created_at,
   }));
+
+  // "열기"는 브라우저 내장 뷰어로 바로 보여주는 원본 URL (다운로드 카운트 미반영),
+  // "다운로드"는 /download 라우트를 거쳐 실제 파일 저장 + 카운트 반영
+  const { data: paperFileUrl } = supabase.storage
+    .from("exam-papers")
+    .getPublicUrl(paper.file_path);
+  // exact track 정답표 우선, 없으면 공용(track null) 정답표.
+  const answerKeys = (answerKeyRows ?? []) as AnswerKey[];
+  const typedAnswerKey =
+    answerKeys.find((k) => k.track != null && k.track === paper.track) ??
+    answerKeys.find((k) => k.track == null) ??
+    null;
+  const answerKeyFileUrl = typedAnswerKey
+    ? supabase.storage.from("exam-papers").getPublicUrl(typedAnswerKey.file_path)
+        .data.publicUrl
+    : null;
+
+  return {
+    userId,
+    loggedIn,
+    isAdmin: isAdminData === true,
+    comments: (comments ?? []) as Comment[],
+    averageScore,
+    voteCount: scores.length,
+    myScore: myRatingData ? (myRatingData.score as number) : null,
+    isBookmarked: !!bookmarkData,
+    hasCbtAnswers,
+    hasFullExplanations,
+    roundAverages,
+    myCbtRecordItems,
+    paperFileUrl: paperFileUrl.publicUrl,
+    answerKey: typedAnswerKey,
+    answerKeyFileUrl,
+  };
+}
+
+// 하단 "같은 과목 기출문제 목록" 섹션 전용 데이터. 목록 조회 → dedup 신호 조회 →
+// 카드용 북마크/바로풀기 확인이 데이터 의존 때문에 직렬로 이어질 수밖에 없어,
+// 상단 데이터(getPaperDetailData)와 분리해 Suspense 뒤에서 따로 스트리밍한다.
+export async function getRelatedPapersData(
+  paper: ExamPaper,
+  level?: string,
+  examTypeIds?: Set<string>,
+) {
+  if (!paper.subject_id) return null;
+
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims.sub ?? null;
+
+  // "같은 과목 목록"은 미리보기 성격이라 최근 RELATED_PAPERS_LIMIT개만 보여주고,
+  // 전체 목록은 /subjects/[slug] 페이지(페이지네이션 적용됨)로 넘긴다.
+  let subjectPapersQuery = supabase
+    .from("exam_papers")
+    .select("*, subjects(*), exam_types(*)")
+    .eq("subject_id", paper.subject_id);
+  if (level) {
+    subjectPapersQuery = subjectPapersQuery.eq("level", level);
+  }
+  if (examTypeIds && examTypeIds.size > 0) {
+    subjectPapersQuery = subjectPapersQuery.in("exam_type_id", [...examTypeIds]);
+  }
+
+  const [
+    { data: subjectPapers },
+    { data: subjectLevelRows },
+    { data: subjectExamTypeRows },
+    myRoundCounts,
+  ] = await Promise.all([
+    subjectPapersQuery
+      .order("year", { ascending: false })
+      .order("round", { ascending: false })
+      .limit(RELATED_FETCH_LIMIT),
+    // 급수 탭은 이 과목에 존재하는 급수 종류만 필요하므로 level 컬럼만 가볍게 조회한다.
+    supabase.from("exam_papers").select("level").eq("subject_id", paper.subject_id),
+    // 직렬 탭도 급수 탭과 같은 이유로, 이 과목에 실제 존재하는 직렬만 가볍게 조회한다.
+    supabase
+      .from("exam_papers")
+      .select("exam_type_id, exam_types(id, name, display_order)")
+      .eq("subject_id", paper.subject_id),
+    // 카드에 회독 배지를 달아주기 위한 문제지별 응시 횟수.
+    userId
+      ? getMyRoundCounts(supabase, userId)
+      : Promise.resolve(new Map<string, number>()),
+  ]);
 
   // 급수 탭에는 이 과목에 실제로 존재하는 급수만 보여준다.
   const availableLevels = [
@@ -238,9 +279,9 @@ export async function getPaperDetailData(
   }
   const relatedPapers = relatedDeduped.slice(0, RELATED_PAPERS_LIMIT);
 
-  // "같은 과목 목록" 카드에 북마크/바로풀기를 달아주기 위한 배치 조회. subjectPapers의
-  // id는 위 Promise.all이 끝나야 알 수 있어서 그 안에 묶지 못하고 여기서 한 번 더
-  // 병렬 조회한다(현재 보는 문제지 자신은 카드에서 두 기능 다 안 쓰니 제외).
+  // 카드에 북마크/바로풀기를 달아주기 위한 배치 조회. 대상 id는 위 조회가 끝나야
+  // 알 수 있어서 그 안에 묶지 못하고 여기서 한 번 더 병렬 조회한다(현재 보는
+  // 문제지 자신은 카드에서 두 기능 다 안 쓰니 제외).
   const subjectPaperIds = relatedPapers
     .map((p) => p.id)
     .filter((pid) => pid !== paper.id);
@@ -251,43 +292,13 @@ export async function getPaperDetailData(
     getCbtAvailability(supabase, subjectPaperIds),
   ]);
 
-  // "열기"는 브라우저 내장 뷰어로 바로 보여주는 원본 URL (다운로드 카운트 미반영),
-  // "다운로드"는 /download 라우트를 거쳐 실제 파일 저장 + 카운트 반영
-  const { data: paperFileUrl } = supabase.storage
-    .from("exam-papers")
-    .getPublicUrl(paper.file_path);
-  // exact track 정답표 우선, 없으면 공용(track null) 정답표.
-  const answerKeys = (answerKeyRows ?? []) as AnswerKey[];
-  const typedAnswerKey =
-    answerKeys.find((k) => k.track != null && k.track === paper.track) ??
-    answerKeys.find((k) => k.track == null) ??
-    null;
-  const answerKeyFileUrl = typedAnswerKey
-    ? supabase.storage.from("exam-papers").getPublicUrl(typedAnswerKey.file_path)
-        .data.publicUrl
-    : null;
-
   return {
-    userId,
-    loggedIn,
-    isAdmin: isAdminData === true,
-    comments: (comments ?? []) as Comment[],
-    averageScore,
-    voteCount: scores.length,
-    myScore: myRatingData ? (myRatingData.score as number) : null,
-    isBookmarked: !!bookmarkData,
-    hasCbtAnswers,
-    hasFullExplanations,
-    roundAverages,
-    myCbtRecordItems,
+    loggedIn: !!userId,
     subjectPapers: relatedPapers,
     availableLevels,
     availableExamTypes,
     myRoundCounts,
     subjectBookmarkedIds,
     subjectCbtAvailability,
-    paperFileUrl: paperFileUrl.publicUrl,
-    answerKey: typedAnswerKey,
-    answerKeyFileUrl,
   };
 }
