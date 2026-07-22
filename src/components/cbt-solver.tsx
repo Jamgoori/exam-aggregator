@@ -16,6 +16,8 @@ import {
   Clock,
   Eraser,
   Hand,
+  Maximize,
+  Minimize,
   PenLine,
   X,
   ZoomIn,
@@ -48,6 +50,69 @@ const ZOOM_STEP = 0.1;
 
 function clampZoom(zoom: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+}
+
+// 태블릿 가로에서는 브라우저 크롬(탭·주소창)에 사이트 헤더까지 겹쳐 세로 공간을
+// 크게 잡아먹어, 문제별 풀기에서 문제 이미지가 세로로 잘려 스크롤해야 보인다.
+// solver 루트를 브라우저 전체화면으로 띄우면 그 크롬과(그리고 solver 밖에 있는
+// 사이트 헤더도) 사라져 세로 공간을 통째로 되찾는다. Safari 계열은 webkit
+// 프리픽스만 있어 둘 다 커버하고, 아이폰처럼 아예 지원하지 않는 기기에서는
+// supported가 false가 되어 버튼 자체를 숨긴다.
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => void;
+  webkitFullscreenEnabled?: boolean;
+};
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => void;
+};
+
+function currentFullscreenElement(): Element | null {
+  const doc = document as FullscreenDocument;
+  return document.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+}
+
+function useFullscreen(ref: RefObject<HTMLElement | null>) {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  // 지원 여부는 클라이언트에서만 알 수 있어(document 접근) 마운트 후에 채운다.
+  const [supported, setSupported] = useState(false);
+
+  useEffect(() => {
+    const doc = document as FullscreenDocument;
+    // 지원 여부는 서버에서 알 수 없어 SSR은 항상 "미지원"으로 그리고, 하이드레이션
+    // 이후 여기서 실제 값으로 맞춘다(서버/클라 첫 렌더 불일치를 피하려는 의도적
+    // 마운트 후 setState라, 이 줄에 한해 set-state-in-effect 경고를 끈다).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSupported(Boolean(document.fullscreenEnabled || doc.webkitFullscreenEnabled));
+
+    // ESC나 시스템 제스처로 전체화면을 빠져나가도 버튼 아이콘이 실제 상태와 어긋나지
+    // 않도록, 상태는 언제나 브라우저가 알려주는 fullscreenchange를 따라간다.
+    function handleChange() {
+      setIsFullscreen(currentFullscreenElement() === ref.current);
+    }
+    document.addEventListener("fullscreenchange", handleChange);
+    document.addEventListener("webkitfullscreenchange", handleChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleChange);
+      document.removeEventListener("webkitfullscreenchange", handleChange);
+    };
+  }, [ref]);
+
+  const toggle = useCallback(() => {
+    const el = ref.current as FullscreenElement | null;
+    if (!el) return;
+    if (currentFullscreenElement()) {
+      const doc = document as FullscreenDocument;
+      if (document.exitFullscreen) void document.exitFullscreen().catch(() => {});
+      else doc.webkitExitFullscreen?.();
+    } else if (el.requestFullscreen) {
+      void el.requestFullscreen().catch(() => {});
+    } else {
+      el.webkitRequestFullscreen?.();
+    }
+  }, [ref]);
+
+  return { isFullscreen, supported, toggle };
 }
 
 // 페이지에 들어오면 곧바로 재기 시작하는 대신 5초 카운트다운을 보여주고, 그
@@ -243,7 +308,13 @@ export function CbtSolver({
   const clearDrawingRef = useRef<() => void>(() => {});
   const clearSingleDrawingRef = useRef<() => void>(() => {});
   const pdfWrapperRef = useRef<HTMLDivElement>(null);
+  const solverRootRef = useRef<HTMLDivElement>(null);
   const { zoom, zoomIn, zoomOut, handlePinchZoom } = useExamZoom(pdfWrapperRef);
+  const {
+    isFullscreen,
+    supported: fullscreenSupported,
+    toggle: toggleFullscreen,
+  } = useFullscreen(solverRootRef);
 
   const hasQuestionImages = Object.keys(questionImages).length > 0;
   // 사이트 기본값은 "문제별 풀기"다. 계정에 "전체보기"가 명시적으로 잠겨 있으면
@@ -405,7 +476,14 @@ export function CbtSolver({
     // SiteHeaderGate가 lg 이상에서는 전역 사이트 헤더(약 65px)를 그대로 보여주는데,
     // 100dvh는 그 헤더를 포함한 뷰포트 전체 높이라서 그만큼을 빼주지 않으면
     // 화면 하단(OMR 제출 버튼 등)이 잘린다. lg 미만은 헤더가 아예 없으니 그대로 둔다.
-    <div className="flex h-[100dvh] flex-col lg:h-[calc(100dvh-65px)]">
+    // 전체화면일 때는 solver 밖의 사이트 헤더가 렌더되지 않으므로 그 65px 보정도
+    // 빼야 한다 — 안 그러면 하단에 65px 빈 공간이 남고 제출 버튼이 잘린다.
+    <div
+      ref={solverRootRef}
+      className={`flex h-[100dvh] flex-col bg-white dark:bg-zinc-900 ${
+        isFullscreen ? "" : "lg:h-[calc(100dvh-65px)]"
+      }`}
+    >
       {/* 헤더/탭/펜 색상 바를 하나의 그룹으로 묶어서, 각 줄마다 구분선이 겹겹이
           쌓이지 않게 내부 구분선 없이 콘텐츠와 닿는 맨 아래에만 선을 둔다. */}
       <div className="shrink-0 border-b border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
@@ -465,6 +543,17 @@ export function CbtSolver({
                   <ZoomIn size={18} />
                 </button>
               </div>
+              {fullscreenSupported && (
+                <button
+                  type="button"
+                  onClick={toggleFullscreen}
+                  aria-label={isFullscreen ? "전체화면 종료" : "전체화면"}
+                  aria-pressed={isFullscreen}
+                  className="hidden items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100 sm:flex dark:text-zinc-400 dark:hover:bg-zinc-800"
+                >
+                  {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+                </button>
+              )}
               <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">
                 <button
                   type="button"
@@ -549,6 +638,35 @@ export function CbtSolver({
               viewMode={viewMode}
               initialDefaultViewMode={defaultViewMode}
             />
+            {/* 문제별 풀기(lg)에서는 문항 번호·제출을 이 탭 줄 오른쪽에 붙여, 문제별
+                뷰가 따로 갖던 헤더 한 줄(약 40px)을 없앤다 — 태블릿 가로에서 문제가
+                한눈에 들어오도록 세로 공간을 아끼는 게 목적. 폭이 좁은 모바일에서는
+                줄이 넘칠 수 있어 숨기고, 그쪽은 문제별 뷰의 자체 헤더를 그대로 쓴다. */}
+            {viewMode === "single" && (
+              <div className="ml-auto hidden items-center gap-2 lg:flex">
+                <div className="text-sm">
+                  <span className="font-bold text-zinc-800 dark:text-zinc-200">
+                    {groupFirstNumber === groupLastNumber
+                      ? `${groupFirstNumber}번`
+                      : `${groupFirstNumber}~${groupLastNumber}번`}
+                  </span>
+                  <span className="text-zinc-400 dark:text-zinc-600">
+                    {" "}
+                    / {totalQuestions}
+                  </span>
+                </div>
+                {!result && (
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={isPending}
+                    className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
+                  >
+                    {isPending ? "채점 중..." : `제출 (${answeredCount}/${totalQuestions})`}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

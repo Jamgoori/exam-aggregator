@@ -182,7 +182,10 @@ export function SingleQuestionView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2 dark:border-zinc-700 dark:bg-zinc-900">
+      {/* lg(태블릿 가로·데스크톱)에서는 이 번호·제출 줄을 상단 탭 줄로 옮겨 세로
+          공간을 아끼므로 여기서는 숨긴다. 폭이 좁은 모바일에서는 탭 줄에 넣으면
+          넘쳐서, 모바일 한정으로 이 자체 헤더를 그대로 쓴다. */}
+      <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2 lg:hidden dark:border-zinc-700 dark:bg-zinc-900">
         <div>
           <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
             {firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`}
