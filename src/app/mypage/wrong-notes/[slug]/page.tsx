@@ -88,7 +88,7 @@ export default async function SubjectWrongNotePage({
       }
     >
       {totalWrong > 0 && (
-        <p className="-mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">
           시험지를 눌러 회독 기록·해설을 보거나, 아래 버튼으로 바로 다시 풀 수 있어요.
         </p>
       )}
