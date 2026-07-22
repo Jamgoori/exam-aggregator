@@ -8,9 +8,21 @@ export function stripTrackFromTitle(
   return title.replace(` (${track})`, "").replace(/\s{2,}/g, " ").trim();
 }
 
+// 직렬을 제목에 남기는 시험(법원직 외)에서는 " (직렬)"의 괄호만 벗겨 텍스트를 그대로
+// 노출한다. 예: "2024 경찰 (간부후보) 국어" → "2024 경찰 간부후보 국어".
+export function unwrapTrackParens(
+  title: string,
+  track: string | null | undefined,
+): string {
+  if (!track) return title;
+  return title.replace(` (${track})`, ` ${track}`).replace(/\s{2,}/g, " ").trim();
+}
+
 export function getPaperDisplayTitle(
   title: string,
   track: string | null | undefined,
 ): string {
-  return title.includes(" 법원직 ") ? stripTrackFromTitle(title, track) : title;
+  return title.includes(" 법원직 ")
+    ? stripTrackFromTitle(title, track)
+    : unwrapTrackParens(title, track);
 }
