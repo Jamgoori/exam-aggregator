@@ -8,9 +8,21 @@ export function stripTrackFromTitle(
   return title.replace(` (${track})`, "").replace(/\s{2,}/g, " ").trim();
 }
 
+// 화면에 보여줄 제목에서는 괄호 표기를 없애고 안의 텍스트만 남긴다.
+// ex) "2024 경찰 (간부후보) 1차" -> "2024 경찰 간부후보 1차"
+function unwrapParentheses(title: string): string {
+  return title
+    .replace(/[(（]([^()（）]*)[)）]/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export function getPaperDisplayTitle(
   title: string,
   track: string | null | undefined,
 ): string {
-  return title.includes(" 법원직 ") ? stripTrackFromTitle(title, track) : title;
+  const base = title.includes(" 법원직 ")
+    ? stripTrackFromTitle(title, track)
+    : title;
+  return unwrapParentheses(base);
 }
