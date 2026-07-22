@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   attachDrawing,
@@ -19,6 +19,11 @@ import {
 // 회색으로 뭉개진다. 크롭을 더 높은 해상도로 다시 떠도 글자가 작아지는 것 자체는
 // 그대로라, 이 값은 "크기 vs 가독성" 절충점이지 화질로 보완할 수 있는 값이 아니다.
 const BASE_CONTENT_WIDTH = 605;
+
+// 세로가 짧은 태블릿 가로에서 "높이에 맞춰 폭을 역산"할 때, 세로로 아주 긴
+// 문제(자료해석 세트 등)까지 한 화면에 욱여넣으면 글자가 못 읽을 만큼 작아진다.
+// 그 지점부터는 차라리 이 폭으로 멈추고 스크롤을 허용하는 게 낫다는 하한선.
+const MIN_FIT_WIDTH = 300;
 
 type QuestionAnswerState = {
   number: number;
@@ -81,6 +86,31 @@ export function SingleQuestionView({
   // 방식이라(아래 maxWidth), 캔버스도 리사이즈 옵저버로 같이 커진다. 즉 캔버스
   // 좌표계와 화면 크기가 늘 1:1이므로 필기 좌표 보정 배율은 항상 1이다.
   const zoomRef = useRef(1);
+
+  // "높이에 맞춰 폭 역산"에 필요한 두 값: 문제가 들어갈 스크롤 영역의 실제 높이와,
+  // 각 이미지의 세로/가로 비율(자연 크기 기준). 문항을 넘기면 이미지가 바뀌므로
+  // 비율은 매번 새로 잰다.
+  const [availableHeight, setAvailableHeight] = useState(0);
+  const [aspectRatios, setAspectRatios] = useState<number[]>([]);
+  // 문항이 바뀌면 이미지가 통째로 달라지므로 이전 문항에서 잰 비율을 버린다. 이펙트
+  // 대신 렌더 중에 prop 변화를 감지해 초기화하는 React 권장 패턴이라, 새 이미지의
+  // onLoad가 채워 넣기 전 한 프레임 동안만 폭 고정값(605)으로 그려진다.
+  const [measuredIndex, setMeasuredIndex] = useState(questionIndex);
+  if (measuredIndex !== questionIndex) {
+    setMeasuredIndex(questionIndex);
+    setAspectRatios([]);
+  }
+
+  useEffect(() => {
+    const scrollArea = scrollAreaRef.current;
+    if (!scrollArea) return;
+    setAvailableHeight(scrollArea.clientHeight);
+    const observer = new ResizeObserver(() =>
+      setAvailableHeight(scrollArea.clientHeight),
+    );
+    observer.observe(scrollArea);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     toolRef.current = tool;
@@ -180,6 +210,28 @@ export function SingleQuestionView({
     }
   }
 
+  // 폭 고정(605) 대신, 세로가 병목일 때는 스크롤 영역 높이에 맞는 폭을 역산해서
+  // 문제 전체가 스크롤 없이 한 화면에 담기게 한다. 세로 여유가 많은 세로모드에서는
+  // fitWidth가 605보다 커서 min(605, …)에 걸려 기존과 동일하게 보인다. 이미지 자연
+  // 비율(세로/가로)의 합이 곧 "폭 1px당 총 높이"라, 쓸 수 있는 높이를 그 합으로
+  // 나누면 그 높이에 맞는 폭이 나온다. 너무 세로로 긴 문제는 MIN_FIT_WIDTH에서 멈추고
+  // 그 아래로는 스크롤을 허용한다(작아서 못 읽느니 스크롤이 낫다).
+  const totalAspect = aspectRatios.reduce((sum, r) => sum + r, 0);
+  const allImagesMeasured =
+    images.length > 0 &&
+    aspectRatios.length === images.length &&
+    aspectRatios.every((r) => r > 0);
+  // 스크롤 영역의 세로 패딩(py-4 = 32px), 이미지 사이 간격(gap-2 = 8px), 컨테이너
+  // 테두리(위아래 1px) + 반올림 여유를 빼야 실제로 이미지가 쓸 수 있는 높이가 된다.
+  const usableHeight =
+    availableHeight - 32 - 8 * Math.max(0, images.length - 1) - 4;
+  let baseWidth = BASE_CONTENT_WIDTH;
+  if (allImagesMeasured && usableHeight > 0 && totalAspect > 0) {
+    const fitWidth = usableHeight / totalAspect;
+    baseWidth = Math.min(BASE_CONTENT_WIDTH, Math.max(MIN_FIT_WIDTH, fitWidth));
+  }
+  const contentWidth = Math.round(baseWidth * zoom);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* lg(태블릿 가로·데스크톱)에서는 이 번호·제출 줄을 상단 탭 줄로 옮겨 세로
@@ -214,7 +266,7 @@ export function SingleQuestionView({
       >
         <div
           ref={contentRef}
-          style={{ maxWidth: `${Math.round(BASE_CONTENT_WIDTH * zoom)}px` }}
+          style={{ maxWidth: `${contentWidth}px` }}
           className="relative mx-auto flex min-h-full w-full flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white"
         >
           {images.length === 0 ? (
@@ -229,6 +281,17 @@ export function SingleQuestionView({
                 src={src}
                 alt={`${firstNumber}번 문제 이미지 ${i + 1}`}
                 className="w-full"
+                onLoad={(e) => {
+                  const img = e.currentTarget;
+                  if (!img.naturalWidth) return;
+                  const ratio = img.naturalHeight / img.naturalWidth;
+                  setAspectRatios((prev) => {
+                    if (prev[i] === ratio) return prev;
+                    const next = [...prev];
+                    next[i] = ratio;
+                    return next;
+                  });
+                }}
               />
             ))
           )}
