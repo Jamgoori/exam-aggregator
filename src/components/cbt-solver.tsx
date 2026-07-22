@@ -750,6 +750,7 @@ export function CbtSolver({
                 answeredCount={answeredCount}
                 error={error}
                 zoom={zoom}
+                onPinchZoom={handlePinchZoom}
               />
             )}
           </div>

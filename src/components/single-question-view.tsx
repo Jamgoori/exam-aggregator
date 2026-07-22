@@ -51,6 +51,7 @@ export function SingleQuestionView({
   answeredCount,
   error,
   zoom = 1,
+  onPinchZoom,
 }: {
   questionIndex: number;
   totalQuestions: number;
@@ -71,6 +72,10 @@ export function SingleQuestionView({
   answeredCount: number;
   error?: string | null;
   zoom?: number;
+  // 두 손가락 핀치로 확대/축소할 때 직전 대비 배율(예: 1.02)을 부모(zoom 상태 보유)에
+  // 올려보내는 콜백. 손(이동) 모드에서는 스크롤 영역 터치로, 펜/지우개 모드에서는
+  // 캔버스 pointer로 잡아 같은 콜백을 호출한다.
+  onPinchZoom?: (factor: number) => void;
 }) {
   const firstNumber = questions[0]?.number ?? questionIndex + 1;
   const lastNumber = questions[questions.length - 1]?.number ?? firstNumber;
@@ -82,6 +87,9 @@ export function SingleQuestionView({
   const toolRef = useRef(tool);
   const penColorRef = useRef(penColor);
   const penWidthRef = useRef(penWidth);
+  // attachDrawing은 마운트 시 한 번만 붙어 그때의 콜백을 가둬두므로, 매 렌더 바뀌는
+  // onPinchZoom은 ref로 감싸 항상 최신 것을 부르게 한다.
+  const onPinchZoomRef = useRef(onPinchZoom);
   // 문제별 보기의 확대/축소는 CSS zoom이 아니라 문제 영역의 실제 너비를 키우는
   // 방식이라(아래 maxWidth), 캔버스도 리사이즈 옵저버로 같이 커진다. 즉 캔버스
   // 좌표계와 화면 크기가 늘 1:1이므로 필기 좌표 보정 배율은 항상 1이다.
@@ -92,14 +100,22 @@ export function SingleQuestionView({
   // 비율은 매번 새로 잰다.
   const [availableHeight, setAvailableHeight] = useState(0);
   const [aspectRatios, setAspectRatios] = useState<number[]>([]);
+  // 마지막으로 확정된 문제 폭. 문항을 넘기는 순간 새 이미지 비율을 아직 못 재는
+  // 한 프레임 동안, 폭을 605로 되돌리는 대신 이 값을 유지해 폭이 확 튀며 깜빡이는
+  // 걸 막는다(새 이미지 onLoad가 끝나면 자연스럽게 새 폭으로 이어진다).
+  const [stableBaseWidth, setStableBaseWidth] = useState(BASE_CONTENT_WIDTH);
   // 문항이 바뀌면 이미지가 통째로 달라지므로 이전 문항에서 잰 비율을 버린다. 이펙트
-  // 대신 렌더 중에 prop 변화를 감지해 초기화하는 React 권장 패턴이라, 새 이미지의
-  // onLoad가 채워 넣기 전 한 프레임 동안만 폭 고정값(605)으로 그려진다.
+  // 대신 렌더 중에 prop 변화를 감지해 초기화하는 React 권장 패턴이다. 비운 직후엔
+  // 새 비율을 못 재지만, 폭은 stableBaseWidth로 이어져 깜빡이지 않는다.
   const [measuredIndex, setMeasuredIndex] = useState(questionIndex);
   if (measuredIndex !== questionIndex) {
     setMeasuredIndex(questionIndex);
     setAspectRatios([]);
   }
+
+  useEffect(() => {
+    onPinchZoomRef.current = onPinchZoom;
+  }, [onPinchZoom]);
 
   useEffect(() => {
     const scrollArea = scrollAreaRef.current;
@@ -144,7 +160,9 @@ export function SingleQuestionView({
     const canvas = canvasRef.current;
     if (!scrollArea || !content || !canvas) return;
 
-    attachDrawing(canvas, toolRef, penColorRef, zoomRef, penWidthRef);
+    attachDrawing(canvas, toolRef, penColorRef, zoomRef, penWidthRef, (factor) =>
+      onPinchZoomRef.current?.(factor),
+    );
 
     function syncSize() {
       const width = content!.clientWidth;
@@ -181,8 +199,23 @@ export function SingleQuestionView({
   // 있을 때는 획을 긋는 동작과 겹치므로 동작하지 않고(이동 모드에서만), 세로
   // 스크롤과 헷갈리지 않도록 가로 이동이 충분히 크고 우세할 때만 넘긴다.
   const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  // 이동 모드에서 캔버스는 pointerEvents:none이라 attachDrawing의 핀치가 안 먹는다.
+  // 그래서 이동 모드의 두 손가락 핀치는 여기 스크롤 영역 터치로 직접 잡아 확대/축소로
+  // 넘긴다(펜/지우개 모드에서는 캔버스가 pointer로 잡으므로 여기서는 무시).
+  const pinchDistRef = useRef<number | null>(null);
+
+  function twoFingerDistance(touches: React.TouchList) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
 
   function handleTouchStart(e: React.TouchEvent) {
+    if (tool === "move" && e.touches.length === 2) {
+      swipeStart.current = null;
+      pinchDistRef.current = twoFingerDistance(e.touches);
+      return;
+    }
     if (tool !== "move" || e.touches.length !== 1) {
       swipeStart.current = null;
       return;
@@ -191,11 +224,20 @@ export function SingleQuestionView({
   }
 
   function handleTouchMove(e: React.TouchEvent) {
+    if (tool === "move" && e.touches.length === 2 && pinchDistRef.current !== null) {
+      const distance = twoFingerDistance(e.touches);
+      if (pinchDistRef.current > 0) onPinchZoom?.(distance / pinchDistRef.current);
+      pinchDistRef.current = distance;
+      swipeStart.current = null;
+      return;
+    }
     // 도중에 손가락이 더 닿으면(핀치 등) 스와이프로 취급하지 않는다.
     if (e.touches.length > 1) swipeStart.current = null;
   }
 
   function handleTouchEnd(e: React.TouchEvent) {
+    // 손가락이 하나 이하로 줄면 핀치 추적을 끝낸다.
+    if (e.touches.length < 2) pinchDistRef.current = null;
     const start = swipeStart.current;
     swipeStart.current = null;
     if (!start || tool !== "move") return;
@@ -225,12 +267,15 @@ export function SingleQuestionView({
   // 테두리(위아래 1px) + 반올림 여유를 빼야 실제로 이미지가 쓸 수 있는 높이가 된다.
   const usableHeight =
     availableHeight - 32 - 8 * Math.max(0, images.length - 1) - 4;
-  let baseWidth = BASE_CONTENT_WIDTH;
-  if (allImagesMeasured && usableHeight > 0 && totalAspect > 0) {
-    const fitWidth = usableHeight / totalAspect;
-    baseWidth = Math.min(BASE_CONTENT_WIDTH, Math.max(MIN_FIT_WIDTH, fitWidth));
+  const measuredBaseWidth =
+    allImagesMeasured && usableHeight > 0 && totalAspect > 0
+      ? Math.min(BASE_CONTENT_WIDTH, Math.max(MIN_FIT_WIDTH, usableHeight / totalAspect))
+      : null;
+  // 새로 잰 폭이 있으면 그 값을 쓰고, 없으면(문항 전환 직후) 마지막 폭을 유지한다.
+  if (measuredBaseWidth !== null && measuredBaseWidth !== stableBaseWidth) {
+    setStableBaseWidth(measuredBaseWidth);
   }
-  const contentWidth = Math.round(baseWidth * zoom);
+  const contentWidth = Math.round((measuredBaseWidth ?? stableBaseWidth) * zoom);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -262,6 +307,9 @@ export function SingleQuestionView({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        // pan-y로 두면 세로 스크롤(한 손가락)은 그대로 두고 브라우저 기본 핀치줌만
+        // 꺼져서, 두 손가락 핀치를 위 핸들러가 문제 확대/축소로 쓸 수 있다.
+        style={{ touchAction: "pan-y" }}
         className="min-h-0 flex-1 overflow-y-auto bg-zinc-100 px-4 py-4 dark:bg-zinc-800"
       >
         <div
