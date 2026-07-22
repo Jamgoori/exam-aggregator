@@ -497,7 +497,7 @@ export function CbtSolver({
               >
                 <ChevronLeft size={20} />
               </Link>
-              <h1 className="truncate text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              <h1 className="hidden truncate text-sm font-medium text-zinc-700 lg:block dark:text-zinc-300">
                 {paperTitle}
               </h1>
             </div>
