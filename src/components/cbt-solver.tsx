@@ -214,20 +214,45 @@ function useLeaveConfirmation(active: boolean) {
 }
 
 // 문제별 보기에서 다음/이전 문항으로 넘어갈 때마다 이미지를 새로 받느라, 상단 번호는
-// 바로 바뀌는데 문제 사진은 뒤늦게 뜨는 문제가 있었다. 문제별 보기를 처음 켜는
-// 순간 모든 문항 이미지를 미리 브라우저 캐시에 받아둬서, 이후 이동은 캐시에서 바로
-// 그려지게 한다(이미 받아둔 이미지는 브라우저가 재요청하지 않는다).
+// 바로 바뀌는데 문제 사진은 뒤늦게 뜨는 문제가 있었다. 두 단계로 미리 받아둔다.
+//
+// 1) 지금 문항 앞뒤(다음 우선)를 fetchPriority=high로 먼저 받고 decode()까지 끝낸다.
+//    캐시에 있어도 <img src> 교체 시 메인 스레드 디코드가 한 박자 늦게 그려지던 걸,
+//    미리 디코드해 두면 즉시 그려진다. 넘기는 순간 대기 시간을 없애는 핵심이다.
+// 2) 나머지 전체 문항은 낮은 우선순위로 배경에서 마저 받아둬 캐시를 데운다. 예전처럼
+//    켜자마자 전부를 한꺼번에 쏘면 브라우저 동시 연결(6개) 한도에 막혀 바로 볼 다음
+//    이미지가 뒤로 밀렸는데, 앞뒤 창을 먼저 처리하므로 그 경쟁이 사라진다.
 function useQuestionImagePreload(
   viewMode: "full" | "single",
   questionImages: Record<number, string[]>,
+  currentQuestionIndex: number,
 ) {
-  const preloadedImagesRef = useRef(false);
+  // 다음 문항을 먼저, 그다음 다음+1·이전·현재 순으로 받아 디코드한다. 매 이동마다
+  // 새 창을 처리하므로 far 문항도 도달하기 전에 디코드까지 끝나 있게 된다.
   useEffect(() => {
-    if (viewMode !== "single" || preloadedImagesRef.current) return;
-    preloadedImagesRef.current = true;
+    if (viewMode !== "single") return;
+    for (const offset of [1, 2, -1, 0]) {
+      const srcs = questionImages[currentQuestionIndex + 1 + offset];
+      if (!srcs) continue;
+      for (const src of srcs) {
+        const img = new Image();
+        if (offset === 1) img.fetchPriority = "high";
+        img.src = src;
+        // 캐시에 있으면 즉시 끝나고, 없으면 받은 뒤 디코드까지 끝낸다.
+        img.decode?.().catch(() => {});
+      }
+    }
+  }, [viewMode, questionImages, currentQuestionIndex]);
+
+  // 앞뒤 창 밖의 나머지는 한 번만 낮은 우선순위로 마저 받아둔다.
+  const bulkWarmedRef = useRef(false);
+  useEffect(() => {
+    if (viewMode !== "single" || bulkWarmedRef.current) return;
+    bulkWarmedRef.current = true;
     for (const images of Object.values(questionImages)) {
       for (const src of images) {
         const img = new Image();
+        img.fetchPriority = "low";
         img.src = src;
       }
     }
@@ -356,7 +381,7 @@ export function CbtSolver({
   const { countdown, elapsedSeconds, started, startError, startedAtRef, resetTimer, requestStart } =
     useCbtTimer(paperId, !result);
   useLeaveConfirmation(!result);
-  useQuestionImagePreload(viewMode, questionImages);
+  useQuestionImagePreload(viewMode, questionImages, currentQuestionIndex);
 
   const registerClearDrawing = useCallback((clear: () => void) => {
     clearDrawingRef.current = clear;
