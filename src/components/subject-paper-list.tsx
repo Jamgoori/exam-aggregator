@@ -103,7 +103,7 @@ export function SubjectPaperList({
                 href={`/mypage/wrong-notes/${subjectSlug}/${p.paperId}`}
                 className="group flex min-w-0 flex-1 items-start gap-2"
               >
-                <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-1 flex-col gap-3">
                   <div className="flex items-center gap-2">
                     {p.level && (
                       <span
@@ -119,7 +119,7 @@ export function SubjectPaperList({
 
                   {/* 진행률: 극복 vs 남은 오답을 바로 눈에 보이게 */}
                   {total > 0 && (
-                    <div className="mt-3">
+                    <div>
                       <div className="mb-1.5 flex items-center justify-between text-xs">
                         <span className="font-semibold text-zinc-600 dark:text-zinc-300">
                           극복 {p.resolved} / {total}문항
@@ -144,7 +144,7 @@ export function SubjectPaperList({
                   )}
 
                   {/* 라벨 붙은 메타: 각 숫자의 뜻을 분명히 */}
-                  <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-500">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-500">
                     <span>
                       회독{" "}
                       <span className="font-semibold text-zinc-700 dark:text-zinc-300">
