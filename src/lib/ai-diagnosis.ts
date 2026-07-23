@@ -21,6 +21,13 @@ export type DiagnosisWeakConcept = {
   subjectSlug: string | null;
   wrongCount: number | null;
   resolvedCount: number | null;
+  // 출제 빈도(1~3점). 전체 기출에서 이 개념(keyword_title)이 얼마나 자주 나오는지를
+  // next-diagnosis.mjs가 코퍼스 빈도로 3분위 눌러 넣는다. "가성비 우선순위"(자주 나오는데
+  // 약한 것 먼저)의 근거. 없으면 화면이 빈도 뱃지를 숨긴다.
+  frequency?: number | null;
+  // 내 정답률(%). 생성기가 계산해 줄 수 있으면 채운다. 없으면 화면이 극복 진행도
+  // (resolvedCount/wrongCount)로 대체 표시하므로 지어내지 말 것.
+  accuracyPct?: number | null;
 };
 
 export type DiagnosisSubjectTrend = {
@@ -28,12 +35,38 @@ export type DiagnosisSubjectTrend = {
   // "up" | "down" | "flat" — 최근 응시 추세.
   trend: "up" | "down" | "flat";
   note: string;
+  // 최근 회차 정오율(%) 배열, 오래된→최신. 스파크라인용. 입력(recentScores)을 그대로
+  // 실어 준다. 없으면 화면은 추세 화살표만 그린다.
+  scores?: number[] | null;
+};
+
+// 히어로(오늘의 1분 미션): 한 줄 요약과 시작 버튼 목적지. "지금 당장 뭘 하면 되는지".
+export type DiagnosisMission = {
+  // 예: "컴퓨터일반 '서브넷 마스크 계산'만 잡으면 예상 점수 +5점". 데이터 근거 한 줄.
+  headline: string;
+  // 미션 시작 버튼이 섞어풀기를 만들 과목 slug. 없으면 버튼은 오답노트 허브로 보낸다.
+  subjectSlug?: string | null;
+  // 미션이 겨냥하는 개념명(강조 표시용). 선택.
+  concept?: string | null;
+};
+
+// AI 오답 패턴(자주 낚이는 선지 유형)을 문장형으로 짚어주는 인사이트. 선택.
+export type DiagnosisInsight = {
+  subject?: string | null;
+  // 예: "정보보호론에서 'MAC과 DAC의 차이'를 묻는 함정 선지에 오답률이 높아요". 한 문장.
+  text: string;
+  // 오답률(%). 강조 뱃지용. 없으면 숨김.
+  wrongRatePct?: number | null;
 };
 
 export type AiDiagnosisReport = {
   summary: string;
   weakConcepts: DiagnosisWeakConcept[];
   subjectTrends: DiagnosisSubjectTrend[];
+  // 아래 두 필드는 리뉴얼된 대시보드용(선택). 구버전 리포트엔 없을 수 있어 화면이
+  // 있으면 그리고 없으면 대체/숨김 처리한다.
+  mission?: DiagnosisMission | null;
+  insights?: DiagnosisInsight[] | null;
 };
 
 export type DiagnosisEligibility = {

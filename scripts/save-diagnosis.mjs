@@ -42,21 +42,54 @@ function validateReport(report) {
   return null;
 }
 
-// 화면 타입에 맞게 정규화(불필요 필드 제거, 누락 필드 null).
+function clampInt(v, lo, hi) {
+  if (!Number.isFinite(v)) return null;
+  return Math.max(lo, Math.min(hi, Math.round(v)));
+}
+
+// 화면 타입에 맞게 정규화(불필요 필드 제거, 누락 필드 null). 리뉴얼된 대시보드용 필드
+// (mission/insights/frequency/accuracyPct/scores)도 있으면 실어 준다 — 전부 선택이라
+// 없으면 null/빈배열로 두고 화면이 알아서 대체·숨김한다.
 function normalizeReport(report) {
+  const mission =
+    report.mission && typeof report.mission.headline === "string" && report.mission.headline.trim()
+      ? {
+          headline: String(report.mission.headline).trim(),
+          subjectSlug: report.mission.subjectSlug != null ? String(report.mission.subjectSlug) : null,
+          concept: report.mission.concept != null ? String(report.mission.concept) : null,
+        }
+      : null;
+
+  const insights = Array.isArray(report.insights)
+    ? report.insights
+        .filter((ins) => ins && typeof ins.text === "string" && ins.text.trim())
+        .map((ins) => ({
+          subject: ins.subject != null ? String(ins.subject) : null,
+          text: String(ins.text).trim(),
+          wrongRatePct: clampInt(ins.wrongRatePct, 0, 100),
+        }))
+    : [];
+
   return {
     summary: report.summary.trim(),
+    mission,
+    insights,
     weakConcepts: report.weakConcepts.map((c) => ({
       concept: String(c.concept).trim(),
       subject: c.subject != null ? String(c.subject) : null,
       subjectSlug: c.subjectSlug != null ? String(c.subjectSlug) : null,
       wrongCount: Number.isFinite(c.wrongCount) ? c.wrongCount : null,
       resolvedCount: Number.isFinite(c.resolvedCount) ? c.resolvedCount : null,
+      frequency: clampInt(c.frequency, 1, 3),
+      accuracyPct: clampInt(c.accuracyPct, 0, 100),
     })),
     subjectTrends: report.subjectTrends.map((t) => ({
       subject: String(t.subject),
       trend: t.trend,
       note: String(t.note),
+      scores: Array.isArray(t.scores)
+        ? t.scores.filter((n) => Number.isFinite(n)).map((n) => Math.round(n))
+        : null,
     })),
   };
 }

@@ -165,6 +165,28 @@ async function main() {
     .sort((a, b) => b.wrongCount - a.wrongCount || a.resolvedCount - b.resolvedCount)
     .slice(0, 30);
 
+  // 6) 출제 빈도(★): 각 취약 개념(keyword_title)이 전체 기출에서 얼마나 자주 나오는지.
+  // 코퍼스 전체에서 같은 keyword_title을 단 해설 수를 세어(개념=문항 1:1이라 문항 빈도),
+  // 이 사용자의 개념 집합 안에서 3분위(tercile)로 눌러 1~3점을 매긴다. 절대 스케일을
+  // 모르므로 상대 분위로 정한다("자주 나오는데 약한 것"의 가성비 판단용).
+  const uniqueConcepts = [...new Set(concepts.map((c) => c.concept))];
+  const corpusCount = new Map();
+  for (const kw of uniqueConcepts) {
+    const { count } = await supabase
+      .from("question_explanations")
+      .select("question_id", { count: "exact", head: true })
+      .eq("keyword_title", kw);
+    corpusCount.set(kw, count ?? 0);
+  }
+  const counts = [...corpusCount.values()].filter((n) => n > 0).sort((a, b) => a - b);
+  const q1 = counts.length ? counts[Math.floor(counts.length / 3)] : 0;
+  const q2 = counts.length ? counts[Math.floor((counts.length * 2) / 3)] : 0;
+  for (const c of concepts) {
+    const n = corpusCount.get(c.concept) ?? 0;
+    // 분위 경계로 1~3점. 데이터가 거의 없으면(0) frequency는 넣지 않는다(화면이 뱃지 숨김).
+    c.frequency = n <= 0 ? null : n > q2 ? 3 : n > q1 ? 2 : 1;
+  }
+
   const output = {
     diagnosis_id: pending.id,
     user_id: userId,
