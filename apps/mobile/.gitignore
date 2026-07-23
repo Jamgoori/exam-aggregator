@@ -1,0 +1,18 @@
+node_modules/
+.expo/
+dist/
+web-build/
+*.log
+.env
+.env.local
+
+# Native
+ios/
+android/
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
+
+# Misc
+.DS_Store
