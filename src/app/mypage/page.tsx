@@ -17,6 +17,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
+import { ScrollToHash } from "@/components/scroll-to-hash";
 import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
 import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getCbtAvailability } from "@/lib/cbt-availability";
@@ -186,6 +187,9 @@ export default async function MyPage({
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 pb-12 pt-6 sm:pt-8">
+      {/* 홈 오답노트 배너의 #wrong-notes 딥링크가 스켈레톤 이후에도 확실히
+          해당 섹션으로 스크롤되도록, 콘텐츠 마운트 후 클라이언트에서 처리한다. */}
+      <ScrollToHash />
       <div>
         <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">
           ← 홈으로
