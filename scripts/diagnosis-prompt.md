@@ -17,7 +17,7 @@
   ],
   "concepts": [
     { "concept": "처분성", "subject": "행정법", "subjectSlug": "administrative-law",
-      "wrongCount": 8, "resolvedCount": 2, "frequency": 3 }
+      "wrongCount": 8, "resolvedCount": 2, "frequency": 3, "accuracyPct": 25 }
   ]
 }
 ```
@@ -28,6 +28,8 @@
 - `concepts.frequency`는 출제 빈도 점수(1~3, 값이 없으면 `null`). 전체 기출에서 그 개념이
   얼마나 자주 나오는지를 3분위로 눌러 넣은 것. **자주 나오는데(빈도↑) 아직 약한** 개념이
   가성비가 높으니 미션·Top 3 우선순위에 반영한다. 지어내지 말고 입력값을 그대로 쓴다.
+- `concepts.accuracyPct`는 그 개념 취약 문항의 **CBT 정답률**(%, 응시 기록 없으면 `null`).
+  섞어풀기는 빠진 CBT 기준이다. 우선순위 판단(낮을수록 시급)에 참고하고, 값은 그대로 쓴다.
 
 ## 작성 규칙
 
@@ -54,9 +56,9 @@
    있을 때만 넣고, 없으면 생략. 확인 안 되는 함정 유형을 상상해서 쓰지 말 것 — 근거 없으면
    빈 배열.
 7. **딥링크·뱃지용 필드 보존.** 각 weakConcept에 입력의 `subject`/`subjectSlug`/`wrongCount`/
-   `resolvedCount`/`frequency`를 그대로 실어 준다(화면이 뱃지와 "틀린 문항 모아보기"로
-   이어준다). 개념별 `accuracyPct`(내 정답률)는 신뢰할 입력이 없으면 넣지 말 것 — 화면이
-   극복 진행도로 대체한다.
+   `resolvedCount`/`frequency`/`accuracyPct`를 그대로 실어 준다(화면이 뱃지와 "틀린 문항
+   모아보기"로 이어준다). `accuracyPct`는 입력에 있으면 그대로, `null`이면 생략 — 지어내지
+   말 것(화면이 극복 진행도로 대체한다).
 
 ## 출력 (save-diagnosis.mjs 입력)
 
@@ -75,7 +77,7 @@
     },
     "weakConcepts": [
       { "concept": "처분성", "subject": "행정법", "subjectSlug": "administrative-law",
-        "wrongCount": 8, "resolvedCount": 2, "frequency": 3 }
+        "wrongCount": 8, "resolvedCount": 2, "frequency": 3, "accuracyPct": 25 }
     ],
     "insights": [
       { "subject": "행정법", "text": "'처분성 인정 여부'를 묻는 판례형 선지에서 자주 놓치고 있어요.", "wrongRatePct": 75 }

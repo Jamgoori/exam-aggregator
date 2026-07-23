@@ -93,6 +93,32 @@ async function main() {
     recentScores: e.recentPct.slice(-5),
   }));
 
+  // 2-1) CBT 제출별 정오(cbt_attempt_answers). 문항별 정답률 집계용.
+  // user_question_status엔 총 응시 수가 없어 정답률을 못 내므로, 채점 원본에서 문항별
+  // 맞힘/총합을 센다. selected_choice=null(건너뜀)은 응시로 치지 않아 제외한다.
+  // 주의: 이 테이블은 CBT 제출만 담는다(섞어풀기 제외) — 정답률은 "CBT 기준".
+  const attemptPaper = new Map(attempts.map((a) => [a.id, a.paper_id]));
+  const answerStats = new Map(); // `${paperId}#${qnum}` → { correct, total }
+  const attemptIds = attempts.map((a) => a.id);
+  for (const ids of chunk(attemptIds, 100)) {
+    const rows = await fetchAll(
+      supabase,
+      "cbt_attempt_answers",
+      "attempt_id, question_number, selected_choice, is_correct",
+      (q) => q.in("attempt_id", ids),
+    );
+    for (const r of rows) {
+      if (r.selected_choice == null) continue; // 건너뛴 문항 제외
+      const paperId = attemptPaper.get(r.attempt_id);
+      if (!paperId) continue;
+      const k = `${paperId}#${r.question_number}`;
+      const e = answerStats.get(k) ?? { correct: 0, total: 0 };
+      e.total++;
+      if (r.is_correct) e.correct++;
+      answerStats.set(k, e);
+    }
+  }
+
   // 3) 한 번이라도 틀린 문항(통합 상태). 개념 분포용.
   const statusRows = await fetchAll(
     supabase,
@@ -156,12 +182,35 @@ async function main() {
     const key = `${concept}###${subj?.slug ?? ""}`;
     const entry =
       conceptMap.get(key) ??
-      { concept, subject: subj?.name ?? null, subjectSlug: subj?.slug ?? null, wrongCount: 0, resolvedCount: 0 };
+      {
+        concept,
+        subject: subj?.name ?? null,
+        subjectSlug: subj?.slug ?? null,
+        wrongCount: 0,
+        resolvedCount: 0,
+        correctSum: 0,
+        answerSum: 0,
+      };
     entry.wrongCount++;
     if (r.last_is_correct) entry.resolvedCount++;
+    // 이 개념 취약 문항(틀린 적 있는 문항)의 CBT 정답률 누적.
+    const st = answerStats.get(`${r.paper_id}#${r.question_number}`);
+    if (st) {
+      entry.correctSum += st.correct;
+      entry.answerSum += st.total;
+    }
     conceptMap.set(key, entry);
   }
   const concepts = [...conceptMap.values()]
+    .map((e) => ({
+      concept: e.concept,
+      subject: e.subject,
+      subjectSlug: e.subjectSlug,
+      wrongCount: e.wrongCount,
+      resolvedCount: e.resolvedCount,
+      // CBT 정답률(%). 응시 기록이 없으면 null(화면이 극복 진행도로 대체).
+      accuracyPct: e.answerSum > 0 ? Math.round((e.correctSum / e.answerSum) * 100) : null,
+    }))
     .sort((a, b) => b.wrongCount - a.wrongCount || a.resolvedCount - b.resolvedCount)
     .slice(0, 30);
 
