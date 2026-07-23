@@ -93,6 +93,32 @@ async function main() {
     recentScores: e.recentPct.slice(-5),
   }));
 
+  // 2-1) CBT 제출별 정오(cbt_attempt_answers). 문항별 정답률 집계용.
+  // user_question_status엔 총 응시 수가 없어 정답률을 못 내므로, 채점 원본에서 문항별
+  // 맞힘/총합을 센다. selected_choice=null(건너뜀)은 응시로 치지 않아 제외한다.
+  // 주의: 이 테이블은 CBT 제출만 담는다(섞어풀기 제외) — 정답률은 "CBT 기준".
+  const attemptPaper = new Map(attempts.map((a) => [a.id, a.paper_id]));
+  const answerStats = new Map(); // `${paperId}#${qnum}` → { correct, total }
+  const attemptIds = attempts.map((a) => a.id);
+  for (const ids of chunk(attemptIds, 100)) {
+    const rows = await fetchAll(
+      supabase,
+      "cbt_attempt_answers",
+      "attempt_id, question_number, selected_choice, is_correct",
+      (q) => q.in("attempt_id", ids),
+    );
+    for (const r of rows) {
+      if (r.selected_choice == null) continue; // 건너뛴 문항 제외
+      const paperId = attemptPaper.get(r.attempt_id);
+      if (!paperId) continue;
+      const k = `${paperId}#${r.question_number}`;
+      const e = answerStats.get(k) ?? { correct: 0, total: 0 };
+      e.total++;
+      if (r.is_correct) e.correct++;
+      answerStats.set(k, e);
+    }
+  }
+
   // 3) 한 번이라도 틀린 문항(통합 상태). 개념 분포용.
   const statusRows = await fetchAll(
     supabase,
@@ -156,14 +182,59 @@ async function main() {
     const key = `${concept}###${subj?.slug ?? ""}`;
     const entry =
       conceptMap.get(key) ??
-      { concept, subject: subj?.name ?? null, subjectSlug: subj?.slug ?? null, wrongCount: 0, resolvedCount: 0 };
+      {
+        concept,
+        subject: subj?.name ?? null,
+        subjectSlug: subj?.slug ?? null,
+        wrongCount: 0,
+        resolvedCount: 0,
+        correctSum: 0,
+        answerSum: 0,
+      };
     entry.wrongCount++;
     if (r.last_is_correct) entry.resolvedCount++;
+    // 이 개념 취약 문항(틀린 적 있는 문항)의 CBT 정답률 누적.
+    const st = answerStats.get(`${r.paper_id}#${r.question_number}`);
+    if (st) {
+      entry.correctSum += st.correct;
+      entry.answerSum += st.total;
+    }
     conceptMap.set(key, entry);
   }
   const concepts = [...conceptMap.values()]
+    .map((e) => ({
+      concept: e.concept,
+      subject: e.subject,
+      subjectSlug: e.subjectSlug,
+      wrongCount: e.wrongCount,
+      resolvedCount: e.resolvedCount,
+      // CBT 정답률(%). 응시 기록이 없으면 null(화면이 극복 진행도로 대체).
+      accuracyPct: e.answerSum > 0 ? Math.round((e.correctSum / e.answerSum) * 100) : null,
+    }))
     .sort((a, b) => b.wrongCount - a.wrongCount || a.resolvedCount - b.resolvedCount)
     .slice(0, 30);
+
+  // 6) 출제 빈도(★): 각 취약 개념(keyword_title)이 전체 기출에서 얼마나 자주 나오는지.
+  // 코퍼스 전체에서 같은 keyword_title을 단 해설 수를 세어(개념=문항 1:1이라 문항 빈도),
+  // 이 사용자의 개념 집합 안에서 3분위(tercile)로 눌러 1~3점을 매긴다. 절대 스케일을
+  // 모르므로 상대 분위로 정한다("자주 나오는데 약한 것"의 가성비 판단용).
+  const uniqueConcepts = [...new Set(concepts.map((c) => c.concept))];
+  const corpusCount = new Map();
+  for (const kw of uniqueConcepts) {
+    const { count } = await supabase
+      .from("question_explanations")
+      .select("question_id", { count: "exact", head: true })
+      .eq("keyword_title", kw);
+    corpusCount.set(kw, count ?? 0);
+  }
+  const counts = [...corpusCount.values()].filter((n) => n > 0).sort((a, b) => a - b);
+  const q1 = counts.length ? counts[Math.floor(counts.length / 3)] : 0;
+  const q2 = counts.length ? counts[Math.floor((counts.length * 2) / 3)] : 0;
+  for (const c of concepts) {
+    const n = corpusCount.get(c.concept) ?? 0;
+    // 분위 경계로 1~3점. 데이터가 거의 없으면(0) frequency는 넣지 않는다(화면이 뱃지 숨김).
+    c.frequency = n <= 0 ? null : n > q2 ? 3 : n > q1 ? 2 : 1;
+  }
 
   const output = {
     diagnosis_id: pending.id,
