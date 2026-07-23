@@ -15,6 +15,7 @@ import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
 import { getHomeStats } from "@/lib/home-stats";
 import { getCachedHomeData } from "@/lib/home-data";
+import { getMyUnresolvedTotal } from "@/lib/wrong-notes";
 
 export default async function Home({
   searchParams,
@@ -43,6 +44,7 @@ export default async function Home({
     myRoundCounts,
     bookmarkedIds,
     bookmarkedSubjectIds,
+    wrongNoteCount,
   ] = await Promise.all([
     getCachedHomeData(),
     getHomeStats(),
@@ -55,6 +57,7 @@ export default async function Home({
     userId
       ? getMyBookmarkedSubjectIds(supabase, userId)
       : Promise.resolve(new Set<string>()),
+    userId ? getMyUnresolvedTotal(supabase, userId) : Promise.resolve(0),
   ]);
   const { totalDownloads, totalAttempts } = homeStats;
   // "총 자료 수"는 exam_papers 원본 행 수(homeStats.totalCount) 대신, 중복 시험지를
@@ -117,6 +120,7 @@ export default async function Home({
         cbtMask={cbtMask}
         myRoundCounts={Object.fromEntries(myRoundCounts)}
         loggedIn={!!userId}
+        wrongNoteCount={wrongNoteCount}
         totalCount={totalCount}
         totalDownloads={totalDownloads}
         totalAttempts={totalAttempts}
