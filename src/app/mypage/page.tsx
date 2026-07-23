@@ -422,7 +422,9 @@ function WrongNotesTab({
   diagnosisHint: string | null;
 }) {
   return (
-    <section className="flex flex-col gap-4">
+    // 홈 오답노트 배너(#wrong-notes)가 페이지 최상단이 아닌 이 섹션으로 바로
+    // 스크롤되도록 앵커를 건다. scroll-mt는 스크롤 정지 위치에 약간의 여백.
+    <section id="wrong-notes" className="flex scroll-mt-4 flex-col gap-4">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
         <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
         오답노트

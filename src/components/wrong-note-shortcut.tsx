@@ -7,7 +7,7 @@ import { ChevronRight } from "lucide-react";
 export function WrongNoteShortcut({ count }: { count: number }) {
   return (
     <Link
-      href="/mypage?tab=wrong-notes"
+      href="/mypage?tab=wrong-notes#wrong-notes"
       aria-label={`복습을 기다리는 오답 ${count}문항, 오답노트로 이동`}
       className="group flex w-full items-center gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3.5 transition-colors hover:bg-blue-100/70 sm:px-5 sm:py-4 dark:border-blue-900/50 dark:bg-blue-950/25 dark:hover:bg-blue-950/40"
     >
