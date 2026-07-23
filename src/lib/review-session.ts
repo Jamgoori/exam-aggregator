@@ -303,6 +303,7 @@ export async function createReviewSessionFromItems(
   supabase: Supabase,
   userId: string,
   items: { paperId: string; questionNumber: number }[],
+  limit: number = MAX_LIMIT,
 ): Promise<{ sessionId?: string; error?: string }> {
   const seen = new Set<string>();
   const clean: { paperId: string; questionNumber: number }[] = [];
@@ -315,7 +316,8 @@ export async function createReviewSessionFromItems(
   }
   if (clean.length === 0) return { error: "다시 풀 문항이 없어요." };
 
-  const picked = shuffle(clean).slice(0, MAX_LIMIT);
+  const cap = Math.min(Math.max(1, limit), MAX_LIMIT);
+  const picked = shuffle(clean).slice(0, cap);
   const admin = createAdminClient();
   const { data: session, error: sessionError } = await admin
     .from("review_sessions")
@@ -345,6 +347,98 @@ export async function createReviewSessionFromItems(
     return { error: "세션 생성에 실패했어요." };
   }
   return { sessionId: session.id as string };
+}
+
+// 같은 개념(keyword_title)의 기출 문항을 전체 코퍼스에서 모아 후보로 뽑는다. 진단의
+// "같은개념 기출 5문제 풀기"용 — 유저 오답이 아니라 기출 전체가 소스다. 개념은 과목에
+// 걸쳐 표기가 겹칠 수 있어 subjectSlug로 좁힌다. 이미지 없는(못 푸는)·voided(정답 없음)
+// 문항은 제외. question_explanations/paper_answers는 service_role만 읽으므로 admin.
+export async function collectConceptReviewCandidates(
+  supabase: Supabase,
+  concept: string,
+  subjectSlug: string | null,
+): Promise<{ paperId: string; questionNumber: number }[]> {
+  const kw = concept.trim();
+  if (!kw) return [];
+  const admin = createAdminClient();
+
+  // 1) 같은 keyword_title 해설 → question_id. 코퍼스가 커도 상한을 둔다(랜덤 풀 충분).
+  const { data: expl } = await admin
+    .from("question_explanations")
+    .select("question_id")
+    .eq("keyword_title", kw)
+    .limit(500);
+  const questionIds = [...new Set((expl ?? []).map((r) => r.question_id as string))];
+  if (questionIds.length === 0) return [];
+
+  // subjectSlug가 있으면 subject_id로 환원해 그 과목 문항으로만 좁힌다(개념 표기가 과목에
+  // 걸쳐 겹칠 수 있음). slug를 못 찾으면 과목 제한 없이 진행.
+  let subjectId: string | null = null;
+  if (subjectSlug) {
+    const { data: subj } = await admin
+      .from("subjects")
+      .select("id")
+      .eq("slug", subjectSlug)
+      .maybeSingle();
+    subjectId = (subj?.id as string) ?? null;
+  }
+
+  // 2) question_id → (paper_id, question_number). 과목 제한이 있으면 임베드 FK로 필터.
+  const rows: { paper_id: string; question_number: number }[] = [];
+  for (const ids of chunkIds(questionIds, 100)) {
+    const q = subjectId
+      ? admin
+          .from("questions")
+          .select("paper_id, question_number, exam_papers!inner(subject_id)")
+          .in("id", ids)
+          .eq("exam_papers.subject_id", subjectId)
+      : admin.from("questions").select("paper_id, question_number").in("id", ids);
+    const { data } = await q;
+    for (const r of (data ?? []) as { paper_id: string; question_number: number }[]) {
+      rows.push({ paper_id: r.paper_id, question_number: r.question_number });
+    }
+  }
+  if (rows.length === 0) return [];
+
+  // 3) 이미지 있는(풀 수 있는) 문항만 + voided 제외.
+  const paperIds = [...new Set(rows.map((r) => r.paper_id))];
+  const mediaByPaper = await fetchQuestionMedia(supabase, paperIds);
+
+  const voidedByPaper = new Map<string, Set<number>>();
+  for (const ids of chunkIds(paperIds, 200)) {
+    const { data } = await admin
+      .from("paper_answers")
+      .select("paper_id, voided_questions")
+      .in("paper_id", ids);
+    for (const row of (data ?? []) as { paper_id: string; voided_questions: number[] | null }[]) {
+      voidedByPaper.set(row.paper_id, new Set((row.voided_questions ?? []) as number[]));
+    }
+  }
+
+  const seen = new Set<string>();
+  const items: { paperId: string; questionNumber: number }[] = [];
+  for (const r of rows) {
+    if (!mediaByPaper.get(r.paper_id)?.get(r.question_number)?.images.length) continue;
+    if (voidedByPaper.get(r.paper_id)?.has(r.question_number)) continue;
+    const key = `${r.paper_id}#${r.question_number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({ paperId: r.paper_id, questionNumber: r.question_number });
+  }
+  return items;
+}
+
+// 같은개념 기출 랜덤 세션(있는 만큼, 최대 limit). 후보가 하나도 없으면 error.
+export async function createConceptReviewSessionForUser(
+  supabase: Supabase,
+  userId: string,
+  input: { concept: string; subjectSlug: string | null; limit?: number },
+): Promise<{ sessionId?: string; error?: string }> {
+  const items = await collectConceptReviewCandidates(supabase, input.concept, input.subjectSlug);
+  if (items.length === 0) {
+    return { error: "이 개념으로 풀 수 있는 기출 문항을 찾지 못했어요." };
+  }
+  return createReviewSessionFromItems(supabase, userId, items, input.limit ?? 5);
 }
 
 // 세션 하나를 화면용으로 읽는다. 본인 세션이 아니면 null. 채점 전이면 정답·출처는

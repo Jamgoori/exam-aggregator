@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/supabase/session";
 import {
   createReviewSessionForUser,
   createReviewSessionFromItems,
+  createConceptReviewSessionForUser,
   createAllReviewSessionForUser,
   createPaperReviewSessionForUser,
   submitReviewSessionForUser,
@@ -31,6 +32,26 @@ export async function createReviewSession(input: {
     onlyUnresolved: input.onlyUnresolved ?? true,
     onlyDue: input.onlyDue ?? false,
     limit: input.limit,
+  });
+}
+
+// 진단의 "같은개념 기출 5문제 풀기". 유저 오답이 아니라 기출 전체에서 같은 개념
+// (keyword_title) 문항을 랜덤으로 뽑아 세션을 만든다(있는 만큼).
+export async function createReviewFromConcept(input: {
+  concept: string;
+  subjectSlug?: string | null;
+  limit?: number;
+}): Promise<CreateReviewResult> {
+  const concept = String(input?.concept ?? "").trim();
+  if (!concept) return { error: "개념을 찾을 수 없어요." };
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  return createConceptReviewSessionForUser(supabase, user.id, {
+    concept,
+    subjectSlug: input.subjectSlug ?? null,
+    limit: input.limit ?? 5,
   });
 }
 
