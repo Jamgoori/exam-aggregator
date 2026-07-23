@@ -22,6 +22,19 @@ export function DiagnosisBanner({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  function request() {
+    if (pending) return;
+    setError(null);
+    start(async () => {
+      const res = await requestDiagnosis();
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setState(res.status === "ready" ? "ready" : "pending");
+    });
+  }
+
   const shell =
     "flex items-center gap-3 rounded-2xl border px-4 py-3.5 border-violet-200 bg-violet-50 dark:border-violet-900/50 dark:bg-violet-950/20";
 
@@ -60,34 +73,36 @@ export function DiagnosisBanner({
   }
 
   if (state === "pending") {
+    // 극복법(AI) 생성이 아직 안 됐어도 막대그래프·개념 카드는 데이터만으로 바로
+    // 뜬다 — 배너를 그 페이지로 보내는 링크로 두고, 옆에 재시도 버튼을 둔다(극복법
+    // 생성이 API 키 미설정 등으로 한 번 실패했을 수 있어 다시 시도할 수 있게).
     return (
-      <div className={shell}>
-        <div className="min-w-0">
+      <div className={`${shell} flex-wrap`}>
+        <Link
+          href="/mypage/diagnosis"
+          className="min-w-0 flex-1 transition-colors hover:opacity-80"
+        >
           <p className="text-sm font-bold text-violet-900 dark:text-violet-200">
-            진단을 준비하고 있어요
+            취약 개념 그래프는 준비됐어요
           </p>
           <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
-            오답 데이터를 분석하고 있어요. 준비되면 여기에 표시돼요(보통 하루 안).
+            눌러서 과목별 틀린 개념부터 확인해보세요 · 맞춤 극복법은 준비 중
           </p>
-        </div>
+          {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
+        </Link>
+        <button
+          type="button"
+          onClick={request}
+          disabled={pending}
+          className="shrink-0 rounded-lg border border-violet-300 bg-white px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-50 disabled:opacity-60 dark:border-violet-800 dark:bg-zinc-900 dark:text-violet-300"
+        >
+          {pending ? "생성 중..." : "극복법 다시 시도"}
+        </button>
       </div>
     );
   }
 
   // eligible
-  function request() {
-    if (pending) return;
-    setError(null);
-    start(async () => {
-      const res = await requestDiagnosis();
-      if (res.error) {
-        setError(res.error);
-        return;
-      }
-      setState(res.status === "ready" ? "ready" : "pending");
-    });
-  }
-
   return (
     <div className={`${shell} flex-wrap`}>
       <div className="min-w-0 flex-1">
