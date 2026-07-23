@@ -59,14 +59,28 @@ export type DiagnosisInsight = {
   wrongRatePct?: number | null;
 };
 
+// 개념별 "맞춤 극복법"(AI). 진단받기 시점에 온디맨드 API가 상위 취약 개념들을 한 번에
+// 생성해 report에 캐시한다(일 1회 재사용). 표시 방식은 화면 자유 — 데이터만 담아둔다.
+export type DiagnosisConceptCoaching = {
+  concept: string;
+  subject?: string | null;
+  subjectSlug?: string | null;
+  // 이 개념에서 "주로 어떤 문제를 틀리는지" 한두 문장(데이터 근거 기반).
+  weakPattern: string;
+  // 어떻게 극복하면 좋을지 실천형 조언 한두 문장.
+  howToOvercome: string;
+};
+
 export type AiDiagnosisReport = {
   summary: string;
   weakConcepts: DiagnosisWeakConcept[];
   subjectTrends: DiagnosisSubjectTrend[];
-  // 아래 두 필드는 리뉴얼된 대시보드용(선택). 구버전 리포트엔 없을 수 있어 화면이
+  // 아래 필드들은 리뉴얼된 대시보드용(선택). 구버전 리포트엔 없을 수 있어 화면이
   // 있으면 그리고 없으면 대체/숨김 처리한다.
   mission?: DiagnosisMission | null;
   insights?: DiagnosisInsight[] | null;
+  // 개념별 맞춤 극복법(AI, 진단받기 때 생성·캐시).
+  conceptCoaching?: DiagnosisConceptCoaching[] | null;
 };
 
 export type DiagnosisEligibility = {
