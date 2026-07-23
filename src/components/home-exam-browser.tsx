@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { FileStack, Download, Users, Star } from "lucide-react";
 import { ExamCard } from "@/components/exam-card";
 import { SearchInput } from "@/components/search-input";
+import { WrongNoteShortcut } from "@/components/wrong-note-shortcut";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
 import { levelColor } from "@/lib/level-colors";
 import {
@@ -112,6 +113,7 @@ export function HomeExamBrowser({
   cbtMask,
   myRoundCounts,
   loggedIn,
+  wrongNoteCount,
   totalCount,
   totalDownloads,
   totalAttempts,
@@ -134,6 +136,8 @@ export function HomeExamBrowser({
   cbtMask: string;
   myRoundCounts: Record<string, number>;
   loggedIn: boolean;
+  // 마이페이지 "남은 오답"과 같은 미극복 오답 수. 0이면 배너를 숨긴다.
+  wrongNoteCount: number;
   totalCount: number | null;
   totalDownloads: number | null;
   totalAttempts: number | null;
@@ -342,6 +346,12 @@ export function HomeExamBrowser({
         {heroText}
 
         <SearchInput value={query} onChange={handleQueryChange} />
+
+        {/* 오답노트 바로가기: 로그인 상태이고 아직 극복 못 한 오답이 있을 때만
+            검색창 바로 아래에 배너로 노출한다. */}
+        {loggedIn && wrongNoteCount > 0 && (
+          <WrongNoteShortcut count={wrongNoteCount} />
+        )}
 
         {/* 통계 타일은 PC(sm 이상)에만 보여준다. 모바일에서는 첫 화면에 카드
             목록이 들어오도록 걷어냈고, "총 자료 수"만 소개 문장에 통합돼 있다

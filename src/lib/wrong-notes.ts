@@ -994,6 +994,19 @@ export async function getUnresolvedCountBySubject(
   return out;
 }
 
+// 홈 화면 오답노트 바로가기 배너용: 마이페이지 "남은 오답"과 같은 값을 하나의
+// 숫자로 돌려준다. 과목별 집계(getUnresolvedCountBySubject)를 그대로 재사용해
+// 마이페이지 헤드라인과 숫자가 어긋나지 않도록 한다.
+export async function getMyUnresolvedTotal(
+  supabase: Supabase,
+  userId: string,
+): Promise<number> {
+  const bySubject = await getUnresolvedCountBySubject(supabase, userId);
+  let total = 0;
+  for (const v of bySubject.values()) total += v.unresolved;
+  return total;
+}
+
 // ── 문제지 오답노트 (과목 → 문제지 드릴다운) ───────────────────────────────
 
 export type PaperWrongNoteRound = {
