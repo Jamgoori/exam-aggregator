@@ -890,6 +890,57 @@ $$;
 
 grant execute on function is_nickname_taken(text, uuid) to anon, authenticated;
 
+-- 닉네임 서버 강제(트리거). user_metadata.nickname은 로그인 사용자가 supabase.auth
+-- .updateUser로 직접 쓸 수 있는 값이라, 앱/웹의 클라이언트 검증(길이·중복)만으로는
+-- REST를 직접 호출해 우회할 수 있다(중복·길이 초과 닉네임을 화면에 노출). 특히 모바일
+-- 앱은 닉네임 저장을 updateUser로만 하고 profiles(그림자 원장)에 직접 쓰지 않으므로,
+-- 이 트리거가 없으면 앱에서 정한 닉네임은 유일성 검사를 전혀 못 받는다.
+--
+-- 그래서 raw_user_meta_data의 nickname이 "바뀌는 UPDATE"에서 서버가 강제한다:
+--  1) 공백 정리·길이(2~10) 검증 — 위반 시 예외로 updateUser 자체를 실패시킨다.
+--  2) 정규화한 값을 metadata에 되써 화면 값과 원장을 일치시킨다.
+--  3) profiles에 upsert — lower(nickname) 유니크 인덱스가 "다른 사용자와의 중복"을
+--     23505로 막아 updateUser가 실패한다(우회 불가).
+-- 가입(INSERT)에는 걸지 않는다: 소셜 provider가 실어보내는 nickname(예: 카카오)이
+-- 길거나 중복일 때 회원가입 자체가 막히는 사고를 피하기 위함이다. 신규 계정의 닉네임은
+-- 기존과 동일하게 온보딩(updateUser)에서 이 트리거를 거친다.
+create or replace function enforce_nickname_on_metadata()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  nn text := new.raw_user_meta_data->>'nickname';
+begin
+  -- 닉네임을 건드리지 않는 metadata 변경(예: 다른 preference)은 그대로 통과.
+  if nn is null or nn is not distinct from (old.raw_user_meta_data->>'nickname') then
+    return new;
+  end if;
+
+  nn := regexp_replace(btrim(nn), '\s+', ' ', 'g');
+  if char_length(nn) < 2 or char_length(nn) > 10 then
+    raise exception '닉네임은 2~10자여야 합니다.' using errcode = 'check_violation';
+  end if;
+
+  -- 화면에 뿌려지는 metadata 값과 원장을 같은(정규화된) 값으로 맞춘다.
+  new.raw_user_meta_data := jsonb_set(new.raw_user_meta_data, '{nickname}', to_jsonb(nn));
+
+  -- 그림자 원장. 다른 사용자와 lower(nickname)이 겹치면 유니크 인덱스가 23505를
+  -- 던져 이 UPDATE(=updateUser) 전체가 실패한다.
+  insert into profiles (user_id, nickname)
+    values (new.id, nn)
+    on conflict (user_id) do update set nickname = excluded.nickname;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists enforce_nickname_before_update on auth.users;
+create trigger enforce_nickname_before_update
+  before update of raw_user_meta_data on auth.users
+  for each row execute function enforce_nickname_on_metadata();
+
 -- 로그인 아이디가 이메일 자체로 바뀌면서(가짜 도메인 트릭 폐기) 더 이상 쓰지 않는다.
 drop function if exists is_username_taken(text);
 
