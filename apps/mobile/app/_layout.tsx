@@ -1,0 +1,46 @@
+import { Stack, useRouter, useSegments } from "expo-router";
+import { useEffect } from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
+import { currentNickname } from "../src/lib/profile";
+import { AuthProvider, useAuth } from "../src/providers/auth-provider";
+
+// 루트 레이아웃: 제스처 핸들러(핀치줌·필기용)와 인증 컨텍스트를 앱 전체에 깐다.
+export default function RootLayout() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <AuthProvider>
+          <StatusBar style="dark" />
+          <NicknameGate />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="(auth)/login" options={{ presentation: "modal" }} />
+            <Stack.Screen name="papers/[id]/index" options={{ headerShown: true, title: "" }} />
+            <Stack.Screen name="papers/[id]/cbt" options={{ headerShown: true, title: "CBT" }} />
+          </Stack>
+        </AuthProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}
+
+// 소셜 로그인 후 닉네임이 없으면 온보딩(/nickname)으로 보낸다. 웹 auth 콜백이
+// user_metadata.nickname 없으면 온보딩으로 보내는 것과 같은 규칙.
+function NicknameGate() {
+  const { session, loading } = useAuth();
+  const router = useRouter();
+  const segments = useSegments();
+
+  useEffect(() => {
+    if (loading || !session) return;
+    if (currentNickname(session.user.user_metadata)) return;
+    // 이미 닉네임/로그인 화면이면 두 번 보내지 않는다.
+    const top = segments[0];
+    if (top === "nickname" || top === "(auth)") return;
+    router.replace("/nickname");
+  }, [loading, session, segments, router]);
+
+  return null;
+}

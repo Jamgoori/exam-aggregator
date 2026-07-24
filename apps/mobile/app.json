@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "공모아",
+    "slug": "gongmoa-mobile",
+    "scheme": "gongmoa",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.gongmoa.app"
+    },
+    "android": {
+      "package": "com.gongmoa.app"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.PLACEHOLDER_REVERSED_CLIENT_ID"
+        }
+      ],
+      [
+        "@react-native-seoul/kakao-login",
+        {
+          "kakaoAppKey": "3a97be9e089aaa6027ed56ba337e19c0",
+          "overrideKakaoSDKVersion": "2.20.0",
+          "kotlinVersion": "1.9.25"
+        }
+      ],
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "ed6b6dd5-0d81-41ef-a322-060859bae5f2"
+      }
+    },
+    "owner": "kojam",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/ed6b6dd5-0d81-41ef-a322-060859bae5f2"
+    }
+  }
+}

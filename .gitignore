@@ -1,55 +1,30 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# === 모노레포 루트 .gitignore ===
+# 각 워크스페이스(apps/web, apps/mobile)는 자체 .gitignore 를 가진다.
+# 여기서는 루트 레벨/횡단 관심사만 다룬다.
 
-# dependencies
-/node_modules
-/.pnp
+# dependencies (npm workspaces 는 루트로 호이스팅)
+node_modules/
+.pnp
 .pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
 
-# testing
-/coverage
+# turborepo
+.turbo/
 
-# next.js
-/.next/
-/out/
+# supabase CLI 로컬 캐시
+supabase/.temp/
 
-# production
-/build
-
-# misc
-.DS_Store
+# env (루트에 실수로 생기는 것 방지 — 앱별 env 는 앱 .gitignore 가 처리)
+.env
+.env.local
 *.pem
 
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-!.env.local.example
-
-# vercel
-.vercel
-
-# 로컬 벌크 업로드 대기/처리 폴더 (실제 저작권 있는 PDF는 git에 올리지 않음)
-/uploads/*
-!/uploads/.gitkeep
-/src/testpaper/
-
-# typescript
+# typescript 빌드 캐시
 *.tsbuildinfo
-next-env.d.ts
 
-.vercel
+# 로그/OS
+*.log
+npm-debug.log*
+.DS_Store
 
-# 해설 백업 JSON (deploy-law-explanations.mjs가 생성 — 해설 본문 포함이라 커밋 금지)
-/backups/
-
-# Claude Code 머신 로컬 설정 (배치 루틴 환경이 세션마다 생성 — 커밋 금지)
+# Claude Code 머신 로컬 설정 (세션마다 생성 — 커밋 금지)
 .claude/settings.local.json

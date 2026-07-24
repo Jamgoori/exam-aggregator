@@ -1,52 +1,20 @@
 {
-  "name": "exam-aggregator",
-  "version": "0.1.0",
+  "name": "gongmoa-monorepo",
+  "version": "0.0.0",
   "private": true,
+  "packageManager": "npm@12.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "postinstall": "node -e \"require('fs').copyFileSync('node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', 'public/pdf.worker.min.mjs')\"",
-    "bulk-upload": "node --env-file=.env.local scripts/bulk-upload.mjs",
-    "upload-answer": "node --env-file=.env.local scripts/upload-answer-key.mjs",
-    "extract-answers": "node --env-file=.env.local scripts/extract-answer-keys.mjs",
-    "list-pending-answers": "node --env-file=.env.local scripts/list-pending-answer-keys.mjs",
-    "crop-questions": "node --env-file=.env.local scripts/crop-question-images.mjs",
-    "batch-crop-questions": "node --env-file=.env.local scripts/batch-crop-questions.mjs",
-    "migrate-question-images": "node --env-file=.env.local scripts/migrate-question-images-to-webp.mjs",
-    "backfill-question-image-width": "node --env-file=.env.local scripts/backfill-question-image-width.mjs",
-    "migrate-pdfs": "node --env-file=.env.local scripts/migrate-pdfs-optimize.mjs",
-    "split-combined-pdf": "node scripts/split-combined-pdf.mjs",
-    "split-by-subject-header": "node scripts/split-by-subject-header.mjs",
-    "split-by-toc": "node scripts/split-by-toc.mjs"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
-    "@napi-rs/canvas": "^1.0.2",
-    "@next/third-parties": "^16.2.10",
-    "@supabase/ssr": "^0.12.0",
-    "@supabase/supabase-js": "^2.110.0",
-    "@vercel/analytics": "^2.0.1",
-    "bcryptjs": "^3.0.3",
-    "lucide-react": "^1.22.0",
-    "next": "16.2.9",
-    "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^6.1.200",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "server-only": "^0.0.1",
-    "sharp": "^0.34.5"
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "web": "npm run dev --workspace @gongmoa/web",
+    "mobile": "npm run start --workspace @gongmoa/mobile"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/bcryptjs": "^2.4.6",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.9",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "turbo": "^2.10.6"
   }
 }
