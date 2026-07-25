@@ -35,7 +35,7 @@ export async function searchPapers(rawQuery: string): Promise<ExamPaper[]> {
 
   let query = supabase
     .from("exam_papers")
-    .select("id, title, year, round, level, subjects(id, name, slug)")
+    .select("id, title, year, round, level, track, subjects(id, name, slug)")
     .order("year", { ascending: false })
     .order("round", { ascending: false })
     .limit(100);

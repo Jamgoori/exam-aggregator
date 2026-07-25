@@ -50,7 +50,7 @@ export function getSubjectBySlug(slug: string): Promise<Subject | null> {
 export async function papersBySubject(subjectId: string, limit = 100): Promise<ExamPaper[]> {
   const { data, error } = await supabase
     .from("exam_papers")
-    .select("id, title, year, round, level, subjects(id, name, slug)")
+    .select("id, title, year, round, level, track, subjects(id, name, slug)")
     .eq("subject_id", subjectId)
     .order("year", { ascending: false })
     .order("round", { ascending: false })

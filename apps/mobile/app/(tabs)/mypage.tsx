@@ -18,7 +18,7 @@ import {
   type WrongNoteSubject,
 } from "../../src/lib/mypage";
 import { computeStreakDays, streakTier } from "../../src/lib/streak";
-import type { ExamPaper } from "@gongmoa/core";
+import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
 import { useAuth } from "../../src/providers/auth-provider";
 import { colors } from "../../src/theme/colors";
 
@@ -197,7 +197,7 @@ export default function MyPageScreen() {
           <Pressable onPress={() => router.push(`/papers/${p.id}`)} style={rowStyle}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontWeight: "500" }} numberOfLines={1}>
-                {p.title}
+                {getPaperDisplayTitle(p.title, p.track)}
               </Text>
               <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>
                 {p.year}년 {p.round}회{p.subjects?.name ? ` · ${p.subjects.name}` : ""}

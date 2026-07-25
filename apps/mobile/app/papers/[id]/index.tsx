@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { COMMENT_CONTENT_MAX } from "@gongmoa/core";
+import { COMMENT_CONTENT_MAX, getPaperDisplayTitle } from "@gongmoa/core";
 import {
   deleteComment,
   getComments,
@@ -148,7 +148,9 @@ export default function PaperDetailScreen() {
       keyboardShouldPersistTaps="handled"
     >
       <View style={{ gap: 6 }}>
-        <Text style={{ fontSize: 19, fontWeight: "700" }}>{paper.title}</Text>
+        <Text style={{ fontSize: 19, fontWeight: "700" }}>
+          {getPaperDisplayTitle(paper.title, paper.track)}
+        </Text>
         <Text style={{ color: colors.textMuted }}>
           {paper.year}년 {paper.round}회
           {paper.level ? ` · ${paper.level}` : ""}

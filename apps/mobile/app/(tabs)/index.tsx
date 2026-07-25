@@ -8,7 +8,7 @@ import {
   View,
 } from "react-native";
 import { listPapers } from "../../src/lib/papers";
-import type { ExamPaper } from "@gongmoa/core";
+import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
 import { colors } from "../../src/theme/colors";
 
 // 홈: 최신 문제지 목록. 웹 home-exam-browser 의 앱 최소판.
@@ -72,7 +72,9 @@ export default function HomeScreen() {
               backgroundColor: colors.card,
             }}
           >
-            <Text style={{ fontWeight: "600", fontSize: 15 }}>{item.title}</Text>
+            <Text style={{ fontWeight: "600", fontSize: 15 }}>
+              {getPaperDisplayTitle(item.title, item.track)}
+            </Text>
             <Text style={{ color: colors.textMuted, marginTop: 4, fontSize: 13 }}>
               {item.year}년 {item.round}회
               {item.level ? ` · ${item.level}` : ""}

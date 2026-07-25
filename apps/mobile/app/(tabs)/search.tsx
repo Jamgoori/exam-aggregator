@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { searchPapers } from "../../src/lib/search";
-import type { ExamPaper } from "@gongmoa/core";
+import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
 import { colors } from "../../src/theme/colors";
 
 export default function SearchScreen() {
@@ -97,7 +97,7 @@ export default function SearchScreen() {
               }}
             >
               <Text style={{ fontWeight: "600", fontSize: 15 }} numberOfLines={1}>
-                {item.title}
+                {getPaperDisplayTitle(item.title, item.track)}
               </Text>
               <Text style={{ color: colors.textMuted, marginTop: 4, fontSize: 13 }}>
                 {item.year}년 {item.round}회

@@ -17,6 +17,13 @@ export * from "./comment-constraints";
 export * from "./nickname";
 export * from "./search";
 export * from "./streak";
+export * from "./paper-title";
+export * from "./levels";
+export * from "./tiers";
+export * from "./subject-color";
+
+// 오답노트 집계 (표시는 각 앱, 판정 규칙은 여기 하나)
+export * from "./wrong-notes";
 
 // 데이터 접근 (DI — SupabaseClient 주입)
 export * from "./data/subjects";

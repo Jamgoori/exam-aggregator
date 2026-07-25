@@ -7,7 +7,8 @@ import type { ExamPaper } from "@gongmoa/core";
 
 // 목록 카드에 필요한 최소 컬럼. 전체 컬럼(file_path·tags·집계 등)을 다 받지 않아
 // 전송량을 줄인다. 카드는 title·연도·회차·급수·과목명만 쓴다.
-const LIST_COLUMNS = "id, title, year, round, level, subjects(id, name, slug)";
+const LIST_COLUMNS =
+  "id, title, year, round, level, track, subjects(id, name, slug)";
 
 export async function listPapers(limit = 30): Promise<ExamPaper[]> {
   const { data, error } = await supabase

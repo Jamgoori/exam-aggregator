@@ -1,6 +1,6 @@
 import { supabase } from "./supabase";
 import { publicUrl } from "./storage";
-import type { ExamPaper } from "@gongmoa/core";
+import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
 
 // 마이페이지 데이터. RLS 로 본인 행만 읽힌다(cbt_attempts / bookmarks /
 // user_question_status 모두 user_id = auth.uid() 정책). 웹 mypage 의 앱 최소판.
@@ -18,17 +18,28 @@ export async function getMyAttempts(): Promise<MyAttempt[]> {
   const { data, error } = await supabase
     .from("cbt_attempts")
     .select(
-      "id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, level)",
+      "id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, level, track)",
     )
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((r) => {
-    const p = r.exam_papers as
-      | { id: string; title: string; level: string | null }
-      | { id: string; title: string; level: string | null }[]
-      | null;
+    type PaperRow = {
+      id: string;
+      title: string;
+      level: string | null;
+      track: string | null;
+    };
+    const p = r.exam_papers as PaperRow | PaperRow[] | null;
     // PostgREST 는 관계를 단일/배열 어느 쪽으로도 줄 수 있어 방어적으로 편다.
-    const paper = Array.isArray(p) ? (p[0] ?? null) : p;
+    const row = Array.isArray(p) ? (p[0] ?? null) : p;
+    // MyAttempt.paper.title 은 화면에 그대로 그려지는 값이라 웹과 같은 표시 규칙을 적용한다.
+    const paper = row
+      ? {
+          id: row.id,
+          title: getPaperDisplayTitle(row.title, row.track),
+          level: row.level,
+        }
+      : null;
     return {
       id: r.id as string,
       score: r.score as number,
@@ -64,7 +75,9 @@ export function computeAttemptRounds(attempts: MyAttempt[]): Map<string, number>
 export async function getMyBookmarks(): Promise<ExamPaper[]> {
   const { data, error } = await supabase
     .from("bookmarks")
-    .select("created_at, exam_papers(id, title, year, round, level, subjects(id, name, slug))")
+    .select(
+      "created_at, exam_papers(id, title, year, round, level, track, subjects(id, name, slug))",
+    )
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? [])
@@ -139,13 +152,17 @@ export type AttemptDetail = {
 export async function getAttemptDetail(attemptId: string): Promise<AttemptDetail | null> {
   const { data: attempt } = await supabase
     .from("cbt_attempts")
-    .select("id, paper_id, score, total_questions, created_at, exam_papers(title)")
+    .select("id, paper_id, score, total_questions, created_at, exam_papers(title, track)")
     .eq("id", attemptId)
     .maybeSingle();
   if (!attempt) return null;
 
-  const ep = attempt.exam_papers as { title: string } | { title: string }[] | null;
-  const title = (Array.isArray(ep) ? ep[0]?.title : ep?.title) ?? "삭제된 문제";
+  type PaperRow = { title: string; track: string | null };
+  const ep = attempt.exam_papers as PaperRow | PaperRow[] | null;
+  const paperRow = Array.isArray(ep) ? (ep[0] ?? null) : ep;
+  const title = paperRow
+    ? getPaperDisplayTitle(paperRow.title, paperRow.track)
+    : "삭제된 문제";
   const paperId = attempt.paper_id as string;
 
   const [{ data: answerRows }, { data: questionRows }] = await Promise.all([
@@ -221,17 +238,18 @@ export async function getWrongNoteDetail(
   const { data: statusRows, error } = await supabase
     .from("user_question_status")
     .select(
-      "paper_id, question_number, last_is_correct, exam_papers!inner(id, title, subject_id)",
+      "paper_id, question_number, last_is_correct, exam_papers!inner(id, title, track, subject_id)",
     )
     .eq("exam_papers.subject_id", subject.id)
     .gt("wrong_count", 0);
   if (error) throw error;
 
+  type PaperRow = { id: string; title: string; track: string | null };
   type Row = {
     paper_id: string;
     question_number: number;
     last_is_correct: boolean;
-    exam_papers: { id: string; title: string } | { id: string; title: string }[];
+    exam_papers: PaperRow | PaperRow[];
   };
   const rows = (statusRows ?? []) as Row[];
   if (rows.length === 0) {
@@ -262,7 +280,7 @@ export async function getWrongNoteDetail(
     if (!ep) continue;
     const group = groupMap.get(r.paper_id) ?? {
       paperId: r.paper_id,
-      title: ep.title,
+      title: getPaperDisplayTitle(ep.title, ep.track),
       questions: [],
     };
     group.questions.push({
