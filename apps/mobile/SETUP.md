@@ -161,6 +161,23 @@ eas update --branch production --message "설명"   # OTA 배포 (스토어 심�
 
 ---
 
+## 5-2. 앱 아이콘
+
+`assets/icon.png`(iOS·스토어), `assets/adaptive-icon.png`(안드로이드 적응형 앞면),
+`assets/adaptive-icon-monochrome.png`(안드로이드 13+ 테마 아이콘)이 들어 있고 `app.json` 에
+연결돼 있다. 별도 작업 없이 빌드하면 그대로 붙는다.
+
+모양·색을 바꾸려면 `scripts/generate-icons.mjs` 의 상수를 고치고 다시 돌린다:
+
+```bash
+cd apps/mobile && node scripts/generate-icons.mjs
+```
+
+디자인 도구 없이 코드로 그리고 의존성도 없다(PNG 를 직접 쓴다). 브랜드 색은
+`src/theme/colors.ts` 의 primary 와 같은 값을 쓰므로 앱 색을 바꾸면 여기도 같이 고칠 것.
+
+---
+
 ## 6. 빌드 & 설치
 
 ### 6-A. 폰만 있을 때 — GitHub Actions 로 빌드 (PC 불필요)
