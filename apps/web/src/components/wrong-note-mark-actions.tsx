@@ -103,8 +103,15 @@ export function WrongNoteUndoToast({
   bottomClass?: string;
 }) {
   const [pending, start] = useTransition();
+  // 8초 뒤 자동으로 닫는다. onDismiss 는 렌더마다 새 함수로 올 수 있는데, 그걸 effect
+  // 의존성에 넣으면 타이머가 매번 다시 걸려 영영 안 닫힌다. 그래서 ref 에 담아 최신
+  // 콜백만 읽는다 — 다만 ref 쓰기는 렌더 중이 아니라 effect 안에서 해야 한다
+  // (렌더 중 쓰기는 동시 렌더링에서 버려질 수 있다).
   const dismissRef = useRef(onDismiss);
-  dismissRef.current = onDismiss;
+
+  useEffect(() => {
+    dismissRef.current = onDismiss;
+  }, [onDismiss]);
 
   useEffect(() => {
     const t = setTimeout(() => dismissRef.current(), 8000);

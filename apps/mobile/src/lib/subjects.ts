@@ -1,10 +1,18 @@
 import { supabase } from "./supabase";
+import { fetchWithCache } from "./offline";
+import { collapsePapers } from "./papers";
 import { getSubjectBySlug as coreGetSubjectBySlug } from "@gongmoa/core";
 import type { ExamPaper, Subject } from "@gongmoa/core";
 
 // 과목 목록/즐겨찾기/과목별 문제지. subject_bookmarks 는 RLS 본인 쓰기라 클라이언트에서.
 
 export type SubjectWithFav = Subject & { favorited: boolean };
+
+// 과목 목록은 잘 안 변하고 오프라인에서도 둘러볼 수 있어야 해서 캐시를 둔다.
+export async function listSubjectsCached(): Promise<SubjectWithFav[]> {
+  const { data } = await fetchWithCache("subjects", listSubjects);
+  return data;
+}
 
 export async function listSubjects(): Promise<SubjectWithFav[]> {
   const { data: userData } = await supabase.auth.getUser();
@@ -42,6 +50,13 @@ export async function toggleSubjectBookmark(subjectId: string, on: boolean): Pro
   }
 }
 
+// 즐겨찾기한 과목 id. 홈의 "즐겨찾기한 과목만 보기" 필터가 쓴다. RLS 로 본인 것만.
+export async function getMyBookmarkedSubjectIds(): Promise<string[]> {
+  const { data, error } = await supabase.from("subject_bookmarks").select("subject_id");
+  if (error) return [];
+  return (data ?? []).map((r) => r.subject_id as string);
+}
+
 // 쿼리는 @gongmoa/core 로 단일화(웹과 공유). 모바일 클라를 주입해 기존 API 유지.
 export function getSubjectBySlug(slug: string): Promise<Subject | null> {
   return coreGetSubjectBySlug(supabase, slug);
@@ -50,11 +65,14 @@ export function getSubjectBySlug(slug: string): Promise<Subject | null> {
 export async function papersBySubject(subjectId: string, limit = 100): Promise<ExamPaper[]> {
   const { data, error } = await supabase
     .from("exam_papers")
-    .select("id, title, year, round, level, subjects(id, name, slug)")
+    .select(
+      "id, title, year, round, level, track, subject_id, exam_type_id, subjects(id, name, slug), exam_types(id, name)",
+    )
     .eq("subject_id", subjectId)
     .order("year", { ascending: false })
     .order("round", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []) as unknown as ExamPaper[];
+  // 과목별 목록도 웹처럼 중복 시험지를 한 장으로 합쳐서 보여준다.
+  return collapsePapers((data ?? []) as unknown as ExamPaper[]);
 }

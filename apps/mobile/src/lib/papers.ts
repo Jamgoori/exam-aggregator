@@ -1,23 +1,156 @@
 import { supabase } from "./supabase";
 import { publicUrl } from "./storage";
-import type { ExamPaper } from "@gongmoa/core";
+import {
+  collapseDuplicatePapers,
+  matchSubjectIds,
+  parseSearchQuery,
+} from "@gongmoa/core";
+import { fetchWithCache } from "./offline";
+import type { ExamPaper, Subject } from "@gongmoa/core";
 
 // 웹의 all-papers / paper-search 데이터 접근을 앱용으로 얇게 옮긴 것.
 // RLS·RPC 는 웹과 동일하게 그대로 재사용한다. 페이지네이션·정렬은 화면에서 필요할 때 확장.
 
 // 목록 카드에 필요한 최소 컬럼. 전체 컬럼(file_path·tags·집계 등)을 다 받지 않아
-// 전송량을 줄인다. 카드는 title·연도·회차·급수·과목명만 쓴다.
-const LIST_COLUMNS = "id, title, year, round, level, subjects(id, name, slug)";
+// 전송량을 줄인다. 카드는 title·연도·회차·급수·과목명을 쓰고, subject_id·exam_type_id 는
+// 중복 시험지 합치기(paperDedupKey)가 쓴다.
+const LIST_COLUMNS =
+  "id, title, year, round, level, track, subject_id, exam_type_id, subjects(id, name, slug), exam_types(id, name)";
 
-export async function listPapers(limit = 30): Promise<ExamPaper[]> {
-  const { data, error } = await supabase
+// ── 홈 목록(검색·급수 필터·페이지네이션) ──────────────────────────────────────
+//
+// 웹 홈은 문제지 전체(3천여 건)를 클라이언트로 내려 브라우저에서 필터한다. 앱은 전송량과
+// 메모리가 부담이라 같은 규칙(@gongmoa/core 의 parseSearchQuery/matchSubjectIds)을 쓰되
+// 필터를 서버 쿼리로 내리고 페이지 단위로 받는다.
+
+export const PAGE_SIZE = 20;
+
+// 과목(약 160개)·시행처(14개)는 작고 잘 안 변해서 한 번 받아 캐시한다.
+let subjectsCache: Subject[] | null = null;
+let examTypeNamesCache: string[] | null = null;
+
+async function getSubjects(): Promise<Subject[]> {
+  if (subjectsCache) return subjectsCache;
+  const { data, error } = await supabase.from("subjects").select("*").order("name");
+  if (error) throw error;
+  subjectsCache = (data ?? []) as Subject[];
+  return subjectsCache;
+}
+
+async function getExamTypeNames(): Promise<string[]> {
+  if (examTypeNamesCache) return examTypeNamesCache;
+  const { data } = await supabase.from("exam_types").select("name");
+  examTypeNamesCache = (data ?? []).map((r) => r.name as string);
+  return examTypeNamesCache;
+}
+
+export type BrowseResult = { papers: ExamPaper[]; hasMore: boolean; fromCache?: boolean };
+
+// 오프라인 대비: 검색어·필터 없는 첫 페이지(= 앱을 켜면 보이는 화면)만 캐시한다.
+// 검색 결과까지 캐시하면 조합이 무한히 늘어나는 데 비해 다시 볼 일이 적다.
+export async function browsePapersCached(level?: string): Promise<BrowseResult> {
+  const key = `home:${level ?? "all"}`;
+  const { data, fromCache } = await fetchWithCache(key, () => browsePapers({ level }, 0));
+  return { ...data, fromCache };
+}
+
+// page 는 0부터. 검색어가 비어 있으면 최신순 전체 목록이다.
+export async function browsePapers(
+  {
+    query = "",
+    level,
+    // "즐겨찾기한 과목만 보기" — 비어 있지 않으면 이 과목들로만 좁힌다.
+    subjectIds,
+  }: { query?: string; level?: string; subjectIds?: string[] },
+  page = 0,
+): Promise<BrowseResult> {
+  const trimmed = query.trim();
+
+  let q = supabase
     .from("exam_papers")
     .select(LIST_COLUMNS)
     .order("year", { ascending: false })
     .order("round", { ascending: false })
-    .limit(limit);
+    .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+
+  // 탭으로 고른 급수가 검색어 안의 급수보다 우선한다(사용자가 방금 누른 값이라).
+  let effectiveLevel = level;
+
+  if (trimmed) {
+    const [subjects, examTypeNames] = await Promise.all([
+      getSubjects(),
+      getExamTypeNames(),
+    ]);
+    const parsed = parseSearchQuery(trimmed, examTypeNames);
+    effectiveLevel = level ?? parsed.level;
+
+    const matchedSubjectIds = parsed.subjectQuery
+      ? matchSubjectIds(subjects, parsed.subjectQuery)
+      : [];
+
+    if (matchedSubjectIds.length > 0) {
+      q = q.in("subject_id", matchedSubjectIds);
+    } else if (parsed.subjectQuery) {
+      // 매칭되는 과목이 없으면 제목 부분 일치로 폴백(웹 검색과 같은 순서).
+      q = q.ilike("title", `%${parsed.subjectQuery}%`);
+    }
+    if (parsed.year) q = q.eq("year", parsed.year);
+    if (parsed.examType) {
+      const { data: types } = await supabase
+        .from("exam_types")
+        .select("id")
+        .eq("name", parsed.examType);
+      const typeId = types?.[0]?.id;
+      if (typeId) q = q.eq("exam_type_id", typeId);
+    }
+  }
+
+  if (effectiveLevel) q = q.eq("level", effectiveLevel);
+  if (subjectIds && subjectIds.length > 0) q = q.in("subject_id", subjectIds);
+
+  const { data, error } = await q;
   if (error) throw error;
-  return (data ?? []) as unknown as ExamPaper[];
+  const papers = (data ?? []) as unknown as ExamPaper[];
+  // 요청한 페이지가 꽉 찼으면 다음 페이지가 있을 수 있다고 본다(총 개수 조회 생략).
+  return { papers, hasMore: papers.length === PAGE_SIZE };
+}
+
+// 같은 시험지를 직류만 다르게 올린 행을 표시할 때 하나로 합친다(웹과 같은 규칙).
+// 앱은 정답(paper_answers)을 RLS 로 못 읽어 signals 없이 부른다 — 문서가 말하는
+// "service_role 키가 없는 환경" 폴백이라 메타데이터만으로 합쳐진다.
+// docs: apps/web/docs/agents/dedup-papers.md
+export function collapsePapers(papers: ExamPaper[]): ExamPaper[] {
+  return collapseDuplicatePapers(papers);
+}
+
+// 문제지별 내 회독 수(= CBT 응시 횟수). 홈 카드의 회독 배지에 쓴다. RLS 로 본인 것만.
+export async function getMyRoundCounts(): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  const { data, error } = await supabase.from("cbt_attempts").select("paper_id");
+  if (error) return counts;
+  for (const r of data ?? []) {
+    const id = r.paper_id as string;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+// 목록 카드의 "바로 풀기" 버튼 표시용. paper_answers 는 정답이 들어 있어 일반 select 가
+// 막혀 있으므로, 웹과 같은 security definer RPC 로 "있는지 여부"만 배치로 받는다.
+export async function getCbtAvailability(paperIds: string[]): Promise<Set<string>> {
+  if (paperIds.length === 0) return new Set();
+  const { data, error } = await supabase.rpc("has_cbt_answers_bulk", {
+    target_paper_ids: paperIds,
+  });
+  if (error) return new Set();
+  return new Set(((data ?? []) as { paper_id: string }[]).map((r) => r.paper_id));
+}
+
+// 목록 카드의 즐겨찾기 별 초기 상태. RLS 로 본인 행만 읽힌다.
+export async function getMyBookmarkedPaperIds(): Promise<Set<string>> {
+  const { data, error } = await supabase.from("bookmarks").select("paper_id");
+  if (error) return new Set();
+  return new Set((data ?? []).map((r) => r.paper_id as string));
 }
 
 export async function getPaper(id: string): Promise<ExamPaper | null> {

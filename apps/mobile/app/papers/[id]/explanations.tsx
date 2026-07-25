@@ -13,12 +13,13 @@ import {
   type ExplanationsResult,
 } from "../../../src/lib/explanations";
 import { useAuth } from "../../../src/providers/auth-provider";
-import { colors } from "../../../src/theme/colors";
+import { useColors } from "../../../src/theme/colors";
 
 // 문제지 전체 해설. 웹 papers/[id]/explanations 포팅. 정답·해설은 서버(Edge Function)
 // 만 읽을 수 있어(RLS 차단) 클라이언트는 그 결과를 그대로 보여준다. 비로그인/한도초과는
 // 서버가 이미 미리보기 문항만 내려주므로(hiddenCount>0), 화면은 안내만 얹는다.
 export default function ExplanationsScreen() {
+  const colors = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
   const paperId = String(id ?? "");
   const { session } = useAuth();
@@ -75,7 +76,7 @@ export default function ExplanationsScreen() {
             <View style={{ flexDirection: "row", justifyContent: "space-between", padding: 10 }}>
               <Text style={{ fontWeight: "700" }}>{q.questionNumber}번</Text>
               {q.correctChoice != null && (
-                <Text style={{ color: "#16a34a", fontWeight: "700" }}>정답 {q.correctChoice}</Text>
+                <Text style={{ color: colors.success, fontWeight: "700" }}>정답 {q.correctChoice}</Text>
               )}
             </View>
             {q.images.map((uri) => (
@@ -117,7 +118,7 @@ export default function ExplanationsScreen() {
                 </Text>
               )}
               {q.explanation.lawAmendmentNote && (
-                <Text style={{ fontSize: 12, color: "#d97706" }}>
+                <Text style={{ fontSize: 12, color: colors.warning }}>
                   ⚠ {q.explanation.lawAmendmentNote}
                 </Text>
               )}

@@ -28,9 +28,13 @@ import {
 } from "../../../src/lib/cbt";
 import { formatDuration } from "@gongmoa/core";
 import { getCbtQuestionData, getPaper } from "../../../src/lib/papers";
+import {
+  currentCbtViewMode,
+  type CbtViewMode,
+} from "../../../src/lib/profile";
 import { publicUrl } from "../../../src/lib/storage";
 import { useAuth } from "../../../src/providers/auth-provider";
-import { colors } from "../../../src/theme/colors";
+import { useColors, type Colors } from "../../../src/theme/colors";
 
 // 5초 카운트다운 후 서버에 시작 기록(startCbtAttempt) → 응답의 startedAt 을 기준으로
 // 경과시간을 잰다. 웹과 동일하게 클라이언트 시계로 먼저 시작하지 않는다(네트워크
@@ -86,6 +90,7 @@ function useCbtTimer(paperId: string, enabled: boolean, running: boolean) {
 }
 
 export default function CbtScreen() {
+  const colors = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
   const paperId = String(id ?? "");
   const router = useRouter();
@@ -99,8 +104,12 @@ export default function CbtScreen() {
     Record<number, number>
   >({});
   const [fileUrl, setFileUrl] = useState<string | null>(null);
-  // 전체 PDF / 문제별 보기. 크롭 이미지가 있으면 문제별로 시작, 없으면 전체 PDF.
-  const [viewMode, setViewMode] = useState<"single" | "full">("single");
+  // 전체 PDF / 문제별 보기. 계정에 저장한 시작 화면 설정(웹 mypage/edit 과 공유하는
+  // user_metadata.default_cbt_view_mode)으로 시작하고, 크롭 이미지가 없으면 아래에서
+  // 전체 PDF 로 되돌린다.
+  const [viewMode, setViewMode] = useState<CbtViewMode>(() =>
+    currentCbtViewMode(session?.user.user_metadata),
+  );
 
   const [answers, setAnswers] = useState<(number | null)[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -235,7 +244,7 @@ export default function CbtScreen() {
         <Text style={{ color: colors.textMuted, marginBottom: 12 }}>
           CBT는 로그인 후 이용할 수 있어요.
         </Text>
-        <Pressable onPress={() => router.push("/(auth)/login")} style={primaryBtn}>
+        <Pressable onPress={() => router.push("/(auth)/login")} style={primaryBtn(colors)}>
           <Text style={{ color: colors.primaryText, fontWeight: "500" }}>로그인</Text>
         </Pressable>
       </Centered>
@@ -439,6 +448,7 @@ function ModeTab({
   active: boolean;
   onPress: () => void;
 }) {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}
@@ -463,6 +473,7 @@ function ModeTab({
 }
 
 function Centered({ children }: { children: ReactNode }) {
+  const colors = useColors();
   return (
     <View
       style={{
@@ -477,9 +488,9 @@ function Centered({ children }: { children: ReactNode }) {
   );
 }
 
-const primaryBtn = {
+const primaryBtn = (colors: Colors) => ({
   backgroundColor: colors.primary,
   borderRadius: 10,
   paddingHorizontal: 20,
   paddingVertical: 10,
-} as const;
+} as const);

@@ -74,29 +74,36 @@ export async function getComments(paperId: string): Promise<Comment[]> {
   return (data ?? []) as Comment[];
 }
 
+// 쓰기(작성·수정·삭제)는 comments-write Edge Function 을 거친다. comments 는
+// anon/authenticated 에 select 컬럼 권한만 있고 쓰기 권한이 revoke 돼 있어서(schema.sql)
+// 클라이언트에서 직접 insert/update/delete 하면 권한 오류가 난다. 웹이 서버 액션
+// (service_role)으로 쓰는 것과 같은 자리다. 닉네임도 서버가 채운다(위조 방지).
+async function callCommentsWrite(body: Record<string, unknown>): Promise<void> {
+  const { data, error } = await supabase.functions.invoke("comments-write", { body });
+  if (error) {
+    const context = (error as { context?: Response }).context;
+    let message: string | null = null;
+    if (context && typeof context.json === "function") {
+      const parsed = await context.json().catch(() => null);
+      if (parsed && typeof parsed.error === "string") message = parsed.error;
+    }
+    throw new Error(message ?? "처리에 실패했어요.");
+  }
+  if (data?.error) throw new Error(data.error as string);
+}
+
 export async function postComment(
   paperId: string,
   content: string,
   parentId: string | null = null,
 ): Promise<void> {
-  const { data: userData } = await supabase.auth.getUser();
-  const user = userData.user;
-  if (!user) throw new Error("로그인이 필요해요.");
-  const nickname =
-    (user.user_metadata?.nickname as string | undefined) ??
-    user.email?.split("@")[0] ??
-    "회원";
-  const { error } = await supabase.from("comments").insert({
-    paper_id: paperId,
-    user_id: user.id,
-    nickname,
-    content: content.trim(),
-    parent_id: parentId,
-  });
-  if (error) throw error;
+  await callCommentsWrite({ action: "create", paperId, content, parentId });
+}
+
+export async function updateComment(id: string, content: string): Promise<void> {
+  await callCommentsWrite({ action: "update", commentId: id, content });
 }
 
 export async function deleteComment(id: string): Promise<void> {
-  const { error } = await supabase.from("comments").delete().eq("id", id);
-  if (error) throw error;
+  await callCommentsWrite({ action: "delete", commentId: id });
 }

@@ -10,9 +10,11 @@ import {
 } from "react-native";
 import { searchPapers } from "../../src/lib/search";
 import type { ExamPaper } from "@gongmoa/core";
-import { colors } from "../../src/theme/colors";
+import { ExamCard } from "../../src/components/exam-card";
+import { useColors } from "../../src/theme/colors";
 
 export default function SearchScreen() {
+  const colors = useColors();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ExamPaper[]>([]);
   const [loading, setLoading] = useState(false);
@@ -85,28 +87,7 @@ export default function SearchScreen() {
             </Text>
           ) : null
         }
-        renderItem={({ item }) => (
-          <Link href={`/papers/${item.id}`} asChild>
-            <Pressable
-              style={{
-                borderWidth: 1,
-                borderColor: colors.border,
-                borderRadius: 12,
-                padding: 14,
-                backgroundColor: colors.card,
-              }}
-            >
-              <Text style={{ fontWeight: "600", fontSize: 15 }} numberOfLines={1}>
-                {item.title}
-              </Text>
-              <Text style={{ color: colors.textMuted, marginTop: 4, fontSize: 13 }}>
-                {item.year}년 {item.round}회
-                {item.level ? ` · ${item.level}` : ""}
-                {item.subjects?.name ? ` · ${item.subjects.name}` : ""}
-              </Text>
-            </Pressable>
-          </Link>
-        )}
+        renderItem={({ item }) => <ExamCard paper={item} />}
       />
     </View>
   );

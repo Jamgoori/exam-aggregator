@@ -7,7 +7,7 @@ import Animated, {
 import { Pressable, ScrollView, Text, View } from "react-native";
 import type { CbtQuestionResult } from "../lib/cbt";
 import { MemoField } from "./memo-field";
-import { colors } from "../theme/colors";
+import { useColors } from "../theme/colors";
 
 // 문제별 보기 한 화면: 위쪽 문제 이미지(핀치줌), 아래쪽 문항별 선택지 + 이전/다음.
 // 세트문제(공통지문)는 여러 번호가 같은 이미지를 공유하므로 numbers 로 함께 받는다.
@@ -41,6 +41,7 @@ export function SingleQuestionView({
   paperId?: string;
   showMemo?: boolean;
 }) {
+  const colors = useColors();
   const scale = useSharedValue(1);
   const saved = useSharedValue(1);
   const pinch = Gesture.Pinch()
@@ -109,7 +110,7 @@ export function SingleQuestionView({
                 let fg = colors.text;
                 if (isSelected) {
                   if (q.result) {
-                    bg = q.result.is_correct ? "#16a34a" : colors.danger;
+                    bg = q.result.is_correct ? colors.success : colors.danger;
                     border = bg;
                   } else {
                     bg = colors.primary;
@@ -171,6 +172,7 @@ function NavButton({
   onPress: () => void;
   disabled: boolean;
 }) {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}

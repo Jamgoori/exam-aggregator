@@ -1,7 +1,7 @@
 import { Modal, Pressable, Text, View } from "react-native";
 import type { CbtSubmitResult } from "../lib/cbt";
 import { formatDuration } from "@gongmoa/core";
-import { colors } from "../theme/colors";
+import { useColors } from "../theme/colors";
 
 // 웹 cbt-result-modal 의 앱판. 점수·소요시간 요약 + 다시 풀기/닫기.
 export function CbtResultModal({
@@ -13,6 +13,7 @@ export function CbtResultModal({
   onRetry: () => void;
   onClose: () => void;
 }) {
+  const colors = useColors();
   const percent = result.totalQuestions
     ? Math.round((result.score / result.totalQuestions) * 100)
     : 0;

@@ -8,7 +8,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import Pdf from "react-native-pdf";
-import { colors } from "../theme/colors";
+import { useColors } from "../theme/colors";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 전체 PDF 보기 + 펜 필기. 웹 pdf-canvas-viewer(pdf.js) 대체.
@@ -34,6 +34,7 @@ const MAX_SCALE = 4;
 const ERASE_RADIUS = 0.025; // 정규화 거리 임계값
 
 export function PdfPenViewer({ fileUrl }: { fileUrl: string }) {
+  const colors = useColors();
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(1);
@@ -283,6 +284,7 @@ function Toolbar({
   onPrev: () => void;
   onNext: () => void;
 }) {
+  const colors = useColors();
   return (
     <View
       style={{
@@ -375,6 +377,7 @@ function ToolButton({
   onPress: () => void;
   disabled?: boolean;
 }) {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}

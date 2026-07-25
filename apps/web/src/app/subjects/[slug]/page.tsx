@@ -16,7 +16,7 @@ import {
   collidingPaperIds,
   fetchPaperIdentitySignals,
 } from "@/lib/dedup-papers";
-import type { ExamPaper, Subject } from "@gongmoa/core";
+import type { ExamPaper } from "@gongmoa/core";
 import { getSubjectBySlug } from "@gongmoa/core";
 import type { Metadata } from "next";
 

@@ -11,10 +11,11 @@ import {
   requestDiagnosis,
   type AiDiagnosisReport,
 } from "../src/lib/diagnosis";
-import { colors } from "../src/theme/colors";
+import { useColors } from "../src/theme/colors";
 
 // AI 약점 진단: 버튼 → Edge Function(Claude) 생성 → 리포트 표시. 하루 1회.
 export default function DiagnosisScreen() {
+  const colors = useColors();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

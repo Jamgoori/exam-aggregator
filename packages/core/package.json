@@ -9,12 +9,14 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0"
   },
   "devDependencies": {
+    "tsx": "^4.20.0",
     "typescript": "^5"
   }
 }
