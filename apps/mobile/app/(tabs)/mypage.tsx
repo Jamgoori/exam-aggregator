@@ -64,6 +64,10 @@ export default function MyPageScreen() {
         <Pressable onPress={() => router.push("/(auth)/login")} style={primaryBtn}>
           <Text style={{ color: colors.primaryText, fontWeight: "500" }}>로그인</Text>
         </Pressable>
+        {/* 비로그인 상태에서도 약관·처리방침에 닿아야 한다(스토어 심사 확인 항목). */}
+        <Pressable onPress={() => router.push("/settings")} style={{ marginTop: 16 }}>
+          <Text style={{ color: colors.textMuted, fontSize: 13 }}>설정 · 약관</Text>
+        </Pressable>
       </Centered>
     );
   }
@@ -89,18 +93,32 @@ export default function MyPageScreen() {
             <Text style={{ color: colors.primary, fontSize: 13 }}>수정</Text>
           </Pressable>
         </View>
-        <Pressable
-          onPress={signOut}
-          style={{
-            borderWidth: 1,
-            borderColor: colors.border,
-            borderRadius: 8,
-            paddingHorizontal: 12,
-            paddingVertical: 6,
-          }}
-        >
-          <Text style={{ color: colors.danger, fontSize: 13 }}>로그아웃</Text>
-        </Pressable>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Pressable
+            onPress={() => router.push("/settings")}
+            style={{
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 8,
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+            }}
+          >
+            <Text style={{ fontSize: 13 }}>설정</Text>
+          </Pressable>
+          <Pressable
+            onPress={signOut}
+            style={{
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 8,
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+            }}
+          >
+            <Text style={{ color: colors.danger, fontSize: 13 }}>로그아웃</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* 통계 */}

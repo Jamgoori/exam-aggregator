@@ -9,7 +9,8 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.gongmoa.app"
+      "bundleIdentifier": "com.gongmoa.app",
+      "usesAppleSignIn": true
     },
     "android": {
       "package": "com.gongmoa.app"
@@ -30,7 +31,8 @@
           "kotlinVersion": "1.9.25"
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true

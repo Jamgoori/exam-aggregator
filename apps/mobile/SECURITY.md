@@ -9,7 +9,7 @@
 | 2 | AI 진단 동시호출 비용 남용 | 중 | ✅ |
 | 3 | 닉네임 검증·유일성 클라이언트 전용(우회 가능) | 중 | 🔧 |
 | 4 | EXPO_TOKEN 채팅 노출 | 높음 | 🔧 |
-| 5 | 네이티브 OAuth id_token nonce 미사용 | 낮음 | 🔧 |
+| 5 | 네이티브 OAuth id_token nonce 미사용 | 낮음 | ✅ Apple / 🔧 Google·Kakao |
 | 6 | Edge Function CORS `*` | 낮음 | 🟢/🔧 |
 | 7 | 섞어풀기 세션 생성 rate limit 없음 | 낮음 | 🔧(선택) |
 | 8 | 정답 비공개(RLS)·응시 IDOR | — | 🟢 |
@@ -94,14 +94,19 @@ Anthropic API 를 여러 번 호출해 비용을 태울 수 있었다.
 
 ---
 
-## 5. OAuth id_token nonce — 🔧 하드닝(선택)
+## 5. OAuth id_token nonce — ✅ Apple 적용 / 🔧 Google·Kakao 남음
 
 **문제**: 네이티브 로그인에서 `signInWithIdToken` 에 nonce 를 함께 쓰지 않으면, 유효기간
 내 id_token 재사용(replay) 방어가 약해진다.
 
-**조치**: 로그인 시 임의 nonce 생성 → 네이티브 SDK(Google/Kakao)에 nonce 의 해시를
-넘겨 발급받고, `supabase.auth.signInWithIdToken({ provider, token, nonce })` 에 원본
-nonce 를 전달. 초기엔 위험 낮으나, 프로덕션 전 적용 권장.
+**조치**: 로그인 시 임의 nonce 생성 → 네이티브 SDK에 nonce 의 해시를 넘겨 발급받고,
+`supabase.auth.signInWithIdToken({ provider, token, nonce })` 에 원본 nonce 를 전달.
+
+- **Apple — 적용 완료**: `src/lib/auth.ts` 의 `signInWithApple` 이
+  `Crypto.randomUUID()` 로 원본 nonce 를 만들고 SHA-256(hex) 을 Apple 에 넘긴 뒤,
+  Supabase 에는 원본을 전달한다.
+- **Google·Kakao — 남음**: 두 SDK 도 같은 방식으로 nonce 를 받을 수 있으므로 동일하게
+  적용하면 된다. 위험이 낮아 후순위.
 
 ---
 

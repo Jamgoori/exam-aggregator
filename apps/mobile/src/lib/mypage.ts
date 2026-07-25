@@ -97,7 +97,10 @@ export async function getWrongNoteSubjects(): Promise<WrongNoteSubject[]> {
 
   const bySubject = new Map<string, WrongNoteSubject>();
   for (const row of data ?? []) {
-    const ep = row.exam_papers as
+    // 조인 결과를 supabase-js 는 배열로 추론하지만 to-one 관계라 실제로는 객체로 온다.
+    // 둘 다 들어올 수 있다고 보고 아래에서 풀기 때문에, 추론 타입과 겹치지 않는 이
+    // 캐스트는 unknown 을 한 번 거친다(TS2352).
+    const ep = row.exam_papers as unknown as
       | { subjects: { id: string; name: string; slug: string } | null }
       | { subjects: { id: string; name: string; slug: string } | null }[]
       | null;

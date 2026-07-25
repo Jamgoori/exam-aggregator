@@ -42,7 +42,11 @@ EXPO_PUBLIC_SUPABASE_URL=<결과 A>
 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<결과 B>
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=<3단계 결과>
 EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=<3단계 결과, iOS용>
+EXPO_PUBLIC_WEB_URL=<웹 배포 도메인, 예: https://gongmoa.com>
 ```
+
+> `EXPO_PUBLIC_WEB_URL` 은 앱의 "이용약관 / 개인정보처리방침"이 여는 주소다(웹의
+> `/terms`, `/privacy`). 비어 있으면 두 문서가 안 열려서 **스토어 심사에서 반려된다**.
 
 `app.json` 의 `PLACEHOLDER_*` 두 곳 교체:
 - google-signin 플러그인 `iosUrlScheme` → iOS 클라이언트 ID의 역방향 값
@@ -75,6 +79,33 @@ EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=<3단계 결과, iOS용>
 
 ---
 
+## 4-1. Apple 로그인 (iOS 심사 필수)
+
+다른 소셜 로그인이 있는 앱은 Sign in with Apple 이 없으면 iOS 심사에서 반려된다.
+Android 빌드에는 영향 없다(버튼이 자동으로 숨겨진다).
+
+1. Apple Developer → **Certificates, IDs & Profiles → Identifiers** → App ID
+   `com.gongmoa.app` → **Sign In with Apple** 체크
+2. **Identifiers → Services IDs** 로 서비스 ID 생성(예: `com.gongmoa.app.web`) →
+   Sign In with Apple 설정에서 Return URL 에
+   `https://<프로젝트 ref>.supabase.co/auth/v1/callback` 등록
+3. **Keys** 에서 Sign in with Apple 용 키 생성 → `.p8` 파일 다운로드(1회만 받을 수 있음)
+   + Key ID, Team ID 메모
+4. Supabase 대시보드 → **Authentication → Providers → Apple** 활성화
+   - Services ID, Team ID, Key ID, `.p8` 내용 입력
+   - **Authorized Client IDs** 에 앱 번들 ID `com.gongmoa.app` 추가 ← 네이티브 로그인은
+     이 값으로 검증한다. 빠지면 앱에서만 로그인이 실패한다.
+
+> 코드 쪽은 이미 준비돼 있다(`src/lib/auth.ts` 의 `signInWithApple`, `app.json` 의
+> `usesAppleSignIn` + `expo-apple-authentication` 플러그인). id_token 재사용을 막기 위해
+> nonce 를 쓴다(SECURITY.md 5번).
+
+**미완**: Apple 은 계정 삭제 시 발급한 토큰 폐기(revoke)까지 요구한다.
+`https://appleid.apple.com/auth/revoke` 호출에 위 `.p8` 로 만든 client_secret 이 필요해서
+`account-delete` 함수에 아직 안 들어가 있다. 키 발급 후 채워 넣을 것.
+
+---
+
 ## 5. Edge Functions 배포 (채점·섞어풀기·AI 진단 백엔드)
 
 ```bash
@@ -88,6 +119,7 @@ supabase functions deploy review-create
 supabase functions deploy review-submit
 supabase functions deploy ai-diagnose
 supabase functions deploy explanations-get
+supabase functions deploy account-delete   # 회원 탈퇴 (웹·앱 공용, 스토어 심사 필수)
 
 # AI 진단용 Claude 키 (함수 런타임 시크릿 — 앱 번들엔 안 들어감):
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
