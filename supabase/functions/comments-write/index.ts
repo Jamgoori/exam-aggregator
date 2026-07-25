@@ -13,6 +13,9 @@ import { adminClient, requireUser } from "../_shared/clients.ts";
 // DB 에도 comments_content_len(1~2000) 제약이 있어 최종 방어선은 스키마다.
 const CONTENT_MAX = 2000;
 
+// @gongmoa/core 의 COMMENT_MAX_DEPTH 와 같은 값. 원댓글 1, 대댓글 2, 대대댓글 3까지.
+const MAX_DEPTH = 3;
+
 type Action = "create" | "update" | "delete";
 
 Deno.serve(async (req) => {
@@ -35,15 +38,32 @@ Deno.serve(async (req) => {
     if (!paperId || !content) return json({ error: "내용을 입력해 주세요." }, 400);
     if (content.length > CONTENT_MAX) return json({ error: "내용이 너무 길어요." }, 400);
 
-    // 답글은 같은 문제지의 최상위 댓글에만 (대댓글의 대댓글 금지 — 웹과 같은 규칙).
+    // 답글 깊이 제한(웹 papers/actions.ts 와 같은 규칙). 클라이언트가 보낸 parentId 라
+    // 부모를 따라 올라가며 깊이를 세고 한도에 닿았으면 거절한다.
     if (parentId) {
       const { data: parent } = await admin
         .from("comments")
         .select("id, paper_id, parent_id")
         .eq("id", parentId)
         .maybeSingle();
-      if (!parent || parent.paper_id !== paperId || parent.parent_id !== null) {
+      if (!parent || parent.paper_id !== paperId) {
         return json({ error: "답글을 달 수 없는 댓글이에요." }, 400);
+      }
+
+      let depth = 1;
+      let cursor = parent.parent_id as string | null;
+      while (cursor) {
+        depth++;
+        if (depth >= MAX_DEPTH) break;
+        const { data: up } = await admin
+          .from("comments")
+          .select("parent_id")
+          .eq("id", cursor)
+          .maybeSingle();
+        cursor = (up?.parent_id as string | null) ?? null;
+      }
+      if (depth >= MAX_DEPTH) {
+        return json({ error: "여기에는 더 답글을 달 수 없어요." }, 400);
       }
     }
 

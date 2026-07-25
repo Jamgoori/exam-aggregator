@@ -9,7 +9,12 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { COMMENT_CONTENT_MAX, getPaperDisplayTitle } from "@gongmoa/core";
+import {
+  buildCommentTree,
+  canReplyTo,
+  COMMENT_CONTENT_MAX,
+  getPaperDisplayTitle,
+} from "@gongmoa/core";
 import {
   deleteComment,
   getComments,
@@ -22,7 +27,7 @@ import {
   type RatingSummary,
 } from "../../../src/lib/paper-detail";
 import { getPaper, hasCbtAnswers } from "../../../src/lib/papers";
-import type { Comment, ExamPaper } from "@gongmoa/core";
+import type { Comment, CommentNode, ExamPaper } from "@gongmoa/core";
 import { useAuth } from "../../../src/providers/auth-provider";
 import { useColors, type Colors } from "../../../src/theme/colors";
 
@@ -313,113 +318,39 @@ export default function PaperDetailScreen() {
             아직 댓글이 없어요.
           </Text>
         ) : (
-          // 1단계 깊이만 있으므로(대댓글의 대댓글 금지) 최상위를 돌면서 답글을 붙인다.
-          comments
-            .filter((c) => !c.parent_id)
-            .map((c) => {
-              const replies = comments.filter((r) => r.parent_id === c.id);
-              return (
-                <View
-                  key={c.id}
-                  style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 10 }}
-                >
-                  <CommentBody
-                    comment={c}
-                    mine={!!userId && c.user_id === userId}
-                    editing={editingId === c.id}
-                    editDraft={editDraft}
-                    busy={posting}
-                    onChangeEdit={setEditDraft}
-                    onStartEdit={() => {
-                      setEditingId(c.id);
-                      setEditDraft(c.content);
-                    }}
-                    onCancelEdit={() => setEditingId(null)}
-                    onSaveEdit={() => saveEdit(c.id)}
-                    onDelete={() => removeComment(c.id)}
-                    onReply={() => {
-                      if (!requireLogin()) return;
-                      setReplyTo(replyTo === c.id ? null : c.id);
-                      setReplyDraft("");
-                    }}
-                  />
-
-                  {replies.map((r) => (
-                    <View
-                      key={r.id}
-                      style={{
-                        marginTop: 8,
-                        marginLeft: 16,
-                        paddingLeft: 10,
-                        borderLeftWidth: 2,
-                        borderLeftColor: colors.border,
-                      }}
-                    >
-                      <CommentBody
-                        comment={r}
-                        mine={!!userId && r.user_id === userId}
-                        editing={editingId === r.id}
-                        editDraft={editDraft}
-                        busy={posting}
-                        onChangeEdit={setEditDraft}
-                        onStartEdit={() => {
-                          setEditingId(r.id);
-                          setEditDraft(r.content);
-                        }}
-                        onCancelEdit={() => setEditingId(null)}
-                        onSaveEdit={() => saveEdit(r.id)}
-                        onDelete={() => removeComment(r.id)}
-                      />
-                    </View>
-                  ))}
-
-                  {replyTo === c.id && (
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        gap: 8,
-                        alignItems: "flex-end",
-                        marginTop: 8,
-                        marginLeft: 16,
-                      }}
-                    >
-                      <TextInput
-                        value={replyDraft}
-                        onChangeText={setReplyDraft}
-                        placeholder="답글 달기"
-                        placeholderTextColor={colors.textMuted}
-                        maxLength={COMMENT_CONTENT_MAX}
-                        multiline
-                        autoFocus
-                        style={{
-                          flex: 1,
-                          borderWidth: 1,
-                          borderColor: colors.border,
-                          borderRadius: 10,
-                          paddingHorizontal: 12,
-                          paddingVertical: 8,
-                          color: colors.text,
-                          maxHeight: 100,
-                        }}
-                      />
-                      <Pressable
-                        onPress={() => submitReply(c.id)}
-                        disabled={posting || !replyDraft.trim()}
-                        style={{
-                          backgroundColor:
-                            posting || !replyDraft.trim() ? colors.border : colors.primary,
-                          borderRadius: 10,
-                          paddingHorizontal: 14,
-                          paddingVertical: 10,
-                        }}
-                      >
-                        <Text style={{ color: colors.primaryText, fontWeight: "600" }}>등록</Text>
-                      </Pressable>
-                    </View>
-                  )}
-                </View>
-              );
-            })
+          // 깊이가 여러 단이라 트리로 만들어 재귀로 그린다(규칙은 @gongmoa/core 공유).
+          buildCommentTree(comments).map((node) => (
+            <View
+              key={node.id}
+              style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 10 }}
+            >
+              <CommentThread
+                node={node}
+                userId={userId}
+                colors={colors}
+                busy={posting}
+                replyTo={replyTo}
+                replyDraft={replyDraft}
+                editingId={editingId}
+                editDraft={editDraft}
+                onChangeReply={setReplyDraft}
+                onChangeEdit={setEditDraft}
+                onToggleReply={(cid) => {
+                  if (!requireLogin()) return;
+                  setReplyTo(replyTo === cid ? null : cid);
+                  setReplyDraft("");
+                }}
+                onSubmitReply={submitReply}
+                onStartEdit={(c) => {
+                  setEditingId(c.id);
+                  setEditDraft(c.content);
+                }}
+                onCancelEdit={() => setEditingId(null)}
+                onSaveEdit={saveEdit}
+                onDelete={removeComment}
+              />
+            </View>
+          ))
         )}
       </View>
     </ScrollView>
@@ -442,41 +373,40 @@ const primaryBtn = (colors: Colors) => ({
   alignItems: "center" as const,
 });
 
-// 댓글 한 줄(최상위·답글 공용). 수정 중이면 입력창으로 바뀐다.
-function CommentBody({
-  comment,
-  mine,
-  editing,
-  editDraft,
-  busy,
-  onChangeEdit,
-  onStartEdit,
-  onCancelEdit,
-  onSaveEdit,
-  onDelete,
-  onReply,
-}: {
-  comment: Comment;
-  mine: boolean;
-  editing: boolean;
-  editDraft: string;
+// 댓글 한 줄 + 그 아래 답글들을 재귀로 그린다. 답글 폼은 깊이 한도(canReplyTo)에
+// 닿지 않은 댓글에만 붙고, 서버도 같은 한도로 거절한다.
+type ThreadProps = {
+  node: CommentNode;
+  userId: string | null;
+  colors: Colors;
   busy: boolean;
+  replyTo: string | null;
+  replyDraft: string;
+  editingId: string | null;
+  editDraft: string;
+  onChangeReply: (v: string) => void;
   onChangeEdit: (v: string) => void;
-  onStartEdit: () => void;
+  onToggleReply: (commentId: string) => void;
+  onSubmitReply: (parentId: string) => void;
+  onStartEdit: (comment: Comment) => void;
   onCancelEdit: () => void;
-  onSaveEdit: () => void;
-  onDelete: () => void;
-  // 답글은 최상위 댓글에만 달 수 있어(대댓글의 대댓글 금지) 답글 행에는 안 넘긴다.
-  onReply?: () => void;
-}) {
-  const colors = useColors();
+  onSaveEdit: (commentId: string) => void;
+  onDelete: (commentId: string) => void;
+};
+
+function CommentThread(props: ThreadProps) {
+  const { node, userId, colors, busy, replyTo, replyDraft, editingId, editDraft } = props;
+  const mine = !!userId && node.user_id === userId;
+  const editing = editingId === node.id;
+  const replyable = canReplyTo(node.depth);
+
   return (
     <View style={{ gap: 3 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-        <Text style={{ fontWeight: "600", fontSize: 13 }}>{comment.nickname}</Text>
+        <Text style={{ fontWeight: "600", fontSize: 13 }}>{node.nickname}</Text>
         <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-          {new Date(comment.created_at).toLocaleDateString("ko-KR")}
-          {comment.updated_at ? " (수정됨)" : ""}
+          {new Date(node.created_at).toLocaleDateString("ko-KR")}
+          {node.updated_at ? " (수정됨)" : ""}
         </Text>
       </View>
 
@@ -484,7 +414,7 @@ function CommentBody({
         <View style={{ gap: 6 }}>
           <TextInput
             value={editDraft}
-            onChangeText={onChangeEdit}
+            onChangeText={props.onChangeEdit}
             maxLength={COMMENT_CONTENT_MAX}
             multiline
             autoFocus
@@ -499,29 +429,32 @@ function CommentBody({
             }}
           />
           <View style={{ flexDirection: "row", gap: 12 }}>
-            <Pressable onPress={onSaveEdit} disabled={busy || !editDraft.trim()}>
+            <Pressable
+              onPress={() => props.onSaveEdit(node.id)}
+              disabled={busy || !editDraft.trim()}
+            >
               <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>저장</Text>
             </Pressable>
-            <Pressable onPress={onCancelEdit} disabled={busy}>
+            <Pressable onPress={props.onCancelEdit} disabled={busy}>
               <Text style={{ color: colors.textMuted, fontSize: 12 }}>취소</Text>
             </Pressable>
           </View>
         </View>
       ) : (
         <>
-          <Text style={{ fontSize: 14 }}>{comment.content}</Text>
+          <Text style={{ fontSize: 14 }}>{node.content}</Text>
           <View style={{ flexDirection: "row", gap: 12 }}>
-            {onReply && (
-              <Pressable onPress={onReply}>
+            {replyable && (
+              <Pressable onPress={() => props.onToggleReply(node.id)}>
                 <Text style={{ color: colors.textMuted, fontSize: 12 }}>답글</Text>
               </Pressable>
             )}
             {mine && (
               <>
-                <Pressable onPress={onStartEdit}>
+                <Pressable onPress={() => props.onStartEdit(node)}>
                   <Text style={{ color: colors.textMuted, fontSize: 12 }}>수정</Text>
                 </Pressable>
-                <Pressable onPress={onDelete}>
+                <Pressable onPress={() => props.onDelete(node.id)}>
                   <Text style={{ color: colors.danger, fontSize: 12 }}>삭제</Text>
                 </Pressable>
               </>
@@ -529,6 +462,57 @@ function CommentBody({
           </View>
         </>
       )}
+
+      {replyTo === node.id && (
+        <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-end", marginTop: 8 }}>
+          <TextInput
+            value={replyDraft}
+            onChangeText={props.onChangeReply}
+            placeholder="답글 달기"
+            placeholderTextColor={colors.textMuted}
+            maxLength={COMMENT_CONTENT_MAX}
+            multiline
+            autoFocus
+            style={{
+              flex: 1,
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 10,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              color: colors.text,
+              maxHeight: 100,
+            }}
+          />
+          <Pressable
+            onPress={() => props.onSubmitReply(node.id)}
+            disabled={busy || !replyDraft.trim()}
+            style={{
+              backgroundColor: busy || !replyDraft.trim() ? colors.border : colors.primary,
+              borderRadius: 10,
+              paddingHorizontal: 14,
+              paddingVertical: 10,
+            }}
+          >
+            <Text style={{ color: colors.primaryText, fontWeight: "600" }}>등록</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {node.replies.map((child) => (
+        <View
+          key={child.id}
+          style={{
+            marginTop: 8,
+            marginLeft: 12,
+            paddingLeft: 10,
+            borderLeftWidth: 2,
+            borderLeftColor: colors.border,
+          }}
+        >
+          <CommentThread {...props} node={child} />
+        </View>
+      ))}
     </View>
   );
 }

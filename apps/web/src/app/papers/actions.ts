@@ -6,7 +6,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionUser } from "@/lib/supabase/session";
 import { recordQuestionResults } from "@/lib/question-status";
 import { getClientIp } from "@/lib/client-ip";
-import { NICKNAME_MAX, validateNickname } from "@gongmoa/core";
+import {
+  canReplyTo,
+  COMMENT_MAX_DEPTH,
+  NICKNAME_MAX,
+  validateNickname,
+} from "@gongmoa/core";
 import {
   COMMENT_CONTENT_MAX,
   COMMENT_PW_MIN,
@@ -85,8 +90,8 @@ export async function postComment(input: {
 
   const admin = createAdminClient();
 
-  // 답글은 같은 문제지의 최상위 댓글에만 달 수 있게 한다 (대댓글의 대댓글 금지).
-  // parentId는 클라이언트가 보내는 값이라 여기서 다시 검증해야 의미가 있다.
+  // 답글 깊이 제한(COMMENT_MAX_DEPTH). parentId는 클라이언트가 보내는 값이라 여기서
+  // 다시 검증해야 의미가 있다 — 부모를 따라 올라가며 깊이를 세고, 한도에 닿았으면 거절.
   let parentId: string | null = null;
   if (input.parentId) {
     if (!isUuid(input.parentId)) return { error: "잘못된 접근입니다." };
@@ -95,8 +100,25 @@ export async function postComment(input: {
       .select("id, paper_id, parent_id")
       .eq("id", input.parentId)
       .maybeSingle();
-    if (!parent || parent.paper_id !== paperId || parent.parent_id !== null) {
+    if (!parent || parent.paper_id !== paperId) {
       return { error: "답글을 달 수 없는 댓글이에요." };
+    }
+
+    // 부모의 깊이 = 조상 수 + 1. 한도까지만 올라가면 되므로 조회는 최대 MAX-1회.
+    let depth = 1;
+    let cursor = parent.parent_id as string | null;
+    while (cursor) {
+      depth++;
+      if (depth >= COMMENT_MAX_DEPTH) break;
+      const { data: up } = await admin
+        .from("comments")
+        .select("parent_id")
+        .eq("id", cursor)
+        .maybeSingle();
+      cursor = (up?.parent_id as string | null) ?? null;
+    }
+    if (!canReplyTo(depth)) {
+      return { error: "여기에는 더 답글을 달 수 없어요." };
     }
     parentId = parent.id as string;
   }
