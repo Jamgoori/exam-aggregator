@@ -13,10 +13,13 @@ import {
   computeAttemptRounds,
   getMyAttempts,
   getMyBookmarks,
-  getWrongNoteSubjects,
   type MyAttempt,
-  type WrongNoteSubject,
 } from "../../src/lib/mypage";
+import {
+  getWrongNoteGroups,
+  toSubjectSummaries,
+  type WrongNoteSubjectSummary,
+} from "../../src/lib/wrong-notes";
 import { computeStreakDays, streakTier } from "../../src/lib/streak";
 import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
 import { useAuth } from "../../src/providers/auth-provider";
@@ -32,7 +35,7 @@ export default function MyPageScreen() {
   const [loading, setLoading] = useState(true);
   const [attempts, setAttempts] = useState<MyAttempt[]>([]);
   const [bookmarks, setBookmarks] = useState<ExamPaper[]>([]);
-  const [wrong, setWrong] = useState<WrongNoteSubject[]>([]);
+  const [wrong, setWrong] = useState<WrongNoteSubjectSummary[]>([]);
 
   // 화면에 들어올 때마다 새로고침(CBT 채점 후 돌아오면 기록·오답이 갱신돼야 함).
   useFocusEffect(
@@ -40,12 +43,12 @@ export default function MyPageScreen() {
       if (!session) return;
       let alive = true;
       setLoading(true);
-      Promise.all([getMyAttempts(), getMyBookmarks(), getWrongNoteSubjects()])
-        .then(([a, b, w]) => {
+      Promise.all([getMyAttempts(), getMyBookmarks(), getWrongNoteGroups()])
+        .then(([a, b, groups]) => {
           if (!alive) return;
           setAttempts(a);
           setBookmarks(b);
-          setWrong(w);
+          setWrong(toSubjectSummaries(groups));
         })
         .catch(() => {})
         .finally(() => alive && setLoading(false));

@@ -88,50 +88,10 @@ export async function getMyBookmarks(): Promise<ExamPaper[]> {
     .filter((p): p is ExamPaper => p !== null);
 }
 
-export type WrongNoteSubject = {
-  subjectId: string;
-  name: string;
-  slug: string;
-  unresolved: number;
-};
-
-// 과목별 "남은 오답" 요약 — user_question_status 에서 마지막 제출이 오답인 문항 수.
-//
-// ⚠️ 웹은 dedup(중복 시험지)·수동 표시(wrong_note_marks)·복습 쿨다운까지 반영한
-// 권위 있는 집계를 쓴다(getUnresolvedCountBySubject). 이 앱 버전은 그걸 단순화한
-// 근사치라 웹 숫자와 미세하게 다를 수 있다 — 상세는 웹에서.
-export async function getWrongNoteSubjects(): Promise<WrongNoteSubject[]> {
-  const { data, error } = await supabase
-    .from("user_question_status")
-    .select("paper_id, exam_papers(subject_id, subjects(id, name, slug))")
-    .gt("wrong_count", 0)
-    .eq("last_is_correct", false);
-  if (error) throw error;
-
-  const bySubject = new Map<string, WrongNoteSubject>();
-  for (const row of data ?? []) {
-    // 조인 결과를 supabase-js 는 배열로 추론하지만 to-one 관계라 실제로는 객체로 온다.
-    // 둘 다 들어올 수 있다고 보고 아래에서 풀기 때문에, 추론 타입과 겹치지 않는 이
-    // 캐스트는 unknown 을 한 번 거친다(TS2352).
-    const ep = row.exam_papers as unknown as
-      | { subjects: { id: string; name: string; slug: string } | null }
-      | { subjects: { id: string; name: string; slug: string } | null }[]
-      | null;
-    const paper = Array.isArray(ep) ? ep[0] : ep;
-    const subj = paper?.subjects;
-    const s = Array.isArray(subj) ? subj[0] : subj;
-    if (!s) continue;
-    const cur = bySubject.get(s.id) ?? {
-      subjectId: s.id,
-      name: s.name,
-      slug: s.slug,
-      unresolved: 0,
-    };
-    cur.unresolved += 1;
-    bySubject.set(s.id, cur);
-  }
-  return [...bySubject.values()].sort((a, b) => b.unresolved - a.unresolved);
-}
+// 과목별 "남은 오답" 요약은 lib/wrong-notes.ts 로 옮겼다. 예전엔 user_question_status 만
+// 보는 근사치라 웹 숫자와 어긋났는데, 지금은 @gongmoa/core 의 buildWrongNoteGroups(웹과
+// 같은 집계)를 쓴다. 타입 이름은 쓰던 곳이 있어 재노출한다.
+export type { WrongNoteSubjectSummary as WrongNoteSubject } from "./wrong-notes";
 
 // ── 응시 상세 (한 응시의 문항별 정/오답) ──────────────────────────────────────
 export type AttemptQuestion = {
@@ -201,100 +161,4 @@ export async function getAttemptDetail(attemptId: string): Promise<AttemptDetail
     createdAt: attempt.created_at as string,
     questions,
   };
-}
-
-// ── 오답노트 상세 (과목 → 문제지별 틀린 문항) ──────────────────────────────────
-// 정답은 RLS 로 클라이언트에 안 보인다(커닝 방지). 그래서 상세는 "틀린 문항 이미지 +
-// 극복 여부 + 다시 풀기"만 보여준다 — 정답 확인/재채점은 CBT 로 다시 풀 때 서버가 한다.
-
-export type WrongNoteQuestion = {
-  questionNumber: number;
-  images: string[];
-  resolved: boolean; // 마지막 제출이 정답이면 극복
-};
-
-export type WrongNotePaperGroup = {
-  paperId: string;
-  title: string;
-  questions: WrongNoteQuestion[];
-};
-
-export type WrongNoteDetail = {
-  subjectName: string;
-  groups: WrongNotePaperGroup[];
-};
-
-export async function getWrongNoteDetail(
-  slug: string,
-): Promise<WrongNoteDetail | null> {
-  const { data: subject } = await supabase
-    .from("subjects")
-    .select("id, name, slug")
-    .eq("slug", slug)
-    .maybeSingle();
-  if (!subject) return null;
-
-  // 이 과목의 문제지 중 내가 틀린 문항(wrong_count>0). exam_papers!inner 로 과목 필터.
-  const { data: statusRows, error } = await supabase
-    .from("user_question_status")
-    .select(
-      "paper_id, question_number, last_is_correct, exam_papers!inner(id, title, track, subject_id)",
-    )
-    .eq("exam_papers.subject_id", subject.id)
-    .gt("wrong_count", 0);
-  if (error) throw error;
-
-  type PaperRow = { id: string; title: string; track: string | null };
-  type Row = {
-    paper_id: string;
-    question_number: number;
-    last_is_correct: boolean;
-    exam_papers: PaperRow | PaperRow[];
-  };
-  const rows = (statusRows ?? []) as Row[];
-  if (rows.length === 0) {
-    return { subjectName: subject.name as string, groups: [] };
-  }
-
-  // 틀린 문항들의 이미지 조회: questions(paper_id, question_number) → question_images.
-  const paperIds = [...new Set(rows.map((r) => r.paper_id))];
-  const { data: questionRows } = await supabase
-    .from("questions")
-    .select("paper_id, question_number, question_images(order_index, image_path)")
-    .in("paper_id", paperIds);
-
-  const imageMap = new Map<string, string[]>(); // key: `${paperId}:${qnum}`
-  for (const q of questionRows ?? []) {
-    const imgs = [...((q.question_images as
-      | { order_index: number; image_path: string }[]
-      | null) ?? [])]
-      .sort((a, b) => a.order_index - b.order_index)
-      .map((img) => publicUrl(img.image_path));
-    imageMap.set(`${q.paper_id}:${q.question_number}`, imgs);
-  }
-
-  // 문제지별 그룹화.
-  const groupMap = new Map<string, WrongNotePaperGroup>();
-  for (const r of rows) {
-    const ep = Array.isArray(r.exam_papers) ? r.exam_papers[0] : r.exam_papers;
-    if (!ep) continue;
-    const group = groupMap.get(r.paper_id) ?? {
-      paperId: r.paper_id,
-      title: getPaperDisplayTitle(ep.title, ep.track),
-      questions: [],
-    };
-    group.questions.push({
-      questionNumber: r.question_number,
-      images: imageMap.get(`${r.paper_id}:${r.question_number}`) ?? [],
-      resolved: r.last_is_correct === true,
-    });
-    groupMap.set(r.paper_id, group);
-  }
-
-  const groups = [...groupMap.values()].map((g) => ({
-    ...g,
-    questions: g.questions.sort((a, b) => a.questionNumber - b.questionNumber),
-  }));
-
-  return { subjectName: subject.name as string, groups };
 }
