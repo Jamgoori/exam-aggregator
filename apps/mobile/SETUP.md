@@ -161,7 +161,35 @@ eas update --branch production --message "설명"   # OTA 배포 (스토어 심�
 
 ---
 
-## 6. 빌드 & 설치 (안드로이드 기준)
+## 6. 빌드 & 설치
+
+### 6-A. 폰만 있을 때 — GitHub Actions 로 빌드 (PC 불필요)
+
+`.github/workflows/eas-build.yml` 이 EAS 클라우드 빌드를 대신 돌려준다. 아래는 전부
+GitHub 웹(모바일 브라우저)에서 된다.
+
+1. 저장소 **Settings → Secrets and variables → Actions → New repository secret** 에 등록:
+
+   | 시크릿 | 값 |
+   |---|---|
+   | `EXPO_TOKEN` | expo.dev → Account → Access tokens (**필수**) |
+   | `EXPO_PUBLIC_SUPABASE_URL` | Supabase Project URL (**필수**) |
+   | `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase anon(publishable) 키 |
+   | `EXPO_PUBLIC_WEB_URL` | 웹 배포 도메인 |
+   | `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` | Google Web 클라이언트 ID |
+   | `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` | Google iOS 클라이언트 ID |
+
+2. **Actions → "앱 빌드 (EAS)" → Run workflow** — 플랫폼 `android`, 프로필 `preview`.
+3. 실행이 끝나면 **Summary** 에 expo.dev 빌드 주소가 남는다. 거기서 빌드가 끝나길 기다렸다가
+   APK 를 내려받아 폰에 설치한다("출처를 알 수 없는 앱" 허용 필요).
+
+> 워크플로가 클라우드 빌드를 올리기 전에 타입체크를 먼저 돌린다 — 깨진 코드로 빌드 크레딧을
+> 태우지 않으려는 것.
+
+> `EXPO_TOKEN` 은 채팅·커밋에 남기지 말 것. 노출되면 expo.dev 에서 폐기하고 재발급한다
+> (SECURITY.md 4번).
+
+### 6-B. PC 가 있을 때 — 로컬에서 직접
 
 ```bash
 npm i -g eas-cli

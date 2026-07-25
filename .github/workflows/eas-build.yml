@@ -1,0 +1,106 @@
+# 이 워크플로는 GitHub 화면(모바일 브라우저 포함)에서 직접 실행할 수 있게 만든 것이다.
+# 로컬에 Android SDK·Xcode 를 깔지 않고 EAS 클라우드에서 앱을 빌드한다.
+#
+# 쓰기 전에 저장소 Settings → Secrets and variables → Actions 에 아래 값을 넣어야 한다.
+# (모두 GitHub 웹에서 폰으로도 등록 가능하다.)
+#
+#   EXPO_TOKEN                            expo.dev → Account → Access tokens (필수)
+#   EXPO_PUBLIC_SUPABASE_URL              Supabase Project URL
+#   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY  Supabase anon(publishable) 키
+#   EXPO_PUBLIC_WEB_URL                   웹 배포 도메인 (약관·처리방침을 여는 주소)
+#   EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID      Google Cloud Console – Web 클라이언트 ID
+#   EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID      Google Cloud Console – iOS 클라이언트 ID
+#
+# EXPO_TOKEN 은 채팅·커밋에 절대 남기지 말 것. 노출되면 expo.dev 에서 폐기(revoke)하고
+# 새로 발급한다(apps/mobile/SECURITY.md 4번).
+name: 앱 빌드 (EAS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 빌드할 플랫폼
+        type: choice
+        default: android
+        options: [android, ios, all]
+      profile:
+        description: "eas.json 프로필 (preview = 폰에 바로 설치하는 APK)"
+        type: choice
+        default: preview
+        options: [preview, development, production]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 워크스페이스 설치
+        run: npm ci
+
+      # EAS 는 빌드 서버에서 번들을 만들지만, 여기서 미리 타입체크를 돌려
+      # 깨진 코드를 클라우드 빌드에 올리지 않는다(빌드 시간·크레딧 낭비 방지).
+      - name: 타입체크
+        run: npm run typecheck
+
+      # EXPO_PUBLIC_* 는 번들에 박히는 값이라 빌드 시점에 있어야 한다. .env 는
+      # 저장소에 없으므로(gitignore) 시크릿으로 만들어 넣는다.
+      - name: .env 생성
+        working-directory: apps/mobile
+        run: |
+          {
+            echo "EXPO_PUBLIC_SUPABASE_URL=${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}"
+            echo "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}"
+            echo "EXPO_PUBLIC_WEB_URL=${{ secrets.EXPO_PUBLIC_WEB_URL }}"
+            echo "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}"
+            echo "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}"
+          } > .env
+
+      - name: 필수 시크릿 확인
+        run: |
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "::error::EXPO_TOKEN 시크릿이 없습니다. expo.dev → Account → Access tokens 에서 발급해 저장소 시크릿에 넣어주세요."
+            exit 1
+          fi
+          if [ -z "${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}" ]; then
+            echo "::error::EXPO_PUBLIC_SUPABASE_URL 시크릿이 없습니다. 이 값이 없으면 앱이 켜지자마자 종료됩니다."
+            exit 1
+          fi
+          if [ -z "${{ secrets.EXPO_PUBLIC_WEB_URL }}" ]; then
+            echo "::warning::EXPO_PUBLIC_WEB_URL 이 비어 있습니다. 앱에서 이용약관·개인정보처리방침이 열리지 않아 스토어 심사에서 반려됩니다."
+          fi
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # --no-wait: 빌드는 EAS 클라우드에서 계속 돌고 워크플로는 바로 끝난다.
+      # 진행 상황과 설치 링크는 아래 요약에 찍히는 주소에서 확인한다.
+      - name: EAS 빌드 시작
+        working-directory: apps/mobile
+        run: |
+          eas build \
+            --platform "${{ inputs.platform }}" \
+            --profile "${{ inputs.profile }}" \
+            --non-interactive \
+            --no-wait | tee build.log
+
+      - name: 빌드 주소 요약에 남기기
+        if: always()
+        working-directory: apps/mobile
+        run: |
+          {
+            echo "## EAS 빌드"
+            echo ""
+            echo "- 플랫폼: \`${{ inputs.platform }}\` / 프로필: \`${{ inputs.profile }}\`"
+            echo "- 진행 상황과 설치 파일은 아래 주소에서 확인하세요."
+            echo ""
+            grep -Eo 'https://expo\.dev/[^ ]*' build.log | sort -u | sed 's/^/- /' || \
+              echo "- 빌드 주소를 찾지 못했습니다. 위 로그를 확인하세요."
+          } >> "$GITHUB_STEP_SUMMARY"
