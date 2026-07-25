@@ -15,7 +15,7 @@ import type { ExamPaper, Subject } from "@gongmoa/core";
 // 전송량을 줄인다. 카드는 title·연도·회차·급수·과목명을 쓰고, subject_id·exam_type_id 는
 // 중복 시험지 합치기(paperDedupKey)가 쓴다.
 const LIST_COLUMNS =
-  "id, title, year, round, level, track, subject_id, exam_type_id, subjects(id, name, slug)";
+  "id, title, year, round, level, track, subject_id, exam_type_id, subjects(id, name, slug), exam_types(id, name)";
 
 // ── 홈 목록(검색·급수 필터·페이지네이션) ──────────────────────────────────────
 //
@@ -127,6 +127,24 @@ export async function getMyRoundCounts(): Promise<Map<string, number>> {
     counts.set(id, (counts.get(id) ?? 0) + 1);
   }
   return counts;
+}
+
+// 목록 카드의 "바로 풀기" 버튼 표시용. paper_answers 는 정답이 들어 있어 일반 select 가
+// 막혀 있으므로, 웹과 같은 security definer RPC 로 "있는지 여부"만 배치로 받는다.
+export async function getCbtAvailability(paperIds: string[]): Promise<Set<string>> {
+  if (paperIds.length === 0) return new Set();
+  const { data, error } = await supabase.rpc("has_cbt_answers_bulk", {
+    target_paper_ids: paperIds,
+  });
+  if (error) return new Set();
+  return new Set(((data ?? []) as { paper_id: string }[]).map((r) => r.paper_id));
+}
+
+// 목록 카드의 즐겨찾기 별 초기 상태. RLS 로 본인 행만 읽힌다.
+export async function getMyBookmarkedPaperIds(): Promise<Set<string>> {
+  const { data, error } = await supabase.from("bookmarks").select("paper_id");
+  if (error) return new Set();
+  return new Set((data ?? []).map((r) => r.paper_id as string));
 }
 
 export async function getPaper(id: string): Promise<ExamPaper | null> {

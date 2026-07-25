@@ -32,7 +32,8 @@ export default function MyPageScreen() {
   const { session } = useAuth();
   const router = useRouter();
 
-  const [tab, setTab] = useState<Tab>("history");
+  // 기본 탭·순서를 웹 mypage-tabs 와 맞춘다(오답노트 → 내 시험 기록 → 즐겨찾기).
+  const [tab, setTab] = useState<Tab>("wrong");
   const [loading, setLoading] = useState(true);
   const [attempts, setAttempts] = useState<MyAttempt[]>([]);
   const [bookmarks, setBookmarks] = useState<ExamPaper[]>([]);
@@ -142,9 +143,9 @@ export default function MyPageScreen() {
 
       {/* 탭 */}
       <View style={{ flexDirection: "row", gap: 6 }}>
-        <TabButton label="기록" active={tab === "history"} onPress={() => setTab("history")} />
-        <TabButton label="즐겨찾기" active={tab === "bookmarks"} onPress={() => setTab("bookmarks")} />
         <TabButton label="오답노트" active={tab === "wrong"} onPress={() => setTab("wrong")} />
+        <TabButton label="내 시험 기록" active={tab === "history"} onPress={() => setTab("history")} />
+        <TabButton label="즐겨찾기" active={tab === "bookmarks"} onPress={() => setTab("bookmarks")} />
       </View>
 
       {loading && <ActivityIndicator style={{ marginTop: 8 }} />}

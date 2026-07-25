@@ -29,6 +29,11 @@ import {
 import { getPaper, hasCbtAnswers } from "../../../src/lib/papers";
 import type { Comment, CommentNode, ExamPaper } from "@gongmoa/core";
 import { useAuth } from "../../../src/providers/auth-provider";
+import {
+  examTypeBadge,
+  levelBadge,
+  subjectBadge,
+} from "../../../src/theme/badges";
 import { useColors, type Colors } from "../../../src/theme/colors";
 
 export default function PaperDetailScreen() {
@@ -192,8 +197,18 @@ export default function PaperDetailScreen() {
       contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 40 }}
       keyboardShouldPersistTaps="handled"
     >
-      <View style={{ gap: 6 }}>
-        <Text style={{ fontSize: 19, fontWeight: "700" }}>
+      {/* 배지 행 → 제목 → 메타. 웹 papers/[id]/page.tsx 와 같은 순서·색이다. */}
+      <View style={{ gap: 8 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {paper.level && <DetailBadge text={paper.level} {...levelBadge(paper.level)} />}
+          {paper.subjects && (
+            <DetailBadge text={paper.subjects.name} {...subjectBadge(paper.subjects.slug)} />
+          )}
+          {paper.exam_types && (
+            <DetailBadge text={paper.exam_types.name} {...examTypeBadge(paper.exam_types.name)} />
+          )}
+        </View>
+        <Text style={{ fontSize: 22, fontWeight: "700", lineHeight: 30 }}>
           {getPaperDisplayTitle(paper.title, paper.track)}
         </Text>
         <Text style={{ color: colors.textMuted }}>
@@ -514,5 +529,25 @@ function CommentThread(props: ThreadProps) {
         </View>
       ))}
     </View>
+  );
+}
+
+// 상세 상단의 급수·과목·직렬 배지. 웹과 같은 크기·모양.
+function DetailBadge({ text, bg, fg }: { text: string; bg: string; fg: string }) {
+  return (
+    <Text
+      style={{
+        fontSize: 11,
+        fontWeight: "700",
+        color: fg,
+        backgroundColor: bg,
+        borderRadius: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        overflow: "hidden",
+      }}
+    >
+      {text}
+    </Text>
   );
 }

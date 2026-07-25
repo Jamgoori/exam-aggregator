@@ -59,7 +59,7 @@ export async function papersBySubject(subjectId: string, limit = 100): Promise<E
   const { data, error } = await supabase
     .from("exam_papers")
     .select(
-      "id, title, year, round, level, track, subject_id, exam_type_id, subjects(id, name, slug)",
+      "id, title, year, round, level, track, subject_id, exam_type_id, subjects(id, name, slug), exam_types(id, name)",
     )
     .eq("subject_id", subjectId)
     .order("year", { ascending: false })

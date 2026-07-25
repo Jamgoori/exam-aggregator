@@ -1,29 +1,38 @@
-import { Link, useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
 } from "react-native";
-import { getPaperDisplayTitle, LEVEL_ORDER, type ExamPaper } from "@gongmoa/core";
+import { CONSONANTS, LEVEL_ORDER, type ExamPaper } from "@gongmoa/core";
+import { ExamCard } from "../../src/components/exam-card";
+import { OfflineBanner } from "../../src/components/offline-banner";
 import {
   browsePapers,
   browsePapersCached,
   collapsePapers,
+  getCbtAvailability,
+  getMyBookmarkedPaperIds,
   getMyRoundCounts,
 } from "../../src/lib/papers";
-import { OfflineBanner } from "../../src/components/offline-banner";
-import { roundBadge } from "../../src/lib/round-tier";
+import { setBookmark } from "../../src/lib/paper-detail";
 import { getWrongNoteGroupsCached } from "../../src/lib/wrong-notes";
 import { useAuth } from "../../src/providers/auth-provider";
+import { levelBadge } from "../../src/theme/badges";
 import { useColors } from "../../src/theme/colors";
 
-// 홈: 검색 + 급수 필터 + 무한 스크롤 목록. 웹 home-exam-browser 가 전체 목록(3천여 건)을
-// 받아 브라우저에서 필터하는 것과 달리, 앱은 같은 검색 규칙(@gongmoa/core 의
-// parseSearchQuery/matchSubjectIds)을 서버 쿼리로 내리고 페이지 단위로 이어받는다.
+// 홈. 화면 구성·순서를 웹 모바일 화면(home-exam-browser)에 맞춘다:
+// 소개 문구 → 검색 → 오답노트 배너 → 급수 탭 → 가나다 인덱스 → "총 N개의 자료" → 카드.
+// (웹의 통계 타일 3개는 모바일 폭에서 의도적으로 숨기고 총 자료 수만 소개 문장에 넣는다 —
+//  home-exam-browser.tsx 주석 참고. 앱도 같게 둔다.)
+//
+// 데이터를 받는 방식만 다르다: 웹은 전체 목록을 받아 브라우저에서 거르고, 앱은 같은 검색
+// 규칙(@gongmoa/core)을 서버 쿼리로 내려 20건씩 이어받는다.
 export default function HomeScreen() {
   const colors = useColors();
   const router = useRouter();
@@ -39,11 +48,12 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
 
   const [rounds, setRounds] = useState<Map<string, number>>(new Map());
+  const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
+  const [cbtSet, setCbtSet] = useState<Set<string>>(new Set());
   const [unresolved, setUnresolved] = useState(0);
-  // 오프라인이라 저장해둔 목록을 보여주는 중인지.
-  const [stale, setStale] = useState(false);
 
   // 입력할 때마다 쿼리를 날리지 않도록 300ms 모아서 보낸다.
   useEffect(() => {
@@ -56,7 +66,6 @@ export default function HomeScreen() {
     let alive = true;
     setLoading(true);
     setError(null);
-    // 검색어 없는 첫 화면만 캐시 경유로 받는다(오프라인에서도 목록이 보이도록).
     const load = debounced.trim()
       ? browsePapers({ query: debounced, level }, 0)
       : browsePapersCached(level);
@@ -75,18 +84,21 @@ export default function HomeScreen() {
     };
   }, [debounced, level]);
 
-  // 회독 배지·오답 배너는 사용자별 값이라 목록과 따로 받는다(첫 화면을 막지 않게).
-  // CBT 를 풀고 돌아오면 값이 달라지므로 포커스마다 갱신한다.
+  // 사용자별 값(회독·즐겨찾기·남은 오답)은 목록과 따로 받는다(첫 화면을 막지 않게).
   useFocusEffect(
     useCallback(() => {
       if (!session) {
         setRounds(new Map());
+        setBookmarks(new Set());
         setUnresolved(0);
         return;
       }
       let alive = true;
       getMyRoundCounts()
         .then((m) => alive && setRounds(m))
+        .catch(() => {});
+      getMyBookmarkedPaperIds()
+        .then((b) => alive && setBookmarks(b))
         .catch(() => {});
       getWrongNoteGroupsCached()
         .then(({ groups }) => {
@@ -102,11 +114,21 @@ export default function HomeScreen() {
 
   // 같은 시험지를 직류만 다르게 올린 행을 한 장으로 합친다(웹과 같은 규칙).
   // 페이지 단위가 아니라 지금까지 받은 전체에 적용해야, 한 그룹이 페이지 경계에 걸쳐도
-  // 다음 페이지를 받는 순간 합쳐진다. 그래서 더 불러오면 목록이 늘어나는 대신 카드
-  // 하나가 사라져 보일 수 있는데, 웹과 같은 화면으로 수렴하는 정상 동작이다.
+  // 다음 페이지를 받는 순간 합쳐진다.
   const visiblePapers = useMemo(() => collapsePapers(papers), [papers]);
 
-  // onEndReached 는 스크롤 중 여러 번 불릴 수 있어 진행 중 호출을 막는다.
+  // "바로 풀기" 배지는 보이는 문제지만 한 번에 확인한다(웹 getCbtAvailability 와 같은 RPC).
+  useEffect(() => {
+    if (visiblePapers.length === 0) return;
+    let alive = true;
+    getCbtAvailability(visiblePapers.map((p) => p.id))
+      .then((s) => alive && setCbtSet(s))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [visiblePapers]);
+
   const loadingMoreRef = useRef(false);
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current || !hasMore || loading) return;
@@ -126,9 +148,58 @@ export default function HomeScreen() {
     }
   }, [debounced, level, page, hasMore, loading]);
 
+  async function toggleBookmark(paperId: string) {
+    const next = !bookmarks.has(paperId);
+    // 낙관적 갱신 — 실패하면 되돌린다.
+    const apply = (add: boolean) =>
+      setBookmarks((prev) => {
+        const copy = new Set(prev);
+        if (add) copy.add(paperId);
+        else copy.delete(paperId);
+        return copy;
+      });
+    apply(next);
+    try {
+      await setBookmark(paperId, next);
+    } catch {
+      apply(!next);
+    }
+  }
+
+  const latestYear = visiblePapers[0]?.year;
+
   const header = (
-    <View style={{ gap: 10, paddingBottom: 4 }}>
+    <View style={{ gap: 12, paddingBottom: 4 }}>
       <OfflineBanner visible={stale} />
+
+      {/* 웹 홈의 소개 영역(모바일 압축본). 통계 타일 대신 총 자료 수를 아래 줄에 둔다. */}
+      <View style={{ gap: 8 }}>
+        {latestYear != null && (
+          <Text
+            style={{
+              alignSelf: "flex-start",
+              fontSize: 11,
+              fontWeight: "500",
+              color: colors.primary,
+              backgroundColor: colors.card,
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 999,
+              paddingHorizontal: 10,
+              paddingVertical: 3,
+              overflow: "hidden",
+            }}
+          >
+            {latestYear}년 자료 업데이트 완료
+          </Text>
+        )}
+        <Text style={{ fontSize: 26, fontWeight: "700", lineHeight: 34 }}>
+          나만의 <Text style={{ color: colors.primary }}>데이터</Text>로,{"\n"}합격까지 빠르게
+        </Text>
+        <Text style={{ color: colors.textMuted, fontSize: 13, lineHeight: 19 }}>
+          국가직·지방직·소방·경찰 등 주요 공무원 시험 기출문제를 연도별·과목별로 정리했어요.
+        </Text>
+      </View>
 
       <TextInput
         value={query}
@@ -148,13 +219,7 @@ export default function HomeScreen() {
         autoCorrect={false}
       />
 
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        <Chip label="전체" active={!level} onPress={() => setLevel(undefined)} />
-        {LEVEL_ORDER.map((l) => (
-          <Chip key={l} label={l} active={level === l} onPress={() => setLevel(l)} />
-        ))}
-      </View>
-
+      {/* 오답노트 바로가기 — 웹도 검색창 바로 아래에 둔다. */}
       {unresolved > 0 && (
         <Pressable
           onPress={() => router.push("/(tabs)/mypage")}
@@ -171,8 +236,7 @@ export default function HomeScreen() {
         >
           <Text style={{ flex: 1, fontSize: 13 }}>
             아직 극복 못 한 오답이{" "}
-            <Text style={{ color: colors.danger, fontWeight: "700" }}>{unresolved}개</Text>{" "}
-            있어요.
+            <Text style={{ color: colors.danger, fontWeight: "700" }}>{unresolved}개</Text> 있어요.
           </Text>
           <Text style={{ color: colors.danger, fontSize: 13, fontWeight: "600" }}>
             오답노트 ›
@@ -180,19 +244,50 @@ export default function HomeScreen() {
         </Pressable>
       )}
 
-      <Link href="/subjects" asChild>
-        <Pressable
-          style={{
-            borderWidth: 1,
-            borderColor: colors.primary,
-            borderRadius: 12,
-            padding: 12,
-            alignItems: "center",
-          }}
-        >
-          <Text style={{ color: colors.primary, fontWeight: "600" }}>과목별 보기 ›</Text>
-        </Pressable>
-      </Link>
+      {/* 급수 탭: 웹처럼 선택된 급수는 그 급수의 배지 색으로 채운다. */}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        <LevelChip label="전체" active={!level} onPress={() => setLevel(undefined)} />
+        {LEVEL_ORDER.map((lv) => (
+          <LevelChip
+            key={lv}
+            label={lv}
+            active={level === lv}
+            activeColors={levelBadge(lv)}
+            onPress={() => setLevel(lv)}
+          />
+        ))}
+      </View>
+
+      {/* 가나다 인덱스: 웹은 초성을 누르면 그 초성 과목 목록을 띄운다. 앱은 과목 화면으로
+          같은 초성이 선택된 상태로 넘긴다. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ gap: 6, paddingRight: 8 }}
+        style={{ flexGrow: 0 }}
+      >
+        {CONSONANTS.map((c) => (
+          <Pressable
+            key={c}
+            onPress={() => router.push(`/subjects?consonant=${encodeURIComponent(c)}`)}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 999,
+              borderWidth: 1,
+              borderColor: colors.border,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text style={{ fontSize: 13, color: colors.textMuted }}>{c}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
+      <Text style={{ color: colors.textMuted, fontSize: 13 }}>
+        총 {visiblePapers.length}개의 자료
+      </Text>
     </View>
   );
 
@@ -200,7 +295,7 @@ export default function HomeScreen() {
     <FlatList
       data={visiblePapers}
       keyExtractor={(p) => p.id}
-      contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 32 }}
+      contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 32 }}
       keyboardShouldPersistTaps="handled"
       ListHeaderComponent={header}
       onEndReached={loadMore}
@@ -209,94 +304,57 @@ export default function HomeScreen() {
         loading ? (
           <ActivityIndicator style={{ marginTop: 24 }} />
         ) : error ? (
-          <Text style={{ color: colors.danger, textAlign: "center", padding: 24 }}>
-            {error}
-          </Text>
+          <Text style={{ color: colors.danger, textAlign: "center", padding: 24 }}>{error}</Text>
         ) : (
           <Text style={{ color: colors.textMuted, textAlign: "center", padding: 24 }}>
-            조건에 맞는 문제지가 없어요.
+            조건에 맞는 기출문제가 없습니다.
           </Text>
         )
       }
       ListFooterComponent={
         loadingMore ? <ActivityIndicator style={{ marginVertical: 16 }} /> : null
       }
-      renderItem={({ item }) => {
-        const round = rounds.get(item.id) ?? 0;
-        const badge = round > 0 ? roundBadge(round) : null;
-        return (
-          <Link href={`/papers/${item.id}`} asChild>
-            <Pressable
-              style={{
-                borderWidth: 1,
-                borderColor: colors.border,
-                borderRadius: 12,
-                padding: 14,
-                backgroundColor: colors.card,
-              }}
-            >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Text
-                  style={{ fontWeight: "600", fontSize: 15, flex: 1 }}
-                  numberOfLines={2}
-                >
-                  {getPaperDisplayTitle(item.title, item.track)}
-                </Text>
-                {badge && (
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      fontWeight: "700",
-                      color: badge.fg,
-                      backgroundColor: badge.bg,
-                      borderRadius: 999,
-                      paddingHorizontal: 8,
-                      paddingVertical: 2,
-                      overflow: "hidden",
-                    }}
-                  >
-                    {round}회독
-                  </Text>
-                )}
-              </View>
-              <Text style={{ color: colors.textMuted, marginTop: 4, fontSize: 13 }}>
-                {item.year}년 {item.round}회
-                {item.level ? ` · ${item.level}` : ""}
-                {item.subjects?.name ? ` · ${item.subjects.name}` : ""}
-              </Text>
-            </Pressable>
-          </Link>
-        );
-      }}
+      renderItem={({ item }) => (
+        <ExamCard
+          paper={item}
+          myRoundCount={rounds.get(item.id)}
+          bookmarked={bookmarks.has(item.id)}
+          cbtAvailable={cbtSet.has(item.id)}
+          onToggleBookmark={session ? () => toggleBookmark(item.id) : undefined}
+        />
+      )}
     />
   );
 }
 
-function Chip({
+function LevelChip({
   label,
   active,
+  activeColors,
   onPress,
 }: {
   label: string;
   active: boolean;
+  // 급수 칩은 선택되면 그 급수 색으로 채운다. "전체"는 웹처럼 진한 회색.
+  activeColors?: { bg: string; fg: string };
   onPress: () => void;
 }) {
   const colors = useColors();
+  const bg = active ? (activeColors?.bg ?? "#27272a") : "transparent";
+  const fg = active ? (activeColors?.fg ?? "#ffffff") : colors.textMuted;
   return (
     <Pressable
       onPress={onPress}
       style={{
-        paddingHorizontal: 14,
+        paddingHorizontal: 16,
         paddingVertical: 6,
         borderRadius: 999,
-        backgroundColor: active ? colors.primary : colors.card,
+        backgroundColor: bg,
         borderWidth: 1,
-        borderColor: active ? colors.primary : colors.border,
+        borderColor: active ? bg : colors.border,
       }}
     >
-      <Text style={{ color: active ? colors.primaryText : colors.text, fontSize: 13 }}>
-        {label}
-      </Text>
+      <Text style={{ color: fg, fontSize: 13, fontWeight: "500" }}>{label}</Text>
     </Pressable>
   );
 }

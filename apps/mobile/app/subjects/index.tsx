@@ -1,4 +1,4 @@
-import { Stack, useRouter } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -25,7 +25,12 @@ export default function SubjectsScreen() {
   const router = useRouter();
   const { session } = useAuth();
   const [subjects, setSubjects] = useState<SubjectWithFav[]>([]);
-  const [consonant, setConsonant] = useState<string | null>(null);
+  // 홈의 가나다 인덱스에서 넘어오면 그 초성이 선택된 채로 열린다(웹이 초성 모달을 띄우는
+  // 자리에 대응).
+  const { consonant: consonantParam } = useLocalSearchParams<{ consonant?: string }>();
+  const [consonant, setConsonant] = useState<string | null>(
+    typeof consonantParam === "string" && consonantParam ? consonantParam : null,
+  );
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
