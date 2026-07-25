@@ -1,6 +1,7 @@
 import {
   buildWrongNoteGroups,
   EMPTY_MARKS,
+  wrongRatePct,
   type WrongAnswerRow,
   type WrongNoteAttemptRow,
   type WrongNoteMarks,
@@ -186,6 +187,31 @@ export function toSubjectSummaries(
       unresolved: g.unresolvedCount,
     }))
     .sort((a, b) => b.unresolved - a.unresolved);
+}
+
+// 전국 오답률. paper_question_wrong_rates 는 security definer 라 로그인 사용자면 부를 수
+// 있고, 정답이 아니라 "몇 %가 틀렸는지"만 돌려주므로 정답 유출이 아니다(웹과 같은 RPC).
+// 표본이 적은 문항은 core 의 wrongRatePct 가 null 을 줘서 배지가 숨는다.
+export async function fetchWrongRates(paperIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (paperIds.length === 0) return out;
+  for (const ids of chunk(paperIds, 50)) {
+    const { data, error } = await supabase.rpc("paper_question_wrong_rates", {
+      p_paper_ids: ids,
+    });
+    // 배지는 부가 정보라 실패해도 화면을 막지 않는다.
+    if (error) continue;
+    for (const r of (data ?? []) as {
+      paper_id: string;
+      question_number: number;
+      attempts: number;
+      wrongs: number;
+    }[]) {
+      const pct = wrongRatePct(Number(r.attempts), Number(r.wrongs));
+      if (pct != null) out.set(`${r.paper_id}#${r.question_number}`, pct);
+    }
+  }
+  return out;
 }
 
 // 문항 이미지(공개 읽기). `${paperId}#${questionNumber}` → 이미지 URL 목록.

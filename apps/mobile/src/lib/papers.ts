@@ -56,7 +56,12 @@ export async function browsePapersCached(level?: string): Promise<BrowseResult> 
 
 // page 는 0부터. 검색어가 비어 있으면 최신순 전체 목록이다.
 export async function browsePapers(
-  { query = "", level }: { query?: string; level?: string },
+  {
+    query = "",
+    level,
+    // "즐겨찾기한 과목만 보기" — 비어 있지 않으면 이 과목들로만 좁힌다.
+    subjectIds,
+  }: { query?: string; level?: string; subjectIds?: string[] },
   page = 0,
 ): Promise<BrowseResult> {
   const trimmed = query.trim();
@@ -101,6 +106,7 @@ export async function browsePapers(
   }
 
   if (effectiveLevel) q = q.eq("level", effectiveLevel);
+  if (subjectIds && subjectIds.length > 0) q = q.in("subject_id", subjectIds);
 
   const { data, error } = await q;
   if (error) throw error;

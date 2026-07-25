@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { Subject } from "@gongmoa/core";
 import {
   buildWrongNoteGroups,
+  WRONGRATE_MIN_SAMPLE,
   type WrongAnswerRow,
   type WrongNoteAttemptRow,
   type WrongNoteMarks,
@@ -28,6 +29,7 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 export {
   buildWrongNoteGroups,
   EMPTY_MARKS,
+  WRONGRATE_MIN_SAMPLE,
   type WrongAnswerRow,
   type WrongNoteAttemptRow,
   type WrongNoteMarks,
@@ -423,7 +425,7 @@ export type SubjectWrongNoteQuestion = {
 };
 
 // 전국 오답률 배지를 띄우기 위한 최소 표본(이보다 적으면 오해를 주므로 숨긴다).
-export const WRONGRATE_MIN_SAMPLE = 10;
+
 
 export type SubjectWrongNoteQuestions = {
   subject: Subject;

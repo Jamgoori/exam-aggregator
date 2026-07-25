@@ -21,6 +21,8 @@ import {
   getMyRoundCounts,
 } from "../../src/lib/papers";
 import { setBookmark } from "../../src/lib/paper-detail";
+import { getMyBookmarkedSubjectIds } from "../../src/lib/subjects";
+import { readCache, writeCache } from "../../src/lib/offline";
 import { getWrongNoteGroupsCached } from "../../src/lib/wrong-notes";
 import { useAuth } from "../../src/providers/auth-provider";
 import { levelBadge } from "../../src/theme/badges";
@@ -54,6 +56,17 @@ export default function HomeScreen() {
   const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
   const [cbtSet, setCbtSet] = useState<Set<string>>(new Set());
   const [unresolved, setUnresolved] = useState(0);
+  // "즐겨찾기한 과목만 보기" — 웹처럼 선택을 기억하고, 로그아웃 상태에선 걸지 않는다.
+  const [favOnly, setFavOnly] = useState(false);
+  const [favSubjectIds, setFavSubjectIds] = useState<string[]>([]);
+  const effectiveFavOnly = favOnly && !!session;
+
+  // 저장해둔 토글 상태를 복원한다(웹은 localStorage, 앱은 같은 파일 캐시를 쓴다).
+  useEffect(() => {
+    readCache<boolean>("home:favOnly")
+      .then((c) => c && setFavOnly(c.data))
+      .catch(() => {});
+  }, []);
 
   // 입력할 때마다 쿼리를 날리지 않도록 300ms 모아서 보낸다.
   useEffect(() => {
@@ -66,9 +79,12 @@ export default function HomeScreen() {
     let alive = true;
     setLoading(true);
     setError(null);
-    const load = debounced.trim()
-      ? browsePapers({ query: debounced, level }, 0)
-      : browsePapersCached(level);
+    const subjectIds = effectiveFavOnly ? favSubjectIds : undefined;
+    // 캐시는 필터 없는 기본 목록에만 쓴다(조합마다 캐시를 만들면 금방 지저분해진다).
+    const load =
+      debounced.trim() || subjectIds
+        ? browsePapers({ query: debounced, level, subjectIds }, 0)
+        : browsePapersCached(level);
     load
       .then((r) => {
         if (!alive) return;
@@ -82,7 +98,7 @@ export default function HomeScreen() {
     return () => {
       alive = false;
     };
-  }, [debounced, level]);
+  }, [debounced, level, effectiveFavOnly, favSubjectIds]);
 
   // 사용자별 값(회독·즐겨찾기·남은 오답)은 목록과 따로 받는다(첫 화면을 막지 않게).
   useFocusEffect(
@@ -99,6 +115,9 @@ export default function HomeScreen() {
         .catch(() => {});
       getMyBookmarkedPaperIds()
         .then((b) => alive && setBookmarks(b))
+        .catch(() => {});
+      getMyBookmarkedSubjectIds()
+        .then((ids) => alive && setFavSubjectIds(ids))
         .catch(() => {});
       getWrongNoteGroupsCached()
         .then(({ groups }) => {
@@ -136,7 +155,14 @@ export default function HomeScreen() {
     setLoadingMore(true);
     try {
       const next = page + 1;
-      const r = await browsePapers({ query: debounced, level }, next);
+      const r = await browsePapers(
+        {
+          query: debounced,
+          level,
+          subjectIds: effectiveFavOnly ? favSubjectIds : undefined,
+        },
+        next,
+      );
       setPapers((prev) => [...prev, ...r.papers]);
       setHasMore(r.hasMore);
       setPage(next);
@@ -146,7 +172,7 @@ export default function HomeScreen() {
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [debounced, level, page, hasMore, loading]);
+  }, [debounced, level, page, hasMore, loading, effectiveFavOnly, favSubjectIds]);
 
   async function toggleBookmark(paperId: string) {
     const next = !bookmarks.has(paperId);
@@ -164,6 +190,16 @@ export default function HomeScreen() {
     } catch {
       apply(!next);
     }
+  }
+
+  async function toggleFavOnly() {
+    if (!session) {
+      router.push("/(auth)/login");
+      return;
+    }
+    const next = !favOnly;
+    setFavOnly(next);
+    await writeCache("home:favOnly", next);
   }
 
   const latestYear = visiblePapers[0]?.year;
@@ -244,6 +280,26 @@ export default function HomeScreen() {
         </Pressable>
       )}
 
+      {/* 즐겨찾기한 과목만 보기 — 웹과 같은 자리(급수 탭 바로 위). */}
+      <Pressable
+        onPress={toggleFavOnly}
+        style={{
+          alignSelf: "flex-start",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
+          paddingHorizontal: 16,
+          paddingVertical: 6,
+          borderRadius: 999,
+          borderWidth: 1,
+          borderColor: effectiveFavOnly ? "#f59e0b" : colors.border,
+        }}
+      >
+        <Text style={{ color: effectiveFavOnly ? "#f59e0b" : colors.textMuted, fontSize: 13 }}>
+          {effectiveFavOnly ? "★" : "☆"} 즐겨찾기한 과목만 보기
+        </Text>
+      </Pressable>
+
       {/* 급수 탭: 웹처럼 선택된 급수는 그 급수의 배지 색으로 채운다. */}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         <LevelChip label="전체" active={!level} onPress={() => setLevel(undefined)} />
@@ -307,21 +363,31 @@ export default function HomeScreen() {
           <Text style={{ color: colors.danger, textAlign: "center", padding: 24 }}>{error}</Text>
         ) : (
           <Text style={{ color: colors.textMuted, textAlign: "center", padding: 24 }}>
-            조건에 맞는 기출문제가 없습니다.
+            {effectiveFavOnly && favSubjectIds.length === 0
+              ? "아직 즐겨찾기한 과목이 없어요. 과목별 보기에서 별 아이콘을 눌러 추가해보세요."
+              : "조건에 맞는 기출문제가 없습니다."}
           </Text>
         )
       }
       ListFooterComponent={
         loadingMore ? <ActivityIndicator style={{ marginVertical: 16 }} /> : null
       }
-      renderItem={({ item }) => (
-        <ExamCard
-          paper={item}
-          myRoundCount={rounds.get(item.id)}
-          bookmarked={bookmarks.has(item.id)}
-          cbtAvailable={cbtSet.has(item.id)}
-          onToggleBookmark={session ? () => toggleBookmark(item.id) : undefined}
-        />
+      renderItem={({ item, index }) => (
+        <>
+          {/* 즐겨찾기 보기에서는 웹처럼 연도로 묶어 보여준다(연도가 바뀌는 자리에 머리글). */}
+          {effectiveFavOnly && visiblePapers[index - 1]?.year !== item.year && (
+            <Text style={{ fontSize: 17, fontWeight: "700", marginTop: index === 0 ? 0 : 8 }}>
+              {item.year}년
+            </Text>
+          )}
+          <ExamCard
+            paper={item}
+            myRoundCount={rounds.get(item.id)}
+            bookmarked={bookmarks.has(item.id)}
+            cbtAvailable={cbtSet.has(item.id)}
+            onToggleBookmark={session ? () => toggleBookmark(item.id) : undefined}
+          />
+        </>
       )}
     />
   );

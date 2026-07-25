@@ -1,6 +1,7 @@
 import { Image } from "expo-image";
 import { Pressable, Text, View } from "react-native";
 import type { WrongNoteQuestionSummary } from "@gongmoa/core";
+import { MemoField } from "./memo-field";
 import { useColors } from "../theme/colors";
 
 // 오답노트 문항 카드. 정답은 표시하지 않는다 — paper_answers 는 RLS 로 클라이언트에
@@ -8,20 +9,28 @@ import { useColors } from "../theme/colors";
 // 화면에 나오는 건 문항 이미지·내가 마지막에 고른 답·틀린 횟수·극복 여부뿐이다.
 export function WrongNoteQuestionCard({
   question,
+  paperId,
   images,
   pinned,
   paperLabel,
+  wrongRatePct,
   busy,
+  showMemo = true,
   onZoom,
   onTogglePin,
   onDelete,
 }: {
   question: WrongNoteQuestionSummary;
+  paperId: string;
   images: string[];
   pinned: boolean;
   // 문항 모아보기에서 어느 문제지 문항인지 알려주는 줄. 문제지 화면에선 생략.
   paperLabel?: string;
+  // 전국 오답률(%). 표본이 적으면 null 로 와서 배지를 그리지 않는다.
+  wrongRatePct?: number | null;
   busy?: boolean;
+  // 로그인 사용자만 메모가 의미 있다.
+  showMemo?: boolean;
   onZoom: (uri: string) => void;
   onTogglePin: () => void;
   onDelete: () => void;
@@ -48,6 +57,11 @@ export function WrongNoteQuestionCard({
           {question.wrongCount > 1 && (
             <Text style={{ fontSize: 11, color: colors.danger }}>
               {question.wrongCount}번 틀림
+            </Text>
+          )}
+          {wrongRatePct != null && (
+            <Text style={{ fontSize: 11, color: colors.textMuted }}>
+              전국 오답률 {wrongRatePct}%
             </Text>
           )}
           <View style={{ flex: 1 }} />
@@ -84,6 +98,12 @@ export function WrongNoteQuestionCard({
               />
             </Pressable>
           ))}
+        </View>
+      )}
+
+      {showMemo && (
+        <View style={{ paddingHorizontal: 12, paddingBottom: 10 }}>
+          <MemoField paperId={paperId} questionNumber={question.questionNumber} />
         </View>
       )}
 

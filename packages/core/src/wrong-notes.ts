@@ -73,6 +73,17 @@ export type WrongNoteMarks = { deleted: Set<string>; pinned: Set<string> };
 
 export const EMPTY_MARKS: WrongNoteMarks = { deleted: new Set(), pinned: new Set() };
 
+// 전국 오답률 배지를 보여줄 최소 표본. 응시자가 몇 명 안 되는 문항의 "오답률 100%" 는
+// 오해를 주므로 이 수 미만이면 배지를 숨긴다. 웹·앱이 같은 기준을 써야 같은 문항에서
+// 같은 배지가 뜬다.
+export const WRONGRATE_MIN_SAMPLE = 10;
+
+// attempts/wrongs 집계를 배지에 쓸 퍼센트로. 표본이 모자라면 null(= 배지 숨김).
+export function wrongRatePct(attempts: number, wrongs: number): number | null {
+  if (attempts < WRONGRATE_MIN_SAMPLE) return null;
+  return Math.round((wrongs / attempts) * 100);
+}
+
 // 응시 목록 + 오답 행을 과목 → 문제지 → 문제 순으로 묶는다. "몇 번 틀렸는지"와
 // "가장 최근 응시에서는 맞혔는지(극복)"까지 여기서 한 번에 계산해서, 화면들은
 // 이 결과를 그대로 그리기만 하면 된다.

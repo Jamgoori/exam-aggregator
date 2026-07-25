@@ -15,6 +15,7 @@ import { WrongNoteQuestionCard } from "../../../src/components/wrong-note-questi
 import {
   fetchQuestionImages,
   fetchWrongNoteMarks,
+  fetchWrongRates,
   getWrongNoteGroupsCached,
   setQuestionDeleted,
   setQuestionPinned,
@@ -33,6 +34,7 @@ export default function SubjectWrongNoteScreen() {
   const [group, setGroup] = useState<WrongNoteSubjectGroup | null>(null);
   const [images, setImages] = useState<Map<string, string[]>>(new Map());
   const [pinned, setPinned] = useState<Set<string>>(new Set());
+  const [rates, setRates] = useState<Map<string, number>>(new Map());
   const [view, setView] = useState<View2>("papers");
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -45,12 +47,14 @@ export default function SubjectWrongNoteScreen() {
     setGroup(found);
     if (found) {
       const paperIds = found.papers.map((p) => p.paper.id);
-      const [imgs, marks] = await Promise.all([
+      const [imgs, marks, wrongRates] = await Promise.all([
         fetchQuestionImages(paperIds),
         fetchWrongNoteMarks(paperIds),
+        fetchWrongRates(paperIds),
       ]);
       setImages(imgs);
       setPinned(marks.pinned);
+      setRates(wrongRates);
     }
   }, [slug]);
 
@@ -202,7 +206,9 @@ export default function SubjectWrongNoteScreen() {
               <WrongNoteQuestionCard
                 key={`${paperId}#${q.questionNumber}`}
                 question={q}
+                paperId={paperId}
                 paperLabel={paperTitle}
+                wrongRatePct={rates.get(`${paperId}#${q.questionNumber}`) ?? null}
                 images={images.get(`${paperId}#${q.questionNumber}`) ?? []}
                 pinned={pinned.has(`${paperId}#${q.questionNumber}`)}
                 busy={busyKey === `${paperId}#${q.questionNumber}`}
