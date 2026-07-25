@@ -28,6 +28,10 @@ import {
 } from "../../../src/lib/cbt";
 import { formatDuration } from "@gongmoa/core";
 import { getCbtQuestionData, getPaper } from "../../../src/lib/papers";
+import {
+  currentCbtViewMode,
+  type CbtViewMode,
+} from "../../../src/lib/profile";
 import { publicUrl } from "../../../src/lib/storage";
 import { useAuth } from "../../../src/providers/auth-provider";
 import { colors } from "../../../src/theme/colors";
@@ -99,8 +103,12 @@ export default function CbtScreen() {
     Record<number, number>
   >({});
   const [fileUrl, setFileUrl] = useState<string | null>(null);
-  // 전체 PDF / 문제별 보기. 크롭 이미지가 있으면 문제별로 시작, 없으면 전체 PDF.
-  const [viewMode, setViewMode] = useState<"single" | "full">("single");
+  // 전체 PDF / 문제별 보기. 계정에 저장한 시작 화면 설정(웹 mypage/edit 과 공유하는
+  // user_metadata.default_cbt_view_mode)으로 시작하고, 크롭 이미지가 없으면 아래에서
+  // 전체 PDF 로 되돌린다.
+  const [viewMode, setViewMode] = useState<CbtViewMode>(() =>
+    currentCbtViewMode(session?.user.user_metadata),
+  );
 
   const [answers, setAnswers] = useState<(number | null)[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);

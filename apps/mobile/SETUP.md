@@ -121,6 +121,7 @@ supabase functions deploy ai-diagnose
 supabase functions deploy explanations-get
 supabase functions deploy account-delete   # 회원 탈퇴 (웹·앱 공용, 스토어 심사 필수)
 supabase functions deploy review-history   # 지난 섞어풀기 결과 다시 보기
+supabase functions deploy comments-write   # 앱 댓글 작성·수정·삭제 (없으면 앱에서 댓글이 안 써진다)
 
 # AI 진단용 Claude 키 (함수 런타임 시크릿 — 앱 번들엔 안 들어감):
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...

@@ -4,6 +4,11 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "rea
 import { signOut } from "../src/lib/auth";
 import { deleteAccount } from "../src/lib/account";
 import { LEGAL_LABELS, openLegal, type LegalDoc } from "../src/lib/legal";
+import {
+  currentCbtViewMode,
+  updateCbtViewMode,
+  type CbtViewMode,
+} from "../src/lib/profile";
 import { useAuth } from "../src/providers/auth-provider";
 import { colors } from "../src/theme/colors";
 
@@ -13,6 +18,26 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { session } = useAuth();
   const [deleting, setDeleting] = useState(false);
+  // 웹 mypage/edit 과 같은 값을 쓰므로 한쪽에서 바꾸면 다른 쪽에도 반영된다.
+  const [cbtMode, setCbtMode] = useState<CbtViewMode>(() =>
+    currentCbtViewMode(session?.user.user_metadata),
+  );
+  const [savingMode, setSavingMode] = useState(false);
+
+  async function pickCbtMode(mode: CbtViewMode) {
+    if (mode === cbtMode || savingMode) return;
+    const prev = cbtMode;
+    setCbtMode(mode);
+    setSavingMode(true);
+    try {
+      await updateCbtViewMode(mode);
+    } catch (e) {
+      setCbtMode(prev);
+      Alert.alert("저장 실패", e instanceof Error ? e.message : "다시 시도해 주세요.");
+    } finally {
+      setSavingMode(false);
+    }
+  }
 
   async function openDoc(doc: LegalDoc) {
     try {
@@ -65,6 +90,31 @@ export default function SettingsScreen() {
 
         {session && (
           <>
+            <SectionLabel text="CBT 시작 화면" />
+            <View style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 4 }}>
+              <ModeChip
+                label="문제별 풀기"
+                active={cbtMode === "single"}
+                onPress={() => pickCbtMode("single")}
+              />
+              <ModeChip
+                label="전체 PDF"
+                active={cbtMode === "full"}
+                onPress={() => pickCbtMode("full")}
+              />
+            </View>
+            <Text
+              style={{
+                color: colors.textMuted,
+                fontSize: 12,
+                paddingHorizontal: 16,
+                paddingTop: 8,
+              }}
+            >
+              CBT를 시작할 때 기본으로 열리는 화면이에요. 문항 이미지가 없는 문제지는 전체
+              PDF로 열립니다.
+            </Text>
+
             <SectionLabel text="계정" />
             <Row
               label="로그아웃"
@@ -139,6 +189,34 @@ function Row({
     >
       <Text style={{ flex: 1, color: danger ? colors.danger : colors.text }}>{label}</Text>
       <Text style={{ color: colors.textMuted }}>›</Text>
+    </Pressable>
+  );
+}
+
+function ModeChip({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 999,
+        backgroundColor: active ? colors.primary : colors.card,
+        borderWidth: 1,
+        borderColor: active ? colors.primary : colors.border,
+      }}
+    >
+      <Text style={{ color: active ? colors.primaryText : colors.text, fontSize: 13 }}>
+        {label}
+      </Text>
     </Pressable>
   );
 }

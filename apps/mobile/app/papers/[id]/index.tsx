@@ -13,6 +13,7 @@ import { COMMENT_CONTENT_MAX, getPaperDisplayTitle } from "@gongmoa/core";
 import {
   deleteComment,
   getComments,
+  updateComment,
   getRatingSummary,
   isBookmarked,
   postComment,
@@ -40,6 +41,11 @@ export default function PaperDetailScreen() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [draft, setDraft] = useState("");
   const [posting, setPosting] = useState(false);
+  // 답글/수정은 한 번에 하나만 열린다(모바일 화면에 폼이 여러 개 열리면 헷갈린다).
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
 
   useEffect(() => {
     if (!paperId) return;
@@ -103,6 +109,39 @@ export default function PaperDetailScreen() {
       setComments(await getComments(paperId));
     } catch {
       Alert.alert("댓글", "등록에 실패했어요.");
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  async function submitReply(parentId: string) {
+    if (!requireLogin()) return;
+    const content = replyDraft.trim();
+    if (!content) return;
+    setPosting(true);
+    try {
+      await postComment(paperId, content, parentId);
+      setReplyDraft("");
+      setReplyTo(null);
+      setComments(await getComments(paperId));
+    } catch (e) {
+      Alert.alert("답글", e instanceof Error ? e.message : "등록에 실패했어요.");
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  async function saveEdit(cid: string) {
+    const content = editDraft.trim();
+    if (!content) return;
+    setPosting(true);
+    try {
+      await updateComment(cid, content);
+      setEditingId(null);
+      setEditDraft("");
+      setComments(await getComments(paperId));
+    } catch (e) {
+      Alert.alert("수정", e instanceof Error ? e.message : "수정에 실패했어요.");
     } finally {
       setPosting(false);
     }
@@ -273,30 +312,113 @@ export default function PaperDetailScreen() {
             아직 댓글이 없어요.
           </Text>
         ) : (
-          comments.map((c) => (
-            <View
-              key={c.id}
-              style={{
-                borderTopWidth: 1,
-                borderTopColor: colors.border,
-                paddingVertical: 10,
-                gap: 3,
-              }}
-            >
-              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                <Text style={{ fontWeight: "600", fontSize: 13 }}>{c.nickname}</Text>
-                <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-                  {new Date(c.created_at).toLocaleDateString("ko-KR")}
-                </Text>
-              </View>
-              <Text style={{ fontSize: 14 }}>{c.content}</Text>
-              {userId && c.user_id === userId && (
-                <Pressable onPress={() => removeComment(c.id)} style={{ alignSelf: "flex-start" }}>
-                  <Text style={{ color: colors.danger, fontSize: 12 }}>삭제</Text>
-                </Pressable>
-              )}
-            </View>
-          ))
+          // 1단계 깊이만 있으므로(대댓글의 대댓글 금지) 최상위를 돌면서 답글을 붙인다.
+          comments
+            .filter((c) => !c.parent_id)
+            .map((c) => {
+              const replies = comments.filter((r) => r.parent_id === c.id);
+              return (
+                <View
+                  key={c.id}
+                  style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 10 }}
+                >
+                  <CommentBody
+                    comment={c}
+                    mine={!!userId && c.user_id === userId}
+                    editing={editingId === c.id}
+                    editDraft={editDraft}
+                    busy={posting}
+                    onChangeEdit={setEditDraft}
+                    onStartEdit={() => {
+                      setEditingId(c.id);
+                      setEditDraft(c.content);
+                    }}
+                    onCancelEdit={() => setEditingId(null)}
+                    onSaveEdit={() => saveEdit(c.id)}
+                    onDelete={() => removeComment(c.id)}
+                    onReply={() => {
+                      if (!requireLogin()) return;
+                      setReplyTo(replyTo === c.id ? null : c.id);
+                      setReplyDraft("");
+                    }}
+                  />
+
+                  {replies.map((r) => (
+                    <View
+                      key={r.id}
+                      style={{
+                        marginTop: 8,
+                        marginLeft: 16,
+                        paddingLeft: 10,
+                        borderLeftWidth: 2,
+                        borderLeftColor: colors.border,
+                      }}
+                    >
+                      <CommentBody
+                        comment={r}
+                        mine={!!userId && r.user_id === userId}
+                        editing={editingId === r.id}
+                        editDraft={editDraft}
+                        busy={posting}
+                        onChangeEdit={setEditDraft}
+                        onStartEdit={() => {
+                          setEditingId(r.id);
+                          setEditDraft(r.content);
+                        }}
+                        onCancelEdit={() => setEditingId(null)}
+                        onSaveEdit={() => saveEdit(r.id)}
+                        onDelete={() => removeComment(r.id)}
+                      />
+                    </View>
+                  ))}
+
+                  {replyTo === c.id && (
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        gap: 8,
+                        alignItems: "flex-end",
+                        marginTop: 8,
+                        marginLeft: 16,
+                      }}
+                    >
+                      <TextInput
+                        value={replyDraft}
+                        onChangeText={setReplyDraft}
+                        placeholder="답글 달기"
+                        placeholderTextColor={colors.textMuted}
+                        maxLength={COMMENT_CONTENT_MAX}
+                        multiline
+                        autoFocus
+                        style={{
+                          flex: 1,
+                          borderWidth: 1,
+                          borderColor: colors.border,
+                          borderRadius: 10,
+                          paddingHorizontal: 12,
+                          paddingVertical: 8,
+                          color: colors.text,
+                          maxHeight: 100,
+                        }}
+                      />
+                      <Pressable
+                        onPress={() => submitReply(c.id)}
+                        disabled={posting || !replyDraft.trim()}
+                        style={{
+                          backgroundColor:
+                            posting || !replyDraft.trim() ? colors.border : colors.primary,
+                          borderRadius: 10,
+                          paddingHorizontal: 14,
+                          paddingVertical: 10,
+                        }}
+                      >
+                        <Text style={{ color: colors.primaryText, fontWeight: "600" }}>등록</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+              );
+            })
         )}
       </View>
     </ScrollView>
@@ -318,3 +440,93 @@ const primaryBtn = {
   paddingVertical: 12,
   alignItems: "center" as const,
 };
+
+// 댓글 한 줄(최상위·답글 공용). 수정 중이면 입력창으로 바뀐다.
+function CommentBody({
+  comment,
+  mine,
+  editing,
+  editDraft,
+  busy,
+  onChangeEdit,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onDelete,
+  onReply,
+}: {
+  comment: Comment;
+  mine: boolean;
+  editing: boolean;
+  editDraft: string;
+  busy: boolean;
+  onChangeEdit: (v: string) => void;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaveEdit: () => void;
+  onDelete: () => void;
+  // 답글은 최상위 댓글에만 달 수 있어(대댓글의 대댓글 금지) 답글 행에는 안 넘긴다.
+  onReply?: () => void;
+}) {
+  return (
+    <View style={{ gap: 3 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <Text style={{ fontWeight: "600", fontSize: 13 }}>{comment.nickname}</Text>
+        <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+          {new Date(comment.created_at).toLocaleDateString("ko-KR")}
+          {comment.updated_at ? " (수정됨)" : ""}
+        </Text>
+      </View>
+
+      {editing ? (
+        <View style={{ gap: 6 }}>
+          <TextInput
+            value={editDraft}
+            onChangeText={onChangeEdit}
+            maxLength={COMMENT_CONTENT_MAX}
+            multiline
+            autoFocus
+            style={{
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 10,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              color: colors.text,
+              maxHeight: 120,
+            }}
+          />
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <Pressable onPress={onSaveEdit} disabled={busy || !editDraft.trim()}>
+              <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>저장</Text>
+            </Pressable>
+            <Pressable onPress={onCancelEdit} disabled={busy}>
+              <Text style={{ color: colors.textMuted, fontSize: 12 }}>취소</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <>
+          <Text style={{ fontSize: 14 }}>{comment.content}</Text>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            {onReply && (
+              <Pressable onPress={onReply}>
+                <Text style={{ color: colors.textMuted, fontSize: 12 }}>답글</Text>
+              </Pressable>
+            )}
+            {mine && (
+              <>
+                <Pressable onPress={onStartEdit}>
+                  <Text style={{ color: colors.textMuted, fontSize: 12 }}>수정</Text>
+                </Pressable>
+                <Pressable onPress={onDelete}>
+                  <Text style={{ color: colors.danger, fontSize: 12 }}>삭제</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
