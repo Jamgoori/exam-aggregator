@@ -230,6 +230,19 @@ export default function MyPageScreen() {
           <Text style={{ color: colors.primaryText, fontWeight: "600" }}>섞어풀기</Text>
         </Pressable>
         <Pressable
+          onPress={() => router.push("/review/history")}
+          style={{
+            flex: 1,
+            borderWidth: 1,
+            borderColor: colors.border,
+            borderRadius: 10,
+            paddingVertical: 12,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ fontWeight: "600" }}>지난 기록</Text>
+        </Pressable>
+        <Pressable
           onPress={() => router.push("/diagnosis")}
           style={{
             flex: 1,

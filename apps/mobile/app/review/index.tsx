@@ -18,8 +18,8 @@ import {
   submitReview,
   type ReviewResult,
   type ReviewSession,
-} from "../src/lib/review";
-import { colors } from "../src/theme/colors";
+} from "../../src/lib/review";
+import { colors } from "../../src/theme/colors";
 
 type Phase = "loading" | "solving" | "submitting" | "result" | "error";
 

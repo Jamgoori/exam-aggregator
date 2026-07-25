@@ -40,6 +40,34 @@ export async function createReview(onlyUnresolved = true): Promise<ReviewSession
   return data as ReviewSession;
 }
 
+export type ReviewHistoryEntry = {
+  sessionId: string;
+  scope: string;
+  subjectName: string | null;
+  total: number;
+  score: number | null;
+  submittedAt: string;
+};
+
+// 지난 섞어풀기 기록. review_sessions 는 RLS 정책이 없어 클라이언트가 못 읽으므로
+// review-history Edge Function 으로만 받는다(채점 완료분만 내려온다).
+export async function listReviewHistory(): Promise<ReviewHistoryEntry[]> {
+  const { data, error } = await supabase.functions.invoke("review-history", { body: {} });
+  if (error) throw await unwrap(error, "기록을 불러오지 못했어요.");
+  return (data?.sessions ?? []) as ReviewHistoryEntry[];
+}
+
+export async function getReviewResult(sessionId: string): Promise<ReviewResult> {
+  const { data, error } = await supabase.functions.invoke("review-history", {
+    body: { sessionId },
+  });
+  if (error) throw await unwrap(error, "결과를 불러오지 못했어요.");
+  if (typeof data?.score !== "number") {
+    throw new Error(data?.error ?? "결과를 불러오지 못했어요.");
+  }
+  return data as ReviewResult;
+}
+
 export async function submitReview(
   sessionId: string,
   answers: (number | null)[],
