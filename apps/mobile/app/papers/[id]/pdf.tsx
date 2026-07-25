@@ -6,10 +6,11 @@ import { PdfPenViewer } from "../../../src/components/pdf-pen-viewer";
 import { countDownload, downloadAndOpenPdf } from "../../../src/lib/download";
 import { getPaper } from "../../../src/lib/papers";
 import { publicUrl } from "../../../src/lib/storage";
-import { colors } from "../../../src/theme/colors";
+import { useColors } from "../../../src/theme/colors";
 
 // 원본 PDF 보기 — 문제지 상세의 "원본 PDF". 필기 도구도 그대로 쓸 수 있다.
 export default function PaperPdfScreen() {
+  const colors = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [paper, setPaper] = useState<ExamPaper | null>(null);
   const [loading, setLoading] = useState(true);

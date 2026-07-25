@@ -10,9 +10,10 @@ import {
 } from "react-native";
 import { searchPapers } from "../../src/lib/search";
 import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
-import { colors } from "../../src/theme/colors";
+import { useColors } from "../../src/theme/colors";
 
 export default function SearchScreen() {
+  const colors = useColors();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ExamPaper[]>([]);
   const [loading, setLoading] = useState(false);

@@ -13,12 +13,13 @@ import { browsePapers, getMyRoundCounts } from "../../src/lib/papers";
 import { roundBadge } from "../../src/lib/round-tier";
 import { getWrongNoteGroups } from "../../src/lib/wrong-notes";
 import { useAuth } from "../../src/providers/auth-provider";
-import { colors } from "../../src/theme/colors";
+import { useColors } from "../../src/theme/colors";
 
 // 홈: 검색 + 급수 필터 + 무한 스크롤 목록. 웹 home-exam-browser 가 전체 목록(3천여 건)을
 // 받아 브라우저에서 필터하는 것과 달리, 앱은 같은 검색 규칙(@gongmoa/core 의
 // parseSearchQuery/matchSubjectIds)을 서버 쿼리로 내리고 페이지 단위로 이어받는다.
 export default function HomeScreen() {
+  const colors = useColors();
   const router = useRouter();
   const { session } = useAuth();
 
@@ -259,6 +260,7 @@ function Chip({
   active: boolean;
   onPress: () => void;
 }) {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}

@@ -18,10 +18,11 @@ import {
   setQuestionDeleted,
   setQuestionPinned,
 } from "../../../src/lib/wrong-notes";
-import { colors } from "../../../src/theme/colors";
+import { useColors } from "../../../src/theme/colors";
 
 // 문제지별 오답노트. 웹 mypage/wrong-notes/[slug]/[paperId] 대응.
 export default function PaperWrongNoteScreen() {
+  const colors = useColors();
   const { slug, paperId } = useLocalSearchParams<{ slug: string; paperId: string }>();
   const router = useRouter();
 

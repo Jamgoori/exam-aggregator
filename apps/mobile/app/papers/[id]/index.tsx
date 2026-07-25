@@ -24,9 +24,10 @@ import {
 import { getPaper, hasCbtAnswers } from "../../../src/lib/papers";
 import type { Comment, ExamPaper } from "@gongmoa/core";
 import { useAuth } from "../../../src/providers/auth-provider";
-import { colors } from "../../../src/theme/colors";
+import { useColors, type Colors } from "../../../src/theme/colors";
 
 export default function PaperDetailScreen() {
+  const colors = useColors();
   const { id } = useLocalSearchParams<{ id: string }>();
   const paperId = String(id ?? "");
   const router = useRouter();
@@ -199,18 +200,18 @@ export default function PaperDetailScreen() {
 
       {/* 액션 */}
       <View style={{ flexDirection: "row", gap: 10 }}>
-        <Pressable onPress={toggleBookmark} style={outlineBtn}>
+        <Pressable onPress={toggleBookmark} style={outlineBtn(colors)}>
           <Text style={{ color: bookmarked ? colors.primary : colors.text, fontWeight: "600" }}>
             {bookmarked ? "★ 즐겨찾기" : "☆ 즐겨찾기"}
           </Text>
         </Pressable>
         <Link href={`/papers/${paper.id}/pdf`} asChild>
-          <Pressable style={outlineBtn}>
+          <Pressable style={outlineBtn(colors)}>
             <Text style={{ fontWeight: "600" }}>원본 PDF</Text>
           </Pressable>
         </Link>
         <Link href={`/papers/${paper.id}/explanations`} asChild>
-          <Pressable style={outlineBtn}>
+          <Pressable style={outlineBtn(colors)}>
             <Text style={{ fontWeight: "600" }}>해설</Text>
           </Pressable>
         </Link>
@@ -218,7 +219,7 @@ export default function PaperDetailScreen() {
 
       {cbt ? (
         <Link href={`/papers/${paper.id}/cbt`} asChild>
-          <Pressable style={primaryBtn}>
+          <Pressable style={primaryBtn(colors)}>
             <Text style={{ color: colors.primaryText, fontWeight: "600" }}>CBT로 풀기</Text>
           </Pressable>
         </Link>
@@ -425,21 +426,21 @@ export default function PaperDetailScreen() {
   );
 }
 
-const outlineBtn = {
+const outlineBtn = (colors: Colors) => ({
   flex: 1,
   borderWidth: 1,
   borderColor: colors.border,
   borderRadius: 10,
   paddingVertical: 12,
   alignItems: "center" as const,
-};
+});
 
-const primaryBtn = {
+const primaryBtn = (colors: Colors) => ({
   backgroundColor: colors.primary,
   borderRadius: 12,
   paddingVertical: 12,
   alignItems: "center" as const,
-};
+});
 
 // 댓글 한 줄(최상위·답글 공용). 수정 중이면 입력창으로 바뀐다.
 function CommentBody({
@@ -468,6 +469,7 @@ function CommentBody({
   // 답글은 최상위 댓글에만 달 수 있어(대댓글의 대댓글 금지) 답글 행에는 안 넘긴다.
   onReply?: () => void;
 }) {
+  const colors = useColors();
   return (
     <View style={{ gap: 3 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>

@@ -19,13 +19,14 @@ import {
   setQuestionDeleted,
   setQuestionPinned,
 } from "../../../src/lib/wrong-notes";
-import { colors } from "../../../src/theme/colors";
+import { useColors } from "../../../src/theme/colors";
 
 type View2 = "papers" | "questions";
 
 // 과목 오답노트. 웹 mypage/wrong-notes/[slug] 와 같은 구조 — 문제지별/문항별 두 보기.
 // 집계는 @gongmoa/core 의 buildWrongNoteGroups 라 웹과 숫자가 같다.
 export default function SubjectWrongNoteScreen() {
+  const colors = useColors();
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
 
@@ -151,7 +152,7 @@ export default function SubjectWrongNoteScreen() {
           <Text style={{ color: colors.danger, fontWeight: "700" }}>
             남은 오답 {group.unresolvedCount}
           </Text>
-          <Text style={{ color: "#16a34a", fontWeight: "700" }}>
+          <Text style={{ color: colors.success, fontWeight: "700" }}>
             극복 {group.resolvedCount}
           </Text>
         </View>
@@ -226,6 +227,7 @@ function Tab({
   active: boolean;
   onPress: () => void;
 }) {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}

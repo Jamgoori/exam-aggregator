@@ -2,11 +2,12 @@ import { Stack, useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, View } from "react-native";
 import { listReviewHistory, type ReviewHistoryEntry } from "../../src/lib/review";
-import { colors } from "../../src/theme/colors";
+import { useColors } from "../../src/theme/colors";
 
 // 지난 섞어풀기 기록. 웹 mypage/wrong-notes/[slug]/review/[sessionId] 처럼 채점이 끝난
 // 세션을 다시 열어볼 수 있게 한다.
 export default function ReviewHistoryScreen() {
+  const colors = useColors();
   const router = useRouter();
   const [entries, setEntries] = useState<ReviewHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);

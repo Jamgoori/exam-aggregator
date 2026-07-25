@@ -1,7 +1,7 @@
 import { Image } from "expo-image";
 import { Pressable, Text, View } from "react-native";
 import type { WrongNoteQuestionSummary } from "@gongmoa/core";
-import { colors } from "../theme/colors";
+import { useColors } from "../theme/colors";
 
 // 오답노트 문항 카드. 정답은 표시하지 않는다 — paper_answers 는 RLS 로 클라이언트에
 // 완전히 막혀 있고(커닝 방지), 극복 판정은 CBT/섞어풀기에서 서버가 채점한 결과를 쓴다.
@@ -26,6 +26,7 @@ export function WrongNoteQuestionCard({
   onTogglePin: () => void;
   onDelete: () => void;
 }) {
+  const colors = useColors();
   return (
     <View
       style={{
@@ -54,7 +55,7 @@ export function WrongNoteQuestionCard({
             style={{
               fontSize: 11,
               fontWeight: "600",
-              color: question.resolved ? "#16a34a" : colors.danger,
+              color: question.resolved ? colors.success : colors.danger,
             }}
           >
             {question.resolved ? "극복" : "미극복"}

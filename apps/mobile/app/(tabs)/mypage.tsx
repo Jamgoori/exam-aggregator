@@ -23,11 +23,12 @@ import {
 import { computeStreakDays, streakTier } from "../../src/lib/streak";
 import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
 import { useAuth } from "../../src/providers/auth-provider";
-import { colors } from "../../src/theme/colors";
+import { useColors, type Colors } from "../../src/theme/colors";
 
 type Tab = "history" | "bookmarks" | "wrong";
 
 export default function MyPageScreen() {
+  const colors = useColors();
   const { session } = useAuth();
   const router = useRouter();
 
@@ -64,7 +65,7 @@ export default function MyPageScreen() {
         <Text style={{ color: colors.textMuted, marginBottom: 12 }}>
           로그인이 필요해요.
         </Text>
-        <Pressable onPress={() => router.push("/(auth)/login")} style={primaryBtn}>
+        <Pressable onPress={() => router.push("/(auth)/login")} style={primaryBtn(colors)}>
           <Text style={{ color: colors.primaryText, fontWeight: "500" }}>로그인</Text>
         </Pressable>
         {/* 비로그인 상태에서도 약관·처리방침에 닿아야 한다(스토어 심사 확인 항목). */}
@@ -135,7 +136,7 @@ export default function MyPageScreen() {
         <StatCard
           label="남은 오답"
           value={`${unresolvedTotal}`}
-          valueColor={unresolvedTotal > 0 ? colors.danger : "#16a34a"}
+          valueColor={unresolvedTotal > 0 ? colors.danger : colors.success}
         />
       </View>
 
@@ -165,7 +166,7 @@ export default function MyPageScreen() {
           return (
             <Pressable
               onPress={() => router.push(`/mypage/attempts/${a.id}`)}
-              style={rowStyle}
+              style={rowStyle(colors)}
             >
               <View style={{ flex: 1 }}>
                 <Text style={{ fontWeight: "500" }} numberOfLines={1}>
@@ -197,7 +198,7 @@ export default function MyPageScreen() {
         contentContainerStyle={{ paddingBottom: 24 }}
         ListEmptyComponent={!loading ? <Empty text="아직 즐겨찾기한 문제가 없어요." /> : null}
         renderItem={({ item: p }) => (
-          <Pressable onPress={() => router.push(`/papers/${p.id}`)} style={rowStyle}>
+          <Pressable onPress={() => router.push(`/papers/${p.id}`)} style={rowStyle(colors)}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontWeight: "500" }} numberOfLines={1}>
                 {getPaperDisplayTitle(p.title, p.track)}
@@ -269,7 +270,7 @@ export default function MyPageScreen() {
         !loading ? <Empty text="아직 모인 오답이 없어요. CBT로 풀면 틀린 문제가 과목별로 정리돼요." /> : null
       }
       renderItem={({ item: w }) => (
-        <Pressable onPress={() => router.push(`/wrong-notes/${w.slug}`)} style={rowStyle}>
+        <Pressable onPress={() => router.push(`/wrong-notes/${w.slug}`)} style={rowStyle(colors)}>
           <Text style={{ flex: 1, fontWeight: "500" }}>{w.name}</Text>
           <Text style={{ color: colors.danger, fontWeight: "600" }}>남은 오답 {w.unresolved}</Text>
           <Text style={{ color: colors.textMuted, marginLeft: 8 }}>›</Text>
@@ -290,6 +291,7 @@ function StatCard({
   valueColor?: string;
   badge?: { label: string; color: string } | null;
 }) {
+  const colors = useColors();
   return (
     <View
       style={{
@@ -336,6 +338,7 @@ function TabButton({
   active: boolean;
   onPress: () => void;
 }) {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}
@@ -356,6 +359,7 @@ function TabButton({
 }
 
 function Empty({ text }: { text: string }) {
+  const colors = useColors();
   return (
     <Text style={{ color: colors.textMuted, textAlign: "center", padding: 32, fontSize: 13 }}>
       {text}
@@ -364,6 +368,7 @@ function Empty({ text }: { text: string }) {
 }
 
 function Centered({ children }: { children: ReactNode }) {
+  const colors = useColors();
   return (
     <View
       style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}
@@ -373,18 +378,18 @@ function Centered({ children }: { children: ReactNode }) {
   );
 }
 
-const rowStyle = {
+const rowStyle = (colors: Colors) => ({
   flexDirection: "row" as const,
   alignItems: "center" as const,
   paddingHorizontal: 16,
   paddingVertical: 14,
   borderTopWidth: 1,
   borderTopColor: colors.border,
-};
+});
 
-const primaryBtn = {
+const primaryBtn = (colors: Colors) => ({
   backgroundColor: colors.primary,
   borderRadius: 10,
   paddingHorizontal: 20,
   paddingVertical: 10,
-} as const;
+} as const);

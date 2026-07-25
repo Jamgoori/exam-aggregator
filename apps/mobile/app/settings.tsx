@@ -10,11 +10,12 @@ import {
   type CbtViewMode,
 } from "../src/lib/profile";
 import { useAuth } from "../src/providers/auth-provider";
-import { colors } from "../src/theme/colors";
+import { useColors } from "../src/theme/colors";
 
 // 설정: 약관·처리방침 열람과 계정 정리(로그아웃·탈퇴). 스토어 심사에서 "계정 삭제 경로가
 // 앱 안에 있는지"를 여기로 확인한다.
 export default function SettingsScreen() {
+  const colors = useColors();
   const router = useRouter();
   const { session } = useAuth();
   const [deleting, setDeleting] = useState(false);
@@ -151,6 +152,7 @@ export default function SettingsScreen() {
 }
 
 function SectionLabel({ text }: { text: string }) {
+  const colors = useColors();
   return (
     <Text
       style={{
@@ -175,6 +177,7 @@ function Row({
   onPress: () => void;
   danger?: boolean;
 }) {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}
@@ -202,6 +205,7 @@ function ModeChip({
   active: boolean;
   onPress: () => void;
 }) {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}

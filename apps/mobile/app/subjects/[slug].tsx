@@ -3,10 +3,11 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, Pressable, Text, View } from "react-native";
 import { getSubjectBySlug, papersBySubject } from "../../src/lib/subjects";
 import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
-import { colors } from "../../src/theme/colors";
+import { useColors } from "../../src/theme/colors";
 
 // 과목별 문제지 목록.
 export default function SubjectPapersScreen() {
+  const colors = useColors();
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const [title, setTitle] = useState("");
   const [papers, setPapers] = useState<ExamPaper[]>([]);

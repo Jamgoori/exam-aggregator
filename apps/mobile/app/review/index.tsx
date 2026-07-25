@@ -19,11 +19,12 @@ import {
   type ReviewResult,
   type ReviewSession,
 } from "../../src/lib/review";
-import { colors } from "../../src/theme/colors";
+import { useColors, type Colors } from "../../src/theme/colors";
 
 type Phase = "loading" | "solving" | "submitting" | "result" | "error";
 
 export default function ReviewScreen() {
+  const colors = useColors();
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +78,7 @@ export default function ReviewScreen() {
           <Text style={{ color: colors.textMuted, textAlign: "center", marginBottom: 16 }}>
             {error}
           </Text>
-          <Pressable onPress={() => router.back()} style={primaryBtn}>
+          <Pressable onPress={() => router.back()} style={primaryBtn(colors)}>
             <Text style={{ color: colors.primaryText, fontWeight: "500" }}>돌아가기</Text>
           </Pressable>
         </Center>
@@ -129,6 +130,7 @@ function Solver({
   submitting: boolean;
   answeredCount: number;
 }) {
+  const colors = useColors();
   const item = session.items[index];
   const scale = useSharedValue(1);
   const saved = useSharedValue(1);
@@ -229,6 +231,7 @@ function Solver({
 }
 
 function Result({ result, onClose }: { result: ReviewResult; onClose: () => void }) {
+  const colors = useColors();
   const pct = result.total > 0 ? Math.round((result.score / result.total) * 100) : 0;
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
@@ -260,7 +263,7 @@ function Result({ result, onClose }: { result: ReviewResult; onClose: () => void
               style={{
                 fontSize: 12,
                 fontWeight: "700",
-                color: it.isCorrect ? "#16a34a" : colors.danger,
+                color: it.isCorrect ? colors.success : colors.danger,
               }}
             >
               {it.isCorrect ? "정답" : "오답"}
@@ -303,6 +306,7 @@ function NavBtn({
   disabled: boolean;
   primary?: boolean;
 }) {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}
@@ -326,6 +330,7 @@ function NavBtn({
 }
 
 function Center({ children }: { children: ReactNode }) {
+  const colors = useColors();
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}>
       {children}
@@ -333,9 +338,9 @@ function Center({ children }: { children: ReactNode }) {
   );
 }
 
-const primaryBtn = {
+const primaryBtn = (colors: Colors) => ({
   backgroundColor: colors.primary,
   borderRadius: 10,
   paddingHorizontal: 20,
   paddingVertical: 10,
-} as const;
+} as const);

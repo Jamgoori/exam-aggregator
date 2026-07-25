@@ -16,13 +16,14 @@ import {
   signInWithKakao,
 } from "../../src/lib/auth";
 import { openLegal, type LegalDoc } from "../../src/lib/legal";
-import { colors } from "../../src/theme/colors";
+import { useColors } from "../../src/theme/colors";
 
 type Provider = "google" | "kakao" | "apple";
 
 // 웹 login/page.tsx 와 동일하게 소셜 전용. 차이는 네이티브 SDK 로 바로 로그인한다는 점과,
 // iOS 심사 요건상 Apple 로그인이 추가된다는 점(Android 에선 숨긴다).
 export default function LoginScreen() {
+  const colors = useColors();
   const router = useRouter();
   const [busy, setBusy] = useState<Provider | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);

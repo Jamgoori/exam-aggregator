@@ -3,11 +3,12 @@ import { Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { getReviewResult, type ReviewResult } from "../../src/lib/review";
-import { colors } from "../../src/theme/colors";
+import { useColors } from "../../src/theme/colors";
 
 // 지난 섞어풀기 결과 다시 보기. 채점이 끝난 세션이라 정답을 함께 보여준다
 // (채점 전 세션은 서버가 내려주지 않는다 — review-history 함수 주석 참고).
 export default function ReviewResultScreen() {
+  const colors = useColors();
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const [result, setResult] = useState<ReviewResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,7 +76,7 @@ export default function ReviewResultScreen() {
                 <Text
                   style={{
                     fontWeight: "700",
-                    color: item.isCorrect ? "#16a34a" : colors.danger,
+                    color: item.isCorrect ? colors.success : colors.danger,
                   }}
                 >
                   {item.isCorrect ? "정답" : "오답"}

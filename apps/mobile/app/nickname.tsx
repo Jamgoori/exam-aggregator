@@ -10,11 +10,12 @@ import {
 import { NICKNAME_MAX, NICKNAME_MIN } from "@gongmoa/core";
 import { currentNickname, updateNickname } from "../src/lib/profile";
 import { useAuth } from "../src/providers/auth-provider";
-import { colors } from "../src/theme/colors";
+import { useColors } from "../src/theme/colors";
 
 // 닉네임 설정/수정. 소셜 로그인 직후 닉네임이 없으면 여기로 보내지고(온보딩),
 // 마이페이지에서 "닉네임 수정"으로도 들어온다.
 export default function NicknameScreen() {
+  const colors = useColors();
   const router = useRouter();
   const { session } = useAuth();
   const existing = currentNickname(session?.user.user_metadata);

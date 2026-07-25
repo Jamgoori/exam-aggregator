@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
+import { useColors, useIsDark } from "../src/theme/colors";
 import { currentNickname } from "../src/lib/profile";
 import { AuthProvider, useAuth } from "../src/providers/auth-provider";
 
@@ -12,17 +13,35 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <AuthProvider>
-          <StatusBar style="dark" />
-          <NicknameGate />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="(auth)/login" options={{ presentation: "modal" }} />
-            <Stack.Screen name="papers/[id]/index" options={{ headerShown: true, title: "" }} />
-            <Stack.Screen name="papers/[id]/cbt" options={{ headerShown: true, title: "CBT" }} />
-          </Stack>
+          <ThemedStack />
         </AuthProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+  );
+}
+
+// 상태바·헤더·탭 배경까지 테마를 따라가야 다크모드에서 흰 띠가 남지 않는다.
+function ThemedStack() {
+  const colors = useColors();
+  const dark = useIsDark();
+  return (
+    <>
+      <StatusBar style={dark ? "light" : "dark"} />
+      <NicknameGate />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          headerStyle: { backgroundColor: colors.bg },
+          headerTintColor: colors.text,
+          contentStyle: { backgroundColor: colors.bg },
+        }}
+      >
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="(auth)/login" options={{ presentation: "modal" }} />
+        <Stack.Screen name="papers/[id]/index" options={{ headerShown: true, title: "" }} />
+        <Stack.Screen name="papers/[id]/cbt" options={{ headerShown: true, title: "CBT" }} />
+      </Stack>
+    </>
   );
 }
 

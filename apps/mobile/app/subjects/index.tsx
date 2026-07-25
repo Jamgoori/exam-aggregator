@@ -15,12 +15,13 @@ import {
   type SubjectWithFav,
 } from "../../src/lib/subjects";
 import { useAuth } from "../../src/providers/auth-provider";
-import { colors } from "../../src/theme/colors";
+import { useColors, type Colors } from "../../src/theme/colors";
 
 // 과목별 보기: 과목 목록(즐겨찾기 별) + 가나다 인덱스. 과목이 160개가 넘어 스크롤로만
 // 찾기 어려워서, 웹 subject-index-tabs 처럼 초성으로 좁힐 수 있게 한다. 초성 판정은
 // @gongmoa/core 의 initialConsonant 라 웹과 같은 규칙이다.
 export default function SubjectsScreen() {
+  const colors = useColors();
   const router = useRouter();
   const { session } = useAuth();
   const [subjects, setSubjects] = useState<SubjectWithFav[]>([]);
@@ -100,7 +101,7 @@ export default function SubjectsScreen() {
           </Text>
         }
         renderItem={({ item: s }) => (
-          <View style={rowStyle}>
+          <View style={rowStyle(colors)}>
             <Pressable
               onPress={() => router.push(`/subjects/${s.slug}`)}
               style={{ flex: 1 }}
@@ -131,6 +132,7 @@ function Chip({
   active: boolean;
   onPress: () => void;
 }) {
+  const colors = useColors();
   return (
     <Pressable
       onPress={onPress}
@@ -152,11 +154,11 @@ function Chip({
   );
 }
 
-const rowStyle = {
+const rowStyle = (colors: Colors) => ({
   flexDirection: "row" as const,
   alignItems: "center" as const,
   paddingHorizontal: 8,
   paddingVertical: 14,
   borderBottomWidth: 1,
   borderBottomColor: colors.border,
-};
+});
