@@ -1,5 +1,5 @@
 import { Link, useFocusEffect, useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -9,7 +9,12 @@ import {
   View,
 } from "react-native";
 import { getPaperDisplayTitle, LEVEL_ORDER, type ExamPaper } from "@gongmoa/core";
-import { browsePapers, browsePapersCached, getMyRoundCounts } from "../../src/lib/papers";
+import {
+  browsePapers,
+  browsePapersCached,
+  collapsePapers,
+  getMyRoundCounts,
+} from "../../src/lib/papers";
 import { OfflineBanner } from "../../src/components/offline-banner";
 import { roundBadge } from "../../src/lib/round-tier";
 import { getWrongNoteGroupsCached } from "../../src/lib/wrong-notes";
@@ -94,6 +99,12 @@ export default function HomeScreen() {
       };
     }, [session]),
   );
+
+  // 같은 시험지를 직류만 다르게 올린 행을 한 장으로 합친다(웹과 같은 규칙).
+  // 페이지 단위가 아니라 지금까지 받은 전체에 적용해야, 한 그룹이 페이지 경계에 걸쳐도
+  // 다음 페이지를 받는 순간 합쳐진다. 그래서 더 불러오면 목록이 늘어나는 대신 카드
+  // 하나가 사라져 보일 수 있는데, 웹과 같은 화면으로 수렴하는 정상 동작이다.
+  const visiblePapers = useMemo(() => collapsePapers(papers), [papers]);
 
   // onEndReached 는 스크롤 중 여러 번 불릴 수 있어 진행 중 호출을 막는다.
   const loadingMoreRef = useRef(false);
@@ -187,7 +198,7 @@ export default function HomeScreen() {
 
   return (
     <FlatList
-      data={papers}
+      data={visiblePapers}
       keyExtractor={(p) => p.id}
       contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: 32 }}
       keyboardShouldPersistTaps="handled"

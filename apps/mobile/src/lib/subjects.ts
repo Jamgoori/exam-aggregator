@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { fetchWithCache } from "./offline";
+import { collapsePapers } from "./papers";
 import { getSubjectBySlug as coreGetSubjectBySlug } from "@gongmoa/core";
 import type { ExamPaper, Subject } from "@gongmoa/core";
 
@@ -57,11 +58,14 @@ export function getSubjectBySlug(slug: string): Promise<Subject | null> {
 export async function papersBySubject(subjectId: string, limit = 100): Promise<ExamPaper[]> {
   const { data, error } = await supabase
     .from("exam_papers")
-    .select("id, title, year, round, level, track, subjects(id, name, slug)")
+    .select(
+      "id, title, year, round, level, track, subject_id, exam_type_id, subjects(id, name, slug)",
+    )
     .eq("subject_id", subjectId)
     .order("year", { ascending: false })
     .order("round", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return (data ?? []) as unknown as ExamPaper[];
+  // 과목별 목록도 웹처럼 중복 시험지를 한 장으로 합쳐서 보여준다.
+  return collapsePapers((data ?? []) as unknown as ExamPaper[]);
 }

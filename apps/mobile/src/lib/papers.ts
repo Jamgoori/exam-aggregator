@@ -1,6 +1,10 @@
 import { supabase } from "./supabase";
 import { publicUrl } from "./storage";
-import { matchSubjectIds, parseSearchQuery } from "@gongmoa/core";
+import {
+  collapseDuplicatePapers,
+  matchSubjectIds,
+  parseSearchQuery,
+} from "@gongmoa/core";
 import { fetchWithCache } from "./offline";
 import type { ExamPaper, Subject } from "@gongmoa/core";
 
@@ -8,9 +12,10 @@ import type { ExamPaper, Subject } from "@gongmoa/core";
 // RLS·RPC 는 웹과 동일하게 그대로 재사용한다. 페이지네이션·정렬은 화면에서 필요할 때 확장.
 
 // 목록 카드에 필요한 최소 컬럼. 전체 컬럼(file_path·tags·집계 등)을 다 받지 않아
-// 전송량을 줄인다. 카드는 title·연도·회차·급수·과목명만 쓴다.
+// 전송량을 줄인다. 카드는 title·연도·회차·급수·과목명을 쓰고, subject_id·exam_type_id 는
+// 중복 시험지 합치기(paperDedupKey)가 쓴다.
 const LIST_COLUMNS =
-  "id, title, year, round, level, track, subjects(id, name, slug)";
+  "id, title, year, round, level, track, subject_id, exam_type_id, subjects(id, name, slug)";
 
 // ── 홈 목록(검색·급수 필터·페이지네이션) ──────────────────────────────────────
 //
@@ -102,6 +107,14 @@ export async function browsePapers(
   const papers = (data ?? []) as unknown as ExamPaper[];
   // 요청한 페이지가 꽉 찼으면 다음 페이지가 있을 수 있다고 본다(총 개수 조회 생략).
   return { papers, hasMore: papers.length === PAGE_SIZE };
+}
+
+// 같은 시험지를 직류만 다르게 올린 행을 표시할 때 하나로 합친다(웹과 같은 규칙).
+// 앱은 정답(paper_answers)을 RLS 로 못 읽어 signals 없이 부른다 — 문서가 말하는
+// "service_role 키가 없는 환경" 폴백이라 메타데이터만으로 합쳐진다.
+// docs: apps/web/docs/agents/dedup-papers.md
+export function collapsePapers(papers: ExamPaper[]): ExamPaper[] {
+  return collapseDuplicatePapers(papers);
 }
 
 // 문제지별 내 회독 수(= CBT 응시 횟수). 홈 카드의 회독 배지에 쓴다. RLS 로 본인 것만.
