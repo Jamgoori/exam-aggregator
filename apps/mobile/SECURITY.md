@@ -9,7 +9,7 @@
 | 2 | AI 진단 동시호출 비용 남용 | 중 | ✅ |
 | 3 | 닉네임 검증·유일성 클라이언트 전용(우회 가능) | 중 | 🔧 |
 | 4 | EXPO_TOKEN 채팅 노출 | 높음 | 🔧 |
-| 5 | 네이티브 OAuth id_token nonce 미사용 | 낮음 | ✅ Apple / 🔧 Google·Kakao |
+| 5 | 네이티브 OAuth id_token nonce 미사용 | 낮음 | ✅ Apple / ⛔ Google·Kakao(SDK 미지원) |
 | 6 | Edge Function CORS `*` | 낮음 | 🟢/🔧 |
 | 7 | 섞어풀기 세션 생성 rate limit 없음 | 낮음 | 🔧(선택) |
 | 8 | 정답 비공개(RLS)·응시 IDOR | — | 🟢 |
@@ -94,7 +94,7 @@ Anthropic API 를 여러 번 호출해 비용을 태울 수 있었다.
 
 ---
 
-## 5. OAuth id_token nonce — ✅ Apple 적용 / 🔧 Google·Kakao 남음
+## 5. OAuth id_token nonce — ✅ Apple 적용 / ⛔ Google·Kakao 는 SDK 미지원
 
 **문제**: 네이티브 로그인에서 `signInWithIdToken` 에 nonce 를 함께 쓰지 않으면, 유효기간
 내 id_token 재사용(replay) 방어가 약해진다.
@@ -105,8 +105,11 @@ Anthropic API 를 여러 번 호출해 비용을 태울 수 있었다.
 - **Apple — 적용 완료**: `src/lib/auth.ts` 의 `signInWithApple` 이
   `Crypto.randomUUID()` 로 원본 nonce 를 만들고 SHA-256(hex) 을 Apple 에 넘긴 뒤,
   Supabase 에는 원본을 전달한다.
-- **Google·Kakao — 남음**: 두 SDK 도 같은 방식으로 nonce 를 받을 수 있으므로 동일하게
-  적용하면 된다. 위험이 낮아 후순위.
+- **Google·Kakao — 현재 SDK 로는 불가**: `@react-native-google-signin/google-signin` 과
+  `@react-native-seoul/kakao-login` 은 nonce 파라미터를 노출하지 않는다(패키지 전체에
+  해당 문자열이 없음). 적용하려면 SDK 를 바꾸거나(예: 웹 OAuth 흐름 + expo-auth-session)
+  각 SDK 가 지원할 때까지 기다려야 한다. Apple 만 nonce 를 쓰는 상태이고, Google·Kakao 는
+  id_token 유효기간 내 재사용 위험이 남아 있다.
 
 ---
 
@@ -159,6 +162,7 @@ JWT** 라 CSRF 위험은 없다(브라우저가 자동 첨부하는 자격증명
 ## 조치 요약
 
 - **코드로 이미 반영**: 1(세션 SecureStore), 2(AI 진단 선점).
-- **집에서 DB/콘솔로 해야**: 3(닉네임 서버 강제 SQL), 4(EXPO_TOKEN 폐기), 5(nonce, 선택),
-  6·7(선택).
+- **코드로 반영(추가)**: 5의 Apple 부분(nonce).
+- **집에서 DB/콘솔로 해야**: 3(닉네임 서버 강제 SQL), 4(EXPO_TOKEN 폐기), 6·7(선택).
+- **현 SDK 로는 불가**: 5의 Google·Kakao 부분.
 - **양호**: 8·9·10 — 현 구조 유지.

@@ -48,6 +48,9 @@ jobs:
       - name: 타입체크
         run: npm run typecheck
 
+      - name: 공유 로직 테스트
+        run: npm test
+
       # EXPO_PUBLIC_* 는 번들에 박히는 값이라 빌드 시점에 있어야 한다. .env 는
       # 저장소에 없으므로(gitignore) 시크릿으로 만들어 넣는다.
       - name: .env 생성
