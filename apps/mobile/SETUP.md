@@ -133,6 +133,34 @@ supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 
 ---
 
+## 5-1. 앱 전용 기능 — 추가 설정이 필요한 것
+
+**오프라인 / 로컬 알림 / OTA 는 추가 콘솔 설정이 없다.** 캐시는 기기 파일, 리마인더는
+기기에서 예약하는 로컬 알림, OTA 는 이미 있는 EAS 프로젝트를 쓴다.
+
+```bash
+eas update --branch production --message "설명"   # OTA 배포 (스토어 심사 없이 JS 수정본 반영)
+```
+
+- 앱은 켤 때와 포그라운드로 돌아올 때 업데이트를 확인하고 조용히 받아둔다. 적용은 다음
+  실행 — 문제 풀던 중에 화면이 날아가지 않게 즉시 재시작하지 않는다.
+- `runtimeVersion` 이 `appVersion` 정책이라, 네이티브 의존성을 바꾸면 `app.json` 의
+  `version` 을 올리고 스토어 빌드를 새로 올려야 한다(OTA 로는 네이티브가 안 바뀐다).
+
+**웹 주소로 앱 열기(딥링크)는 도메인 확인이 필요하다.** 지금은 `gongmoa://` 커스텀 스킴만
+동작한다. `https://<도메인>/papers/...` 로 앱이 열리게 하려면:
+
+- iOS: `app.json` 의 `ios.associatedDomains` 에 `applinks:<도메인>` 추가 +
+  웹 서버에 `/.well-known/apple-app-site-association` 배포
+- Android: `android.intentFilters` 에 `autoVerify` 링크 추가 +
+  `/.well-known/assetlinks.json` 배포(서명 인증서 지문 필요)
+
+**원격 푸시(FCM/APNs)는 아직 없다.** 지금 리마인더는 로컬 알림이라 서버가 필요 없다.
+"내 댓글에 답글이 달렸다" 같은 서버발 알림을 넣을 때 FCM 키·기기 토큰 테이블·발송
+함수를 함께 만들면 된다.
+
+---
+
 ## 6. 빌드 & 설치 (안드로이드 기준)
 
 ```bash
