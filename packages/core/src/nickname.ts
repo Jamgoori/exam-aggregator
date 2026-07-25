@@ -13,7 +13,10 @@ const CONTROL_CHARS = /\p{Cc}/u;
 // 부분 문자열 차단 목록. 완벽한 욕설 필터는 아니고(우회 표기까지 잡아내진 못함),
 // 흔한 사례를 걸러내는 1차 방어선이다. 공백/구두점을 지우고 소문자로 맞춘 뒤 검사해서
 // "a d m i n"처럼 문자 사이를 띄우는 흔한 우회는 걸러낸다.
-const BANNED_SUBSTRINGS = [
+// DB 트리거(supabase/schema.sql 의 sync_nickname_from_auth)도 같은 목록으로 검사한다.
+// 클라이언트 검증만으로는 REST 로 auth.updateUser 를 직접 호출해 우회할 수 있기 때문이다.
+// 두 목록이 갈리지 않도록 nickname.test.ts 가 schema.sql 과 대조한다.
+export const BANNED_SUBSTRINGS = [
   // 운영진/관리자 사칭
   "admin",
   "administrator",

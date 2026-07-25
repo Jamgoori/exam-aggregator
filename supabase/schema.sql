@@ -1080,8 +1080,10 @@ create policy "delete own wrong note marks" on wrong_note_marks
 -- 맞추고(= 앱이 따로 안 넣어도 됨), 길이·제어문자·중복을 DB 에서 거절한다. 거절되면
 -- auth.users 갱신 자체가 롤백되므로 우회할 수 없다.
 --
--- ⚠️ 금칙어(관리자 사칭·비속어) 목록은 여기 없다. 목록이 길고 자주 바뀌어 애플리케이션
---    (packages/core/src/nickname.ts)에 두고, DB 는 우회 불가능한 규칙만 맡는다.
+-- 금칙어(관리자 사칭·비속어)도 여기서 막는다. 클라이언트에만 두면 REST 로 auth.updateUser
+-- 를 직접 호출해 "관리자" 같은 닉네임을 그대로 만들 수 있고, 그 이름이 댓글에 공개로 붙는다.
+-- 목록은 packages/core/src/nickname.ts 가 정본이고 아래는 그 사본이다 —
+-- packages/core 의 nickname 테스트가 두 목록을 대조해 갈리는 걸 막는다.
 create or replace function sync_nickname_from_auth()
 returns trigger
 language plpgsql
@@ -1105,6 +1107,29 @@ begin
   if nn ~ '[[:cntrl:]]' then
     raise exception '닉네임에 사용할 수 없는 문자가 포함되어 있어요.';
   end if;
+
+  -- 금칙어(관리자 사칭·비속어). 목록은 packages/core/src/nickname.ts 의 BANNED_SUBSTRINGS 와
+  -- 같아야 하고, 어긋나면 packages/core 의 nickname 테스트가 실패한다.
+  --
+  -- 글자 사이에 공백·숫자·기호를 끼워 넣는 우회("관 리 자", "씨1발")를 막으려고 글자만 남긴
+  -- 형태로도 검사한다. 정규화 결과가 로케일에 따라 달라질 수 있으므로 원문(소문자) 검사도
+  -- 함께 돌려서, 둘 중 하나만 걸려도 거절한다.
+  declare
+    normalized text := lower(regexp_replace(nn, '[^[:alpha:]]', '', 'g'));
+    plain text := lower(nn);
+    banned text;
+  begin
+    foreach banned in array array[
+      'admin', 'administrator', '관리자', '운영자', '운영진', '매니저', 'manager', 'moderator',
+      '모더레이터', 'system', '시스템', 'root', '공지사항', 'notice', 'staff', '스태프', '고객센터',
+      '공모아', '씨발', '시발', '병신', '지랄', '좆', '개새끼', '새끼', '썅', '닥쳐', 'fuck', 'shit',
+      'bitch', 'asshole'
+    ] loop
+      if position(banned in normalized) > 0 or position(banned in plain) > 0 then
+        raise exception '사용할 수 없는 닉네임이에요.';
+      end if;
+    end loop;
+  end;
 
   -- profiles(lower(nickname) 유니크 인덱스)에 반영. 다른 사람이 쓰는 닉네임이면 여기서
   -- unique_violation 이 나고 auth.users 갱신까지 함께 롤백된다.
