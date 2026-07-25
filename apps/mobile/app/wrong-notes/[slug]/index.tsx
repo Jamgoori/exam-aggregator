@@ -15,7 +15,7 @@ import { WrongNoteQuestionCard } from "../../../src/components/wrong-note-questi
 import {
   fetchQuestionImages,
   fetchWrongNoteMarks,
-  getWrongNoteGroups,
+  getWrongNoteGroupsCached,
   setQuestionDeleted,
   setQuestionPinned,
 } from "../../../src/lib/wrong-notes";
@@ -40,7 +40,7 @@ export default function SubjectWrongNoteScreen() {
 
   const load = useCallback(async () => {
     if (!slug) return;
-    const groups = await getWrongNoteGroups();
+    const { groups } = await getWrongNoteGroupsCached();
     const found = groups.find((g) => g.subject.slug === String(slug)) ?? null;
     setGroup(found);
     if (found) {

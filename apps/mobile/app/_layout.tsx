@@ -1,10 +1,12 @@
 import { Stack, useRouter, useSegments } from "expo-router";
 import { useEffect } from "react";
+import { AppState } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { useColors, useIsDark } from "../src/theme/colors";
 import { currentNickname } from "../src/lib/profile";
+import { checkForUpdate } from "../src/lib/updates";
 import { AuthProvider, useAuth } from "../src/providers/auth-provider";
 
 // 루트 레이아웃: 제스처 핸들러(핀치줌·필기용)와 인증 컨텍스트를 앱 전체에 깐다.
@@ -24,6 +26,16 @@ export default function RootLayout() {
 function ThemedStack() {
   const colors = useColors();
   const dark = useIsDark();
+
+  // OTA: 켤 때 한 번, 그리고 포그라운드로 돌아올 때마다 확인한다. 받은 업데이트는 다음
+  // 실행에 적용된다(풀던 화면을 날리지 않으려고 즉시 재시작하지 않음).
+  useEffect(() => {
+    checkForUpdate();
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") checkForUpdate();
+    });
+    return () => sub.remove();
+  }, []);
   return (
     <>
       <StatusBar style={dark ? "light" : "dark"} />

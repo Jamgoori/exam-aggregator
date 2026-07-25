@@ -7,6 +7,7 @@ import {
   type WrongNoteSubjectGroup,
 } from "@gongmoa/core";
 import { supabase } from "./supabase";
+import { fetchWithCache } from "./offline";
 import { publicUrl } from "./storage";
 
 // 오답노트 데이터 접근. 집계 규칙(buildWrongNoteGroups)은 @gongmoa/core 로 웹과 공유해서
@@ -154,6 +155,16 @@ export async function getWrongNoteGroups(): Promise<WrongNoteSubjectGroup[]> {
   ]);
 
   return buildWrongNoteGroups(attempts, wrongRows, marks.deleted, statusOverrides);
+}
+
+// 오프라인에서도 오답노트를 열어볼 수 있게 마지막 집계 결과를 캐시한다. 문항 이미지는
+// expo-image 가 자체 디스크 캐시를 갖고 있어 한 번 본 문항은 오프라인에서도 뜬다.
+export async function getWrongNoteGroupsCached(): Promise<{
+  groups: WrongNoteSubjectGroup[];
+  fromCache: boolean;
+}> {
+  const { data, fromCache } = await fetchWithCache("wrong-notes", getWrongNoteGroups);
+  return { groups: data, fromCache };
 }
 
 // 마이페이지 오답노트 탭의 과목 목록. 위 집계에서 그대로 뽑는다(같은 판정 = 같은 숫자).

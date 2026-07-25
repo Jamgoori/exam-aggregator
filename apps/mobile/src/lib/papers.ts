@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { publicUrl } from "./storage";
 import { matchSubjectIds, parseSearchQuery } from "@gongmoa/core";
+import { fetchWithCache } from "./offline";
 import type { ExamPaper, Subject } from "@gongmoa/core";
 
 // 웹의 all-papers / paper-search 데이터 접근을 앱용으로 얇게 옮긴 것.
@@ -38,7 +39,15 @@ async function getExamTypeNames(): Promise<string[]> {
   return examTypeNamesCache;
 }
 
-export type BrowseResult = { papers: ExamPaper[]; hasMore: boolean };
+export type BrowseResult = { papers: ExamPaper[]; hasMore: boolean; fromCache?: boolean };
+
+// 오프라인 대비: 검색어·필터 없는 첫 페이지(= 앱을 켜면 보이는 화면)만 캐시한다.
+// 검색 결과까지 캐시하면 조합이 무한히 늘어나는 데 비해 다시 볼 일이 적다.
+export async function browsePapersCached(level?: string): Promise<BrowseResult> {
+  const key = `home:${level ?? "all"}`;
+  const { data, fromCache } = await fetchWithCache(key, () => browsePapers({ level }, 0));
+  return { ...data, fromCache };
+}
 
 // page 는 0부터. 검색어가 비어 있으면 최신순 전체 목록이다.
 export async function browsePapers(

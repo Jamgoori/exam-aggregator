@@ -9,9 +9,10 @@ import {
   View,
 } from "react-native";
 import { getPaperDisplayTitle, LEVEL_ORDER, type ExamPaper } from "@gongmoa/core";
-import { browsePapers, getMyRoundCounts } from "../../src/lib/papers";
+import { browsePapers, browsePapersCached, getMyRoundCounts } from "../../src/lib/papers";
+import { OfflineBanner } from "../../src/components/offline-banner";
 import { roundBadge } from "../../src/lib/round-tier";
-import { getWrongNoteGroups } from "../../src/lib/wrong-notes";
+import { getWrongNoteGroupsCached } from "../../src/lib/wrong-notes";
 import { useAuth } from "../../src/providers/auth-provider";
 import { useColors } from "../../src/theme/colors";
 
@@ -36,6 +37,8 @@ export default function HomeScreen() {
 
   const [rounds, setRounds] = useState<Map<string, number>>(new Map());
   const [unresolved, setUnresolved] = useState(0);
+  // 오프라인이라 저장해둔 목록을 보여주는 중인지.
+  const [stale, setStale] = useState(false);
 
   // 입력할 때마다 쿼리를 날리지 않도록 300ms 모아서 보낸다.
   useEffect(() => {
@@ -48,11 +51,16 @@ export default function HomeScreen() {
     let alive = true;
     setLoading(true);
     setError(null);
-    browsePapers({ query: debounced, level }, 0)
+    // 검색어 없는 첫 화면만 캐시 경유로 받는다(오프라인에서도 목록이 보이도록).
+    const load = debounced.trim()
+      ? browsePapers({ query: debounced, level }, 0)
+      : browsePapersCached(level);
+    load
       .then((r) => {
         if (!alive) return;
         setPapers(r.papers);
         setHasMore(r.hasMore);
+        setStale(!!r.fromCache);
         setPage(0);
       })
       .catch((e) => alive && setError(e instanceof Error ? e.message : "불러오기 실패"))
@@ -75,8 +83,8 @@ export default function HomeScreen() {
       getMyRoundCounts()
         .then((m) => alive && setRounds(m))
         .catch(() => {});
-      getWrongNoteGroups()
-        .then((groups) => {
+      getWrongNoteGroupsCached()
+        .then(({ groups }) => {
           if (!alive) return;
           setUnresolved(groups.reduce((s, g) => s + g.unresolvedCount, 0));
         })
@@ -109,6 +117,8 @@ export default function HomeScreen() {
 
   const header = (
     <View style={{ gap: 10, paddingBottom: 4 }}>
+      <OfflineBanner visible={stale} />
+
       <TextInput
         value={query}
         onChangeText={setQuery}

@@ -1,10 +1,17 @@
 import { supabase } from "./supabase";
+import { fetchWithCache } from "./offline";
 import { getSubjectBySlug as coreGetSubjectBySlug } from "@gongmoa/core";
 import type { ExamPaper, Subject } from "@gongmoa/core";
 
 // 과목 목록/즐겨찾기/과목별 문제지. subject_bookmarks 는 RLS 본인 쓰기라 클라이언트에서.
 
 export type SubjectWithFav = Subject & { favorited: boolean };
+
+// 과목 목록은 잘 안 변하고 오프라인에서도 둘러볼 수 있어야 해서 캐시를 둔다.
+export async function listSubjectsCached(): Promise<SubjectWithFav[]> {
+  const { data } = await fetchWithCache("subjects", listSubjects);
+  return data;
+}
 
 export async function listSubjects(): Promise<SubjectWithFav[]> {
   const { data: userData } = await supabase.auth.getUser();

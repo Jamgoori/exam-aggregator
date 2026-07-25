@@ -14,7 +14,7 @@ import { WrongNoteQuestionCard } from "../../../src/components/wrong-note-questi
 import {
   fetchQuestionImages,
   fetchWrongNoteMarks,
-  getWrongNoteGroups,
+  getWrongNoteGroupsCached,
   setQuestionDeleted,
   setQuestionPinned,
 } from "../../../src/lib/wrong-notes";
@@ -35,7 +35,7 @@ export default function PaperWrongNoteScreen() {
 
   const load = useCallback(async () => {
     if (!slug || !paperId) return;
-    const groups = await getWrongNoteGroups();
+    const { groups } = await getWrongNoteGroupsCached();
     const subject = groups.find((g) => g.subject.slug === String(slug));
     const found = subject?.papers.find((p) => p.paper.id === String(paperId)) ?? null;
     setGroup(found);

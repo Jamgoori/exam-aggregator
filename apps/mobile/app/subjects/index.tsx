@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { CONSONANTS, initialConsonant } from "@gongmoa/core";
 import {
-  listSubjects,
+  listSubjectsCached,
   toggleSubjectBookmark,
   type SubjectWithFav,
 } from "../../src/lib/subjects";
@@ -29,7 +29,7 @@ export default function SubjectsScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    listSubjects()
+    listSubjectsCached()
       .then(setSubjects)
       .catch(() => {})
       .finally(() => setLoading(false));

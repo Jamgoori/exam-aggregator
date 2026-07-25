@@ -16,7 +16,7 @@ import {
   type MyAttempt,
 } from "../../src/lib/mypage";
 import {
-  getWrongNoteGroups,
+  getWrongNoteGroupsCached,
   toSubjectSummaries,
   type WrongNoteSubjectSummary,
 } from "../../src/lib/wrong-notes";
@@ -44,12 +44,12 @@ export default function MyPageScreen() {
       if (!session) return;
       let alive = true;
       setLoading(true);
-      Promise.all([getMyAttempts(), getMyBookmarks(), getWrongNoteGroups()])
-        .then(([a, b, groups]) => {
+      Promise.all([getMyAttempts(), getMyBookmarks(), getWrongNoteGroupsCached()])
+        .then(([a, b, wrongResult]) => {
           if (!alive) return;
           setAttempts(a);
           setBookmarks(b);
-          setWrong(toSubjectSummaries(groups));
+          setWrong(toSubjectSummaries(wrongResult.groups));
         })
         .catch(() => {})
         .finally(() => alive && setLoading(false));

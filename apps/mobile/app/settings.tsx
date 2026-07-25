@@ -1,5 +1,5 @@
 import { Stack, useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { signOut } from "../src/lib/auth";
 import { deleteAccount } from "../src/lib/account";
@@ -9,6 +9,13 @@ import {
   updateCbtViewMode,
   type CbtViewMode,
 } from "../src/lib/profile";
+import {
+  cancelDailyReminder,
+  hasScheduledReminder,
+  requestNotificationPermission,
+  scheduleDailyReminder,
+} from "../src/lib/reminders";
+import { getWrongNoteGroupsCached } from "../src/lib/wrong-notes";
 import { useAuth } from "../src/providers/auth-provider";
 import { useColors } from "../src/theme/colors";
 
@@ -24,6 +31,44 @@ export default function SettingsScreen() {
     currentCbtViewMode(session?.user.user_metadata),
   );
   const [savingMode, setSavingMode] = useState(false);
+  const [reminderOn, setReminderOn] = useState(false);
+  const [reminderBusy, setReminderBusy] = useState(false);
+
+  useEffect(() => {
+    hasScheduledReminder()
+      .then(setReminderOn)
+      .catch(() => {});
+  }, []);
+
+  async function toggleReminder() {
+    if (reminderBusy) return;
+    setReminderBusy(true);
+    try {
+      if (reminderOn) {
+        await cancelDailyReminder();
+        setReminderOn(false);
+      } else {
+        const granted = await requestNotificationPermission();
+        if (!granted) {
+          Alert.alert(
+            "알림 권한이 꺼져 있어요",
+            "기기 설정에서 공모아 알림을 허용하면 리마인더를 받을 수 있어요.",
+          );
+          return;
+        }
+        // 알림 문구에 남은 오답 수를 넣는다. 못 읽어도(오프라인 등) 일반 문구로 예약한다.
+        const unresolved = await getWrongNoteGroupsCached()
+          .then(({ groups }) => groups.reduce((sum, g) => sum + g.unresolvedCount, 0))
+          .catch(() => 0);
+        await scheduleDailyReminder(unresolved);
+        setReminderOn(true);
+      }
+    } catch (e) {
+      Alert.alert("알림 설정 실패", e instanceof Error ? e.message : "다시 시도해 주세요.");
+    } finally {
+      setReminderBusy(false);
+    }
+  }
 
   async function pickCbtMode(mode: CbtViewMode) {
     if (mode === cbtMode || savingMode) return;
@@ -114,6 +159,22 @@ export default function SettingsScreen() {
             >
               CBT를 시작할 때 기본으로 열리는 화면이에요. 문항 이미지가 없는 문제지는 전체
               PDF로 열립니다.
+            </Text>
+
+            <SectionLabel text="학습 리마인더" />
+            <Row
+              label={reminderOn ? "매일 저녁 8시 알림 켜짐" : "매일 저녁 8시 알림 받기"}
+              onPress={toggleReminder}
+            />
+            <Text
+              style={{
+                color: colors.textMuted,
+                fontSize: 12,
+                paddingHorizontal: 16,
+                paddingTop: 8,
+              }}
+            >
+              기기에서 예약하는 알림이라 서버가 내 학습 정보를 따로 들고 있지 않아요.
             </Text>
 
             <SectionLabel text="계정" />

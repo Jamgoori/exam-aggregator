@@ -6,6 +6,7 @@ import { login as kakaoLogin } from "@react-native-seoul/kakao-login";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as Crypto from "expo-crypto";
 import { Platform } from "react-native";
+import { clearCache } from "./offline";
 import { supabase } from "./supabase";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,6 +113,8 @@ export async function signInWithApple() {
 }
 
 export async function signOut() {
+  // 오프라인 캐시에 남은 개인 데이터(오답노트 등)를 기기에서 지운다.
+  await clearCache();
   // 네이티브 SDK 세션과 Supabase 세션 둘 다 정리한다.
   await Promise.allSettled([
     GoogleSignin.signOut(),
