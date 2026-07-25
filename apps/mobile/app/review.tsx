@@ -35,11 +35,11 @@ export default function ReviewScreen() {
   useEffect(() => {
     createReview(true)
       .then((s) => {
-        setSession(s);
+        setSession({ ...s, items: s.items ?? [] });
         setAnswers(Array(s.total).fill(null));
         setPhase("solving");
         // 문항 이동이 즉시 그려지도록 모든 이미지를 미리 받아둔다.
-        const urls = s.items.flatMap((it) => it.images);
+        const urls = (s.items ?? []).flatMap((it) => it.images ?? []);
         if (urls.length > 0) Image.prefetch(urls);
       })
       .catch((e) => {
@@ -129,7 +129,8 @@ function Solver({
   submitting: boolean;
   answeredCount: number;
 }) {
-  const item = session.items[index];
+  // total 과 items 길이가 어긋난 응답(서버 오류·부분 응답)에도 렌더가 죽지 않게.
+  const item = session.items[index] ?? { position: index, images: [], choiceCount: 0 };
   const scale = useSharedValue(1);
   const saved = useSharedValue(1);
   const pinch = Gesture.Pinch()
@@ -154,7 +155,7 @@ function Solver({
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         <GestureDetector gesture={pinch}>
           <Animated.View style={[{ padding: 8 }, imgStyle]}>
-            {item.images.map((uri) => (
+            {(item.images ?? []).map((uri) => (
               <Image
                 key={uri}
                 source={{ uri }}
@@ -241,7 +242,7 @@ function Result({ result, onClose }: { result: ReviewResult; onClose: () => void
         <Text style={{ color: colors.textMuted }}>정답률 {pct}%</Text>
       </View>
 
-      {result.items.map((it) => (
+      {(result.items ?? []).map((it) => (
         <View
           key={it.position}
           style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, overflow: "hidden" }}

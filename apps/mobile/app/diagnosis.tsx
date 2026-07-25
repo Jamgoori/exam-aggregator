@@ -25,7 +25,12 @@ export default function DiagnosisScreen() {
     setError(null);
     try {
       const r = await requestDiagnosis();
-      setReport(r.report);
+      // 모델 응답이 일부 필드를 빼먹어도 렌더에서 죽지 않게 정규화한다.
+      setReport({
+        summary: r.report?.summary ?? "",
+        weakConcepts: r.report?.weakConcepts ?? [],
+        subjectTrends: r.report?.subjectTrends ?? [],
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "진단 실패");
     } finally {

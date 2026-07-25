@@ -97,7 +97,8 @@ export async function getWrongNoteSubjects(): Promise<WrongNoteSubject[]> {
 
   const bySubject = new Map<string, WrongNoteSubject>();
   for (const row of data ?? []) {
-    const ep = row.exam_papers as
+    // PostgREST 생성 타입과 실제 응답 모양(단일/배열)이 어긋나 unknown 경유로 좁힌다.
+    const ep = row.exam_papers as unknown as
       | { subjects: { id: string; name: string; slug: string } | null }
       | { subjects: { id: string; name: string; slug: string } | null }[]
       | null;

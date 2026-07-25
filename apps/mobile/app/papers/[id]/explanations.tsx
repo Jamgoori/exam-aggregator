@@ -67,63 +67,76 @@ export default function ExplanationsScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 32 }}>
         <Text style={{ color: colors.textMuted, fontSize: 13 }}>{result.totalCount}문항 해설</Text>
 
-        {result.questions.map((q) => (
-          <View
-            key={q.questionNumber}
-            style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, overflow: "hidden" }}
-          >
-            <View style={{ flexDirection: "row", justifyContent: "space-between", padding: 10 }}>
-              <Text style={{ fontWeight: "700" }}>{q.questionNumber}번</Text>
-              {q.correctChoice != null && (
-                <Text style={{ color: "#16a34a", fontWeight: "700" }}>정답 {q.correctChoice}</Text>
-              )}
-            </View>
-            {q.images.map((uri) => (
-              <Image
-                key={uri}
-                source={{ uri }}
-                style={{ width: "100%", aspectRatio: 0.75 }}
-                contentFit="contain"
-              />
-            ))}
-            <View style={{ padding: 12, gap: 8 }}>
-              {q.explanation.keywordTitle && (
-                <Text style={{ fontWeight: "700", fontSize: 14 }}>
-                  {q.explanation.keywordTitle}
-                </Text>
-              )}
-              {q.explanation.keywordExplanation && (
-                <Text style={{ fontSize: 13, lineHeight: 19 }}>
-                  {q.explanation.keywordExplanation}
-                </Text>
-              )}
-              {q.explanation.choiceExplanations.map((c) => (
-                <View key={c.choice} style={{ flexDirection: "row", gap: 6 }}>
-                  <Text style={{ fontWeight: "600", fontSize: 13 }}>{c.choice}.</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, lineHeight: 19 }}>{c.text}</Text>
-                    {c.currentStatus && (
-                      <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
-                        현재 상태: {c.currentStatus}
-                        {c.originalNote ? ` · ${c.originalNote}` : ""}
-                      </Text>
-                    )}
-                  </View>
-                </View>
+        {result.questions.map((q) => {
+          // 서버가 일부 필드를 비워 보내도 렌더가 죽지 않게 한다.
+          const ex = q.explanation ?? {
+            keywordTitle: null,
+            keywordExplanation: null,
+            choiceExplanations: [],
+            correctChoiceSummary: null,
+            lawAmendmentNote: null,
+            currentAnswerStatus: null,
+            currentAnswerNote: null,
+            lawBasisDate: null,
+          };
+          return (
+            <View
+              key={q.questionNumber}
+              style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 12, overflow: "hidden" }}
+            >
+              <View style={{ flexDirection: "row", justifyContent: "space-between", padding: 10 }}>
+                <Text style={{ fontWeight: "700" }}>{q.questionNumber}번</Text>
+                {q.correctChoice != null && (
+                  <Text style={{ color: "#16a34a", fontWeight: "700" }}>정답 {q.correctChoice}</Text>
+                )}
+              </View>
+              {(q.images ?? []).map((uri) => (
+                <Image
+                  key={uri}
+                  source={{ uri }}
+                  style={{ width: "100%", aspectRatio: 0.75 }}
+                  contentFit="contain"
+                />
               ))}
-              {q.explanation.correctChoiceSummary && (
-                <Text style={{ fontSize: 13, color: colors.textMuted, fontStyle: "italic" }}>
-                  {q.explanation.correctChoiceSummary}
-                </Text>
-              )}
-              {q.explanation.lawAmendmentNote && (
-                <Text style={{ fontSize: 12, color: "#d97706" }}>
-                  ⚠ {q.explanation.lawAmendmentNote}
-                </Text>
-              )}
+              <View style={{ padding: 12, gap: 8 }}>
+                {ex.keywordTitle && (
+                  <Text style={{ fontWeight: "700", fontSize: 14 }}>
+                    {ex.keywordTitle}
+                  </Text>
+                )}
+                {ex.keywordExplanation && (
+                  <Text style={{ fontSize: 13, lineHeight: 19 }}>
+                    {ex.keywordExplanation}
+                  </Text>
+                )}
+                {(ex.choiceExplanations ?? []).map((c) => (
+                  <View key={c.choice} style={{ flexDirection: "row", gap: 6 }}>
+                    <Text style={{ fontWeight: "600", fontSize: 13 }}>{c.choice}.</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, lineHeight: 19 }}>{c.text}</Text>
+                      {c.currentStatus && (
+                        <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }}>
+                          현재 상태: {c.currentStatus}
+                          {c.originalNote ? ` · ${c.originalNote}` : ""}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                ))}
+                {ex.correctChoiceSummary && (
+                  <Text style={{ fontSize: 13, color: colors.textMuted, fontStyle: "italic" }}>
+                    {ex.correctChoiceSummary}
+                  </Text>
+                )}
+                {ex.lawAmendmentNote && (
+                  <Text style={{ fontSize: 12, color: "#d97706" }}>
+                    ⚠ {ex.lawAmendmentNote}
+                  </Text>
+                )}
+              </View>
             </View>
-          </View>
-        ))}
+          );
+        })}
 
         {result.hiddenCount > 0 && (
           <View

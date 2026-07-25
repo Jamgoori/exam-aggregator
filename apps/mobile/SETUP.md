@@ -10,11 +10,17 @@
 ## 0. 코드 받기
 
 ```bash
-git clone https://github.com/Jamgoori/gongmoa_mobile
-cd gongmoa_mobile
-npm install
-npx expo install          # 네이티브 모듈 버전 정렬 (package.json 핀 대신 이걸로 맞춤)
+git clone https://github.com/Jamgoori/exam-aggregator
+cd exam-aggregator
+npm install                       # 모노레포 루트에서 한 번 (npm workspaces)
+cd apps/mobile
+npx expo install --check          # SDK 52 기준 네이티브 모듈 버전 점검
 ```
+
+> ⚠️ **Expo Go 로는 이 앱이 안 켜진다.** 구글 로그인·카카오 로그인·Skia·PDF 뷰어는
+> Expo Go 에 없는 네이티브 모듈이라, Expo Go 에서 열면 바로 종료되거나 기능이 죽는다.
+> 반드시 **개발 빌드(development build)** 를 설치하고 거기에 붙여야 한다:
+> `eas build -p android --profile development` → 설치 → `npm run mobile`.
 
 ---
 
@@ -105,6 +111,30 @@ supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 npm i -g eas-cli
 export EXPO_TOKEN=<expo.dev Access token>   # 또는 eas login
 eas init                                    # 프로젝트 생성 → projectId 가 app.json 에 기록됨
+```
+
+### 6-1. EAS 환경변수 등록 (안 하면 앱이 켜지자마자 꺼진다)
+
+`EXPO_PUBLIC_*` 값은 **빌드 시점에 번들 안으로 인라인**된다. 로컬 `.env` 는 EAS
+클라우드 빌드에 올라가지 않으므로(.gitignore 대상), EAS 쪽에 따로 등록해야 한다.
+`eas.json` 의 각 프로필은 `environment`(development/preview/production)를 가리키므로
+같은 이름의 EAS 환경에 값을 넣는다:
+
+```bash
+eas env:create --environment production --name EXPO_PUBLIC_SUPABASE_URL --value "<결과 A>"
+eas env:create --environment production --name EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY --value "<결과 B>"
+eas env:create --environment production --name EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID --value "<3단계 결과>"
+eas env:create --environment production --name EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID --value "<3단계 결과>"
+# preview / development 환경도 동일하게 반복 (--environment preview, development)
+eas env:list --environment production        # 확인
+```
+
+값이 비면 앱은 이제 꺼지지 않고 **"앱 설정이 빠졌어요"** 화면에 어떤 변수가 없는지
+띄운다. 그 화면이 보이면 위 등록 후 다시 빌드하면 된다.
+
+### 6-2. 빌드
+
+```bash
 eas build -p android --profile preview      # Expo 클라우드에서 빌드
 ```
 
@@ -123,3 +153,23 @@ eas build -p android --profile preview      # Expo 클라우드에서 빌드
 4. 마이페이지 → 오답노트 → **섞어풀기**, **AI 진단** 확인
 
 문제 생기면 어디서 막혔는지(로그인/채점/진단) 알려주면 그 부분부터 잡으면 된다.
+
+---
+
+## 8. 앱이 실행되자마자 꺼질 때
+
+증상별 원인과 조치:
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 아이콘 누르면 즉시 종료 (Expo Go) | Expo Go 에 없는 네이티브 모듈(구글/카카오 로그인, Skia, PDF) | 개발 빌드 설치 후 실행 (0단계 경고 참고) |
+| "앱 설정이 빠졌어요" 화면 | `EXPO_PUBLIC_SUPABASE_*` 없이 빌드됨 | 6-1 로 EAS 환경변수 등록 → 재빌드 |
+| "문제가 발생했어요" + 오류 메시지 | 렌더 중 예외 | 메시지 그대로 공유. 앱은 더 이상 종료되지 않음 |
+| 로그인 버튼만 실패 | 구글/카카오 콘솔 설정 누락 | 3·4 단계 재확인 (OIDC 활성화 포함) |
+
+로그를 직접 보려면(안드로이드, USB 디버깅 켠 상태):
+
+```bash
+adb logcat -s ReactNativeJS ReactNative AndroidRuntime
+```
+

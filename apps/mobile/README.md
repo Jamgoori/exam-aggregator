@@ -44,6 +44,11 @@ npx eas build --profile development --platform android
 
 `app.json`의 `PLACEHOLDER_*` 값은 실제 키로 교체할 것.
 
+> `EXPO_PUBLIC_*` 는 **빌드 시점에 번들로 인라인**된다. 로컬은 `.env`, EAS 클라우드
+> 빌드는 EAS 환경변수(`eas env:create`, `eas.json` 프로필의 `environment`)에 넣어야
+> 한다. 값이 없으면 앱이 꺼지지 않고 "앱 설정이 빠졌어요" 화면을 띄운다.
+> 실행 직후 종료 등 문제는 `SETUP.md` 8장(트러블슈팅) 참고.
+
 ## 구조
 
 ```

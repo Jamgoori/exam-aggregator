@@ -31,7 +31,7 @@ export default function WrongNoteDetailScreen() {
 
   useEffect(() => {
     if (!slug) return;
-    getWrongNoteDetail(slug)
+    getWrongNoteDetail(String(slug))
       .then(setDetail)
       .catch(() => {})
       .finally(() => setLoading(false));

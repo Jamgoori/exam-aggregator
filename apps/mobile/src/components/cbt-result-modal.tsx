@@ -58,7 +58,7 @@ export function CbtResultModal({
           <Text style={{ textAlign: "center", color: colors.textMuted }}>
             정답률 {percent}% · 소요 {formatDuration(result.durationSeconds)}
           </Text>
-          {result.voidedQuestions.length > 0 && (
+          {(result.voidedQuestions?.length ?? 0) > 0 && (
             <Text style={{ textAlign: "center", color: colors.textMuted, fontSize: 12 }}>
               전항/복수정답 처리: {result.voidedQuestions.join(", ")}번
             </Text>
