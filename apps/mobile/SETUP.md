@@ -243,3 +243,27 @@ eas build -p android --profile preview      # Expo 클라우드에서 빌드
 4. 마이페이지 → 오답노트 → **섞어풀기**, **AI 진단** 확인
 
 문제 생기면 어디서 막혔는지(로그인/채점/진단) 알려주면 그 부분부터 잡으면 된다.
+
+---
+
+## 8. 앱이 켜자마자 꺼질 때
+
+증상이 같아 보여도 원인은 층이 다르다. **오류 화면이 뜨는지**로 갈린다.
+
+| 화면 | 어디서 죽은 것 | 볼 곳 |
+|---|---|---|
+| 오류 메시지가 뜬다 | JS. `app/_layout.tsx` 의 `ErrorBoundary` 가 잡았다 | 화면에 원인·스택이 그대로 나온다 |
+| 아무것도 없이 꺼진다 | 네이티브. JS 가 시작조차 못 했다 | 아래 참고 |
+
+네이티브에서 죽으면 화면에 아무것도 못 띄운다. 원인을 직접 보려면 `adb logcat -b crash -d`
+가 필요하고(PC + platform-tools), 그게 어려우면 아래 후보를 하나씩 끄면서 좁힌다.
+
+**`newArchEnabled`** — `app.json`. 지금은 `false`다.
+
+이 앱이 쓰는 네이티브 패키지 중 `@react-native-seoul/kakao-login` 만 New Architecture
+지원 흔적이 없다(`codegenConfig` 없음, 관련 코드 없음, 최신 5.4.2 도 마찬가지). 나머지
+7개(pdf, blob-util, google-signin, skia, gesture-handler, reanimated, screens)는 전부
+지원한다. `true` 로 두고 빌드했을 때 앱이 화면도 없이 종료됐고, 그래서 껐다.
+
+SDK 52 는 구 아키텍처도 정식 지원하므로 기능 손실은 없다. kakao-login 이 New
+Architecture 를 지원하는 버전을 내면 다시 켜고 시험해 볼 수 있다.
