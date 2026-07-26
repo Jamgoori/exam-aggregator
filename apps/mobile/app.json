@@ -38,6 +38,7 @@
         }
       ],
       "expo-asset",
+      "./plugins/with-crash-screen",
       "expo-apple-authentication",
       "expo-notifications",
       "expo-file-system"
