@@ -10,19 +10,30 @@ import { SecureStorage } from "./secure-storage";
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    "EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY 가 .env 에 없습니다.",
-  );
-}
+// 값이 없을 때 여기서 throw 하면 안 된다. 이 파일은 루트 레이아웃이 import 하는
+// 모듈이라, import 단계에서 던지면 화면이 뜨기도 전에 앱이 그냥 종료된다 —
+// 사용자에게는 "앱이 계속 중단됨" 만 보이고 이유를 알 방법이 없다(실제로 그렇게
+// 한 번 나갔다). 대신 오류를 값으로 내보내고, 루트 레이아웃이 읽을 수 있는 화면으로
+// 보여준다.
+export const supabaseConfigError =
+  !supabaseUrl || !supabaseAnonKey
+    ? "EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY 가 빌드에 포함되지 않았습니다."
+    : null;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    storage: SecureStorage,
-    autoRefreshToken: true,
-    persistSession: true,
-    // 모바일은 URL 콜백(#access_token=...)으로 세션을 받지 않는다. 네이티브 SDK가
-    // 준 id_token을 signInWithIdToken 으로 교환하는 방식이라 URL 감지는 끈다.
-    detectSessionInUrl: false,
+// 설정이 없으면 형식만 맞는 더미로 만든다 — createClient 가 빈 문자열에 던지는 것을
+// 막기 위한 것이고, 이 클라이언트로 오는 요청은 어차피 실패한다. 위 오류 화면이
+// 먼저 뜨므로 실제로 쓰이지 않는다.
+export const supabase = createClient(
+  supabaseUrl || "https://placeholder.supabase.co",
+  supabaseAnonKey || "placeholder-anon-key",
+  {
+    auth: {
+      storage: SecureStorage,
+      autoRefreshToken: true,
+      persistSession: true,
+      // 모바일은 URL 콜백(#access_token=...)으로 세션을 받지 않는다. 네이티브 SDK가
+      // 준 id_token을 signInWithIdToken 으로 교환하는 방식이라 URL 감지는 끈다.
+      detectSessionInUrl: false,
+    },
   },
-});
+);
