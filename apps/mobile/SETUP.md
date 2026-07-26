@@ -220,6 +220,19 @@ eas build -p android --profile preview      # Expo 클라우드에서 빌드
 
 > Android SHA-1 이 필요하면 `eas credentials` 로 확인해 3단계 Google Android 클라이언트에 넣는다.
 
+> **로컬 `.env` 는 EAS 빌드에 반영되지 않는다.** `.env` 는 gitignore 대상이고 EAS 는
+> git 기준으로 프로젝트를 압축해 올리므로 빌드 서버에 도착하지 않는다. `.env` 는
+> `expo start` 로 로컬 실행할 때만 쓰인다.
+>
+> 로컬에서 `eas build` 를 돌릴 거면 값을 **`eas.json` 의 해당 빌드 프로필 `env`** 에
+> 넣거나 EAS 대시보드 환경변수에 등록해야 한다(6-A 의 GitHub Actions 경로는 저장소
+> 시크릿에서 자동 주입하므로 신경 쓸 것 없다).
+>
+> 값이 빠지면 APK 는 **정상적으로 만들어지지만** 폰에서 켜자마자 꺼진다
+> (`src/lib/supabase.ts` 가 import 단계에서 throw). 이 실수를 빌드 로그에서 잡으려고
+> `scripts/check-build-env.mjs` 가 EAS 빌드 시작 전에 필수 값을 확인하고, 없으면
+> 빌드를 실패시킨다.
+
 ---
 
 ## 7. 확인 순서 (설치 후)
