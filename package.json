@@ -12,7 +12,8 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "web": "npm run dev --workspace @gongmoa/web",
-    "mobile": "npm run start --workspace @gongmoa/mobile"
+    "mobile": "npm run start --workspace @gongmoa/mobile",
+    "test": "turbo run test"
   },
   "devDependencies": {
     "turbo": "^2.10.6"

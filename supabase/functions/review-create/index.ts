@@ -11,6 +11,11 @@ import { fetchQuestionMedia } from "../_shared/media.ts";
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
+// 연타·남용으로 review_sessions 가 쌓이는 걸 막는다(SECURITY.md 7번). 에러로 막지 않고
+// "최근에 만든 아직 안 푼 세션"을 그대로 돌려준다 — 사용자가 버튼을 두 번 눌러도 새 세션이
+// 생기는 대신 같은 문제 묶음을 이어서 풀게 되므로, 막는 느낌 없이 목적이 달성된다.
+const REUSE_WINDOW_MINUTES = 30;
+
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -39,6 +44,50 @@ Deno.serve(async (req) => {
   limit = Math.min(Math.max(1, limit), MAX_LIMIT);
 
   const admin = adminClient();
+
+  // 최근에 만들고 아직 제출하지 않은 세션이 있으면 그걸 그대로 이어준다.
+  {
+    const since = new Date(Date.now() - REUSE_WINDOW_MINUTES * 60_000).toISOString();
+    const { data: recent } = await admin
+      .from("review_sessions")
+      .select("id, total_questions")
+      .eq("user_id", userId)
+      .is("submitted_at", null)
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (recent) {
+      const { data: itemRows } = await admin
+        .from("review_session_items")
+        .select("paper_id, question_number, position")
+        .eq("session_id", recent.id)
+        .order("position", { ascending: true });
+      const rows = (itemRows ?? []) as {
+        paper_id: string;
+        question_number: number;
+        position: number;
+      }[];
+
+      // 항목이 비어 있는 세션(생성 중 실패로 남은 껍데기)은 재사용하지 않고 새로 만든다.
+      if (rows.length > 0) {
+        const media = await fetchQuestionMedia(admin, [
+          ...new Set(rows.map((r) => r.paper_id)),
+        ]);
+        // 새로 만들 때와 같은 모양 — 정답·출처는 싣지 않는다.
+        const items = rows.map((r) => {
+          const m = media.get(r.paper_id)?.get(r.question_number);
+          return {
+            position: r.position,
+            images: m?.images ?? [],
+            choiceCount: m?.choiceCount ?? 4,
+          };
+        });
+        return json({ sessionId: recent.id, total: rows.length, items });
+      }
+    }
+  }
 
   // 내 오답 문항.
   let q = admin

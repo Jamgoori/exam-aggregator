@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { NicknameField } from "@/components/nickname-field";
 import { CbtViewModeField } from "@/components/cbt-view-mode-field";
+import { DeleteAccountButton } from "@/components/delete-account-button";
 
 export default async function EditAccountPage({
   searchParams,
@@ -61,6 +62,11 @@ export default async function EditAccountPage({
           <span className="text-sm text-zinc-700 dark:text-zinc-300">{user.email}</span>
         </div>
       )}
+
+      <section className="flex flex-col gap-4 border-t border-zinc-100 pt-6 dark:border-zinc-700">
+        <h2 className="text-lg font-semibold">회원 탈퇴</h2>
+        <DeleteAccountButton />
+      </section>
     </div>
   );
 }

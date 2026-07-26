@@ -1,6 +1,6 @@
 import { FlatList, Pressable, Text, View } from "react-native";
 import type { CbtQuestionResult } from "../lib/cbt";
-import { colors } from "../theme/colors";
+import { useColors } from "../theme/colors";
 
 // 웹 cbt-omr-panel 의 앱판. 문항번호별 선택지 버블. 채점 후엔 정/오답 색으로 표시.
 export function OmrPanel({
@@ -16,6 +16,7 @@ export function OmrPanel({
   onSelect: (questionIndex: number, choice: number) => void;
   resultByQuestion: Map<number, CbtQuestionResult> | null;
 }) {
+  const colors = useColors();
   const rows = Array.from({ length: totalQuestions }, (_, i) => i);
 
   return (
@@ -48,7 +49,7 @@ export function OmrPanel({
                 let fg = colors.text;
                 if (isSelected) {
                   if (res) {
-                    bg = res.is_correct ? "#16a34a" : colors.danger;
+                    bg = res.is_correct ? colors.success : colors.danger;
                     border = bg;
                   } else {
                     bg = colors.primary;

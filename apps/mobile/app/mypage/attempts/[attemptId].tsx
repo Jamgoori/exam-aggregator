@@ -3,11 +3,12 @@ import { Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Text, View, FlatList } from "react-native";
 import { getAttemptDetail, type AttemptDetail } from "../../../src/lib/mypage";
-import { colors } from "../../../src/theme/colors";
+import { useColors } from "../../../src/theme/colors";
 
 // 응시 상세: 한 응시의 문항별 정/오답 + 문제 이미지. 정답은 표시하지 않는다
 // (RLS 차단) — is_correct 와 내 선택만 보여준다. 기본은 틀린 문항만.
 export default function AttemptDetailScreen() {
+  const colors = useColors();
   const { attemptId } = useLocalSearchParams<{ attemptId: string }>();
   const [detail, setDetail] = useState<AttemptDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,7 +76,7 @@ export default function AttemptDetailScreen() {
             >
               <Text style={{ fontWeight: "600" }}>{q.questionNumber}번</Text>
               <Text
-                style={{ fontWeight: "700", color: q.isCorrect ? "#16a34a" : colors.danger }}
+                style={{ fontWeight: "700", color: q.isCorrect ? colors.success : colors.danger }}
               >
                 {q.isCorrect ? "정답" : "오답"} · 내 답 {q.selectedChoice ?? "-"}
               </Text>
@@ -96,6 +97,7 @@ export default function AttemptDetailScreen() {
 }
 
 function Toggle({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const colors = useColors();
   return (
     <Text
       onPress={onPress}

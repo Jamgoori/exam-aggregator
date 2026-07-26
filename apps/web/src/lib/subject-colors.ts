@@ -1,3 +1,7 @@
+// 어느 색을 쓸지 고르는 해시는 @gongmoa/core 로 단일화(모바일과 공유) — 같은 과목이
+// 웹과 앱에서 팔레트의 같은 자리 색을 갖는다. 팔레트 값 자체는 Tailwind 클래스라 여기.
+import { subjectColorIndex } from "@gongmoa/core";
+
 const PALETTE = [
   "bg-blue-100 text-blue-700",
   "bg-rose-100 text-rose-700",
@@ -10,9 +14,6 @@ const PALETTE = [
 ];
 
 export function subjectColor(slug: string) {
-  let hash = 0;
-  for (let i = 0; i < slug.length; i++) {
-    hash = (hash * 31 + slug.charCodeAt(i)) % PALETTE.length;
-  }
-  return PALETTE[hash];
+  // core 의 SUBJECT_PALETTE_SIZE 와 길이가 같지만, 한쪽만 늘어나도 깨지지 않게 나머지.
+  return PALETTE[subjectColorIndex(slug) % PALETTE.length];
 }

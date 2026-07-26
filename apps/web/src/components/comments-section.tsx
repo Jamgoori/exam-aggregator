@@ -7,8 +7,8 @@ import { CommentRow } from "@/components/comment-row";
 import { EditRow } from "@/components/comment-edit-row";
 import { ReplyForm } from "@/components/comment-reply-form";
 import { CommentGuestFields } from "@/components/comment-guest-fields";
-import { COMMENT_CONTENT_MAX } from "@gongmoa/core";
-import type { Comment } from "@gongmoa/core";
+import { buildCommentTree, canReplyTo, COMMENT_CONTENT_MAX } from "@gongmoa/core";
+import type { Comment, CommentNode } from "@gongmoa/core";
 
 // 댓글 영역 전체의 오케스트레이터: 새 댓글 폼 + 댓글/답글 목록을 그리고,
 // 어떤 댓글이 편집 중인지/어디에 답글을 다는 중인지 상태를 관리한다.
@@ -39,15 +39,9 @@ export function CommentsSection({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [replyingToId, setReplyingToId] = useState<string | null>(null);
 
-  // 답글은 최상위 댓글에만 달리므로(1단계 깊이 제한), 최상위 댓글별로 답글 목록을 묶어둔다.
-  const topLevelComments = comments.filter((c) => !c.parent_id);
-  const repliesByParent = new Map<string, Comment[]>();
-  for (const c of comments) {
-    if (!c.parent_id) continue;
-    const list = repliesByParent.get(c.parent_id) ?? [];
-    list.push(c);
-    repliesByParent.set(c.parent_id, list);
-  }
+  // 답글에 답글을 달 수 있어 깊이가 여러 단이므로 트리로 만들어 재귀로 그린다
+  // (규칙·깊이 한도는 @gongmoa/core 에 있어 앱과 같다).
+  const tree = buildCommentTree(comments);
 
   function submitNew(e: React.FormEvent) {
     e.preventDefault();
@@ -106,6 +100,43 @@ export function CommentsSection({
     );
   }
 
+  // 한 댓글과 그 아래 답글들을 재귀로 그린다. 답글 폼은 깊이 한도에 닿지 않은
+  // 댓글에만 붙는다(서버도 같은 한도로 거절한다).
+  function renderNode(node: CommentNode) {
+    const replyable = canReplyTo(node.depth);
+    return (
+      <>
+        {renderRow(node, {
+          canReply: replyable,
+          isReplying: replyingToId === node.id,
+        })}
+
+        {node.replies.length > 0 && (
+          <div className="mt-4 ml-6 flex flex-col gap-4 border-l-2 border-zinc-100 pl-4 dark:border-zinc-700">
+            {node.replies.map((reply) => (
+              <div key={reply.id}>{renderNode(reply)}</div>
+            ))}
+          </div>
+        )}
+
+        {replyingToId === node.id && (
+          <div className="mt-4 ml-6 border-l-2 border-zinc-100 pl-4 dark:border-zinc-700">
+            <ReplyForm
+              paperId={paperId}
+              parentId={node.id}
+              loggedIn={loggedIn}
+              onDone={() => {
+                setReplyingToId(null);
+                router.refresh();
+              }}
+              onCancel={() => setReplyingToId(null)}
+            />
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <section className="flex flex-col gap-5">
       <h2 className="text-lg font-semibold">댓글 {comments.length}개</h2>
@@ -141,47 +172,16 @@ export function CommentsSection({
       </form>
 
       <div className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-700">
-        {topLevelComments.length === 0 && (
+        {tree.length === 0 && (
           <p className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-500">
             아직 댓글이 없어요. 첫 댓글을 남겨보세요.
           </p>
         )}
-        {topLevelComments.map((comment) => {
-          const replies = repliesByParent.get(comment.id) ?? [];
-          return (
-            <div key={comment.id} className="py-5">
-              {renderRow(comment, {
-                canReply: true,
-                isReplying: replyingToId === comment.id,
-              })}
-
-              {replies.length > 0 && (
-                <div className="mt-4 ml-6 flex flex-col gap-4 border-l-2 border-zinc-100 pl-4 dark:border-zinc-700">
-                  {replies.map((reply) => (
-                    <div key={reply.id}>
-                      {renderRow(reply, { canReply: false, isReplying: false })}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {replyingToId === comment.id && (
-                <div className="mt-4 ml-6 border-l-2 border-zinc-100 pl-4 dark:border-zinc-700">
-                  <ReplyForm
-                    paperId={paperId}
-                    parentId={comment.id}
-                    loggedIn={loggedIn}
-                    onDone={() => {
-                      setReplyingToId(null);
-                      router.refresh();
-                    }}
-                    onCancel={() => setReplyingToId(null)}
-                  />
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {tree.map((node) => (
+          <div key={node.id} className="py-5">
+            {renderNode(node)}
+          </div>
+        ))}
       </div>
     </section>
   );

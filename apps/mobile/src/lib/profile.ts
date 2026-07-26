@@ -25,3 +25,22 @@ export function currentNickname(metadata: Record<string, unknown> | undefined): 
   const n = metadata?.nickname;
   return typeof n === "string" && n.length > 0 ? n : null;
 }
+
+// ── CBT 시작 화면 설정 ────────────────────────────────────────────────────────
+// 웹 mypage/edit 의 "CBT 시작 화면"과 같은 값(user_metadata.default_cbt_view_mode)을
+// 공유한다. 웹에서 바꾼 설정이 앱에도, 앱에서 바꾼 설정이 웹에도 그대로 반영된다.
+export type CbtViewMode = "single" | "full";
+
+export function currentCbtViewMode(
+  metadata: Record<string, unknown> | undefined,
+): CbtViewMode {
+  // 명시적으로 잠긴 값이 없으면 사이트 기본값인 "문제별 풀기"(single).
+  return metadata?.default_cbt_view_mode === "full" ? "full" : "single";
+}
+
+export async function updateCbtViewMode(mode: CbtViewMode): Promise<void> {
+  const { error } = await supabase.auth.updateUser({
+    data: { default_cbt_view_mode: mode },
+  });
+  if (error) throw new Error("설정 저장에 실패했어요.");
+}

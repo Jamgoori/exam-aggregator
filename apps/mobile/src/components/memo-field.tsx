@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { getMemo, saveMemo } from "../lib/memo";
-import { colors } from "../theme/colors";
+import { useColors } from "../theme/colors";
 
 // 문항 메모: 접었다 폈다 하는 입력. 포커스 잃을 때 저장. 로그인 사용자만 의미 있음.
 export function MemoField({
@@ -11,6 +11,7 @@ export function MemoField({
   paperId: string;
   questionNumber: number;
 }) {
+  const colors = useColors();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState("");
   const [loaded, setLoaded] = useState(false);
