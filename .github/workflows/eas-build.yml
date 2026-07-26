@@ -51,19 +51,6 @@ jobs:
       - name: 공유 로직 테스트
         run: npm test
 
-      # EXPO_PUBLIC_* 는 번들에 박히는 값이라 빌드 시점에 있어야 한다. .env 는
-      # 저장소에 없으므로(gitignore) 시크릿으로 만들어 넣는다.
-      - name: .env 생성
-        working-directory: apps/mobile
-        run: |
-          {
-            echo "EXPO_PUBLIC_SUPABASE_URL=${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}"
-            echo "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}"
-            echo "EXPO_PUBLIC_WEB_URL=${{ secrets.EXPO_PUBLIC_WEB_URL }}"
-            echo "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}"
-            echo "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}"
-          } > .env
-
       - name: 필수 시크릿 확인
         run: |
           if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
@@ -74,9 +61,55 @@ jobs:
             echo "::error::EXPO_PUBLIC_SUPABASE_URL 시크릿이 없습니다. 이 값이 없으면 앱이 켜지자마자 종료됩니다."
             exit 1
           fi
+          if [ -z "${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}" ]; then
+            echo "::error::EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY 시크릿이 없습니다. 이 값이 없으면 앱이 켜지자마자 종료됩니다."
+            exit 1
+          fi
           if [ -z "${{ secrets.EXPO_PUBLIC_WEB_URL }}" ]; then
             echo "::warning::EXPO_PUBLIC_WEB_URL 이 비어 있습니다. 앱에서 이용약관·개인정보처리방침이 열리지 않아 스토어 심사에서 반려됩니다."
           fi
+
+      # EXPO_PUBLIC_* 는 JS 번들에 박히는 값이라 **EAS 빌드 서버**에 있어야 한다.
+      # 여기서 .env 를 만들어도 소용이 없다 — .env 는 gitignore 대상이고 EAS 는 git
+      # 기준으로 프로젝트를 압축해 올리므로 빌드 서버에 도착하지 않는다. 그래서 값이
+      # 없는 채로 번들이 만들어졌고, 앱이 supabase.ts import 단계에서 throw 하며
+      # 켜자마자 꺼졌다.
+      #
+      # 대신 eas.json 의 빌드 프로필 env 에 넣는다. eas.json 은 추적되는 파일이라
+      # 업로드된다. 값을 저장소에 커밋하지는 않고 러너에서만 주입한 뒤, 어떤 압축
+      # 방식에서도 확실히 포함되도록 로컬 커밋까지 만든다(푸시하지 않는다).
+      - name: eas.json 에 EXPO_PUBLIC_* 주입
+        working-directory: apps/mobile
+        env:
+          SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          WEB_URL: ${{ secrets.EXPO_PUBLIC_WEB_URL }}
+          GOOGLE_WEB: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
+          GOOGLE_IOS: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
+        run: |
+          jq --arg p "${{ inputs.profile }}" \
+             --arg url "$SUPABASE_URL" \
+             --arg key "$SUPABASE_KEY" \
+             --arg web "$WEB_URL" \
+             --arg gw "$GOOGLE_WEB" \
+             --arg gi "$GOOGLE_IOS" \
+             '.build[$p].env = ((.build[$p].env // {}) + {
+                EXPO_PUBLIC_SUPABASE_URL: $url,
+                EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: $key,
+                EXPO_PUBLIC_WEB_URL: $web,
+                EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: $gw,
+                EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: $gi
+              } | with_entries(select(.value != "")))' eas.json > eas.json.tmp
+          mv eas.json.tmp eas.json
+          # 주입 결과 확인 — 값은 찍지 않고 키 이름만 본다.
+          echo "주입된 키: $(jq -r --arg p "${{ inputs.profile }}" '.build[$p].env | keys | join(", ")' eas.json)"
+
+      - name: 러너 로컬 커밋 (업로드 아카이브에 포함시키기 위함, 푸시하지 않음)
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "github-actions"
+          git add apps/mobile/eas.json
+          git commit -m "ci: inject build env (runner-only, never pushed)"
 
       - uses: expo/expo-github-action@v8
         with:
