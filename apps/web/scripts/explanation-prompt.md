@@ -159,7 +159,7 @@
      "current_answer_status": "동일",
      "current_answer_note": null,
      "law_basis_date": "2026-07",
-     "model_version": "claude-opus-4-8"
+     "model_version": "claude-opus-5"
    }]
    ```
 5. `node scripts/save-explanations.mjs <파일경로>`로 저장한다. 출력의 `mismatched`

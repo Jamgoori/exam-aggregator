@@ -29,7 +29,7 @@
 //     "current_answer_status": "동일",   // "동일" | "정답변경" | "성립불가"
 //     "current_answer_note": null,        // 정답변경/성립불가 사유 한두 줄
 //     "law_basis_date": "2026-07",        // 참조한 "현행"의 기준 시점
-//     "model_version": "claude-opus-4-8"
+//     "model_version": "claude-opus-5"
 //   },
 //   ...
 // ]
