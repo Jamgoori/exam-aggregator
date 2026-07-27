@@ -125,13 +125,17 @@ function lineKey(y, col) {
 
 function findAnnotationLines(items, half) {
   const lines = new Map();
-  for (const item of items) {
+  items.forEach((item, idx) => {
     const [, , , , x, y] = item.transform;
     const col = x < half ? "L" : "R";
     const key = lineKey(y, col);
-    if (!lines.has(key)) lines.set(key, { y, col, parts: [] });
-    lines.get(key).parts.push({ x, str: item.str });
-  }
+    if (!lines.has(key)) lines.set(key, { y, col, height: 0, parts: [] });
+    const line = lines.get(key);
+    // 한 줄 안에서 가장 큰 글자 높이를 그 줄의 높이로 본다 — 크롭 경계를 잡을 때
+    // 이 줄의 잉크가 baseline 위로 얼마나 올라오는지 가늠하는 데 쓴다.
+    if (item.height > line.height) line.height = item.height;
+    line.parts.push({ x, str: item.str, idx });
+  });
 
   // 같은 칼럼 안에서 위→아래(y 내림차순) 순서로 줄을 늘어놓는다 — 안내문이
   // 줄바꿈으로 두 줄에 걸치는 경우(예: "...밑줄 친 부분에... [문 19～" 다음
@@ -140,37 +144,51 @@ function findAnnotationLines(items, half) {
   //못 하고 그 안의 "19." "20."이 진짜 마커로 오인돼 중복 크래시가 났다
   // (실측: 2022 지방직 9급 영어).
   const linesByCol = new Map();
-  for (const [key, line] of lines) {
-    const text = line.parts.sort((a, b) => a.x - b.x).map((p) => p.str).join("");
+  const allLines = [];
+  for (const [, line] of lines) {
+    const sorted = line.parts.sort((a, b) => a.x - b.x);
+    const text = sorted.map((p) => p.str).join("");
     if (!linesByCol.has(line.col)) linesByCol.set(line.col, []);
-    linesByCol.get(line.col).push({ key, y: line.y, text });
+    linesByCol.get(line.col).push({
+      y: line.y,
+      height: line.height,
+      text,
+      indices: sorted.map((p) => p.idx),
+    });
+    if (text.trim()) allLines.push({ y: line.y, col: line.col, height: line.height, text: text.trim() });
   }
   for (const arr of linesByCol.values()) arr.sort((a, b) => b.y - a.y);
 
-  const keys = new Set();
+  // 안내문에 걸려 제외할 조각은 (y, col) 좌표 키가 아니라 items 배열의 원본
+  // 인덱스로 직접 추적한다. 좌표 키를 쓰면, 안내문과 무관한 다른 조각이 우연히
+  // 같은 반올림 y·같은 칼럼에 놓였을 때 그 조각까지 같은 키로 묶여 통째로
+  // 지워진다(실측: 2026 국회직 8급 상황판단 — 왼쪽 안내문과 같은 y에 있던
+  // 오른쪽 칼럼의 진짜 마커 "20."이 소실). 조각 자체를 인덱스로 지목하면 좌표
+  // 재해석에서 오는 이런 오차가 아예 생기지 않는다.
+  const consumedIndices = new Set();
   const groups = [];
   for (const [col, arr] of linesByCol) {
     for (let i = 0; i < arr.length; i++) {
       const line = arr[i];
       let match = ANNOTATION_RANGE_RE.exec(line.text);
-      const usedKeys = [line.key];
+      const usedIndices = [...line.indices];
       if (!match && line.text.includes("[") && !line.text.includes("]")) {
         const next = arr[i + 1];
         if (next) {
           match = ANNOTATION_RANGE_RE.exec(line.text + next.text);
-          if (match) usedKeys.push(next.key);
+          if (match) usedIndices.push(...next.indices);
         }
       }
       if (!match) continue;
-      for (const k of usedKeys) keys.add(k);
+      for (const idx of usedIndices) consumedIndices.add(idx);
       const start = Number(match[1]);
       const end = Number(match[2]);
       if (end > start && end - start <= 10) {
-        groups.push({ start, end, y: line.y, col });
+        groups.push({ start, end, y: line.y, height: line.height, col });
       }
     }
   }
-  return { keys, groups };
+  return { consumedIndices, groups, allLines };
 }
 
 // columnSplitX: 실측 칼럼 경계(computeColumnSplitX). 아직 모르는 최초 호출(1차
@@ -185,7 +203,7 @@ async function findQuestionMarkers(page, columnSplitX) {
   const textContent = await page.getTextContent();
   const items = textContent.items.filter((i) => "str" in i);
   const half = columnSplitX ?? viewport.width / 2;
-  const { keys: annotationKeys, groups } = findAnnotationLines(items, half);
+  const { consumedIndices, groups, allLines } = findAnnotationLines(items, half);
 
   // "문"이 단독 조각으로 떨어져 나온 자리들을 (같은 줄, x) 기준으로 미리 모아둔다
   // — items 배열 순서가 항상 시각적 왼쪽→오른쪽 순서라는 보장이 없어서(콘텐츠
@@ -219,7 +237,7 @@ async function findQuestionMarkers(page, columnSplitX) {
     const str = item.str.trim();
     if (!str) continue;
     const [, , , , itemX, itemY] = item.transform;
-    if (annotationKeys.has(lineKey(itemY, itemX < half ? "L" : "R"))) continue;
+    if (consumedIndices.has(i)) continue;
 
     // 진짜 문제 마커는 거의 항상 "문"이 앞에 붙는다(같은 조각이든 "문"만 따로
     // 떨어진 조각이든) — 지문 속 조항·보기 번호("1. 다음의 농지는...")에는
@@ -263,6 +281,10 @@ async function findQuestionMarkers(page, columnSplitX) {
     markers,
     relaxedMarkers,
     groups,
+    // 페이지의 모든 텍스트 줄(칼럼·baseline·글자높이). 크롭 하단 경계를 "다음
+    // 문제의 잉크가 시작되기 직전 여백"에 정확히 놓는 데 쓰고, 페이지마다
+    // 되풀이되는 머리글/꼬리말(쪽번호 등)을 찾아내는 데도 쓴다.
+    lines: allLines,
     pageWidthPt: viewport.width,
     pageHeightPt: viewport.height,
   };
@@ -468,6 +490,65 @@ export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSpli
   }
 }
 
+// pruneDuplicateMarkers는 "여백 x"를 기준으로 진짜/가짜를 가르는데, 그 기준을
+// 세우지 못하는 문제지가 있다 — computeDocMarginX는 최빈 x가 그 칼럼 마커의
+// 절반(DOC_MARGIN_MIN_SHARE) 이상일 때만 기준을 세우는데, 한 자리 수와 두 자리
+// 수 마커의 x가 갈리면(실측: 2025 군무원 9급 네트워크 보안 왼쪽 칼럼 — "1."이
+// x=49.2, "10."이 x=46.5로 나뉘어 최빈 비율 41%) 어느 쪽도 과반이 안 돼 기준이
+// 없다. 그 상태에서 지문 속 번호 목록(같은 문제지 4쪽 "1. A는 통신을 시작하기
+// 전에…" 등 x=71.4)이 걸리면 진짜 1~4번과 번호가 겹쳐 "N번이 두 번 잘렸습니다"
+// 하드 에러로 문제지 전체가 버려진다.
+//
+// 여백 x에 기대지 않고 **열람 순서**만으로 가른다. 가짜 마커는 정의상 문서
+// 어딘가의 진짜 마커와 번호가 겹쳐야만 드러나므로(그래야 "두 번" 잘린다), 딱 한
+// 번만 나오는 번호는 절대 건드리지 않고 2회 이상 나온 번호만 다룬다. 중복 번호는
+// "유일 번호들의 골격"(열람 순서상 항상 증가해야 하는, 한 번만 나온 번호들의
+// 나열)에서 자기 자리 — 바로 아래 골격 번호와 바로 위 골격 번호 사이 — 에 놓인
+// 등장만 진짜로 인정한다. 그 구간에 걸리는 등장이 하나도 없거나 둘 이상이면
+// (모호함) 전부 버려서 개수 불일치 경고로 남긴다 — 틀린 이미지를 올리느니
+// 수동 확인 대상이 되는 편이 낫다.
+export function dropOutOfSequenceMarkers(pageMarkerDataList, columnMode, columnSplitX) {
+  const ordered = [];
+  for (const data of pageMarkerDataList) {
+    const { left, right } = splitIntoColumns(
+      data.markers,
+      data.pageWidthPt,
+      columnMode,
+      columnSplitX,
+    );
+    ordered.push(...(columnMode === "single" ? left : [...left, ...right]));
+  }
+  const indexed = ordered.map((m, index) => ({ m, index }));
+
+  const counts = new Map();
+  for (const { m } of indexed) counts.set(m.number, (counts.get(m.number) ?? 0) + 1);
+  if ([...counts.values()].every((c) => c === 1)) return;
+
+  const skeleton = indexed.filter(({ m }) => counts.get(m.number) === 1);
+
+  const keep = new Set();
+  for (const { m } of indexed) {
+    if (counts.get(m.number) === 1) keep.add(m);
+  }
+  for (const [number, count] of counts) {
+    if (count === 1) continue;
+    let before = -Infinity;
+    let after = Infinity;
+    for (const { m, index } of skeleton) {
+      if (m.number < number && index > before) before = index;
+      if (m.number > number && index < after) after = index;
+    }
+    const candidates = indexed.filter(
+      ({ m, index }) => m.number === number && index > before && index < after,
+    );
+    if (candidates.length === 1) keep.add(candidates[0].m);
+  }
+
+  for (const data of pageMarkerDataList) {
+    data.markers = data.markers.filter((m) => keep.has(m));
+  }
+}
+
 function filterMarginMarkers(columnMarkers) {
   if (columnMarkers.length === 0) return columnMarkers;
 
@@ -527,50 +608,86 @@ function splitIntoColumns(markers, pageWidthPt, columnMode, columnSplitX) {
 //     같은 발문이 모든 문제에서 잘려나가 무엇을 묻는지 알 수 없게 된다.
 const GROUP_GAP_RATIO = 2.5;
 const GROUP_MIN_GAP_PT = 150;
+// 안내문과 첫 문제 사이가 이만큼 벌어져 있으면 그 사이에 있는 건 지문일 수밖에
+// 없으므로(지시문 재사용형은 실측 12~21pt) 문제 사이 간격과의 비율을 더 따지지
+// 않고 공통지문형으로 인정한다. 비율만으로 판정하면 세트의 뒷 문항이 길어
+// 문제 사이 간격이 큰 경우에 공통지문형을 놓친다(실측: 2026 군무원 9급 국어
+// [23~24] — 지문 427.7pt인데 23→24 간격이 207.8pt라 2.5배에 못 미쳐 탈락했다).
+const GROUP_STRONG_GAP_PT = 300;
+
+// 세트를 칼럼 넘어 이어붙일 때 두 조각 사이에 둘 흰 여백(pt).
+const SEGMENT_GAP_PT = 14;
 // 안내문 스트립의 아래 경계는 안내문 baseline(y)보다 살짝 아래로 내려잡아야
 // 한글 받침/디센더가 잘리지 않는다.
 const STRIP_DESCENT_PAD = 4;
+
+// 아래쪽 크롭 경계를 다음 잉크 위로 띄울 최소 여유. 윗줄이 없어 여백 한가운데를
+// 계산할 수 없을 때만 쓰는 폴백이라 작게 잡는다 — 남는 여백은 어차피
+// finalizeQuestionImage가 걷어낸다.
+const BOUNDARY_PAD = 3;
+
+// 페이지마다 같은 자리에 되풀이되는 꼬리말(쪽번호 등)을 찾을 때 쓰는 값들.
+const FOOTER_ZONE_RATIO = 0.25;
+const FOOTER_Y_TOLERANCE_PT = 3;
+// 꼬리말은 본문과 "줄간격의 몇 배" 이상 떨어져 있어야 한다. 위치와 페이지 간
+// 반복만으로 판정하면 지면을 아래까지 꽉 채우는 조판에서 마지막 문항의 선택지를
+// 꼬리말로 오인한다(실측: 2017 국가직 9급 국어 — 841pt 지면에서 5번 문항이
+// y=101에서 시작해 선택지가 y=32까지 내려가는데, 매 페이지가 같은 구조라
+// "아래쪽 + 반복" 조건을 그대로 통과해 5번이 통째로 사라졌다). 실측상 문항 안의
+// 큰 여백(발문↔상자↔선택지)은 줄간격의 1.3~1.7배, 꼬리말 앞 여백은 2.5배 이상.
+const FOOTER_GAP_RATIO = 2.1;
+// 꼬리말은 한두 줄이다. 이보다 두꺼운 덩어리는 문항 본문으로 보고 손대지 않는다.
+const FOOTER_MAX_LINES = 2;
 
 // trim()으로 가장자리 흰 여백을 걷어낸 뒤 보기 좋게 약간만 다시 패딩한다.
 // (내용이 거의 없어 trim이 실패하면 원본을 그대로 쓴다.) 최종 저장은 WebP
 // 무손실로 — 문제 이미지는 사진이 아니라 흰 배경+얇은 텍스트/선 위주라 PNG보다
 // 60%대로 작아지면서 화질 손실은 없다(실측 결과).
+// 세로(위/아래) 여백만 걷어내고 원본 칼럼 폭은 그대로 둔다. 좌우까지 trim하면
+// 선택지가 짧은 문항("① 라이신 …")이 좁게 잘려, 프런트가 이미지를 컨테이너
+// 폭(w-full)에 맞춰 늘릴 때 넓은 문항보다 크게 확대돼 글씨 크기가 문항마다
+// 들쭉날쭉해진다(실측: 2026 지방직 9급 공업화학 8번이 폭 516px로 같은 문제지
+// 다른 문항 ~1050px의 절반 → 표시 글씨 약 2배). 한 문제지 안에서 폭을 칼럼
+// 폭으로 통일해 표시 배율을 맞춘다.
+// 잉크가 하나도 없으면(빈 영역) null.
+async function trimVerticalWhitespace(rawPng) {
+  const { data, info } = await sharp(rawPng)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  let top = -1;
+  let bottom = -1;
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * width;
+    let hasInk = false;
+    for (let x = 0; x < width; x++) {
+      if (data[rowStart + x] < 245) {
+        hasInk = true;
+        break;
+      }
+    }
+    if (hasInk) {
+      if (top === -1) top = y;
+      bottom = y;
+    }
+  }
+  if (top === -1) return null;
+  return sharp(rawPng)
+    .extract({ left: 0, top, width, height: bottom - top + 1 })
+    .png()
+    .toBuffer();
+}
+
 async function finalizeQuestionImage(rawPng, scale) {
   const pad = Math.round(8 * scale);
   try {
-    // 세로(위/아래) 여백만 걷어내고 원본 칼럼 폭은 그대로 둔다. 좌우까지 trim하면
-    // 선택지가 짧은 문항("① 라이신 …")이 좁게 잘려, 프런트가 이미지를 컨테이너
-    // 폭(w-full)에 맞춰 늘릴 때 넓은 문항보다 크게 확대돼 글씨 크기가 문항마다
-    // 들쭉날쭉해진다(실측: 2026 지방직 9급 공업화학 8번이 폭 516px로 같은 문제지
-    // 다른 문항 ~1050px의 절반 → 표시 글씨 약 2배). 한 문제지 안에서 폭을 칼럼
-    // 폭으로 통일해 표시 배율을 맞춘다.
-    const { data, info } = await sharp(rawPng)
-      .greyscale()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-    const { width, height } = info;
-    let top = -1;
-    let bottom = -1;
-    for (let y = 0; y < height; y++) {
-      const rowStart = y * width;
-      let hasInk = false;
-      for (let x = 0; x < width; x++) {
-        if (data[rowStart + x] < 245) {
-          hasInk = true;
-          break;
-        }
-      }
-      if (hasInk) {
-        if (top === -1) top = y;
-        bottom = y;
-      }
-    }
-    if (top === -1) {
+    const trimmed = await trimVerticalWhitespace(rawPng);
+    if (!trimmed) {
       // 내용이 거의 없어 잉크 행을 못 찾으면 원본을 그대로 쓴다.
       return await sharp(rawPng).webp({ lossless: true }).toBuffer();
     }
-    return await sharp(rawPng)
-      .extract({ left: 0, top, width, height: bottom - top + 1 })
+    return await sharp(trimmed)
       .extend({ top: pad, bottom: pad, left: pad, right: pad, background: "#ffffff" })
       .webp({ lossless: true })
       .toBuffer();
@@ -582,23 +699,22 @@ async function finalizeQuestionImage(rawPng, scale) {
 // 안내문 스트립과 문제 본문 크롭을 위아래로 이어붙인다. 둘 다 같은 배율의 칼럼
 // 폭 크롭이라 너비가 사실상 같지만, 반올림 오차나 좌우 칼럼 폭 차이에 대비해
 // 넓은 쪽에 맞추고 빈 자리는 흰색으로 채운다.
-async function stackVertically(topBuffer, bottomBuffer) {
-  const [topMeta, bottomMeta] = await Promise.all([
-    sharp(topBuffer).metadata(),
-    sharp(bottomBuffer).metadata(),
-  ]);
-  return sharp({
-    create: {
-      width: Math.max(topMeta.width, bottomMeta.width),
-      height: topMeta.height + bottomMeta.height,
-      channels: 3,
-      background: "#ffffff",
-    },
-  })
-    .composite([
-      { input: topBuffer, top: 0, left: 0 },
-      { input: bottomBuffer, top: topMeta.height, left: 0 },
-    ])
+async function stackVertically(buffers, gapPx = 0) {
+  const parts = buffers.filter(Boolean);
+  if (parts.length === 0) return null;
+  if (parts.length === 1) return parts[0];
+  const metas = await Promise.all(parts.map((b) => sharp(b).metadata()));
+  const width = Math.max(...metas.map((m) => m.width));
+  const height =
+    metas.reduce((sum, m) => sum + m.height, 0) + gapPx * (parts.length - 1);
+  const composite = [];
+  let offset = 0;
+  for (let i = 0; i < parts.length; i++) {
+    composite.push({ input: parts[i], top: offset, left: 0 });
+    offset += metas[i].height + gapPx;
+  }
+  return sharp({ create: { width, height, channels: 3, background: "#ffffff" } })
+    .composite(composite)
     .png()
     .toBuffer();
 }
@@ -623,9 +739,11 @@ async function cropQuestionsFromPage(
   carriedStrips = new Map(),
   columnMode = "double",
   columnSplitX = null,
+  footerInkTopY = null,
 ) {
-  const { markers, groups, pageWidthPt, pageHeightPt } = markerData;
+  const { markers, groups, lines = [], pageWidthPt, pageHeightPt } = markerData;
   if (markers.length === 0) return { results: [], pendingStrips: carriedStrips };
+  const pageLead = medianLineLead(lines);
 
   const { left, right, half } = splitIntoColumns(markers, pageWidthPt, columnMode, columnSplitX);
   const { buffer: pageImage, width: pageWidthPx, height: pageHeightPx } =
@@ -656,44 +774,165 @@ async function cropQuestionsFromPage(
   // 위에 있는 쪽. 안내문을 경계로 안 삼으면 위 문제의 크롭이 다음 세트의
   // 안내문·지문까지 집어삼킨다(예: 5번 크롭에 "[6~7] 다음 글을..."과 그 지문이
   // 통째로 딸려 들어가는 문제).
-  function findBottomBoundary(colDef, fromY) {
-    const nextMarker = colDef.markers.find((m) => m.y < fromY);
-    let bottomY = nextMarker ? nextMarker.y : null;
-    for (const g of groups) {
-      if (g.col !== colDef.key) continue;
-      if (g.y < fromY && (bottomY === null || g.y > bottomY)) bottomY = g.y;
-    }
-    return bottomY;
+  //
+  // 반환값은 "다음 것의 baseline"이 아니라 **그 잉크가 시작되는 위쪽 y**다.
+  // 예전에는 baseline을 그대로 돌려주고 호출부가 `baseline + TOP_PAD`로 잘랐는데,
+  // PDF의 y는 baseline이라 글자는 그보다 위로 (거의 글자높이만큼) 더 올라간다.
+  // 그래서 본문 글자높이가 TOP_PAD(10pt)보다 큰 조판에서는 자르는 선이 다음
+  // 문제 첫 줄 글자를 관통해, 그 윗동강이 점선처럼 남았다(실측: 2026 군무원 9급
+  // 국어 — 글자높이 13pt라 25문항 중 13건이 정확히 3.0pt씩 남음). 위쪽 경계는
+  // 처음부터 `marker.y + marker.height + TOP_PAD`로 글자높이를 더하고 있었으니,
+  // 아래쪽만 빠져 있던 비대칭을 맞춘 것이다.
+  function nextInkTop(thing) {
+    return thing.y + (thing.height ?? 0);
   }
 
-  const mergedSets = []; // { colDef, numbers, top, bottom }
+  // 잉크가 시작되는 지점 바로 위로 자르되, 바로 윗줄의 디센더까지 먹지 않도록
+  // 두 줄 사이 여백의 한가운데를 고른다. 여백 안이기만 하면 어디서 자르든
+  // finalizeQuestionImage의 세로 여백 제거가 결과를 똑같이 맞춰주므로, 목표는
+  // "정확히 여백 안에 놓기" 하나다.
+  function cutAboveInk(colKey, inkTopY) {
+    const above = lines
+      .filter((l) => l.col === colKey && l.y > inkTopY)
+      .sort((a, b) => a.y - b.y)[0];
+    if (!above) return inkTopY + BOUNDARY_PAD;
+    // 윗줄 디센더는 baseline 아래로 글자높이의 30% 남짓 내려간다.
+    const aboveInkBottom = above.y - above.height * 0.3;
+    if (aboveInkBottom <= inkTopY) return inkTopY + BOUNDARY_PAD;
+    return (aboveInkBottom + inkTopY) / 2;
+  }
+
+  function findBottomBoundary(colDef, fromY) {
+    let next = null;
+    const nextMarker = colDef.markers.find((m) => m.y < fromY);
+    if (nextMarker) next = nextMarker;
+    for (const g of groups) {
+      if (g.col !== colDef.key) continue;
+      if (g.y < fromY && (next === null || g.y > next.y)) next = g;
+    }
+    if (next) return cutAboveInk(colDef.key, nextInkTop(next));
+    return bottomForLastInColumn(colDef, fromY);
+  }
+
+  // 칼럼에 다음 것이 없는 마지막 문항. 예전에는 무조건 BOTTOM_MARGIN(4)까지, 즉
+  // 페이지 바닥까지 잘라 쪽번호 꼬리말이 딸려 들어왔고, 꼬리말도 잉크라서 세로
+  // 여백 제거가 무력화돼 본문과 꼬리말 사이 큰 빈칸이 그대로 남았다(실측: 2026
+  // 군무원 9급 국어 3번 — 본문이 y=198에서 끝나는데 꼬리말이 y=44라 154pt 공백 +
+  // 칼럼 폭에 잘린 "국어(9"가 붙었다).
+  //
+  // 문서 전체에서 구한 꼬리말 위치(footerInkTopY) 하나만 믿고 자르면 안 된다 —
+  // 그 값은 다른 페이지에서 나온 값이라, 이 페이지 이 칼럼의 마지막 문항이 그보다
+  // 아래에서 시작하면 위/아래가 뒤집혀 문항이 통째로 사라진다(실측: 2015 국가직
+  // 9급 수학 3번 — 마커가 y=195.7인데 footerInkTopY가 195.87로 잡혀 크롭 영역이
+  // 음수가 됐다). 그래서 **두 신호가 일치할 때만** 자른다:
+  //   (a) 이 문항의 줄을 따라 내려가다 줄간격의 FOOTER_GAP_RATIO배가 넘는 여백을
+  //       만나 실제로 끊기고,
+  //   (b) 그 여백 아래에 있는 게 정말로 그 되풀이 꼬리말일 것.
+  // 하나라도 어긋나면 예전대로 페이지 바닥까지 둔다 — 꼬리말이 좀 붙는 건 고칠 수
+  // 있지만 문항 내용이 잘려나가는 건 되돌릴 수 없다.
+  function bottomForLastInColumn(colDef, fromY) {
+    if (footerInkTopY === null || pageLead === null) return BOTTOM_MARGIN;
+    const colLines = lines
+      .filter((l) => l.col === colDef.key && l.y < fromY)
+      .sort((a, b) => b.y - a.y);
+    if (colLines.length < 2) return BOTTOM_MARGIN;
+    let endIdx = 0;
+    for (let i = 0; i + 1 < colLines.length; i++) {
+      if (colLines[i].y - colLines[i + 1].y > pageLead * FOOTER_GAP_RATIO) break;
+      endIdx = i + 1;
+    }
+    if (endIdx === colLines.length - 1) return BOTTOM_MARGIN; // 끊긴 데 없음 = 꼬리말 없음
+    const belowGap = colLines[endIdx + 1];
+    if (Math.abs(belowGap.y + belowGap.height - footerInkTopY) > FOOTER_Y_TOLERANCE_PT * 2) {
+      return BOTTOM_MARGIN; // 여백 아래에 있는 게 꼬리말이 아니다(그림 여백 등)
+    }
+    const end = colLines[endIdx];
+    return (end.y - end.height * 0.3 + footerInkTopY) / 2;
+  }
+
+  const mergedSets = []; // { numbers, segments: [{ colDef, top, bottom }] }
   const mergedNumbers = new Set();
   const stripRegions = []; // { colDef, top, bottom, memberNumbers }
   const topOverrideByNumber = new Map();
+
+  // 안내문과 첫 문제 사이에 지문이 끼어 있는 "공통지문형"인지 판정한다.
+  function looksLikeCommonPassage(gapBeforeFirst, gapsBetween) {
+    if (gapBeforeFirst < GROUP_MIN_GAP_PT) return false;
+    if (gapBeforeFirst >= GROUP_STRONG_GAP_PT) return true;
+    if (gapsBetween.length === 0) return false;
+    const avg = gapsBetween.reduce((a, b) => a + b, 0) / gapsBetween.length;
+    return gapBeforeFirst >= avg * GROUP_GAP_RATIO;
+  }
+
+  function gapsAmong(list) {
+    const gaps = [];
+    for (let k = 0; k < list.length - 1; k++) gaps.push(list[k].y - list[k + 1].y);
+    return gaps;
+  }
+
+  function segmentFor(colDef, topPt, lastMarker) {
+    return {
+      colDef,
+      top: Math.min(pageHeightPt, topPt),
+      bottom: findBottomBoundary(colDef, lastMarker.y),
+    };
+  }
 
   for (const g of groups) {
     const colDef = columnDefs.find((c) => c.key === g.col);
     const below = colDef.markers.filter((m) => m.y < g.y);
     const members = below.filter((m) => m.number >= g.start && m.number <= g.end);
+    const wanted = g.end - g.start + 1;
+    const annotationTop = Math.min(pageHeightPt, g.y + g.height + TOP_PAD);
 
-    // 공통지문형 병합은 그룹 전원이 안내문과 같은 칼럼에 있을 때만 가능하다
-    // (칼럼을 넘으면 한 사각형으로 잘라낼 수 없다).
-    if (members.length === g.end - g.start + 1 && members.length >= 2) {
-      const gapBeforeFirst = g.y - members[0].y;
-      const gapsBetween = [];
-      for (let k = 0; k < members.length - 1; k++) {
-        gapsBetween.push(members[k].y - members[k + 1].y);
-      }
-      const avgBetween = gapsBetween.reduce((a, b) => a + b, 0) / gapsBetween.length;
-      if (gapBeforeFirst >= GROUP_MIN_GAP_PT && gapBeforeFirst >= avgBetween * GROUP_GAP_RATIO) {
-        const bottomY = findBottomBoundary(colDef, members[members.length - 1].y);
+    // (1) 그룹 전원이 안내문과 같은 칼럼에 있는 표준형 — 한 사각형으로 잘라낸다.
+    if (members.length === wanted && members.length >= 2) {
+      if (looksLikeCommonPassage(g.y - members[0].y, gapsAmong(members))) {
         mergedSets.push({
-          colDef,
           numbers: members.map((m) => m.number),
-          top: Math.min(pageHeightPt, g.y + TOP_PAD),
-          bottom: bottomY !== null ? bottomY + TOP_PAD : BOTTOM_MARGIN,
+          segments: [segmentFor(colDef, annotationTop, members[members.length - 1])],
         });
         for (const m of members) mergedNumbers.add(m.number);
+        continue;
+      }
+    }
+
+    // (2) 지문과 앞 문항은 왼쪽 칼럼, 나머지가 오른쪽 칼럼 맨 위로 이어지는 세트
+    // (실측: 2026 군무원 9급 국어 [16~17]/[20~21] — 지문+16번이 왼쪽, 17번이
+    // 오른쪽 맨 위). 예전에는 이런 세트를 "칼럼을 넘으니 병합 불가"로 보고
+    // 지시문 재사용형처럼 처리해, 지문 전체를 두 문항에 각각 복제한 이미지를
+    // 만들었다(실측 결과물: 16번 2769px / 17번 2631px 둘 다 지문 포함). 두 칼럼
+    // 조각을 세로로 이어붙이면 원래 지면의 읽기 순서 그대로 한 장이 된다.
+    if (columnMode === "double" && g.col === "L" && members.length >= 1) {
+      const rightCol = columnDefs.find((c) => c.key === "R");
+      const rightMembers = (rightCol?.markers ?? []).filter(
+        (m) => m.number >= g.start && m.number <= g.end,
+      );
+      const covered = [...members, ...rightMembers].map((m) => m.number).sort((a, b) => a - b);
+      const contiguous =
+        covered.length === wanted && covered.every((n, i) => n === g.start + i);
+      // 오른쪽 조각은 그 칼럼 맨 위부터 이어져야 한다 — 위에 다른 문항이 끼어
+      // 있으면 지면 순서가 "왼쪽 → 오른쪽 위"가 아니므로 이어붙이면 안 된다.
+      const continuesAtTopOfRight =
+        rightMembers.length > 0 && rightCol.markers[0].number === rightMembers[0].number;
+      if (
+        contiguous &&
+        continuesAtTopOfRight &&
+        looksLikeCommonPassage(g.y - members[0].y, gapsAmong(members))
+      ) {
+        const lastRight = rightMembers[rightMembers.length - 1];
+        mergedSets.push({
+          numbers: covered,
+          segments: [
+            segmentFor(colDef, annotationTop, members[members.length - 1]),
+            segmentFor(
+              rightCol,
+              rightMembers[0].y + rightMembers[0].height + TOP_PAD,
+              lastRight,
+            ),
+          ],
+        });
+        for (const n of covered) mergedNumbers.add(n);
         continue;
       }
     }
@@ -738,7 +977,16 @@ async function cropQuestionsFromPage(
   const results = [];
 
   for (const set of mergedSets) {
-    const raw = await extractRegion(set.colDef, set.top, set.bottom);
+    // 조각이 둘 이상이면(칼럼을 넘는 세트) 각 조각의 세로 여백을 먼저 걷어낸 뒤
+    // 이어붙인다 — 안 걷어내면 왼쪽 칼럼 아래쪽 빈 공간이 두 조각 사이에 커다란
+    // 흰 띠로 남는다.
+    const pieces = [];
+    for (const seg of set.segments) {
+      const raw = await extractRegion(seg.colDef, seg.top, seg.bottom);
+      if (!raw) continue;
+      pieces.push(set.segments.length > 1 ? await trimVerticalWhitespace(raw) : raw);
+    }
+    const raw = await stackVertically(pieces, Math.round(SEGMENT_GAP_PT * scale));
     if (!raw) continue;
     const image = await finalizeQuestionImage(raw, scale);
     // 그룹 전원이 같은 이미지를 공유한다 — 업로드 단계는 groupNumbers를 보고 첫
@@ -755,8 +1003,7 @@ async function cropQuestionsFromPage(
       const top =
         topOverrideByNumber.get(marker.number) ??
         Math.min(pageHeightPt, marker.y + marker.height + TOP_PAD);
-      const bottomY = findBottomBoundary(colDef, marker.y);
-      const bottom = bottomY !== null ? bottomY + TOP_PAD : BOTTOM_MARGIN;
+      const bottom = findBottomBoundary(colDef, marker.y);
 
       let raw = await extractRegion(colDef, top, bottom);
       if (!raw) {
@@ -765,7 +1012,7 @@ async function cropQuestionsFromPage(
       }
       const strip = stripByNumber.get(marker.number);
       if (strip) {
-        raw = await stackVertically(strip, raw);
+        raw = await stackVertically([strip, raw]);
         consumedNumbers.add(marker.number);
       }
       results.push({ number: marker.number, image: await finalizeQuestionImage(raw, scale) });
@@ -787,6 +1034,69 @@ async function cropQuestionsFromPage(
 // 페이지 폭 정확히 절반이 경계와 어긋나는 조판(국회직 등)에서 우측 칼럼 마커가
 // 통째로 사라지는 걸 막는다. 아래 extractQuestionsFromPdf가 두 전략을 순서대로
 // 시도해 더 나은 쪽을 고른다.
+// 페이지마다 같은 높이에 되풀이되는 꼬리말(쪽번호 "국어(9급) 6 - 1" 등)의 잉크
+// 윗선을 구한다. 칼럼의 마지막 문항은 아래에 다음 마커가 없어 페이지 바닥까지
+// 잘리는데, 그때 이 값을 경계로 삼아 꼬리말을 빼낸다.
+//
+// 네 가지 조건을 모두 만족해야 꼬리말로 본다 — 잘못 잡으면 마지막 문항의 아래쪽이
+// 통째로 잘려나가므로, 애매하면 아예 포기(null)하고 예전대로 페이지 바닥까지 둔다:
+//   (1) 칼럼의 맨 아래 덩어리일 것
+//   (2) 바로 위 본문과 줄간격의 FOOTER_GAP_RATIO배 넘게 떨어져 있을 것
+//   (3) 한두 줄로 얇을 것
+//   (4) 여러 페이지에서 같은 y에 되풀이될 것
+// 페이지가 하나뿐이면 (4)를 확인할 수 없으니 포기한다.
+function medianLineLead(lines) {
+  const gaps = [];
+  for (const col of new Set(lines.map((l) => l.col))) {
+    const arr = lines.filter((l) => l.col === col).sort((a, b) => b.y - a.y);
+    for (let i = 0; i + 1 < arr.length; i++) {
+      const g = arr[i].y - arr[i + 1].y;
+      if (g > 0.5) gaps.push(g);
+    }
+  }
+  if (gaps.length === 0) return null;
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)];
+}
+
+function computeFooterInkTopY(pageDataList) {
+  if (pageDataList.length < 2) return null;
+  const buckets = new Map();
+  for (let i = 0; i < pageDataList.length; i++) {
+    const data = pageDataList[i];
+    const lines = data.lines ?? [];
+    const lead = medianLineLead(lines);
+    if (!lead) continue;
+    const zoneTop = data.pageHeightPt * FOOTER_ZONE_RATIO;
+    for (const col of new Set(lines.map((l) => l.col))) {
+      const arr = lines.filter((l) => l.col === col).sort((a, b) => b.y - a.y);
+      if (arr.length < 2) continue;
+      // 맨 아래에서 위로, 줄간격 이내로 붙어 있는 만큼을 한 덩어리로 묶는다.
+      let start = arr.length - 1;
+      while (start > 0 && arr[start - 1].y - arr[start].y <= lead * 1.5) start--;
+      if (start === 0) continue; // 칼럼 전체가 한 덩어리 = 꼬리말이 아니다
+      const block = arr.slice(start);
+      if (block.length > FOOTER_MAX_LINES) continue;
+      if (arr[start - 1].y - arr[start].y <= lead * FOOTER_GAP_RATIO) continue;
+      if (block[0].y >= zoneTop) continue;
+      for (const l of block) {
+        const key = Math.round(l.y / FOOTER_Y_TOLERANCE_PT);
+        if (!buckets.has(key)) buckets.set(key, { pages: new Set(), inkTop: -Infinity });
+        const b = buckets.get(key);
+        b.pages.add(i);
+        b.inkTop = Math.max(b.inkTop, l.y + l.height);
+      }
+    }
+  }
+  const minPages = Math.max(2, Math.ceil(pageDataList.length / 2));
+  let inkTop = null;
+  for (const b of buckets.values()) {
+    if (b.pages.size < minPages) continue;
+    if (inkTop === null || b.inkTop > inkTop) inkTop = b.inkTop;
+  }
+  return inkTop;
+}
+
 async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
   // 1차 패스: 렌더링 없이 텍스트만 뽑아 페이지 폭 절반 기준으로 findQuestionMarkers를
   // 한 번 돌려본다.
@@ -832,6 +1142,16 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     docMarginX,
     columnSplitX,
   );
+  // 여백 x 기준으로 못 가른 중복이 남아 있으면 열람 순서로 마지막 정리를 한다.
+  // 여기까지 와서 중복이 남으면 아래 중복 감지가 하드 에러로 문제지를 통째로
+  // 버리므로, 그 전에 확실한 것만 살려낸다.
+  dropOutOfSequenceMarkers(
+    pageMarkerData.map((d) => d.data),
+    columnMode,
+    columnSplitX,
+  );
+
+  const footerInkTopY = computeFooterInkTopY(pageMarkerData.map((d) => d.data));
 
   const cropped = [];
   let carriedStrips = new Map();
@@ -844,6 +1164,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
       carriedStrips,
       columnMode,
       columnSplitX,
+      footerInkTopY,
     );
     carriedStrips = pendingStrips;
     cropped.push(...pageResults);
