@@ -7,6 +7,7 @@
 // 진행을 막지 않게 하고, 끝에 성공/실패/주의 목록을 모아 보여준다.
 
 import { createClient } from "@supabase/supabase-js";
+import fs from "node:fs";
 import { extractQuestionsFromPdf } from "./crop-question-images.mjs";
 
 function parseArgs(argv) {
@@ -173,9 +174,18 @@ async function main() {
   // 급수(level)가 없는 시험(경찰 공채/간부후보 등)은 --track으로 대상을 좁힌다.
   // 둘 다 없으면 그 시험유형 전체가 대상이 되어 의도치 않게 크게 도는 걸 막는다.
   const track = args.track;
-  if (!examTypeName || (!level && !track)) {
+
+  // --paper-ids <파일>: 문제지 id를 줄바꿈으로 나열한 파일로 대상을 직접 지정한다.
+  // 크롭 로직을 고친 뒤 "이 수정에 영향받는 문제지만" 골라 다시 도는 백필용이라,
+  // 시험유형/급수 경계와 상관없이 목록 그대로를 대상으로 삼는다(--force 암묵 적용
+  // — 애초에 이미 크롭된 것을 고쳐 올리는 게 목적이므로).
+  const paperIdsFile = args["paper-ids"];
+  if (!paperIdsFile && (!examTypeName || (!level && !track))) {
     console.error(
       "사용법: npm run batch-crop-questions -- --exam-type <시험유형명> (--level <급수> | --track <직류>) [--dry-run] [--concurrency 2] [--limit N] [--force]",
+    );
+    console.error(
+      "  또는: npm run batch-crop-questions -- --paper-ids <id목록파일> [--dry-run] [--concurrency N] [--limit N]",
     );
     process.exit(1);
   }
@@ -188,27 +198,58 @@ async function main() {
   }
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-  const { data: examType, error: examTypeError } = await supabase
-    .from("exam_types")
-    .select("id, name")
-    .eq("name", examTypeName)
-    .single();
-  if (examTypeError || !examType) {
-    console.error(`시험유형을 찾을 수 없습니다: ${examTypeName}`, examTypeError?.message);
-    process.exit(1);
+  let examType = null;
+  if (!paperIdsFile) {
+    const { data, error } = await supabase
+      .from("exam_types")
+      .select("id, name")
+      .eq("name", examTypeName)
+      .single();
+    if (error || !data) {
+      console.error(`시험유형을 찾을 수 없습니다: ${examTypeName}`, error?.message);
+      process.exit(1);
+    }
+    examType = data;
   }
 
-  const papers = await fetchAllRows(
+  let requestedIds = null;
+  if (paperIdsFile) {
+    requestedIds = fs
+      .readFileSync(paperIdsFile, "utf8")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (requestedIds.length === 0) {
+      console.error(`${paperIdsFile}에 문제지 id가 없습니다.`);
+      process.exit(1);
+    }
+  }
+
+  const allPapers = await fetchAllRows(
     supabase,
     "exam_papers",
     "id, title, year, round, level, file_path, question_count, choice_count",
     (q) => {
+      if (paperIdsFile) return q;
       let built = q.eq("exam_type_id", examType.id);
       if (level) built = built.eq("level", level);
       if (track) built = built.eq("track", track);
       return built;
     },
   );
+  const papers = requestedIds
+    ? (() => {
+        const byId = new Map(allPapers.map((p) => [p.id, p]));
+        const found = requestedIds.map((id) => byId.get(id)).filter(Boolean);
+        if (found.length !== requestedIds.length) {
+          console.error(
+            `목록의 id ${requestedIds.length - found.length}개를 exam_papers에서 못 찾았습니다. 중단합니다.`,
+          );
+          process.exit(1);
+        }
+        return found;
+      })()
+    : allPapers;
 
   const questionRows = await fetchAllRows(supabase, "questions", "id, paper_id");
   const questionIdToPaperId = new Map(questionRows.map((r) => [r.id, r.paper_id]));
@@ -217,12 +258,13 @@ async function main() {
     imageRows.map((r) => questionIdToPaperId.get(r.question_id)).filter(Boolean),
   );
 
-  let targets = force ? papers : papers.filter((p) => !paperIdsAlreadyCropped.has(p.id));
+  let targets = force || requestedIds ? papers : papers.filter((p) => !paperIdsAlreadyCropped.has(p.id));
   targets.sort((a, b) => a.year - b.year || a.round - b.round);
   if (limit) targets = targets.slice(0, limit);
 
+  const scopeLabel = requestedIds ? `목록 지정 ${requestedIds.length}개` : `${examTypeName} ${level ?? track}`;
   console.log(
-    `${examTypeName} ${level ?? track}: 전체 ${papers.length}개 중 ${paperIdsAlreadyCropped.size}개 이미 크롭됨, ${targets.length}개 처리 대상${force ? " (--force: 이미 크롭된 것도 다시)" : ""}${dryRun ? " (dry-run)" : ""} (동시성 ${concurrency})\n`,
+    `${scopeLabel}: 전체 ${papers.length}개 중 ${papers.filter((p) => paperIdsAlreadyCropped.has(p.id)).length}개 이미 크롭됨, ${targets.length}개 처리 대상${force || requestedIds ? " (이미 크롭된 것도 다시)" : ""}${dryRun ? " (dry-run)" : ""} (동시성 ${concurrency})\n`,
   );
 
   if (targets.length === 0) {
