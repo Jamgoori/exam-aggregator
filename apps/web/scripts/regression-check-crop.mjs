@@ -17,6 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import sharp from "sharp";
 
 function parseArgs(argv) {
   const args = {};
@@ -110,10 +111,51 @@ targets.sort((a, b) => a.id.localeCompare(b.id));
 if (limit) targets = targets.slice(0, limit);
 console.log(`이미 크롭된 문제지 ${targets.length}개 검사 (scale ${SCALE}, 동시성 ${concurrency})\n`);
 
-async function run(extract, buf, expectedCount) {
+// 문항 수만 보면 크롭이 반쪽이어도 통과한다 — 실측 사고: 2026 국회직 8급
+// 행정법총론은 25/25로 멀쩡히 통과했지만 좌측 칼럼은 본문 오른쪽이 잘리고 우측
+// 칼럼은 구분선과 옆 문제를 물고 있었다. 그래서 이미지 자체의 기하도 같이 잰다:
+//   widths      — 한 문제지 안에서 폭이 갈리면 프런트 확대율이 달라져 글씨 크기가
+//                 문항마다 달라 보인다(폭 통일이 깨진 신호)
+//   maxSkew     — 좌우 잉크 여백 차. 크면 내용이 한쪽으로 치우쳤다는 뜻
+//   edgeInkMax  — 이미지 좌우 맨 끝 열에 잉크가 닿은 비율. 높으면 칼럼 경계에서
+//                 잘렸거나 옆 칼럼을 물고 있다는 신호
+async function measureGeometry(images) {
+  let widths = new Set();
+  let maxSkew = 0;
+  let edgeInkMax = 0;
+  for (const buf of images) {
+    const { data, info } = await sharp(buf).greyscale().raw().toBuffer({ resolveWithObject: true });
+    const { width, height } = info;
+    widths.add(width);
+    let l = width;
+    let r = -1;
+    let edgeL = 0;
+    let edgeR = 0;
+    for (let y = 0; y < height; y++) {
+      const row = y * width;
+      for (let x = 0; x < width; x++) {
+        if (data[row + x] < 245) {
+          if (x < l) l = x;
+          if (x > r) r = x;
+        }
+      }
+      if (data[row] < 245) edgeL++;
+      if (data[row + width - 1] < 245) edgeR++;
+    }
+    if (r < 0) continue;
+    maxSkew = Math.max(maxSkew, Math.abs(l - (width - 1 - r)));
+    edgeInkMax = Math.max(edgeInkMax, edgeL / height, edgeR / height);
+  }
+  return { widthCount: widths.size, maxSkew, edgeInk: Number(edgeInkMax.toFixed(3)) };
+}
+
+async function run(extract, buf, expectedCount, withGeometry) {
   try {
     const out = await extract(buf, { scale: SCALE, expectedCount });
-    return { count: out.length, sets: out.filter((c) => c.groupNumbers).length, error: null };
+    const base = { count: out.length, sets: out.filter((c) => c.groupNumbers).length, error: null };
+    if (!withGeometry) return base;
+    const unique = [...new Set(out.map((c) => c.image))];
+    return { ...base, geom: await measureGeometry(unique) };
   } catch (err) {
     return { count: null, sets: 0, error: err.message };
   }
@@ -133,12 +175,13 @@ async function worker() {
       const { data: blob, error } = await supabase.storage.from("exam-papers").download(p.file_path);
       if (error) throw new Error(`download: ${error.message}`);
       const buf = Buffer.from(await blob.arrayBuffer());
-      const oldR = await run(extractOld, buf, p.question_count);
-      const newR = await run(extractNew, buf, p.question_count);
+      const oldR = await run(extractOld, buf, p.question_count, false);
+      const newR = await run(extractNew, buf, p.question_count, true);
       rec = {
         ...rec,
         old: oldR.count, oldErr: oldR.error, oldSets: oldR.sets,
         new: newR.count, newErr: newR.error, newSets: newR.sets,
+        geom: newR.geom,
       };
     } catch (err) {
       rec = { ...rec, fatal: err.message };
@@ -172,5 +215,20 @@ console.log(`세트 병합 감소: ${setDown.length}건  ← 0이어야 정상 (
 for (const r of setDown) console.log(`  [세트감소] ${r.year} ${r.title}: ${r.oldSets} -> ${r.newSets} id=${r.id}`);
 console.log(`세트 병합 증가: ${setUp.length}건`);
 console.log(`검사 실패: ${fatals.length}건`);
+
+// 개수가 맞아도 이미지가 반쪽일 수 있어 기하도 본다(measureGeometry 주석 참고).
+const SKEW_LIMIT_PX = 12; // scale 0.4 기준
+const EDGE_INK_LIMIT = 0.05; // 가장자리 열의 5% 넘게 잉크가 닿으면 잘림/침범 의심
+const mixedWidth = results.filter((r) => (r.geom?.widthCount ?? 1) > 1);
+const skewed = results.filter((r) => (r.geom?.maxSkew ?? 0) > SKEW_LIMIT_PX);
+const edgeCut = results.filter((r) => (r.geom?.edgeInk ?? 0) > EDGE_INK_LIMIT);
+console.log(`\n--- 이미지 기하 (개수만으로 못 잡는 것들) ---`);
+console.log(`문제지 안에서 폭이 갈림: ${mixedWidth.length}건  ← 0이어야 정상`);
+for (const r of mixedWidth.slice(0, 10)) console.log(`  ${r.year} ${r.title} (폭 ${r.geom.widthCount}종) id=${r.id}`);
+console.log(`좌우 치우침 > ${SKEW_LIMIT_PX}px: ${skewed.length}건`);
+for (const r of skewed.slice(0, 10)) console.log(`  ${r.year} ${r.title} (${r.geom.maxSkew}px) id=${r.id}`);
+console.log(`가장자리 잉크 > ${EDGE_INK_LIMIT * 100}%(잘림/옆칼럼 침범 의심): ${edgeCut.length}건`);
+for (const r of edgeCut.slice(0, 15)) console.log(`  ${r.year} ${r.title} (${(r.geom.edgeInk * 100).toFixed(1)}%) id=${r.id}`);
+
 console.log(`\n리포트: ${outPath}`);
-process.exit(regressions.length > 0 || setDown.length > 0 ? 1 : 0);
+process.exit(regressions.length > 0 || setDown.length > 0 || mixedWidth.length > 0 ? 1 : 0);

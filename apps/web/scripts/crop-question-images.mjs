@@ -390,6 +390,45 @@ export function computeColumnSplitX(pageMarkerDataList) {
   return Math.max(left.max + 1, right.min - COLUMN_SPLIT_RIGHT_BUFFER_PT);
 }
 
+// 픽셀을 잘라낼 좌/우 경계. computeColumnSplitX(분류용)를 그대로 쓰면 안 된다 —
+// 저쪽은 안내문 오분류를 막으려고 우측 마커보다 30pt 왼쪽으로 일부러 당겨둔 값이라,
+// 그 자리에서 이미지를 자르면 좌측 칼럼 본문의 오른쪽 끝이 잘려 나가고(실측: 2026
+// 국회직 8급 행정법총론 1·3·6·7번) 우측 칼럼 크롭은 칼럼 사이 구분선과 좌측 문제의
+// 꼬리까지 물고 들어온다(같은 문제지 2·4·5번). 분류 경계와 크롭 경계는 목적이 달라
+// 같은 값을 쓰면 안 되는데 지금까지 한 값을 공유하고 있었다.
+//
+// 크롭 경계는 **우측 칼럼 본문이 시작되는 자리 바로 앞**이어야 한다. 마커는 칼럼
+// 왼쪽 끝에 붙으므로 우측 클러스터의 최소 x가 곧 우측 칼럼의 왼쪽 끝이다. 거기서
+// 조금만 물러나 잡으면 좌측 칼럼은 넉넉히 살고 우측 칼럼엔 남의 것이 안 들어온다.
+const COLUMN_CROP_BACKOFF_PT = 8;
+export function computeColumnCropX(pageMarkerDataList) {
+  const xs = pageMarkerDataList
+    .flatMap((d) => d.markers.map((m) => m.x))
+    .sort((a, b) => a - b);
+  if (xs.length < 4) return null;
+
+  const clusters = [];
+  let current = [xs[0]];
+  for (let i = 1; i < xs.length; i++) {
+    if (xs[i] - current[current.length - 1] <= COLUMN_CLUSTER_TOLERANCE_PT) current.push(xs[i]);
+    else {
+      clusters.push(current);
+      current = [xs[i]];
+    }
+  }
+  clusters.push(current);
+  if (clusters.length < 2) return null;
+
+  const summarized = clusters
+    .map((c) => ({ min: c[0], count: c.length, x: c.reduce((a, b) => a + b, 0) / c.length }))
+    .sort((a, b) => b.count - a.count);
+  const first = summarized[0];
+  const second = summarized.find((c) => Math.abs(c.x - first.x) >= COLUMN_SPLIT_MIN_GAP_PT);
+  if (!second) return null;
+  const right = first.x < second.x ? second : first;
+  return right.min - COLUMN_CROP_BACKOFF_PT;
+}
+
 // 문서 전체 마커에서 칼럼별 최빈 x를 구한다. "문" 신호가 하나라도 있으면
 // 기존의 신뢰 마커 기반 필터가 더 정확하므로 계산하지 않는다(null 반환).
 export function computeDocMarginX(pageMarkerDataList, columnSplitX) {
@@ -650,6 +689,15 @@ const FOOTER_MAX_LINES = 2;
 // 다른 문항 ~1050px의 절반 → 표시 글씨 약 2배). 한 문제지 안에서 폭을 칼럼
 // 폭으로 통일해 표시 배율을 맞춘다.
 // 잉크가 하나도 없으면(빈 영역) null.
+//
+// 세로 여백은 걷어내고, 가로는 **폭을 유지한 채 내용만 한가운데로 옮긴다.** 칼럼
+// 크롭 영역은 지면 바깥 여백까지 포함하는데 그 여백이 좌우 비대칭이라(실측: 2026
+// 군무원 9급 국어는 왼쪽 칼럼이 x=6..360인데 본문은 57에서 시작 → 왼쪽에 51pt가
+// 남고 오른쪽엔 10pt만 남는다. 오른쪽 칼럼은 정확히 그 반대) 왼쪽 칼럼 문항은
+// 오른쪽으로, 오른쪽 칼럼 문항은 왼쪽으로 치우쳐 보였다(실측 좌우 여백 차 150px
+// 안팎). 폭 자체를 줄이면 안 된다 — 프런트가 w-full로 늘려 표시하므로 문항마다
+// 폭이 다르면 글씨 크기가 들쭉날쭉해진다(2026 지방직 9급 공업화학 8번 사례,
+// commit 167df71). 그래서 폭은 그대로 두고 내용 블록만 가운데로 재배치한다.
 async function trimVerticalWhitespace(rawPng) {
   const { data, info } = await sharp(rawPng)
     .greyscale()
@@ -658,13 +706,16 @@ async function trimVerticalWhitespace(rawPng) {
   const { width, height } = info;
   let top = -1;
   let bottom = -1;
+  let inkLeft = width;
+  let inkRight = -1;
   for (let y = 0; y < height; y++) {
     const rowStart = y * width;
     let hasInk = false;
     for (let x = 0; x < width; x++) {
       if (data[rowStart + x] < 245) {
         hasInk = true;
-        break;
+        if (x < inkLeft) inkLeft = x;
+        if (x > inkRight) inkRight = x;
       }
     }
     if (hasInk) {
@@ -673,8 +724,22 @@ async function trimVerticalWhitespace(rawPng) {
     }
   }
   if (top === -1) return null;
-  return sharp(rawPng)
-    .extract({ left: 0, top, width, height: bottom - top + 1 })
+
+  const contentWidth = inkRight - inkLeft + 1;
+  const padLeft = Math.floor((width - contentWidth) / 2);
+  const region = sharp(rawPng).extract({
+    left: inkLeft,
+    top,
+    width: contentWidth,
+    height: bottom - top + 1,
+  });
+  if (padLeft <= 0 && width === contentWidth) return region.png().toBuffer();
+  return region
+    .extend({
+      left: padLeft,
+      right: width - contentWidth - padLeft,
+      background: "#ffffff",
+    })
     .png()
     .toBuffer();
 }
@@ -740,12 +805,16 @@ async function cropQuestionsFromPage(
   columnMode = "double",
   columnSplitX = null,
   footerInkTopY = null,
+  columnCropX = null,
 ) {
   const { markers, groups, lines = [], pageWidthPt, pageHeightPt } = markerData;
   if (markers.length === 0) return { results: [], pendingStrips: carriedStrips };
-  const pageLead = medianLineLead(lines);
 
   const { left, right, half } = splitIntoColumns(markers, pageWidthPt, columnMode, columnSplitX);
+  // 분류는 half(columnSplitX), 픽셀 자르기는 cropX로 나눠 쓴다 — 자세한 이유는
+  // computeColumnCropX 주석. columnCropX가 없으면(1단이거나 클러스터를 못 찾으면)
+  // 예전처럼 half를 그대로 쓴다.
+  const cropX = columnCropX ?? half;
   const { buffer: pageImage, width: pageWidthPx, height: pageHeightPx } =
     await renderPageToPng(page, scale);
 
@@ -753,8 +822,8 @@ async function cropQuestionsFromPage(
     columnMode === "single"
       ? [{ key: "L", markers: left, xLeftPt: PAGE_MARGIN_X, xRightPt: pageWidthPt - PAGE_MARGIN_X }]
       : [
-          { key: "L", markers: left, xLeftPt: PAGE_MARGIN_X, xRightPt: half - COLUMN_GAP },
-          { key: "R", markers: right, xLeftPt: half + COLUMN_GAP, xRightPt: pageWidthPt - PAGE_MARGIN_X },
+          { key: "L", markers: left, xLeftPt: PAGE_MARGIN_X, xRightPt: cropX - COLUMN_GAP },
+          { key: "R", markers: right, xLeftPt: cropX + COLUMN_GAP, xRightPt: pageWidthPt - PAGE_MARGIN_X },
         ];
 
   // (top, bottom)은 PDF 좌표(pt, y가 클수록 위)를 받아 이미지 좌표(y가 아래로
@@ -820,34 +889,31 @@ async function cropQuestionsFromPage(
   // 군무원 9급 국어 3번 — 본문이 y=198에서 끝나는데 꼬리말이 y=44라 154pt 공백 +
   // 칼럼 폭에 잘린 "국어(9"가 붙었다).
   //
-  // 문서 전체에서 구한 꼬리말 위치(footerInkTopY) 하나만 믿고 자르면 안 된다 —
-  // 그 값은 다른 페이지에서 나온 값이라, 이 페이지 이 칼럼의 마지막 문항이 그보다
-  // 아래에서 시작하면 위/아래가 뒤집혀 문항이 통째로 사라진다(실측: 2015 국가직
-  // 9급 수학 3번 — 마커가 y=195.7인데 footerInkTopY가 195.87로 잡혀 크롭 영역이
-  // 음수가 됐다). 그래서 **두 신호가 일치할 때만** 자른다:
-  //   (a) 이 문항의 줄을 따라 내려가다 줄간격의 FOOTER_GAP_RATIO배가 넘는 여백을
-  //       만나 실제로 끊기고,
-  //   (b) 그 여백 아래에 있는 게 정말로 그 되풀이 꼬리말일 것.
-  // 하나라도 어긋나면 예전대로 페이지 바닥까지 둔다 — 꼬리말이 좀 붙는 건 고칠 수
-  // 있지만 문항 내용이 잘려나가는 건 되돌릴 수 없다.
+  // footerInkTopY는 **이 페이지에서 실제로 관측된** 꼬리말 잉크 윗선이다(문서
+  // 절반 이상의 페이지에 같은 자리로 나타날 때만 값이 들어온다). 문서 전체에 값
+  // 하나를 쓰면 다른 페이지에서 나온 y가 이 페이지에선 본문 한복판일 수 있어
+  // 문항이 통째로 사라진다(실측: 2015 국가직 9급 수학 3번 — 마커 y=195.7인데
+  // 문서값이 195.87이라 크롭 영역이 뒤집혔다). 그래도 남는 위험이 있으니 마커보다
+  // 확실히 아래일 때만 쓴다.
+  //
+  // 칼럼을 가리지 않고 이 페이지 전체에 적용한다 — 꼬리말이 칼럼 경계에 걸치면
+  // 텍스트 조각은 시작 x 때문에 한쪽 칼럼에만 기록되지만 픽셀은 반대쪽 칼럼
+  // 크롭에도 들어온다(실측: 2026 군무원 9급 국어 15·19번에 "국어(9급) 6 - 3"의
+  // 오른쪽 조각이 남았다 — 그 줄은 왼쪽 칼럼으로 기록돼 오른쪽 칼럼 검사에서
+  // 안 보였다).
   function bottomForLastInColumn(colDef, fromY) {
-    if (footerInkTopY === null || pageLead === null) return BOTTOM_MARGIN;
-    const colLines = lines
-      .filter((l) => l.col === colDef.key && l.y < fromY)
-      .sort((a, b) => b.y - a.y);
-    if (colLines.length < 2) return BOTTOM_MARGIN;
-    let endIdx = 0;
-    for (let i = 0; i + 1 < colLines.length; i++) {
-      if (colLines[i].y - colLines[i + 1].y > pageLead * FOOTER_GAP_RATIO) break;
-      endIdx = i + 1;
+    if (footerInkTopY === null || footerInkTopY >= fromY) return BOTTOM_MARGIN;
+    // 꼬리말보다 위에 있는, 이 칼럼의 마지막 본문 줄
+    let end = null;
+    for (const l of lines) {
+      if (l.col !== colDef.key) continue;
+      if (l.y >= fromY || l.y <= footerInkTopY) continue;
+      if (end === null || l.y < end.y) end = l;
     }
-    if (endIdx === colLines.length - 1) return BOTTOM_MARGIN; // 끊긴 데 없음 = 꼬리말 없음
-    const belowGap = colLines[endIdx + 1];
-    if (Math.abs(belowGap.y + belowGap.height - footerInkTopY) > FOOTER_Y_TOLERANCE_PT * 2) {
-      return BOTTOM_MARGIN; // 여백 아래에 있는 게 꼬리말이 아니다(그림 여백 등)
-    }
-    const end = colLines[endIdx];
-    return (end.y - end.height * 0.3 + footerInkTopY) / 2;
+    if (end === null) return BOTTOM_MARGIN;
+    const endInkBottom = end.y - end.height * 0.3;
+    if (endInkBottom <= footerInkTopY) return BOTTOM_MARGIN;
+    return (endInkBottom + footerInkTopY) / 2;
   }
 
   const mergedSets = []; // { numbers, segments: [{ colDef, top, bottom }] }
@@ -1059,8 +1125,21 @@ function medianLineLead(lines) {
   return gaps[Math.floor(gaps.length / 2)];
 }
 
-function computeFooterInkTopY(pageDataList) {
-  if (pageDataList.length < 2) return null;
+// 페이지별 꼬리말 잉크 윗선을 구한다(없으면 null). 반환값은 페이지 인덱스 배열.
+//
+// 문서 전체에 하나의 값을 쓰면 안 된다 — 다른 페이지에서 나온 y가 이 페이지에선
+// 본문 한복판일 수 있어 문항이 통째로 사라진다(실측: 2015 국가직 9급 수학 3번,
+// 마커 y=195.7 vs 문서값 195.87). 그래서 "되풀이 여부"만 문서 전체로 판정하고,
+// 실제 자르는 y는 **그 페이지에 실제로 있는 꼬리말 줄**에서 가져온다.
+//
+// 또 꼬리말은 칼럼 경계에 걸쳐 있을 수 있다(실측: 2026 군무원 9급 국어의
+// "국어(9급) 6 - 3"은 x=323.6에서 시작해 칼럼 경계 364를 넘어 오른쪽 칼럼
+// 크롭 영역까지 뻗는다). 텍스트 조각은 시작 x로 왼쪽 칼럼에 기록되지만 픽셀은
+// 오른쪽 칼럼 크롭에도 들어오므로, 페이지 값은 **칼럼과 무관하게 그 페이지 전체**
+// 에 적용해야 한다(실측: 이걸 칼럼별로만 적용했더니 15·19번에 쪽번호가 남았다).
+function computeFooterInkTopByPage(pageDataList) {
+  const empty = pageDataList.map(() => null);
+  if (pageDataList.length < 2) return empty;
   const buckets = new Map();
   for (let i = 0; i < pageDataList.length; i++) {
     const data = pageDataList[i];
@@ -1081,20 +1160,55 @@ function computeFooterInkTopY(pageDataList) {
       if (block[0].y >= zoneTop) continue;
       for (const l of block) {
         const key = Math.round(l.y / FOOTER_Y_TOLERANCE_PT);
-        if (!buckets.has(key)) buckets.set(key, { pages: new Set(), inkTop: -Infinity });
+        if (!buckets.has(key)) buckets.set(key, { perPage: new Map() });
         const b = buckets.get(key);
-        b.pages.add(i);
-        b.inkTop = Math.max(b.inkTop, l.y + l.height);
+        b.perPage.set(i, Math.max(b.perPage.get(i) ?? -Infinity, l.y + l.height));
       }
     }
   }
+  // 문서 절반 이상의 페이지에 같은 자리로 나타나야 되풀이 꼬리말로 인정한다.
   const minPages = Math.max(2, Math.ceil(pageDataList.length / 2));
-  let inkTop = null;
+  const result = empty;
   for (const b of buckets.values()) {
-    if (b.pages.size < minPages) continue;
-    if (inkTop === null || b.inkTop > inkTop) inkTop = b.inkTop;
+    if (b.perPage.size < minPages) continue;
+    for (const [pageIdx, inkTop] of b.perPage) {
+      if (result[pageIdx] === null || inkTop > result[pageIdx]) result[pageIdx] = inkTop;
+    }
   }
-  return inkTop;
+  return result;
+}
+
+// 한 문제지 안에서 이미지 폭을 전부 같게 맞춘다(좁은 쪽에 흰 여백을 양옆으로
+// 덧대며, 내용은 절대 자르지 않는다). 프런트가 이미지를 컨테이너 폭(w-full)에
+// 맞춰 늘려 보여주므로, 폭이 다르면 그만큼 확대율이 달라져 문항마다 글씨 크기가
+// 달라 보인다. 좌우 칼럼 폭이 실제로 다른 조판이 있어서(실측: 2026 국회직 8급
+// 행정법총론 — 좌 342pt / 우 367pt) 크롭 단계만으로는 폭이 안 맞는다.
+async function normalizeWidths(cropped) {
+  if (cropped.length === 0) return;
+  // 세트 병합분은 여러 번호가 같은 버퍼를 공유하므로 버퍼 단위로 한 번만 처리한다.
+  const unique = new Map();
+  for (const c of cropped) {
+    if (!unique.has(c.image)) unique.set(c.image, await sharp(c.image).metadata());
+  }
+  const target = Math.max(...[...unique.values()].map((m) => m.width));
+  const resized = new Map();
+  for (const [buf, meta] of unique) {
+    if (meta.width === target) continue;
+    const extra = target - meta.width;
+    const left = Math.floor(extra / 2);
+    resized.set(
+      buf,
+      await sharp(buf)
+        .extend({ left, right: extra - left, background: "#ffffff" })
+        .webp({ lossless: true })
+        .toBuffer(),
+    );
+  }
+  if (resized.size === 0) return;
+  for (const c of cropped) {
+    const next = resized.get(c.image);
+    if (next) c.image = next;
+  }
 }
 
 async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
@@ -1125,6 +1239,12 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
   const columnSplitX = useColumnSplitOverride
     ? (computeColumnSplitX(pageMarkerData.map((d) => d.data)) ?? roughColumnSplitX)
     : null;
+  // 크롭 경계는 분류 경계와 별개로 구한다(computeColumnCropX 주석 참고). 예전
+  // 방식(페이지 폭 절반)으로 도는 문제지는 건드리지 않는다 — 이미 잘 나오던
+  // 수천 장의 동작을 그대로 유지하기 위해서다.
+  const columnCropX = useColumnSplitOverride
+    ? computeColumnCropX(pageMarkerData.map((d) => d.data))
+    : null;
   const columnMode =
     columnSplitX != null || pageMarkerData.some((d) => d.data.markers.some((m) => m.x >= d.data.pageWidthPt / 2))
       ? "double"
@@ -1151,7 +1271,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     columnSplitX,
   );
 
-  const footerInkTopY = computeFooterInkTopY(pageMarkerData.map((d) => d.data));
+  const footerInkTopByPage = computeFooterInkTopByPage(pageMarkerData.map((d) => d.data));
 
   const cropped = [];
   let carriedStrips = new Map();
@@ -1164,7 +1284,8 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
       carriedStrips,
       columnMode,
       columnSplitX,
-      footerInkTopY,
+      footerInkTopByPage[p - 1],
+      columnCropX,
     );
     carriedStrips = pendingStrips;
     cropped.push(...pageResults);
@@ -1172,6 +1293,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
   }
 
   cropped.sort((a, b) => a.number - b.number);
+  await normalizeWidths(cropped);
 
   const seen = new Set();
   for (const c of cropped) {

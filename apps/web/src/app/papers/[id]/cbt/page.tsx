@@ -17,7 +17,15 @@ export default async function CbtPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  // 로컬 개발에서 크롭 이미지·레이아웃을 확인하려면 매번 로그인해야 해서 번거롭다.
+  // .env.local에 DEV_SKIP_CBT_AUTH=1을 두면 로그인 없이 열 수 있다.
+  // `process.env.NODE_ENV !== "production"` 조건을 반드시 함께 둔다 — 빌드 시 이
+  // 분기가 통째로 죽어 배포본에는 우회 경로가 아예 남지 않는다. 서버에 환경변수를
+  // 잘못 켜도 프로덕션에서는 동작하지 않는다.
+  const devSkipAuth =
+    process.env.NODE_ENV !== "production" && process.env.DEV_SKIP_CBT_AUTH === "1";
+
+  if (!user && !devSkipAuth) {
     redirect(`/login?next=${encodeURIComponent(`/papers/${id}/cbt`)}`);
   }
 
@@ -80,7 +88,7 @@ export default async function CbtPage({
   // 명시적으로 저장된 값이 없으면(한 번도 자물쇠를 잠근 적 없음) null로 구분해서
   // 넘긴다 — 전체보기로 "시작"하는 것과 전체보기를 "기본값으로 잠가둔 것"은
   // 자물쇠 아이콘 표시상 서로 다른 상태라 여기서 뭉개면 안 된다.
-  const rawDefaultViewMode = user.user_metadata?.default_cbt_view_mode;
+  const rawDefaultViewMode = user?.user_metadata?.default_cbt_view_mode;
   const defaultViewMode: "full" | "single" | null =
     rawDefaultViewMode === "single" || rawDefaultViewMode === "full"
       ? rawDefaultViewMode
