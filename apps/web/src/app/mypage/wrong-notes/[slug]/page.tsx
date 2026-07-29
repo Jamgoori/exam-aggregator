@@ -1,7 +1,9 @@
+import { cache, Suspense } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import {
+  getSubjectBySlug,
   getSubjectWrongNoteOverview,
   getSubjectWrongNoteQuestions,
 } from "@/lib/wrong-notes";
@@ -12,11 +14,21 @@ import { subjectColor } from "@/lib/subject-colors";
 
 type ViewKey = "papers" | "questions";
 
+// 요약 스탯과 목록은 같은 조회 결과를 쓰는데 화면에서 떨어져 있어(탭 줄이 사이에
+// 낀다) 각자 따로 기다려야 한다. 같은 요청 안에서는 한 번만 조회되도록 감싼다.
+const loadQuestions = cache(getSubjectWrongNoteQuestions);
+const loadOverview = cache(getSubjectWrongNoteOverview);
+
 // 마이페이지 오답노트 탭에서 과목을 골랐을 때 나오는 화면. 기본 "문제지별"은 문제지
 // 요약 카드 목록(누르면 회독별 기록·해설), "문항 모아보기"는 그 과목에서 틀린 문항을
 // 문제지 경계 없이 한 목록으로 펼친다. 어느 탭을 보든 다른 탭 데이터는 조회하지 않게
 // ?view 쿼리로 서버에서 갈라 렌더한다(회독 많은 계정에서 무거운 문항 조립을 필요할
 // 때만 하려는 분리). 전환 중 표시는 WrongNoteViewTabs가 담당한다.
+//
+// 오답이 많이 쌓인 과목은 집계에 시간이 걸리는데, 예전에는 그게 끝날 때까지 화면에
+// 아무것도 나오지 않았다. 지금은 과목명·탭 같은 뼈대를 먼저 보여주고(가벼운 과목
+// 조회만 기다린다), 요약 스탯과 목록만 준비되는 대로 채운다 — 기다리는 동안에도
+// 탭을 바로 누를 수 있다.
 export default async function SubjectWrongNotePage({
   params,
   searchParams,
@@ -39,54 +51,87 @@ export default async function SubjectWrongNotePage({
     );
   }
 
-  if (view === "questions") {
-    const note = await getSubjectWrongNoteQuestions(supabase, user.id, slug);
-    if (!note) notFound();
-    const hasAny = note.unresolvedCount + note.resolvedCount > 0;
-    return (
-      <SubjectWrongNoteShell
-        subject={note.subject}
-        view="questions"
-        summary={
-          hasAny ? (
-            <WrongNoteSummary
-              unresolved={note.unresolvedCount}
-              resolved={note.resolvedCount}
-            />
-          ) : null
-        }
-      >
-        <SubjectWrongNoteQuestions
-          questions={note.questions}
-          unresolvedCount={note.unresolvedCount}
-          subjectSlug={slug}
-        />
-      </SubjectWrongNoteShell>
-    );
-  }
-
-  const note = await getSubjectWrongNoteOverview(supabase, user.id, slug);
-  if (!note) notFound();
-
-  const { subject, papers } = note;
-  const totalUnresolved = papers.reduce((sum, p) => sum + p.unresolvedCount, 0);
-  const totalResolved = papers.reduce((sum, p) => sum + p.resolvedCount, 0);
-  const totalWrong = totalUnresolved + totalResolved;
+  const subject = await getSubjectBySlug(supabase, slug);
+  if (!subject) notFound();
 
   return (
     <SubjectWrongNoteShell
       subject={subject}
-      view="papers"
+      view={view}
       summary={
-        totalWrong > 0 ? (
-          <WrongNoteSummary
-            unresolved={totalUnresolved}
-            resolved={totalResolved}
-            paperCount={papers.length}
-          />
-        ) : null
+        <Suspense fallback={<SummarySkeleton />}>
+          {view === "questions" ? (
+            <QuestionsSummary supabase={supabase} userId={user.id} slug={slug} />
+          ) : (
+            <PapersSummary supabase={supabase} userId={user.id} slug={slug} />
+          )}
+        </Suspense>
       }
     >
+      <Suspense fallback={<ListSkeleton />}>
+        {view === "questions" ? (
+          <QuestionsView supabase={supabase} userId={user.id} slug={slug} />
+        ) : (
+          <PapersView supabase={supabase} userId={user.id} slug={slug} />
+        )}
+      </Suspense>
+    </SubjectWrongNoteShell>
+  );
+}
+
+type ViewProps = {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  userId: string;
+  slug: string;
+};
+
+async function QuestionsSummary({ supabase, userId, slug }: ViewProps) {
+  const note = await loadQuestions(supabase, userId, slug);
+  if (!note || note.unresolvedCount + note.resolvedCount === 0) return null;
+  return (
+    <WrongNoteSummary unresolved={note.unresolvedCount} resolved={note.resolvedCount} />
+  );
+}
+
+async function QuestionsView({ supabase, userId, slug }: ViewProps) {
+  const note = await loadQuestions(supabase, userId, slug);
+  if (!note) notFound();
+  return (
+    <SubjectWrongNoteQuestions
+      questions={note.questions}
+      unresolvedCount={note.unresolvedCount}
+      subjectSlug={slug}
+    />
+  );
+}
+
+async function PapersSummary({ supabase, userId, slug }: ViewProps) {
+  const note = await loadOverview(supabase, userId, slug);
+  if (!note) return null;
+  const totalUnresolved = note.papers.reduce((sum, p) => sum + p.unresolvedCount, 0);
+  const totalResolved = note.papers.reduce((sum, p) => sum + p.resolvedCount, 0);
+  if (totalUnresolved + totalResolved === 0) return null;
+  return (
+    <WrongNoteSummary
+      unresolved={totalUnresolved}
+      resolved={totalResolved}
+      paperCount={note.papers.length}
+    />
+  );
+}
+
+async function PapersView({ supabase, userId, slug }: ViewProps) {
+  const note = await loadOverview(supabase, userId, slug);
+  if (!note) notFound();
+
+  const { papers } = note;
+  const totalWrong = papers.reduce(
+    (sum, p) => sum + p.unresolvedCount + p.resolvedCount,
+    0,
+  );
+
+  return (
+    <>
       {totalWrong > 0 && (
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
           시험지를 눌러 회독 기록·해설을 보거나, 아래 버튼으로 바로 다시 풀 수 있어요.
@@ -114,7 +159,42 @@ export default async function SubjectWrongNotePage({
           }))}
         />
       )}
-    </SubjectWrongNoteShell>
+    </>
+  );
+}
+
+// 기다리는 동안 자리를 잡아두는 뼈대. 실제 내용이 도착하면 그 자리에 그대로 들어차서
+// 화면이 위아래로 튀지 않는다(loading.tsx와 같은 skeleton 스타일).
+function SummarySkeleton() {
+  return (
+    <div className="flex items-center gap-4 rounded-xl bg-zinc-50 px-4 py-3 dark:bg-zinc-800/40">
+      <div className="skeleton h-10 w-20 rounded-lg" />
+      <span className="h-8 w-px bg-zinc-200 dark:bg-zinc-700" />
+      <div className="skeleton h-10 w-20 rounded-lg" />
+    </div>
+  );
+}
+
+function ListSkeleton() {
+  return (
+    <div className="flex flex-col gap-3">
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          className="flex flex-col gap-2 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700"
+        >
+          <div className="flex items-center gap-2">
+            <div className="skeleton h-5 w-10 rounded" />
+            <div className="skeleton h-5 w-56 rounded-lg" />
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="skeleton h-4 w-14 rounded-full" />
+            <div className="skeleton h-4 w-24 rounded-lg" />
+            <div className="skeleton h-4 w-28 rounded-lg" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

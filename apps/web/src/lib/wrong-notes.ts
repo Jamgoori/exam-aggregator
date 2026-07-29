@@ -461,6 +461,20 @@ function toQuestionDetail(
 // 수)만으로 돌려준다. 문항 이미지·해설은 문제지 오답노트 페이지에서 그 문제지 것만
 // 받는다 — 회독이 쌓여도 과목 페이지가 무거워지지 않게 하려는 분리다.
 // 과목 slug가 존재하지 않으면 null.
+// 과목 slug → 과목. 오답 집계와 무관하게 가벼워서, 무거운 목록을 기다리는 동안
+// 화면 뼈대(과목명·탭)를 먼저 그리는 데 쓴다. 없는 slug면 null(404 처리용).
+export async function getSubjectBySlug(
+  supabase: Supabase,
+  slug: string,
+): Promise<Subject | null> {
+  const { data } = await supabase
+    .from("subjects")
+    .select("*")
+    .eq("slug", slug)
+    .maybeSingle();
+  return (data as Subject) ?? null;
+}
+
 export async function getSubjectWrongNoteOverview(
   supabase: Supabase,
   userId: string,
