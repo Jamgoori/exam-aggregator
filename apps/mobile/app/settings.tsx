@@ -15,6 +15,7 @@ import {
   requestNotificationPermission,
   scheduleDailyReminder,
 } from "../src/lib/reminders";
+import { getPausedSubjectIds } from "../src/lib/review-preferences";
 import { getWrongNoteGroupsCached } from "../src/lib/wrong-notes";
 import { useAuth } from "../src/providers/auth-provider";
 import { useColors } from "../src/theme/colors";
@@ -57,8 +58,17 @@ export default function SettingsScreen() {
           return;
         }
         // 알림 문구에 남은 오답 수를 넣는다. 못 읽어도(오프라인 등) 일반 문구로 예약한다.
-        const unresolved = await getWrongNoteGroupsCached()
-          .then(({ groups }) => groups.reduce((sum, g) => sum + g.unresolvedCount, 0))
+        // 복습에서 쉬고 있는 과목은 뺀다 — 끈 과목의 숫자를 매일 밤 다시 보여주면
+        // 설정이 아무 일도 안 한 것처럼 보인다.
+        const unresolved = await Promise.all([
+          getWrongNoteGroupsCached(),
+          getPausedSubjectIds().catch(() => new Set<string>()),
+        ])
+          .then(([{ groups }, paused]) =>
+            groups
+              .filter((g) => !paused.has(g.subject.id))
+              .reduce((sum, g) => sum + g.unresolvedCount, 0),
+          )
           .catch(() => 0);
         await scheduleDailyReminder(unresolved);
         setReminderOn(true);

@@ -1254,3 +1254,39 @@ set
     ) at time zone 'Asia/Seoul'
   )
 where srs_due_at is null and wrong_count > 0;
+
+-- ── 복습 설정(과목 보류) ────────────────────────────────────────────────────
+-- 복습 큐에서 특정 과목을 잠시 빼두는 설정. "지금은 국어만 판다" 같은 시기에
+-- 다른 과목이 매일 큐에 섞여 들어오면 복습 자체를 안 하게 되기 때문이다.
+--
+-- 담을 과목을 고르는 include 목록이 아니라 뺄 과목을 고르는 exclude 목록인 이유:
+-- 나중에 새로 공부를 시작한 과목은 기본으로 켜져 있어야 한다. include 목록이면
+-- 새 과목이 조용히 빠진 채로 남고, 사용자는 그걸 "복습에 안 뜬다"는 버그로 읽는다.
+--
+-- 즐겨찾는 과목(subject_bookmarks)과 겹치지 않게 별도 테이블로 둔다 — 그쪽은
+-- 과목 탐색용 바로가기라, 즐겨찾기를 지웠다고 복습이 멈추면 안 된다.
+create table if not exists review_preferences (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  paused_subject_ids uuid[] not null default '{}',
+  updated_at timestamptz not null default now()
+);
+
+alter table review_preferences enable row level security;
+
+-- 이 테이블은 표시 설정만 담는다(어떤 과목을 큐에서 빼둘지). 정답·채점·멤버십과
+-- 무관해서 본인 행 쓰기를 열어도 얻을 수 있는 권한이 없다. 실제 복습일
+-- (user_question_status.srs_due_at)은 여전히 쓰기 정책이 없어 서버만 고친다 —
+-- 보류 해제 시 재예약도 그래서 서버 경로로만 돈다.
+drop policy if exists "select own review preferences" on review_preferences;
+create policy "select own review preferences" on review_preferences
+  for select to authenticated using (auth.uid() = user_id);
+
+drop policy if exists "insert own review preferences" on review_preferences;
+create policy "insert own review preferences" on review_preferences
+  for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "update own review preferences" on review_preferences;
+create policy "update own review preferences" on review_preferences
+  for update to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);

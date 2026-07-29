@@ -10,6 +10,7 @@ export const unstable_instant = {
 
 import { createClient } from "@/lib/supabase/server";
 import { HomeExamBrowser } from "@/components/home-exam-browser";
+import { ReviewNudgeModal } from "@/components/review-nudge-modal";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
@@ -70,6 +71,10 @@ export default async function Home({
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
+      {/* 로그인 사용자에게만, 하루 한 번, 오늘 복습이 남아 있을 때만 뜬다. 판정과
+          조회는 전부 컴포넌트가 마운트된 뒤에 한다 — 홈 서버 렌더에 복습 요약을
+          넣으면 모두가 매번 무거운 조회를 하게 된다. */}
+      {userId && <ReviewNudgeModal />}
       <HomeExamBrowser
         heroText={
           <>

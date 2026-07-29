@@ -26,6 +26,8 @@ export * from "./dedup-papers";
 export * from "./srs";
 export * from "./membership";
 export * from "./review-queue";
+export * from "./review-pick";
+export * from "./review-resume";
 
 // 오답노트 집계 (표시는 각 앱, 판정 규칙은 여기 하나)
 export * from "./wrong-notes";
