@@ -57,6 +57,19 @@ function parseArgs(argv) {
 // 항상 그 인용이 시작하는 지점에서만 낫표가 열린다) 공백과 똑같이 신뢰할 수 있다.
 const QUESTION_MARKER_RE = /^(?:문\s*)?(\d{1,3})\.(?:\s|「|$)/;
 
+// 법원직 조판은 마침표 대신 각괄호를 쓴다: "【문 1】다음 중 기본권 제한에 관한…".
+// 각괄호와 "문"이 함께 오는 조합은 지문 인용이나 보기 목록에 나오지 않아 그 자체로
+// 신뢰할 수 있는 마커다(과목 머리글 "【헌 법 25문】"은 여는 괄호 다음이 "문"이
+// 아니라 안 걸린다). 조각이 "【" / "문" / "1" / "】"로 쪼개져 나오는 경우까지
+// 잡으려고 findQuestionMarkers에서 같은 줄의 조각을 이어붙인 문자열에도 적용한다.
+const BRACKET_QUESTION_MARKER_RE = /^【\s*문\s*(\d{1,3})\s*】/;
+// 같은 마커가 조각으로 갈려 나오는 자리가 제각각이다(한 문제지 안에서도 섞인다):
+//   "【문" + "2】<표>와…"        (실측: 2020 법원직 9급 한국사 2·5·9번)
+//   "【"   + "문 1】다음 설명…"   (실측: 2014 법원직 9급 민법 1·23·24·25번)
+// 그래서 여는 "【" 조각을 만나면 같은 줄의 뒤 조각 몇 개를 이어붙인 문자열에
+// 마커 정규식을 다시 걸어본다. 좌표는 여는 조각(칼럼 왼쪽 끝)을 쓴다.
+const BRACKET_JOIN_LOOKAHEAD = 4;
+
 // 완화형 마커: 마침표 뒤에 공백 없이 본문이 곧장 붙는 조판을 잡는다(실측: 2017
 // 경찰간부 경찰학개론 `4.「경찰법」과 …`가 40문항 중 14개, 2014 경찰간부
 // 형사소송법 `10.상소에 관한 …`이 1개 통째로 누락). 다만 이 형태를 처음부터
@@ -244,6 +257,39 @@ async function findQuestionMarkers(page, columnSplitX) {
     // "문"이 절대 안 붙는다. 이 유무가 위치(x)보다 훨씬 믿을 수 있는 신호라
     // filterMarginMarkers에서 "문 확인된 마커"를 우선 신뢰하는 데 쓴다.
     const hasMun = /^문\s*/.test(str) || hasMunBefore(itemX, itemY);
+
+    // 각괄호형(법원직)은 "문"이 괄호 안에 있어 hasMun 정규식(^문)에 안 걸리지만
+    // 실제로는 가장 믿을 수 있는 마커다 — 신뢰 마커로 표시해 filterMarginMarkers가
+    // 여백 기준을 이걸로 세우게 한다.
+    const bracketMatch = BRACKET_QUESTION_MARKER_RE.exec(str);
+    if (bracketMatch) {
+      const [, , , , x, y] = item.transform;
+      markers.push({ number: Number(bracketMatch[1]), x, y, height: item.height, hasMun: true });
+      continue;
+    }
+
+    // 조각이 "【" 뒤 어딘가에서 갈린 경우: 같은 줄의 뒤 조각을 이어붙여 다시 본다.
+    if (str.startsWith("【")) {
+      let joined = str;
+      for (let j = i + 1; j < items.length && j <= i + BRACKET_JOIN_LOOKAHEAD; j++) {
+        const nextItem = items[j];
+        const [, , , , , nextY] = nextItem.transform;
+        if (Math.abs(nextY - itemY) > 2) break;
+        joined += nextItem.str;
+        const joinedMatch = BRACKET_QUESTION_MARKER_RE.exec(joined);
+        if (joinedMatch) {
+          markers.push({
+            number: Number(joinedMatch[1]),
+            x: itemX,
+            y: itemY,
+            height: item.height,
+            hasMun: true,
+          });
+          break;
+        }
+      }
+      continue;
+    }
 
     const match = QUESTION_MARKER_RE.exec(str);
     if (match) {
@@ -1303,6 +1349,10 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     seen.add(c.number);
   }
 
+  // cropped 외에 판정 결과도 같이 돌려준다 — 호출자가 "1단으로 봤는데 실측은
+  // 2단"인 오판을 걸러내는 데 쓴다(extractQuestionsFromPdf 주석 참고).
+  cropped.columnMode = columnMode;
+  cropped.markerData = pageMarkerData.map((d) => d.data);
   return cropped;
 }
 
@@ -1331,7 +1381,24 @@ export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage, ex
   } catch (err) {
     legacyError = err;
   }
-  if (legacyResult && (expectedCount == null || legacyResult.length === expectedCount)) {
+  // 개수가 맞아도 legacy를 그대로 믿으면 안 되는 경우가 하나 있다: legacy가 이
+  // 문서를 1단으로 판정했는데 실측 마커는 뚜렷하게 두 칼럼으로 갈리는 경우다.
+  // legacy의 1단/2단 판정은 "마커 x가 지면 절반보다 오른쪽에 하나라도 있는가"인데,
+  // 우측 칼럼이 지면 절반보다 아주 살짝 왼쪽에서 시작하는 조판이 있다(실측: 법원직
+  // 9급 — 지면 폭 595, 절반 297.5인데 우측 칼럼 마커가 x=297.4). 그러면 우측 마커가
+  // 전부 좌측으로 분류되어 1단으로 오판하고, 문항 수는 25/25로 정확히 맞는 채로
+  // 지면 전체 폭을 한 장에 담은 이미지가 나온다 — 문서가 경고하는 "개수만 맞고
+  // 반쪽인" 사고 그대로다. 실측 마커 x가 80pt 이상 떨어진 두 무리를 이루면
+  // (computeColumnSplitX가 값을 돌려주면) 그건 2단이 확실하므로 legacy를 버린다.
+  const legacyMisreadAsSingle =
+    legacyResult &&
+    legacyResult.columnMode === "single" &&
+    computeColumnSplitX(legacyResult.markerData ?? []) != null;
+  if (
+    legacyResult &&
+    !legacyMisreadAsSingle &&
+    (expectedCount == null || legacyResult.length === expectedCount)
+  ) {
     return legacyResult;
   }
 
