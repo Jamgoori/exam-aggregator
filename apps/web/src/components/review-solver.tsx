@@ -11,6 +11,8 @@ import {
   Hand,
   PenLine,
   RotateCcw,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import {
   submitReviewSession,
@@ -23,12 +25,20 @@ import {
   DEFAULT_PEN_WIDTH,
   type DrawTool,
 } from "@/components/pdf-canvas-viewer";
+import {
+  MAX_ZOOM,
+  MIN_ZOOM,
+  useContentZoom,
+  useFitContentWidth,
+  useSwipeNavigation,
+} from "@/components/question-view-gestures";
 import type { ReviewSessionView } from "@/lib/review-session";
 
 // 섞어풀기 풀이 화면. 문제지 경계 없이 섞인 오답을 순서대로 풀고 채점한다. 풀이
 // 중에는 출처(문제지·번호)와 정답을 숨겨 힌트가 되지 않게 하고, 채점 후에만 공개한다.
-// CBT 솔버(PDF·최소응시시간)와 달리 순수 문항 리스트라 가볍게 따로 뒀지만, 필기
-// (펜·지우개·색상·굵기)는 CBT 문제별 풀기와 같은 캔버스 방식을 그대로 쓴다.
+// CBT 솔버(PDF·최소응시시간)와 달리 순수 문항 리스트라 가볍게 따로 뒀지만, 문제를
+// 다루는 조작(필기 캔버스, 쓸어넘김 이동, 핀치·버튼 확대, 화면 높이에 맞춘 문제 폭)은
+// CBT 문제별 풀기와 같은 코드(question-view-gestures)를 그대로 쓴다.
 export function ReviewSolver({
   initial,
   backHref,
@@ -60,7 +70,18 @@ export function ReviewSolver({
   const toolRef = useRef(tool);
   const penColorRef = useRef(penColor);
   const penWidthRef = useRef(penWidth);
+  // 문제별 보기의 확대/축소는 CSS zoom이 아니라 문제 영역의 실제 너비를 키우는
+  // 방식이라(아래 contentWidth), 캔버스도 리사이즈 옵저버로 같이 커진다. 즉 캔버스
+  // 좌표계와 화면 크기가 늘 1:1이므로 필기 좌표 보정 배율은 항상 1이다.
   const zoomRef = useRef(1);
+
+  const { zoom, zoomIn, zoomOut, handlePinchZoom } = useContentZoom();
+  // attachDrawing은 마운트 시 한 번만 붙어 그때의 콜백을 가둬두므로, 핀치 콜백은
+  // ref로 감싸 항상 최신 것을 부르게 한다(CBT 문제별 보기와 같은 방식).
+  const onPinchZoomRef = useRef(handlePinchZoom);
+  useEffect(() => {
+    onPinchZoomRef.current = handlePinchZoom;
+  });
 
   useEffect(() => {
     toolRef.current = tool;
@@ -93,7 +114,11 @@ export function ReviewSolver({
     const canvas = canvasRef.current;
     if (!scrollArea || !content || !canvas) return;
 
-    attachDrawing(canvas, toolRef, penColorRef, zoomRef, penWidthRef);
+    // 펜/지우개 모드에서는 캔버스가 포인터를 잡으므로 두 손가락 핀치도 여기서
+    // 받아 확대/축소로 넘긴다(이동 모드의 핀치는 아래 스크롤 영역 터치가 잡는다).
+    attachDrawing(canvas, toolRef, penColorRef, zoomRef, penWidthRef, (factor) =>
+      onPinchZoomRef.current(factor),
+    );
 
     function syncSize() {
       const width = content!.clientWidth;
@@ -122,6 +147,36 @@ export function ReviewSolver({
     const ctx = canvas?.getContext("2d");
     if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
   }, [index]);
+
+  // 넘길 때마다 이미지를 새로 받으면 번호만 먼저 바뀌고 문제 사진이 늦게 뜬다. CBT
+  // 문제별 풀기와 같이 들어오자마자 전 문항 이미지를 브라우저 캐시에 받아둬서, 쓸어넘김
+  // 이동이 캐시에서 바로 그려지게 한다(이미 받은 이미지는 브라우저가 재요청하지 않는다).
+  const preloadedRef = useRef(false);
+  useEffect(() => {
+    if (submitted || preloadedRef.current) return;
+    preloadedRef.current = true;
+    for (const it of view.items) {
+      for (const src of it.images) {
+        const img = new Image();
+        img.src = src;
+      }
+    }
+  }, [submitted, view.items]);
+
+  // 문제 폭·쓸어넘김·핀치는 CBT 문제별 풀기와 같은 훅을 쓴다. 훅은 채점 후 조기
+  // 반환(ReviewResult)보다 위에서 불러야 호출 순서가 항상 같다.
+  const { contentWidth, handleImageLoad } = useFitContentWidth({
+    scrollAreaRef,
+    itemKey: index,
+    imageCount: view.items[index]?.images.length ?? 0,
+    zoom,
+  });
+  const swipeHandlers = useSwipeNavigation({
+    tool,
+    onPrev: () => goPrev(),
+    onNext: () => goNext(),
+    onPinchZoom: handlePinchZoom,
+  });
 
   // 채점 전 답은 클라이언트 상태로만 있어 페이지를 벗어나면 사라진다. 새로고침·닫기는
   // beforeunload로, 뒤로가기 링크는 클릭 확인으로 막는다(하나라도 풀었을 때만).
@@ -160,6 +215,14 @@ export function ReviewSolver({
     });
   }
 
+  function goPrev() {
+    setIndex((i) => Math.max(0, i - 1));
+  }
+
+  function goNext() {
+    setIndex((i) => Math.min(view.items.length - 1, i + 1));
+  }
+
   function handleSubmit() {
     if (isPending) return;
     if (
@@ -196,6 +259,31 @@ export function ReviewSolver({
           오답 다시 풀기{view.subjectName ? ` · ${view.subjectName}` : ""}
         </h1>
         <div className="flex shrink-0 items-center gap-2">
+          {/* 모바일은 헤더가 좁아 넣지 못하고(그쪽은 두 손가락 핀치로 확대한다),
+              CBT와 같이 lg 이상에서만 배율 버튼을 보여준다. */}
+          <div className="hidden items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 lg:flex dark:bg-zinc-800">
+            <button
+              type="button"
+              onClick={zoomOut}
+              disabled={zoom <= MIN_ZOOM}
+              aria-label="문제 축소"
+              className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-700"
+            >
+              <ZoomOut size={18} />
+            </button>
+            <span className="w-10 text-center text-xs font-medium text-zinc-500 dark:text-zinc-500">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              type="button"
+              onClick={zoomIn}
+              disabled={zoom >= MAX_ZOOM}
+              aria-label="문제 확대"
+              className="flex items-center justify-center rounded-md p-1.5 text-zinc-600 hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-700"
+            >
+              <ZoomIn size={18} />
+            </button>
+          </div>
           <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">
             <button
               type="button"
@@ -266,11 +354,16 @@ export function ReviewSolver({
 
       <div
         ref={scrollAreaRef}
+        {...swipeHandlers}
+        // pan-y로 두면 세로 스크롤(한 손가락)은 그대로 두고 브라우저 기본 핀치줌만
+        // 꺼져서, 두 손가락 핀치를 위 핸들러가 문제 확대/축소로 쓸 수 있다.
+        style={{ touchAction: "pan-y" }}
         className="min-h-0 flex-1 overflow-y-auto bg-zinc-100 px-4 py-4 dark:bg-zinc-800"
       >
         <div
           ref={contentRef}
-          className="relative mx-auto flex min-h-full max-w-2xl flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white"
+          style={{ maxWidth: `${contentWidth}px` }}
+          className="relative mx-auto flex min-h-full w-full flex-col gap-2 overflow-hidden rounded-lg border border-zinc-200 bg-white"
         >
           {item.images.length === 0 ? (
             <p className="py-24 text-center text-sm text-zinc-400 dark:text-zinc-600">
@@ -279,7 +372,13 @@ export function ReviewSolver({
           ) : (
             item.images.map((src, i) => (
               // eslint-disable-next-line @next/next/no-img-element
-              <img key={i} src={src} alt={`문제 ${index + 1} 이미지 ${i + 1}`} className="w-full" />
+              <img
+                key={i}
+                src={src}
+                alt={`문제 ${index + 1} 이미지 ${i + 1}`}
+                className="w-full"
+                onLoad={(e) => handleImageLoad(i, e.currentTarget)}
+              />
             ))
           )}
           <canvas
@@ -304,7 +403,7 @@ export function ReviewSolver({
             type="button"
             aria-label="이전 문제"
             disabled={index === 0}
-            onClick={() => setIndex((i) => Math.max(0, i - 1))}
+            onClick={goPrev}
             className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800"
           >
             <ChevronLeft size={22} />
@@ -336,7 +435,7 @@ export function ReviewSolver({
             <button
               type="button"
               aria-label="다음 문제"
-              onClick={() => setIndex((i) => Math.min(view.items.length - 1, i + 1))}
+              onClick={goNext}
               className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
             >
               <ChevronRight size={22} />
