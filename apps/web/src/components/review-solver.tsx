@@ -17,6 +17,7 @@ import {
   createReviewFromWrong,
 } from "@/app/mypage/wrong-notes/actions";
 import { CbtDrawingToolbar, PEN_COLORS } from "@/components/cbt-drawing-toolbar";
+import { ReviewScheduleSection } from "@/components/review-schedule-section";
 import {
   attachDrawing,
   DEFAULT_PEN_WIDTH,
@@ -450,6 +451,10 @@ function ReviewResult({
         </button>
       )}
       {error && <p className="-mt-3 text-center text-xs text-red-600 dark:text-red-400">{error}</p>}
+
+      {/* 채점 직후가 스케줄을 이해시키기 제일 좋은 자리다 — 방금 푼 문항이 각각
+          언제 다시 오는지 본인 데이터로 보여준다. 무료 사용자에게는 아무것도 안 뜬다. */}
+      <ReviewScheduleSection sessionId={view.id} />
 
       <Link
         href={backHref}
