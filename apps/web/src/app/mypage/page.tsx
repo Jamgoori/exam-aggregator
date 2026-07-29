@@ -21,7 +21,7 @@ import { ScrollToHash } from "@/components/scroll-to-hash";
 import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
 import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-card";
 import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
-import { getMembership } from "@/lib/membership";
+import { getMembership, isAdminUser } from "@/lib/membership";
 import { getDueReviewSummary } from "@/lib/review-queue";
 import { isPremiumMembership, trialDaysLeft } from "@gongmoa/core";
 import { getCbtAvailability } from "@/lib/cbt-availability";
@@ -191,8 +191,14 @@ export default async function MyPage({
 
   // 오늘의 복습(멤버십 전용). 무료 사용자에게는 요약을 조회하지도 않는다 — 못 누르는
   // 숫자는 압박만 되고, 후보 수집이 이미지 조회까지 도는 무거운 작업이라 값이다.
-  const membership = await getMembership(supabase, user.id);
-  const premium = isPremiumMembership(membership);
+  // 관리자는 멤버십과 무관하게 프리미엄으로 본다. 관리자 여부를 따로 들고 있는 건
+  // 체험 만료 안내("체험 N일 남음") 때문이다 — 관리자는 체험이 끝나도 계속 쓸 수
+  // 있으니 그 문구를 보여주면 거짓말이 된다.
+  const [membership, admin] = await Promise.all([
+    getMembership(supabase, user.id),
+    isAdminUser(supabase),
+  ]);
+  const premium = admin || isPremiumMembership(membership);
   const dueSummary = premium ? await getDueReviewSummary(supabase, user.id) : null;
   const reviewDue: ReviewDueCardProps = {
     premium,
@@ -201,7 +207,7 @@ export default async function MyPage({
     subjects: dueSummary?.subjects.map((s) => ({ name: s.name, count: s.count })) ?? [],
     forecast: dueSummary?.forecast ?? [],
     nextDueOffset: dueSummary?.nextDueOffset ?? null,
-    trialDaysLeft: trialDaysLeft(membership),
+    trialDaysLeft: admin ? null : trialDaysLeft(membership),
   };
 
   return (

@@ -30,7 +30,17 @@ export async function getMembership(
   return membershipFromRow(data ?? null);
 }
 
+// 관리자는 멤버십과 무관하게 유료 기능을 다 쓴다. 검수·문의 대응을 하려면 사용자와
+// 같은 화면을 볼 수 있어야 하고, 관리자 계정마다 결제나 체험을 붙이는 건 말이 안 된다.
+// 판정은 admins 테이블(이메일 화이트리스트)을 보는 is_admin() — 이 테이블은 클라이언트가
+// 직접 못 읽고 security definer 함수로만 검사된다.
+export async function isAdminUser(supabase: Supabase): Promise<boolean> {
+  const { data } = await supabase.rpc("is_admin");
+  return data === true;
+}
+
 export async function isPremium(supabase: Supabase, userId: string): Promise<boolean> {
+  if (await isAdminUser(supabase)) return true;
   return isPremiumMembership(await getMembership(supabase, userId));
 }
 
