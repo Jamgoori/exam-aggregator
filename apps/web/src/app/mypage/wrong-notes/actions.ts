@@ -6,10 +6,14 @@ import {
   createReviewSessionFromItems,
   createConceptReviewSessionForUser,
   createAllReviewSessionForUser,
+  createDueReviewSessionForUser,
   createPaperReviewSessionForUser,
   submitReviewSessionForUser,
   type ReviewSessionView,
 } from "@/lib/review-session";
+import { collectDueQueueItems, getSessionSchedule } from "@/lib/review-queue";
+import { isPremium } from "@/lib/membership";
+import type { SessionSchedule } from "@gongmoa/core";
 
 export type CreateReviewResult = { error?: string; sessionId?: string };
 
@@ -208,6 +212,41 @@ export async function createReviewAll(input: {
     onlyDue: input?.onlyDue ?? false,
     includeResolved: input?.includeResolved ?? false,
   });
+}
+
+// 오늘의 복습 세션 시작(유료 전용). 문항 선정·순서는 서버가 정한다 — 클라이언트가
+// 문항 목록을 넘기게 하면 상한과 스케줄을 우회할 수 있다.
+//
+// 멤버십 확인을 여기서 한 번 더 하는 이유: 화면에서 버튼을 숨기는 건 표시일 뿐이고,
+// 서버 액션은 URL만 알면 직접 부를 수 있다.
+export async function createDueReviewSession(): Promise<CreateReviewResult> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  if (!(await isPremium(supabase, user.id))) {
+    return { error: "복습은 멤버십 기능이에요." };
+  }
+
+  const items = await collectDueQueueItems(supabase, user.id);
+  return createDueReviewSessionForUser(supabase, user.id, items);
+}
+
+export type ReviewScheduleResult = { premium: boolean; schedule?: SessionSchedule };
+
+// 채점 결과 화면의 "다음 복습" 섹션. 무료 사용자는 스케줄 자체가 없으므로
+// premium=false만 돌려주고 화면에서 섹션을 통째로 숨긴다.
+export async function getReviewSchedule(input: {
+  sessionId: string;
+}): Promise<ReviewScheduleResult> {
+  const sessionId = String(input?.sessionId ?? "");
+  if (!sessionId) return { premium: false };
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { premium: false };
+  if (!(await isPremium(supabase, user.id))) return { premium: false };
+
+  const schedule = await getSessionSchedule(supabase, user.id, sessionId);
+  return { premium: true, schedule: schedule ?? undefined };
 }
 
 // 결과 화면 "틀린 N문항만 다시 풀기".

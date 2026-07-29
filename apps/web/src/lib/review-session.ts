@@ -299,11 +299,16 @@ export async function createAllReviewSessionForUser(
 
 // 채점 결과에서 "틀린 문항만 다시 풀기": 넘겨받은 (문제지, 문항) 목록으로 새 세션을
 // 만든다. 정답·이미지는 채점/렌더 시점에 서버가 다시 조회하므로 목록엔 정답이 없다.
+//
+// keepOrder를 켜면 넘어온 순서를 그대로 쓴다. 복습 큐는 이미 우선순위와 과목
+// 섞기까지 계산해서 넘기므로(review-queue.ts), 여기서 다시 섞으면 그 편성이 통째로
+// 버려진다.
 export async function createReviewSessionFromItems(
   supabase: Supabase,
   userId: string,
   items: { paperId: string; questionNumber: number }[],
   limit: number = MAX_LIMIT,
+  opts: { keepOrder?: boolean } = {},
 ): Promise<{ sessionId?: string; error?: string }> {
   const seen = new Set<string>();
   const clean: { paperId: string; questionNumber: number }[] = [];
@@ -317,7 +322,7 @@ export async function createReviewSessionFromItems(
   if (clean.length === 0) return { error: "다시 풀 문항이 없어요." };
 
   const cap = Math.min(Math.max(1, limit), MAX_LIMIT);
-  const picked = shuffle(clean).slice(0, cap);
+  const picked = (opts.keepOrder ? clean : shuffle(clean)).slice(0, cap);
   const admin = createAdminClient();
   const { data: session, error: sessionError } = await admin
     .from("review_sessions")
@@ -347,6 +352,24 @@ export async function createReviewSessionFromItems(
     return { error: "세션 생성에 실패했어요." };
   }
   return { sessionId: session.id as string };
+}
+
+// 복습(간격 반복) 세션 생성 — 유료 전용. 어떤 문항을 어떤 순서로 낼지는 이미
+// review-queue.ts가 정해서 넘기므로 여기서는 섞지 않는다(keepOrder).
+//
+// 오늘 큐가 비어 있는 건 정상 상태다("오늘은 복습할 게 없다"). 그래서 다른 세션
+// 생성과 달리 에러 문구가 실패가 아니라 안내에 가깝다.
+export async function createDueReviewSessionForUser(
+  supabase: Supabase,
+  userId: string,
+  items: { paperId: string; questionNumber: number }[],
+): Promise<{ sessionId?: string; error?: string }> {
+  if (items.length === 0) {
+    return { error: "오늘 복습할 문항이 없어요." };
+  }
+  return createReviewSessionFromItems(supabase, userId, items, items.length, {
+    keepOrder: true,
+  });
 }
 
 // 같은 개념(keyword_title)의 기출 문항을 전체 코퍼스에서 모아 후보로 뽑는다. 진단의

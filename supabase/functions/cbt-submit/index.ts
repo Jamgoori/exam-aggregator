@@ -9,6 +9,7 @@ import {
   sanitizeSelectedChoice,
 } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
+import { recordQuestionResults } from "../_shared/status.ts";
 
 type QuestionResult = {
   question_number: number;
@@ -113,7 +114,7 @@ Deno.serve(async (req) => {
 
   // 문항 단위 통합 상태 갱신(오답노트 극복 판정 등). 부가 집계라 실패해도 채점은 유지.
   try {
-    await recordQuestionResults(admin, userId, paperId, questionResults);
+    await recordQuestionResults(admin, userId, paperId, questionResults, "cbt");
   } catch {
     // 무시: 상태 갱신 실패가 채점을 막지 않는다.
   }
@@ -136,42 +137,6 @@ Deno.serve(async (req) => {
   });
 });
 
-// 웹 recordQuestionResults 포팅. wrong_count 는 증분이라 기존 값을 읽어 더한 뒤 upsert.
-async function recordQuestionResults(
-  // deno-lint-ignore no-explicit-any
-  admin: any,
-  userId: string,
-  paperId: string,
-  results: QuestionResult[],
-): Promise<void> {
-  if (results.length === 0) return;
-
-  const { data: existing } = await admin
-    .from("user_question_status")
-    .select("question_number, wrong_count")
-    .eq("user_id", userId)
-    .eq("paper_id", paperId);
-
-  const priorWrong = new Map<number, number>(
-    (existing ?? []).map((r: { question_number: number; wrong_count: number }) => [
-      r.question_number,
-      r.wrong_count ?? 0,
-    ]),
-  );
-
-  const now = new Date().toISOString();
-  const rows = results.map((r) => ({
-    user_id: userId,
-    paper_id: paperId,
-    question_number: r.question_number,
-    wrong_count: (priorWrong.get(r.question_number) ?? 0) + (r.is_correct ? 0 : 1),
-    last_is_correct: r.is_correct,
-    last_answered_at: now,
-    source: "cbt",
-    updated_at: now,
-  }));
-
-  await admin
-    .from("user_question_status")
-    .upsert(rows, { onConflict: "user_id,paper_id,question_number" });
-}
+// 문항 단위 상태·SRS 갱신은 _shared/status.ts 하나로 모았다. 예전엔 여기에 같은
+// 함수가 한 벌 더 있었는데, 섞어풀기(review-submit)만 _shared 를 쓰는 바람에 한쪽만
+// 고치면 CBT 채점이 조용히 옛 규칙으로 남는 구조였다.
