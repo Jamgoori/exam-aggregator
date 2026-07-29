@@ -13,9 +13,15 @@ import {
 } from "@/lib/review-session";
 import { collectDueQueueItems, getSessionSchedule } from "@/lib/review-queue";
 import { isPremium } from "@/lib/membership";
-import type { SessionSchedule } from "@gongmoa/core";
+import type { SessionSchedule, ReviewPickStrategy } from "@gongmoa/core";
 
 export type CreateReviewResult = { error?: string; sessionId?: string };
+
+// 클라이언트가 보내는 값이라 문자열을 그대로 믿지 않는다. 모르는 값은 기본값
+// ("약한 문제 우선")으로 떨어뜨린다.
+function pickStrategy(value: unknown): ReviewPickStrategy {
+  return value === "random" ? "random" : "weighted";
+}
 
 // 섞어풀기 세션 시작. 성공하면 sessionId를 돌려주고, 호출부(클라이언트)가 풀이
 // 페이지로 이동한다.
@@ -24,6 +30,7 @@ export async function createReviewSession(input: {
   onlyUnresolved?: boolean;
   onlyDue?: boolean;
   limit?: number;
+  strategy?: ReviewPickStrategy;
 }): Promise<CreateReviewResult> {
   const slug = String(input?.subjectSlug ?? "");
   if (!slug) return { error: "잘못된 접근입니다." };
@@ -36,6 +43,7 @@ export async function createReviewSession(input: {
     onlyUnresolved: input.onlyUnresolved ?? true,
     onlyDue: input.onlyDue ?? false,
     limit: input.limit,
+    strategy: pickStrategy(input.strategy),
   });
 }
 
@@ -205,12 +213,14 @@ export async function createReviewFromPapers(input: {
 export async function createReviewAll(input: {
   onlyDue?: boolean;
   includeResolved?: boolean;
+  strategy?: ReviewPickStrategy;
 }): Promise<CreateReviewResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
   return createAllReviewSessionForUser(supabase, user.id, {
     onlyDue: input?.onlyDue ?? false,
     includeResolved: input?.includeResolved ?? false,
+    strategy: pickStrategy(input?.strategy),
   });
 }
 

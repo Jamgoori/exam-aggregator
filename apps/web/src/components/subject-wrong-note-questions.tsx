@@ -19,6 +19,7 @@ import {
 } from "@/components/wrong-note-mark-actions";
 import { levelColor } from "@/lib/level-colors";
 import type { SubjectWrongNoteQuestion } from "@/lib/wrong-notes";
+import type { ReviewPickStrategy } from "@gongmoa/core";
 
 type SortKey = "number" | "recent" | "frequent";
 
@@ -72,6 +73,9 @@ export function SubjectWrongNoteQuestions({
   const [sort, setSort] = useState<SortKey>("number");
   const [reviewPending, startReview] = useTransition();
   const [reviewError, setReviewError] = useState<string | null>(null);
+  // 섞어풀기가 후보를 뽑는 방식. 기본은 층 정원제(2번 이상 틀림 > 최근 오답 > 나머지).
+  // 오답이 수백 개 쌓이면 균등 무작위는 위험한 문항을 만날 확률을 계속 희석시킨다.
+  const [strategy, setStrategy] = useState<ReviewPickStrategy>("weighted");
 
   // 다시보기 체크/완전 삭제는 서버 왕복 없이 즉시 반영한다. 키는 `${paperId}#${qnum}`.
   const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(
@@ -142,7 +146,7 @@ export function SubjectWrongNoteQuestions({
     if (reviewPending) return;
     setReviewError(null);
     startReview(async () => {
-      const res = await createReviewSession({ subjectSlug, onlyUnresolved: true });
+      const res = await createReviewSession({ subjectSlug, onlyUnresolved: true, strategy });
       if (res.error || !res.sessionId) {
         setReviewError(res.error ?? "다시 풀기를 시작하지 못했어요.");
         return;
@@ -247,6 +251,25 @@ export function SubjectWrongNoteQuestions({
               ? "준비 중..."
               : `남은 오답 ${playableUnresolved}개 섞어서 다시 풀기`}
           </button>
+          {/* 뽑는 방식은 설정 화면이 아니라 버튼 바로 아래에 둔다 — 이 버튼이
+              무엇을 하는지의 일부라서 따로 찾아 들어갈 성질이 아니다. */}
+          <div className="flex items-center justify-center gap-1.5">
+            <PickChip
+              label="약한 문제 우선"
+              active={strategy === "weighted"}
+              onClick={() => setStrategy("weighted")}
+            />
+            <PickChip
+              label="전체 랜덤"
+              active={strategy === "random"}
+              onClick={() => setStrategy("random")}
+            />
+          </div>
+          <p className="text-center text-[11px] text-zinc-500 dark:text-zinc-500">
+            {strategy === "weighted"
+              ? "2번 이상 틀린 문제를 많이, 오래된 오답도 조금 섞어서 내요."
+              : "남은 오답 전체에서 똑같은 확률로 뽑아요."}
+          </p>
           {reviewError && (
             <p className="text-center text-xs text-red-600 dark:text-red-400">{reviewError}</p>
           )}
@@ -430,5 +453,32 @@ export function SubjectWrongNoteQuestions({
         />
       )}
     </div>
+  );
+}
+
+// 섞어풀기 뽑기 방식 칩. 필터 칩(chip)보다 한 단계 작게 둬서 "필터가 하나 더
+// 늘었다"로 읽히지 않게 한다 — 목록을 거르는 게 아니라 버튼의 동작을 고르는 자리다.
+function PickChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+        active
+          ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+          : "text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
