@@ -32,9 +32,16 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
-export type ReviewSubjectOption = { id: string; name: string; paused: boolean };
+export type ReviewSubjectOption = {
+  id: string;
+  name: string;
+  paused: boolean;
+  // 이 과목에 복습이 예약된 문항 수(날짜 무관). 설정 화면에서 "이 과목을 끄면 뭐가
+  // 빠지는지"를 보여주는 값이다.
+  scheduledCount: number;
+};
 
-// 설정 패널에 띄울 과목 목록. 복습 큐 후보(collectDueCandidates)에서 뽑지 않는
+// 설정 화면에 띄울 과목 목록. 복습 큐 후보(collectDueCandidates)에서 뽑지 않는
 // 이유는 그쪽이 앞으로 7일치만 보기 때문이다 — 다음 복습이 40일 뒤인 과목은 큐에
 // 안 잡히는데, 그 과목을 보류하지도 못하게 되면 설정이 반쪽이 된다.
 // 여기서는 예약이 하나라도 있는 과목을 전부 모은다(컬럼 하나짜리 조회).
@@ -42,7 +49,7 @@ export async function getReviewSubjectOptions(
   supabase: Supabase,
   userId: string,
 ): Promise<ReviewSubjectOption[]> {
-  const paperIds = new Set<string>();
+  const countByPaper = new Map<string, number>();
   let from = 0;
   while (true) {
     const { data } = await supabase
@@ -52,29 +59,44 @@ export async function getReviewSubjectOptions(
       .not("srs_due_at", "is", null)
       .range(from, from + BATCH_SIZE - 1);
     if (!data || data.length === 0) break;
-    for (const r of data as { paper_id: string }[]) paperIds.add(r.paper_id);
+    for (const r of data as { paper_id: string }[]) {
+      countByPaper.set(r.paper_id, (countByPaper.get(r.paper_id) ?? 0) + 1);
+    }
     if (data.length < BATCH_SIZE) break;
     from += BATCH_SIZE;
   }
-  if (paperIds.size === 0) return [];
+  if (countByPaper.size === 0) return [];
 
-  const byId = new Map<string, string>();
-  for (const ids of chunk([...paperIds], 100)) {
+  const names = new Map<string, string>();
+  const counts = new Map<string, number>();
+  for (const ids of chunk([...countByPaper.keys()], 100)) {
     const { data } = await supabase
       .from("exam_papers")
-      .select("subjects(id, name)")
+      .select("id, subjects(id, name)")
       .in("id", ids);
     for (const row of (data ?? []) as unknown as {
+      id: string;
       subjects: { id: string; name: string } | null;
     }[]) {
-      if (row.subjects) byId.set(row.subjects.id, row.subjects.name);
+      if (!row.subjects) continue;
+      names.set(row.subjects.id, row.subjects.name);
+      counts.set(
+        row.subjects.id,
+        (counts.get(row.subjects.id) ?? 0) + (countByPaper.get(row.id) ?? 0),
+      );
     }
   }
 
   const paused = await getPausedSubjectIds(supabase, userId);
-  return [...byId]
-    .map(([id, name]) => ({ id, name, paused: paused.has(id) }))
-    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  return [...names]
+    .map(([id, name]) => ({
+      id,
+      name,
+      paused: paused.has(id),
+      scheduledCount: counts.get(id) ?? 0,
+    }))
+    // 예약이 많은 과목부터. 끌지 말지 고민되는 게 대체로 그쪽이다.
+    .sort((a, b) => b.scheduledCount - a.scheduledCount || a.name.localeCompare(b.name, "ko"));
 }
 
 // 보류를 풀 때, 그동안 밀려 연체가 된 그 과목 문항을 며칠에 걸쳐 다시 뿌린다.
