@@ -1,4 +1,5 @@
 import "server-only";
+import { cacheLife } from "next/cache";
 import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Subject } from "@gongmoa/core";
@@ -45,6 +46,30 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+// 이 파일의 조회는 대부분 "id 목록을 청크로 잘라 여러 번 왕복"하는 형태다. 예전엔 그
+// 청크를 for 루프로 하나씩 기다려서, 문제지가 많은 과목(국어처럼 거의 모든 시험유형에
+// 있는 과목)에서는 왕복 지연이 청크 수만큼 그대로 쌓였다. 동시에 돌리되, 한 사용자가
+// 커넥션을 독점하지 않도록 동시 실행 수는 제한한다.
+const QUERY_CONCURRENCY = 8;
+
+async function inParallel<T, R>(
+  items: T[],
+  run: (item: T) => Promise<R>,
+  limit = QUERY_CONCURRENCY,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let cursor = 0;
+  async function worker() {
+    for (let i = cursor++; i < items.length; i = cursor++) {
+      out[i] = await run(items[i]);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+  return out;
+}
+
 export async function fetchWrongNoteMarks(
   supabase: Supabase,
   userId: string,
@@ -54,21 +79,25 @@ export async function fetchWrongNoteMarks(
   const pinned = new Set<string>();
   if (paperIds && paperIds.length === 0) return { deleted, pinned };
 
-  const idChunks = paperIds ? chunk(paperIds, 200) : [null];
-  for (const ids of idChunks) {
+  const idChunks: (string[] | null)[] = paperIds ? chunk(paperIds, 200) : [null];
+  const failed = await inParallel(idChunks, async (ids) => {
     let query = supabase
       .from("wrong_note_marks")
       .select("paper_id, question_number, pinned, deleted")
       .eq("user_id", userId);
     if (ids) query = query.in("paper_id", ids);
     const { data, error } = await query;
-    if (error) return { deleted: new Set(), pinned: new Set() };
+    if (error) return true;
     for (const r of data ?? []) {
       const key = `${r.paper_id}#${r.question_number}`;
       if (r.deleted) deleted.add(key);
       if (r.pinned) pinned.add(key);
     }
-  }
+    return false;
+  });
+  // 한 청크라도 실패하면 마크를 부분 적용하지 않는다(삭제 마크가 빠지면 지운 문항이
+  // 되살아나 보인다) — 예전 순차 루프의 조기 return과 같은 판단.
+  if (failed.some(Boolean)) return { deleted: new Set(), pinned: new Set() };
   return { deleted, pinned };
 }
 
@@ -81,7 +110,7 @@ export async function fetchWrongAnswerRows(
   attemptIds: string[],
 ): Promise<WrongAnswerRow[]> {
   const rows: WrongAnswerRow[] = [];
-  for (const ids of chunk(attemptIds, 100)) {
+  await inParallel(chunk(attemptIds, 100), async (ids) => {
     let from = 0;
     while (true) {
       const { data } = await supabase
@@ -97,7 +126,7 @@ export async function fetchWrongAnswerRows(
       if (data.length < BATCH_SIZE) break;
       from += BATCH_SIZE;
     }
-  }
+  });
   return rows;
 }
 
@@ -141,47 +170,80 @@ export type WrongNoteQuestionDetail = WrongNoteQuestionSummary & {
 
 export type QuestionMediaEntry = { choiceCount: number | null; images: string[] };
 
+const QUESTION_MEDIA_SELECT =
+  "paper_id, question_number, choice_count, question_images(order_index, image_path)";
+
+type QuestionMediaRow = {
+  paper_id: string;
+  question_number: number;
+  choice_count: number;
+  question_images: { order_index: number; image_path: string }[] | null;
+};
+
 // 문제지들의 문항별 크롭 이미지(공개 URL)와 선지 수를 한 번에 받아온다.
 // questions/question_images는 public read라 사용자 세션 클라이언트로 충분하다.
+//
+// wanted를 주면 문제지별로 그 문항 번호만 조회한다. 오답노트는 문제지 한 장에서 보통
+// 일부만 틀리는데, 예전에는 언제나 문제지 전체 문항 + 이미지 행을 받아 와서 화면에
+// 쓰지도 않는 데이터가 대부분이었다(문제지가 수십 장 쌓이는 과목에서 특히 크다).
 export async function fetchQuestionMedia(
   supabase: Supabase,
   paperIds: string[],
+  wanted?: Map<string, Set<number>>,
 ): Promise<Map<string, Map<number, QuestionMediaEntry>>> {
   const byPaper = new Map<string, Map<number, QuestionMediaEntry>>();
 
-  for (const ids of chunk(paperIds, 10)) {
+  function consume(rows: QuestionMediaRow[]) {
+    for (const row of rows) {
+      const images = [...(row.question_images ?? [])]
+        .sort((a, b) => a.order_index - b.order_index)
+        .map(
+          (img) =>
+            supabase.storage.from("exam-papers").getPublicUrl(img.image_path)
+              .data.publicUrl,
+        );
+      const paperMap =
+        byPaper.get(row.paper_id) ?? new Map<number, QuestionMediaEntry>();
+      paperMap.set(row.question_number, {
+        choiceCount: row.choice_count,
+        images,
+      });
+      byPaper.set(row.paper_id, paperMap);
+    }
+  }
+
+  if (wanted) {
+    await inParallel(paperIds, async (paperId) => {
+      const numbers = [...(wanted.get(paperId) ?? [])];
+      if (numbers.length === 0) return;
+      // 문항 번호로 좁히면 한 문제지가 BATCH_SIZE를 넘길 일이 없어 페이지네이션이
+      // 필요 없다(embedded question_images는 행 수에 포함되지 않는다).
+      const { data } = await supabase
+        .from("questions")
+        .select(QUESTION_MEDIA_SELECT)
+        .eq("paper_id", paperId)
+        .in("question_number", numbers);
+      consume((data ?? []) as unknown as QuestionMediaRow[]);
+    });
+    return byPaper;
+  }
+
+  await inParallel(chunk(paperIds, 10), async (ids) => {
     let from = 0;
     while (true) {
       const { data } = await supabase
         .from("questions")
-        .select(
-          "paper_id, question_number, choice_count, question_images(order_index, image_path)",
-        )
+        .select(QUESTION_MEDIA_SELECT)
         .in("paper_id", ids)
         .order("paper_id")
         .order("question_number")
         .range(from, from + BATCH_SIZE - 1);
       if (!data || data.length === 0) break;
-
-      for (const row of data) {
-        const images = [...(row.question_images ?? [])]
-          .sort((a, b) => a.order_index - b.order_index)
-          .map(
-            (img) =>
-              supabase.storage.from("exam-papers").getPublicUrl(img.image_path)
-                .data.publicUrl,
-          );
-        const paperMap = byPaper.get(row.paper_id) ?? new Map();
-        paperMap.set(row.question_number, {
-          choiceCount: row.choice_count,
-          images,
-        });
-        byPaper.set(row.paper_id, paperMap);
-      }
+      consume(data as unknown as QuestionMediaRow[]);
       if (data.length < BATCH_SIZE) break;
       from += BATCH_SIZE;
     }
-  }
+  });
   return byPaper;
 }
 
@@ -194,7 +256,7 @@ async function fetchCorrectAnswers(
 ): Promise<Map<string, number[]>> {
   const admin = createAdminClient();
   const byPaper = new Map<string, number[]>();
-  for (const ids of chunk(paperIds, 200)) {
+  await inParallel(chunk(paperIds, 200), async (ids) => {
     const { data } = await admin
       .from("paper_answers")
       .select("paper_id, answers")
@@ -202,7 +264,7 @@ async function fetchCorrectAnswers(
     for (const row of data ?? []) {
       byPaper.set(row.paper_id as string, (row.answers ?? []) as number[]);
     }
-  }
+  });
   return byPaper;
 }
 
@@ -307,43 +369,72 @@ function toExplanationContent(row: ExplanationRow): QuestionExplanationContent |
 // questions.id(question_id)를 키로 쓰므로, questions를 거쳐 (paper_id,
 // question_number)로 환원한다. 해설에는 정답이 담기므로 일반 select는 막아두고
 // (관리자 전용 RLS 권장) service role로만 읽는다. 해설이 없는 문항은 그냥 빠진다.
+const EXPLANATION_SELECT =
+  "id, created_at, keyword_title, keyword_explanation, choice_explanations, correct_choice_summary, law_amendment_note, current_answer_status, current_answer_note, law_basis_date, questions!inner(paper_id, question_number)";
+
+// wanted(문제지별 필요한 문항 번호)를 주면 그 문항의 해설만 받아온다. 해설 한 건은
+// 선지별 텍스트가 담긴 jsonb라 행 하나가 무거워서, 문제지 전체를 받던 예전 방식은
+// 문제지 수에 비례해 그대로 지연이 됐다(화면에는 틀린 문항 해설만 쓴다).
 async function fetchExplanations(
   paperIds: string[],
+  wanted?: Map<string, Set<number>>,
 ): Promise<Map<string, Map<number, QuestionExplanationContent>>> {
   const admin = createAdminClient();
   const byPaper = new Map<string, Map<number, QuestionExplanationContent>>();
-  for (const ids of chunk(paperIds, 10)) {
+
+  function consume(rows: unknown[]) {
+    for (const row of rows) {
+      const q = (row as { questions?: unknown }).questions as unknown as {
+        paper_id: string;
+        question_number: number;
+      } | null;
+      if (!q) continue;
+      const content = toExplanationContent(row as ExplanationRow);
+      if (!content) continue;
+      const paperMap =
+        byPaper.get(q.paper_id) ?? new Map<number, QuestionExplanationContent>();
+      paperMap.set(q.question_number, content);
+      byPaper.set(q.paper_id, paperMap);
+    }
+  }
+
+  if (wanted) {
+    await inParallel(paperIds, async (paperId) => {
+      const numbers = [...(wanted.get(paperId) ?? [])];
+      if (numbers.length === 0) return;
+      // 같은 문항에 해설이 여러 번 생성됐을 수 있어(재생성) 문항 수보다 행이 많을 수
+      // 있다. 문제지 하나 분량이라 한 번에 다 받되, 정렬은 그대로 오래된 것 → 최근 것
+      // 순이라 consume의 map.set이 가장 최근 해설로 덮어쓴다.
+      const { data } = await admin
+        .from("question_explanations")
+        .select(EXPLANATION_SELECT)
+        .eq("questions.paper_id", paperId)
+        .in("questions.question_number", numbers)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true });
+      consume(data ?? []);
+    });
+    return byPaper;
+  }
+
+  await inParallel(chunk(paperIds, 10), async (ids) => {
     let from = 0;
     while (true) {
       // created_at 오름차순이라, 같은 문항에 해설이 여러 번 생성됐으면
       // 아래 map.set이 가장 최근 것으로 자연스럽게 덮어쓴다.
       const { data } = await admin
         .from("question_explanations")
-        .select(
-          "id, created_at, keyword_title, keyword_explanation, choice_explanations, correct_choice_summary, law_amendment_note, current_answer_status, current_answer_note, law_basis_date, questions!inner(paper_id, question_number)",
-        )
+        .select(EXPLANATION_SELECT)
         .in("questions.paper_id", ids)
         .order("created_at", { ascending: true })
         .order("id", { ascending: true })
         .range(from, from + BATCH_SIZE - 1);
       if (!data || data.length === 0) break;
-      for (const row of data) {
-        const q = row.questions as unknown as {
-          paper_id: string;
-          question_number: number;
-        } | null;
-        if (!q) continue;
-        const content = toExplanationContent(row as unknown as ExplanationRow);
-        if (!content) continue;
-        const paperMap =
-          byPaper.get(q.paper_id) ?? new Map<number, QuestionExplanationContent>();
-        paperMap.set(q.question_number, content);
-        byPaper.set(q.paper_id, paperMap);
-      }
+      consume(data);
       if (data.length < BATCH_SIZE) break;
       from += BATCH_SIZE;
     }
-  }
+  });
   return byPaper;
 }
 
@@ -469,7 +560,7 @@ async function fetchQuestionStatusByRep(
 ): Promise<Map<string, { correct: boolean; at: string }>> {
   const out = new Map<string, { correct: boolean; at: string }>();
   if (realPaperIds.length === 0) return out;
-  for (const ids of chunk(realPaperIds, 200)) {
+  await inParallel(chunk(realPaperIds, 200), async (ids) => {
     const { data } = await supabase
       .from("user_question_status")
       .select("paper_id, question_number, last_is_correct, last_answered_at")
@@ -483,7 +574,7 @@ async function fetchQuestionStatusByRep(
         out.set(key, { correct: row.last_is_correct as boolean, at });
       }
     }
-  }
+  });
   return out;
 }
 
@@ -508,7 +599,7 @@ async function fetchMemos(
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (paperIds.length === 0) return out;
-  for (const ids of chunk(paperIds, 200)) {
+  await inParallel(chunk(paperIds, 200), async (ids) => {
     const { data } = await supabase
       .from("question_memos")
       .select("paper_id, question_number, memo")
@@ -518,28 +609,58 @@ async function fetchMemos(
       const memo = (r.memo as string | null)?.trim();
       if (memo) out.set(`${r.paper_id}#${r.question_number}`, memo);
     }
-  }
+  });
   return out;
 }
 
 // 전국 오답률(%). paper_question_wrong_rates(security definer)로 전체 응시를 집계.
 // 표본이 WRONGRATE_MIN_SAMPLE 미만이면 넣지 않는다(작은 표본은 오해를 준다).
-async function fetchWrongRates(
-  supabase: Supabase,
-  paperIds: string[],
-): Promise<Map<string, number>> {
+//
+// 이 집계는 문제지 하나의 cbt_attempt_answers 전체를 훑는다 — 응시가 많이 쌓인 인기
+// 문제지(국어처럼 모든 시험유형에 있는 과목)에서는 페이지를 열 때마다 수십만~수백만
+// 행을 다시 세는 셈이라, 과목 문항 모아보기 지연의 가장 큰 몫이었다. 결과는 로그인
+// 사용자와 무관한 전체 통계라 문제지 단위로 캐싱하면 같은 문제지를 보는 모든 사용자가
+// 재사용한다(문제지 단위 키라 사용자마다 문제지 조합이 달라도 캐시가 맞는다).
+// 응시가 계속 쌓여도 오답률 %는 천천히 움직여 10분 지연은 표시에 영향이 없다.
+//
+// cookies()를 건드리지 않는 클라이언트를 써야 'use cache' 안에서 안전해서, 사용자
+// 세션 클라이언트 대신 admin 클라이언트로 부른다(반환값은 정답이 아닌 집계 수치뿐).
+async function fetchPaperWrongRates(
+  paperId: string,
+): Promise<{ questionNumber: number; pct: number }[]> {
+  "use cache";
+  cacheLife({ revalidate: 600 });
+
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("paper_question_wrong_rates", {
+    p_paper_ids: [paperId],
+  });
+  if (error) return []; // 함수 미적용 환경: 배지 없이 넘어간다.
+  const out: { questionNumber: number; pct: number }[] = [];
+  for (const r of (data ?? []) as {
+    paper_id: string;
+    question_number: number;
+    attempts: number;
+    wrongs: number;
+  }[]) {
+    if (r.attempts < WRONGRATE_MIN_SAMPLE) continue;
+    out.push({
+      questionNumber: r.question_number,
+      pct: Math.round((r.wrongs / r.attempts) * 100),
+    });
+  }
+  return out;
+}
+
+async function fetchWrongRates(paperIds: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (paperIds.length === 0) return out;
-  for (const ids of chunk(paperIds, 100)) {
-    const { data, error } = await supabase.rpc("paper_question_wrong_rates", {
-      p_paper_ids: ids,
-    });
-    if (error) continue; // 함수 미적용 환경: 배지 없이 넘어간다.
-    for (const r of (data ?? []) as { paper_id: string; question_number: number; attempts: number; wrongs: number }[]) {
-      if (r.attempts < WRONGRATE_MIN_SAMPLE) continue;
-      out.set(`${r.paper_id}#${r.question_number}`, Math.round((r.wrongs / r.attempts) * 100));
+  const perPaper = await inParallel(paperIds, (id) => fetchPaperWrongRates(id));
+  paperIds.forEach((paperId, i) => {
+    for (const r of perPaper[i] ?? []) {
+      out.set(`${paperId}#${r.questionNumber}`, r.pct);
     }
-  }
+  });
   return out;
 }
 
@@ -658,14 +779,23 @@ export async function getSubjectWrongNoteQuestions(
   }
 
   const repIds = [...repInfo.keys()];
+  // 화면에 실제로 그릴 (대표 문제지, 문항 번호)만 이미지·해설 조회 대상으로 넘긴다 —
+  // 문제지 전체를 받던 예전 방식은 문제지가 쌓일수록 안 쓰는 데이터가 대부분이었다.
+  const wantedNumbers = new Map<string, Set<number>>();
+  for (const agg of byRepQ.values()) {
+    const set = wantedNumbers.get(agg.repId) ?? new Set<number>();
+    set.add(agg.questionNumber);
+    wantedNumbers.set(agg.repId, set);
+  }
+
   const [mediaByPaper, answersByPaper, explanationsByPaper, statusByRepQ, memoByRepQ, rateByRepQ, rawMarks] =
     await Promise.all([
-      fetchQuestionMedia(supabase, repIds),
+      fetchQuestionMedia(supabase, repIds, wantedNumbers),
       fetchCorrectAnswers(repIds),
-      fetchExplanations(repIds),
+      fetchExplanations(repIds, wantedNumbers),
       fetchQuestionStatusByRep(supabase, userId, paperList.map((p) => p.id), repId),
       fetchMemos(supabase, userId, repIds),
-      fetchWrongRates(supabase, repIds),
+      fetchWrongRates(repIds),
       fetchWrongNoteMarks(supabase, userId, paperList.map((p) => p.id)),
     ]);
 
@@ -786,13 +916,13 @@ export async function getUnresolvedCountBySubject(
     subjects: { id: string; name: string; slug: string } | null;
   };
   const papers: PaperMeta[] = [];
-  for (const ids of chunk(paperIds, 100)) {
+  await inParallel(chunk(paperIds, 100), async (ids) => {
     const { data } = await supabase
       .from("exam_papers")
       .select("id, subject_id, exam_type_id, year, round, level, title, subjects(id, name, slug)")
       .in("id", ids);
     for (const p of (data ?? []) as unknown as PaperMeta[]) papers.push(p);
-  }
+  });
   const { repByPaperId } = representativePaperIds(papers);
   const repId = (paperId: string) => repByPaperId.get(paperId) ?? paperId;
   const subjectOfPaper = new Map<string, { id: string; name: string; slug: string }>();

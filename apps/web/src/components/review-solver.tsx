@@ -61,6 +61,9 @@ export function ReviewSolver({
   const penColorRef = useRef(penColor);
   const penWidthRef = useRef(penWidth);
   const zoomRef = useRef(1);
+  // 문제 영역을 좌우로 쓸어넘겨 문항을 이동한다 — CBT 문제별 풀기(SingleQuestionView)와
+  // 같은 방식·같은 임계값을 쓴다. 시작점만 여기 담아두고 판정은 handleTouchEnd에서 한다.
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     toolRef.current = tool;
@@ -123,6 +126,21 @@ export function ReviewSolver({
     if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
   }, [index]);
 
+  // 넘길 때마다 이미지를 새로 받으면 번호만 먼저 바뀌고 문제 사진이 늦게 뜬다. CBT
+  // 문제별 풀기와 같이 들어오자마자 전 문항 이미지를 브라우저 캐시에 받아둬서, 쓸어넘김
+  // 이동이 캐시에서 바로 그려지게 한다(이미 받은 이미지는 브라우저가 재요청하지 않는다).
+  const preloadedRef = useRef(false);
+  useEffect(() => {
+    if (submitted || preloadedRef.current) return;
+    preloadedRef.current = true;
+    for (const it of view.items) {
+      for (const src of it.images) {
+        const img = new Image();
+        img.src = src;
+      }
+    }
+  }, [submitted, view.items]);
+
   // 채점 전 답은 클라이언트 상태로만 있어 페이지를 벗어나면 사라진다. 새로고침·닫기는
   // beforeunload로, 뒤로가기 링크는 클릭 확인으로 막는다(하나라도 풀었을 때만).
   const dirty = !submitted && answeredCount > 0;
@@ -158,6 +176,41 @@ export function ReviewSolver({
       next[item.position] = next[item.position] === choice ? null : choice;
       return next;
     });
+  }
+
+  function goPrev() {
+    setIndex((i) => Math.max(0, i - 1));
+  }
+
+  function goNext() {
+    setIndex((i) => Math.min(view.items.length - 1, i + 1));
+  }
+
+  // 쓸어넘김 판정(CBT와 동일): 펜·지우개가 켜져 있으면 획을 긋는 동작과 겹치므로 이동
+  // 모드에서만, 세로 스크롤과 헷갈리지 않게 가로 이동이 60px 이상이면서 세로 이동보다
+  // 1.5배 이상 우세할 때만 넘긴다. 두 손가락(핀치·확대)이 닿으면 스와이프로 안 본다.
+  function handleTouchStart(e: React.TouchEvent) {
+    if (tool !== "move" || e.touches.length !== 1) {
+      swipeStart.current = null;
+      return;
+    }
+    swipeStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+
+  function handleTouchMove(e: React.TouchEvent) {
+    if (e.touches.length > 1) swipeStart.current = null;
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start || tool !== "move") return;
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (dx < 0) goNext();
+    else goPrev();
   }
 
   function handleSubmit() {
@@ -266,6 +319,9 @@ export function ReviewSolver({
 
       <div
         ref={scrollAreaRef}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         className="min-h-0 flex-1 overflow-y-auto bg-zinc-100 px-4 py-4 dark:bg-zinc-800"
       >
         <div
@@ -304,7 +360,7 @@ export function ReviewSolver({
             type="button"
             aria-label="이전 문제"
             disabled={index === 0}
-            onClick={() => setIndex((i) => Math.max(0, i - 1))}
+            onClick={goPrev}
             className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent dark:text-zinc-400 dark:hover:bg-zinc-800"
           >
             <ChevronLeft size={22} />
@@ -336,7 +392,7 @@ export function ReviewSolver({
             <button
               type="button"
               aria-label="다음 문제"
-              onClick={() => setIndex((i) => Math.min(view.items.length - 1, i + 1))}
+              onClick={goNext}
               className="flex shrink-0 items-center justify-center rounded-full p-2 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
             >
               <ChevronRight size={22} />
