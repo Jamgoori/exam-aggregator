@@ -15,6 +15,7 @@ import {
 } from "@gongmoa/core";
 import { representativePaperIds } from "@/lib/dedup-papers";
 import { fetchQuestionMedia, fetchWrongNoteMarks } from "@/lib/wrong-notes";
+import { getPausedSubjectIds } from "@/lib/review-preferences";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -60,8 +61,13 @@ export async function collectDueCandidates(
   supabase: Supabase,
   userId: string,
   now: Date = new Date(),
-): Promise<{ candidates: DueCandidate[]; subjectNames: Map<string, string> }> {
+): Promise<{
+  candidates: DueCandidate[];
+  subjectNames: Map<string, string>;
+  pausedSubjectIds: Set<string>;
+}> {
   const windowEnd = forecastWindowEnd(now);
+  const paused = await getPausedSubjectIds(supabase, userId);
 
   const statusRows: StatusRow[] = [];
   {
@@ -80,7 +86,9 @@ export async function collectDueCandidates(
       from += BATCH_SIZE;
     }
   }
-  if (statusRows.length === 0) return { candidates: [], subjectNames: new Map() };
+  if (statusRows.length === 0) {
+    return { candidates: [], subjectNames: new Map(), pausedSubjectIds: paused };
+  }
 
   const marks = await fetchWrongNoteMarks(supabase, userId);
   const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
@@ -149,6 +157,10 @@ export async function collectDueCandidates(
     const questionNumber = Number(key.slice(idx + 1));
     // 이미지가 없으면 문제를 그릴 수 없어 못 푼다 — 배너 숫자에서도 빼야 한다.
     if (!mediaByPaper.get(paperId)?.get(questionNumber)?.images.length) continue;
+    // 보류한 과목은 큐에서도 예보에서도 뺀다. 스케줄(srs_due_at) 자체는 건드리지
+    // 않는다 — 보류는 "잠깐 안 보는 것"이지 진도를 지우는 게 아니고, 다시 켤 때
+    // 밀린 것을 며칠에 걸쳐 되살린다(review-preferences.ts).
+    if (v.subjectId && paused.has(v.subjectId)) continue;
     candidates.push({
       paperId,
       questionNumber,
@@ -159,9 +171,9 @@ export async function collectDueCandidates(
   }
 
   const subjectNames = new Map<string, string>();
-  for (const s of subjectOfPaper.values()) subjectNames.set(s.id, s.name);
+  for (const s of subjectOfPaper.values()) if (!paused.has(s.id)) subjectNames.set(s.id, s.name);
 
-  return { candidates, subjectNames };
+  return { candidates, subjectNames, pausedSubjectIds: paused };
 }
 
 export type DueReviewSummary = {

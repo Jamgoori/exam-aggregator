@@ -2,8 +2,11 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarCheck, Lock } from "lucide-react";
-import { createDueReviewSession } from "@/app/mypage/wrong-notes/actions";
+import { CalendarCheck, ChevronDown, Lock } from "lucide-react";
+import {
+  createDueReviewSession,
+  toggleReviewSubjectPaused,
+} from "@/app/mypage/wrong-notes/actions";
 import type { DueForecastDay } from "@gongmoa/core";
 
 // 오답노트 탭의 "오늘의 복습" 카드(멤버십 전용). 홈에는 두지 않는다 — 홈은 매번
@@ -12,6 +15,8 @@ import type { DueForecastDay } from "@gongmoa/core";
 //
 // 무료 상태에서 밀린 문항 수 같은 숫자는 보여주지 않는다. 못 누르는 숫자는 설득이
 // 아니라 압박이고, 2주 체험을 이미 써본 사람에게는 낚시로 읽힌다.
+
+export type ReviewSubjectChoice = { id: string; name: string; paused: boolean };
 
 export type ReviewDueCardProps = {
   premium: boolean;
@@ -22,6 +27,8 @@ export type ReviewDueCardProps = {
   nextDueOffset: number | null;
   // 체험 만료까지 남은 일수(체험이 아니면 null). 3일 이하일 때만 알린다.
   trialDaysLeft: number | null;
+  // 복습에 넣을 과목 고르기. 예약이 하나라도 있는 과목만 온다.
+  subjectChoices: ReviewSubjectChoice[];
 };
 
 const SHELL =
@@ -35,6 +42,7 @@ export function ReviewDueCard({
   forecast,
   nextDueOffset,
   trialDaysLeft,
+  subjectChoices,
 }: ReviewDueCardProps) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -105,11 +113,117 @@ export function ReviewDueCard({
 
       <ForecastStrip forecast={forecast} />
 
+      <SubjectPicker choices={subjectChoices} />
+
       {trialDaysLeft != null && trialDaysLeft <= 3 && (
         <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
           체험 {trialDaysLeft}일 남음 · 끝나면 예약된 복습이 사라져요
         </p>
       )}
+    </div>
+  );
+}
+
+// 복습에 넣을 과목 고르기. 접힌 한 줄로 두는 이유는 로드맵 UX 원칙 5(설정을 노출하지
+// 말고 기본값으로 흡수) 때문이다 — 기본값은 "전체"이고, 한 과목만 파는 시기에만 열어
+// 끄면 된다.
+//
+// 저장은 "끈 과목"으로 한다. 켠 과목 목록으로 저장하면 나중에 새로 공부를 시작한
+// 과목이 조용히 빠진 채로 남는다.
+function SubjectPicker({ choices }: { choices: ReviewSubjectChoice[] }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [paused, setPaused] = useState<Set<string>>(
+    () => new Set(choices.filter((c) => c.paused).map((c) => c.id)),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [, start] = useTransition();
+
+  // 과목이 하나뿐이면 고를 게 없다 — 줄만 늘어난다.
+  if (choices.length < 2) return null;
+
+  const pausedNames = choices.filter((c) => paused.has(c.id)).map((c) => c.name);
+
+  function toggle(id: string) {
+    const wasPaused = paused.has(id);
+    // 전부 끄면 복습이 통째로 멈춘다. 마지막 하나는 못 끄게 막고 이유를 말해준다.
+    if (!wasPaused && paused.size >= choices.length - 1) {
+      setError("복습할 과목이 하나는 남아 있어야 해요.");
+      return;
+    }
+    setError(null);
+    setPaused((prev) => {
+      const next = new Set(prev);
+      if (wasPaused) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    start(async () => {
+      const res = await toggleReviewSubjectPaused({ subjectId: id, paused: !wasPaused });
+      if (res.error) {
+        setError(res.error);
+        setPaused((prev) => {
+          const next = new Set(prev);
+          if (wasPaused) next.add(id);
+          else next.delete(id);
+          return next;
+        });
+        return;
+      }
+      // 오늘 문항 수·예보가 즉시 달라지므로 카드를 다시 그린다.
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-blue-200/60 pt-2 dark:border-blue-900/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-1 self-start text-xs font-medium text-blue-700/80 hover:text-blue-800 dark:text-blue-300/70 dark:hover:text-blue-200"
+      >
+        <ChevronDown
+          size={13}
+          className={`transition-transform ${open ? "rotate-180" : ""}`}
+        />
+        복습 과목
+        <span className="font-normal">
+          {pausedNames.length === 0
+            ? "전체"
+            : `${choices.length - pausedNames.length}/${choices.length} · ${pausedNames.join("·")} 쉬는 중`}
+        </span>
+      </button>
+
+      {open && (
+        <>
+          <div className="flex flex-wrap gap-1.5">
+            {choices.map((c) => {
+              const on = !paused.has(c.id);
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => toggle(c.id)}
+                  aria-pressed={on}
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                    on
+                      ? "bg-blue-600 text-white"
+                      : "border border-blue-200 text-blue-700/50 line-through dark:border-blue-900/60 dark:text-blue-300/40"
+                  }`}
+                >
+                  {c.name}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-blue-700/60 dark:text-blue-300/50">
+            끈 과목은 복습에 안 나와요. 진도는 지워지지 않고, 다시 켜면 밀린 문항을
+            며칠에 나눠서 돌려줘요.
+          </p>
+        </>
+      )}
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
     </div>
   );
 }

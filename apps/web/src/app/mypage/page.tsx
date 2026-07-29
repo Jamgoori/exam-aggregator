@@ -23,6 +23,7 @@ import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-
 import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { getDueReviewSummary } from "@/lib/review-queue";
+import { getReviewSubjectOptions } from "@/lib/review-preferences";
 import { isPremiumMembership, trialDaysLeft } from "@gongmoa/core";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@gongmoa/core";
@@ -199,7 +200,12 @@ export default async function MyPage({
     isAdminUser(supabase),
   ]);
   const premium = admin || isPremiumMembership(membership);
-  const dueSummary = premium ? await getDueReviewSummary(supabase, user.id) : null;
+  const [dueSummary, subjectChoices] = premium
+    ? await Promise.all([
+        getDueReviewSummary(supabase, user.id),
+        getReviewSubjectOptions(supabase, user.id),
+      ])
+    : [null, []];
   const reviewDue: ReviewDueCardProps = {
     premium,
     todayCount: dueSummary?.todayCount ?? 0,
@@ -208,6 +214,7 @@ export default async function MyPage({
     forecast: dueSummary?.forecast ?? [],
     nextDueOffset: dueSummary?.nextDueOffset ?? null,
     trialDaysLeft: admin ? null : trialDaysLeft(membership),
+    subjectChoices,
   };
 
   return (
