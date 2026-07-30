@@ -20,6 +20,7 @@ import {
   markReviewGuessed,
 } from "@/app/mypage/wrong-notes/actions";
 import { CbtDrawingToolbar, PEN_COLORS } from "@/components/cbt-drawing-toolbar";
+import { clearReviewFabCache } from "@/components/review-fab";
 import { ReviewScheduleSection } from "@/components/review-schedule-section";
 import {
   attachDrawing,
@@ -300,6 +301,9 @@ export function ReviewSolver({
         setError(res.error ?? "채점에 실패했어요.");
         return;
       }
+      // 오늘 남은 복습 수가 방금 달라졌다. 안 지우면 다 풀고도 플로팅 버튼이
+      // 계속 따라다닌다.
+      clearReviewFabCache();
       setView(res.view);
     });
   }

@@ -5,6 +5,7 @@ import { GoogleAnalytics } from "@next/third-parties/google";
 import { SiteHeaderGate } from "@/components/site-header-gate";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { ReviewFab } from "@/components/review-fab";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
 import { createClient } from "@/lib/supabase/server";
 import "./globals.css";
@@ -48,7 +49,14 @@ async function StreamedSiteHeader() {
       }
     : null;
 
-  return <SiteHeaderGate user={headerUser} />;
+  return (
+    <>
+      <SiteHeaderGate user={headerUser} />
+      {/* 스크롤을 내리면 따라오는 "복습 N" 버튼. 로그인한 사람에게만 붙인다 —
+          비로그인 방문자에게는 셀 것도 없는데 조회만 한 번 더 도는 셈이다. */}
+      {headerUser && <ReviewFab />}
+    </>
+  );
 }
 
 export default function RootLayout({
