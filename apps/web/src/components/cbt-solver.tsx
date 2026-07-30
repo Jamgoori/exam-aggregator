@@ -33,6 +33,12 @@ import { OmrPanel } from "@/components/cbt-omr-panel";
 import { CbtResultModal } from "@/components/cbt-result-modal";
 import { CbtViewModeLock } from "@/components/cbt-view-mode-lock";
 import { DEFAULT_PEN_WIDTH, type DrawTool } from "@/components/pdf-canvas-viewer";
+import {
+  clampZoom,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  useContentZoom,
+} from "@/components/question-view-gestures";
 import { SingleQuestionView } from "@/components/single-question-view";
 import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
 import { formatDuration } from "@gongmoa/core";
@@ -43,14 +49,6 @@ const PdfCanvasViewer = dynamic(
   () => import("@/components/pdf-canvas-viewer").then((m) => m.PdfCanvasViewer),
   { ssr: false },
 );
-
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 2.5;
-const ZOOM_STEP = 0.1;
-
-function clampZoom(zoom: number) {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
-}
 
 // 태블릿 가로에서는 브라우저 크롬(탭·주소창)에 사이트 헤더까지 겹쳐 세로 공간을
 // 크게 잡아먹어, 문제별 풀기에서 문제 이미지가 세로로 잘려 스크롤해야 보인다.
@@ -235,24 +233,10 @@ function useQuestionImagePreload(
 }
 
 // 시험지 배율 상태와 그걸 조절하는 세 가지 입력(버튼 클릭, 모바일 핀치, 트랙패드
-// 핀치/Ctrl+휠)을 묶은 훅.
+// 핀치/Ctrl+휠)을 묶은 훅. 앞의 둘은 오답 다시 풀기와 공유하는 useContentZoom이
+// 담당하고, 여기서는 전체보기(PDF)에만 필요한 Ctrl+휠을 얹는다.
 function useExamZoom(pdfWrapperRef: RefObject<HTMLDivElement | null>) {
-  const [zoom, setZoom] = useState(1);
-
-  function zoomIn() {
-    setZoom((z) => clampZoom(Math.round((z + ZOOM_STEP) * 100) / 100));
-  }
-
-  function zoomOut() {
-    setZoom((z) => clampZoom(Math.round((z - ZOOM_STEP) * 100) / 100));
-  }
-
-  // 펜/지우개 도구 중에도 모바일에서 두 손가락으로 짚으면(핀치) 필기 대신 이
-  // 배율을 조절한다. factor는 PdfCanvasViewer가 넘겨주는, 직전 대비 손가락 간격
-  // 변화 비율이라 그대로 곱해서 반영한다.
-  function handlePinchZoom(factor: number) {
-    setZoom((z) => clampZoom(Math.round(z * factor * 100) / 100));
-  }
+  const { zoom, setZoom, zoomIn, zoomOut, handlePinchZoom } = useContentZoom();
 
   // 트랙패드 핀치줌/Ctrl+휠은 브라우저 기본 동작으로는 페이지 전체(시험지+OMR
   // 패널)를 함께 확대해버린다. 시험지 영역에서만 이 이벤트를 가로채 브라우저 확대를
@@ -268,7 +252,7 @@ function useExamZoom(pdfWrapperRef: RefObject<HTMLDivElement | null>) {
     }
     el.addEventListener("wheel", handleWheel, { passive: false });
     return () => el.removeEventListener("wheel", handleWheel);
-  }, [pdfWrapperRef]);
+  }, [pdfWrapperRef, setZoom]);
 
   return { zoom, zoomIn, zoomOut, handlePinchZoom };
 }

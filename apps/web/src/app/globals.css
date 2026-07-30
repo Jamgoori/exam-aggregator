@@ -259,3 +259,42 @@ button:not(:disabled) {
      훑고 지나가는 폭포(cascade) 연출이 된다. 안 주면 기존처럼 동시에 반짝인다. */
   animation-delay: var(--skeleton-delay, 0s);
 }
+
+/* 모달 등장 — 배경은 옅게 페이드, 패널은 아래에서 살짝 올라오며 커진다. 모바일에서
+   바텀시트로 붙는 배치(items-end)와 데스크톱 중앙 배치 둘 다 같은 움직임으로
+   읽히도록 translateY + scale을 함께 쓴다. */
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-modal-fade-in {
+  animation: modal-fade-in 0.18s ease-out;
+}
+
+.animate-modal-panel-in {
+  animation: modal-panel-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 모션 최소화를 켠 사용자에게는 등장 효과를 끈다. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-modal-fade-in,
+  .animate-modal-panel-in {
+    animation: none;
+  }
+}

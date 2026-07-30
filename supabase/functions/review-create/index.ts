@@ -7,6 +7,10 @@
 import { corsHeaders, json } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
 import { fetchQuestionMedia } from "../_shared/media.ts";
+import {
+  pickReviewCandidates,
+  type ReviewPickStrategy,
+} from "../_shared/review-pick.ts";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -15,15 +19,6 @@ const MAX_LIMIT = 50;
 // "최근에 만든 아직 안 푼 세션"을 그대로 돌려준다 — 사용자가 버튼을 두 번 눌러도 새 세션이
 // 생기는 대신 같은 문제 묶음을 이어서 풀게 되므로, 막는 느낌 없이 목적이 달성된다.
 const REUSE_WINDOW_MINUTES = 30;
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -34,10 +29,13 @@ Deno.serve(async (req) => {
 
   let onlyUnresolved = true;
   let limit = DEFAULT_LIMIT;
+  // 뽑기 방식. 클라이언트가 보내는 값이라 모르는 값은 기본값으로 떨어뜨린다.
+  let strategy: ReviewPickStrategy = "weighted";
   try {
     const body = await req.json().catch(() => ({}));
     if (typeof body?.onlyUnresolved === "boolean") onlyUnresolved = body.onlyUnresolved;
     if (Number.isInteger(body?.limit)) limit = body.limit;
+    if (body?.strategy === "random") strategy = "random";
   } catch {
     // 기본값 사용
   }
@@ -89,17 +87,22 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 내 오답 문항.
+  // 내 오답 문항. wrong_count·last_answered_at 은 층 정원제 추출의 재료다.
   let q = admin
     .from("user_question_status")
-    .select("paper_id, question_number")
+    .select("paper_id, question_number, wrong_count, last_answered_at")
     .eq("user_id", userId)
     .gt("wrong_count", 0);
   if (onlyUnresolved) q = q.eq("last_is_correct", false);
   const { data: statusRows, error } = await q;
   if (error) return json({ error: "오답을 불러오지 못했어요." }, 500);
 
-  const rows = (statusRows ?? []) as { paper_id: string; question_number: number }[];
+  const rows = (statusRows ?? []) as {
+    paper_id: string;
+    question_number: number;
+    wrong_count: number | null;
+    last_answered_at: string | null;
+  }[];
   if (rows.length === 0) {
     return json({ error: "다시 풀 오답이 없어요." }, 400);
   }
@@ -107,14 +110,21 @@ Deno.serve(async (req) => {
   // 이미지가 있는 문항만 출제 가능.
   const paperIds = [...new Set(rows.map((r) => r.paper_id))];
   const media = await fetchQuestionMedia(admin, paperIds);
-  const candidates = rows.filter(
-    (r) => (media.get(r.paper_id)?.get(r.question_number)?.images.length ?? 0) > 0,
-  );
+  const candidates = rows
+    .filter((r) => (media.get(r.paper_id)?.get(r.question_number)?.images.length ?? 0) > 0)
+    .map((r) => ({
+      paper_id: r.paper_id,
+      question_number: r.question_number,
+      wrongCount: r.wrong_count ?? 0,
+      lastWrongAt: r.last_answered_at ?? "",
+    }));
   if (candidates.length === 0) {
     return json({ error: "다시 풀 (이미지가 있는) 오답이 없어요." }, 400);
   }
 
-  const picked = shuffle(candidates).slice(0, limit);
+  // 균등 무작위가 아니라 층 정원제(2번 이상 틀림 > 최근 오답 > 나머지). 오답이 수백
+  // 개 쌓인 계정에서 균등 추출은 위험한 문항을 만날 확률을 계속 희석시킨다.
+  const picked = pickReviewCandidates(candidates, limit, strategy);
 
   const { data: session, error: sErr } = await admin
     .from("review_sessions")

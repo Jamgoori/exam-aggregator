@@ -1,0 +1,102 @@
+// packages/core/src/srs.ts 포팅. 정본은 core 쪽이고 테스트도 거기 있다
+// (packages/core/src/srs.test.ts). 엣지 함수는 워크스페이스 패키지를 번들에 못 넣어
+// 같은 규칙을 여기에 한 벌 더 둔다 — 한쪽만 고치면 웹과 앱의 복습일이 조용히
+// 어긋나므로, 간격·ease 상수를 바꿀 때는 반드시 양쪽을 함께 고칠 것.
+
+export type SrsState = {
+  intervalDays: number;
+  ease: number;
+  reps: number;
+  lapses: number;
+};
+
+export const SRS_INITIAL: SrsState = {
+  intervalDays: 0,
+  ease: 2.5,
+  reps: 0,
+  lapses: 0,
+};
+
+export const SRS_MIN_EASE = 1.3;
+export const SRS_MAX_EASE = 2.8;
+export const SRS_EASE_PENALTY = 0.2;
+export const SRS_EASE_BONUS = 0.1;
+export const SRS_MAX_INTERVAL_DAYS = 180;
+export const SRS_FIRST_INTERVAL_DAYS = 1;
+export const SRS_SECOND_INTERVAL_DAYS = 3;
+
+// 하루 경계는 KST 04:00 (자정으로 하면 새벽에 푼 사람의 "내일"이 두 시간 뒤가 된다).
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_CUTOFF_MS = 4 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function srsDayIndex(at: Date): number {
+  return Math.floor((at.getTime() + KST_OFFSET_MS - DAY_CUTOFF_MS) / DAY_MS);
+}
+
+export function srsDayStart(dayIndex: number): Date {
+  return new Date(dayIndex * DAY_MS + DAY_CUTOFF_MS - KST_OFFSET_MS);
+}
+
+export function srsDueAt(now: Date, intervalDays: number): Date {
+  return srsDayStart(srsDayIndex(now) + intervalDays);
+}
+
+function clampEase(ease: number): number {
+  return Math.min(SRS_MAX_EASE, Math.max(SRS_MIN_EASE, ease));
+}
+
+function isFirstEntry(prev: SrsState): boolean {
+  return prev.reps === 0 && prev.lapses === 0 && prev.intervalDays === 0;
+}
+
+export type SrsResult = { state: SrsState; dueAt: Date };
+
+export function nextSrs(prev: SrsState, isCorrect: boolean, now: Date): SrsResult {
+  if (!isCorrect) {
+    const first = isFirstEntry(prev);
+    return {
+      state: {
+        intervalDays: SRS_FIRST_INTERVAL_DAYS,
+        ease: first ? prev.ease : clampEase(prev.ease - SRS_EASE_PENALTY),
+        reps: 0,
+        lapses: first ? 0 : prev.lapses + 1,
+      },
+      dueAt: srsDueAt(now, SRS_FIRST_INTERVAL_DAYS),
+    };
+  }
+
+  const reps = prev.reps + 1;
+  const intervalDays = reps === 1
+    ? SRS_FIRST_INTERVAL_DAYS
+    : reps === 2
+    ? SRS_SECOND_INTERVAL_DAYS
+    : Math.min(
+      SRS_MAX_INTERVAL_DAYS,
+      Math.max(1, Math.round(prev.intervalDays * prev.ease)),
+    );
+
+  return {
+    state: {
+      intervalDays,
+      ease: clampEase(prev.ease + SRS_EASE_BONUS),
+      reps,
+      lapses: prev.lapses,
+    },
+    dueAt: srsDueAt(now, intervalDays),
+  };
+}
+
+export function srsStateFromRow(row: {
+  srs_interval_days?: number | null;
+  srs_ease?: number | null;
+  srs_reps?: number | null;
+  srs_lapses?: number | null;
+}): SrsState {
+  return {
+    intervalDays: row.srs_interval_days ?? SRS_INITIAL.intervalDays,
+    ease: row.srs_ease ?? SRS_INITIAL.ease,
+    reps: row.srs_reps ?? SRS_INITIAL.reps,
+    lapses: row.srs_lapses ?? SRS_INITIAL.lapses,
+  };
+}

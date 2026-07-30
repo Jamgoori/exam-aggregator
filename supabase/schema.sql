@@ -1155,3 +1155,138 @@ where u.raw_user_meta_data->>'nickname' is not null
   and char_length(btrim(u.raw_user_meta_data->>'nickname')) between 2 and 10
   and btrim(u.raw_user_meta_data->>'nickname') !~ '[[:cntrl:]]'
 on conflict do nothing;
+
+-- ── 멤버십 + 간격 반복(SRS) 스케줄 ───────────────────────────────────────────
+-- 복습(간격 반복)은 유료 전용 기능이다. 무료 사용자는 기존 섞어풀기(미극복 오답
+-- 무작위)를 그대로 쓰고, 유료는 문항마다 "언제 다시 볼지"가 계산된 큐를 받는다.
+-- 둘의 결정적인 차이는 극복한 문항의 처리다: 섞어풀기는 한 번 맞히면 큐에서 영구히
+-- 빠지지만(last_is_correct 기준), 복습은 간격을 벌려 다시 낸다. 한 번 맞힌 것과
+-- 아는 것은 다르기 때문이다.
+
+create table if not exists memberships (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  tier text not null default 'free',        -- 'free' | 'premium'
+  source text not null default 'trial',     -- 'trial' | 'paid'
+  -- 체험 시작 시각. null이면 아직 시작 전 — 가입일이 아니라 "첫 CBT 채점"에 채운다.
+  -- 가입 직후엔 오답이 0개라 복습 큐가 비어 있어서, 가입일 기준으로 재면 체험
+  -- 앞부분을 오답 쌓는 데 다 써버린다.
+  started_at timestamptz,
+  -- null이면 만료 없음(정기결제 중). 만료 판정은 읽는 시점에 계산한다(크론 없음).
+  expires_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+
+do $$ begin
+  alter table memberships add constraint memberships_tier_check
+    check (tier in ('free', 'premium'));
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table memberships add constraint memberships_source_check
+    check (source in ('trial', 'paid'));
+exception when duplicate_object then null; end $$;
+
+create index if not exists memberships_expires_idx on memberships(expires_at)
+  where expires_at is not null;
+
+alter table memberships enable row level security;
+
+drop policy if exists "select own membership" on memberships;
+create policy "select own membership" on memberships
+  for select to authenticated using (auth.uid() = user_id);
+
+-- 쓰기 정책은 의도적으로 없다: tier·expires_at을 클라이언트가 REST 호출로 직접 올릴
+-- 수 있으면 결제 없이 프리미엄이 된다. 체험 시작은 서버 채점 경로가, 결제 반영은
+-- 결제 웹훅이 service_role로만 수행한다.
+
+-- 가입 시 멤버십 행을 만들어 둔다(tier='free', started_at=null). 체험은 이 행이
+-- 있는 상태에서 첫 CBT 채점이 켠다.
+create or replace function create_membership_for_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into memberships (user_id) values (new.id) on conflict (user_id) do nothing;
+  return new;
+end $$;
+
+drop trigger if exists trg_create_membership on auth.users;
+create trigger trg_create_membership
+  after insert on auth.users
+  for each row execute function create_membership_for_new_user();
+
+-- 기존 사용자에게도 체험을 준다(출시 시 1회). started_at이 null이라 다음 CBT 채점
+-- 때 자동으로 켜진다 — 이미 오답을 쌓아둔 사용자는 체험 첫날부터 큐가 차 있어
+-- 신규보다 체험 품질이 좋다.
+insert into memberships (user_id) select id from auth.users on conflict do nothing;
+
+-- ── user_question_status 의 SRS 상태 ─────────────────────────────────────────
+-- 문항별 복습 스케줄. 계산은 packages/core/src/srs.ts(웹·모바일 공유)와 그 Deno
+-- 포팅본(supabase/functions/_shared/srs.ts)이 하고, 여기에는 결과만 저장한다.
+-- 쓰기 정책이 없는 테이블이라(서버 채점만 갱신) 사용자가 자기 복습일을 미루거나
+-- 앞당길 수 없다.
+alter table user_question_status add column if not exists srs_interval_days int not null default 0;
+alter table user_question_status add column if not exists srs_ease real not null default 2.5;
+alter table user_question_status add column if not exists srs_reps int not null default 0;
+alter table user_question_status add column if not exists srs_lapses int not null default 0;
+-- null = 아직 SRS 대상이 아님(한 번도 틀린 적 없는 문항). 복습 큐는 오답에서만 출발한다.
+alter table user_question_status add column if not exists srs_due_at timestamptz;
+
+create index if not exists user_question_status_due_idx
+  on user_question_status(user_id, srs_due_at)
+  where srs_due_at is not null;
+
+-- 기존 오답 백필. 이걸 안 하면 출시 첫날 모든 사용자의 복습 큐가 비어서 기능이
+-- 아예 시작되지 않는다. 하루 경계는 srs.ts와 같은 KST 04:00 기준으로 맞춘다.
+--   미극복(last_is_correct = false) → 다음날 04:00
+--   극복(last_is_correct = true)    → 3일 뒤 04:00 (reps 2 지점에서 이어받기)
+update user_question_status
+set
+  srs_interval_days = case when last_is_correct then 3 else 1 end,
+  srs_reps = case when last_is_correct then 2 else 0 end,
+  srs_due_at = (
+    (
+      date_trunc('day', (last_answered_at at time zone 'Asia/Seoul') - interval '4 hours')
+      + interval '4 hours'
+      + (case when last_is_correct then interval '3 days' else interval '1 day' end)
+    ) at time zone 'Asia/Seoul'
+  )
+where srs_due_at is null and wrong_count > 0;
+
+-- ── 복습 설정(과목 보류) ────────────────────────────────────────────────────
+-- 복습 큐에서 특정 과목을 잠시 빼두는 설정. "지금은 국어만 판다" 같은 시기에
+-- 다른 과목이 매일 큐에 섞여 들어오면 복습 자체를 안 하게 되기 때문이다.
+--
+-- 담을 과목을 고르는 include 목록이 아니라 뺄 과목을 고르는 exclude 목록인 이유:
+-- 나중에 새로 공부를 시작한 과목은 기본으로 켜져 있어야 한다. include 목록이면
+-- 새 과목이 조용히 빠진 채로 남고, 사용자는 그걸 "복습에 안 뜬다"는 버그로 읽는다.
+--
+-- 즐겨찾는 과목(subject_bookmarks)과 겹치지 않게 별도 테이블로 둔다 — 그쪽은
+-- 과목 탐색용 바로가기라, 즐겨찾기를 지웠다고 복습이 멈추면 안 된다.
+create table if not exists review_preferences (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  paused_subject_ids uuid[] not null default '{}',
+  updated_at timestamptz not null default now()
+);
+
+alter table review_preferences enable row level security;
+
+-- 이 테이블은 표시 설정만 담는다(어떤 과목을 큐에서 빼둘지). 정답·채점·멤버십과
+-- 무관해서 본인 행 쓰기를 열어도 얻을 수 있는 권한이 없다. 실제 복습일
+-- (user_question_status.srs_due_at)은 여전히 쓰기 정책이 없어 서버만 고친다 —
+-- 보류 해제 시 재예약도 그래서 서버 경로로만 돈다.
+drop policy if exists "select own review preferences" on review_preferences;
+create policy "select own review preferences" on review_preferences
+  for select to authenticated using (auth.uid() = user_id);
+
+drop policy if exists "insert own review preferences" on review_preferences;
+create policy "insert own review preferences" on review_preferences
+  for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "update own review preferences" on review_preferences;
+create policy "update own review preferences" on review_preferences
+  for update to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);

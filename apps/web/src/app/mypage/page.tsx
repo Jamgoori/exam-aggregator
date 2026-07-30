@@ -19,7 +19,12 @@ import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { ScrollToHash } from "@/components/scroll-to-hash";
 import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
+import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-card";
 import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
+import { getMembership, isAdminUser } from "@/lib/membership";
+import { getDueReviewSummary } from "@/lib/review-queue";
+import { getReviewSubjectOptions } from "@/lib/review-preferences";
+import { isPremiumMembership, trialDaysLeft } from "@gongmoa/core";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@gongmoa/core";
 import { computeStreakDays, streakTier } from "@/lib/streak";
@@ -185,6 +190,33 @@ export default async function MyPage({
           : "locked";
   const diagnosisHint = diagEligibility?.hint ?? null;
 
+  // 오늘의 복습(멤버십 전용). 무료 사용자에게는 요약을 조회하지도 않는다 — 못 누르는
+  // 숫자는 압박만 되고, 후보 수집이 이미지 조회까지 도는 무거운 작업이라 값이다.
+  // 관리자는 멤버십과 무관하게 프리미엄으로 본다. 관리자 여부를 따로 들고 있는 건
+  // 체험 만료 안내("체험 N일 남음") 때문이다 — 관리자는 체험이 끝나도 계속 쓸 수
+  // 있으니 그 문구를 보여주면 거짓말이 된다.
+  const [membership, admin] = await Promise.all([
+    getMembership(supabase, user.id),
+    isAdminUser(supabase),
+  ]);
+  const premium = admin || isPremiumMembership(membership);
+  const [dueSummary, subjectChoices] = premium
+    ? await Promise.all([
+        getDueReviewSummary(supabase, user.id),
+        getReviewSubjectOptions(supabase, user.id),
+      ])
+    : [null, []];
+  const reviewDue: ReviewDueCardProps = {
+    premium,
+    todayCount: dueSummary?.todayCount ?? 0,
+    deferredCount: dueSummary?.deferredCount ?? 0,
+    subjects: dueSummary?.subjects.map((s) => ({ name: s.name, count: s.count })) ?? [],
+    forecast: dueSummary?.forecast ?? [],
+    nextDueOffset: dueSummary?.nextDueOffset ?? null,
+    trialDaysLeft: admin ? null : trialDaysLeft(membership),
+    subjectChoices,
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 pb-12 pt-6 sm:pt-8">
       {/* 홈 오답노트 배너의 #wrong-notes 딥링크가 스켈레톤 이후에도 확실히
@@ -253,6 +285,7 @@ export default async function MyPage({
             unresolvedBySubject={unresolvedBySubject}
             diagnosisState={diagnosisState}
             diagnosisHint={diagnosisHint}
+            reviewDue={reviewDue}
           />
         }
       />
@@ -419,11 +452,13 @@ function WrongNotesTab({
   unresolvedBySubject,
   diagnosisState,
   diagnosisHint,
+  reviewDue,
 }: {
   groups: WrongNoteSubjectGroup[];
   unresolvedBySubject: Map<string, { name: string; slug: string; unresolved: number; due: number }>;
   diagnosisState: DiagnosisBannerState;
   diagnosisHint: string | null;
+  reviewDue: ReviewDueCardProps;
 }) {
   return (
     // 홈 오답노트 배너(#wrong-notes)가 페이지 최상단이 아닌 이 섹션으로 바로
@@ -433,6 +468,7 @@ function WrongNotesTab({
         <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
         오답노트
       </h2>
+      <ReviewDueCard {...reviewDue} />
       <DiagnosisBanner initialState={diagnosisState} hint={diagnosisHint} />
       <HowItWorksStrip />
       {groups.length === 0 ? (

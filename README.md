@@ -33,6 +33,23 @@ Vercel 프로젝트 **Settings → Build & Deployment → Root Directory** 를 *
 
 검증됨: `apps/web` 에서 `npx next build` 성공.
 
+#### 루트 `optionalDependencies` 는 지우지 말 것
+
+루트 `package.json` 의 `optionalDependencies`(lightningcss / @tailwindcss/oxide /
+sharp 의 `linux-x64` 네이티브 바이너리)는 Vercel 빌드용이다. npm 은 이런 플랫폼별
+optional 의존성을 **락 파일을 만든 컴퓨터의 플랫폼 것만** 기록한다 — Windows 에서
+`npm install` 을 돌리면 `package-lock.json` 에 `win32` 바이너리만 남고, 리눅스인
+Vercel 은 설치할 게 없어서 빌드가 이렇게 깨진다:
+
+```
+Error: Cannot find module '../lightningcss.linux-x64-gnu.node'
+```
+
+빌드 캐시가 있는 동안엔 안 드러나고, 캐시가 비는 순간(`Previous build caches not
+available`) 터진다. 루트에 명시해 두면 어느 플랫폼에서 락을 만들든 리눅스 바이너리가
+남는다. 버전은 상위 패키지가 쓰는 것과 **정확히 같아야** 하므로, tailwind 나
+lightningcss 를 올릴 때 이 세 줄도 같이 올릴 것.
+
 ### 모바일 (EAS)
 네이티브 SDK(카카오·구글 로그인)라 Expo Go 불가 — dev build 필요.
 

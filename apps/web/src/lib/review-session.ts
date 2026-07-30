@@ -10,6 +10,7 @@ import {
 import { representativePaperIds } from "@/lib/dedup-papers";
 import { recordQuestionResults } from "@/lib/question-status";
 import { sanitizeSelectedChoice } from "@/lib/cbt-attempt";
+import { pickReviewCandidates, type ReviewPickStrategy } from "@gongmoa/core";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -62,12 +63,23 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-// 섞어풀기 세션을 만든다: 해당 과목의 (이미지가 있어 풀 수 있는) 오답을 골라 섞고
-// limit개로 잘라 세션+문항을 저장한다. 풀 문항이 없으면 error.
+// 섞어풀기 세션을 만든다: 해당 과목의 (이미지가 있어 풀 수 있는) 오답에서 limit개를
+// 골라 세션+문항을 저장한다. 풀 문항이 없으면 error.
+//
+// 뽑기는 균등 무작위가 아니라 층 정원제(review-pick.ts)다. 오답이 수백 개 쌓이면
+// 균등 추출은 "2번 틀린 문제"와 "반년 전 한 번 틀린 문제"를 같은 확률로 내보내
+// 정작 위험한 문항을 만날 확률을 계속 희석시킨다. strategy: "random"을 주면 기존
+// 균등 추출로 돌아간다(화면의 "전체 랜덤" 칩).
 export async function createReviewSessionForUser(
   supabase: Supabase,
   userId: string,
-  input: { subjectSlug: string; onlyUnresolved: boolean; onlyDue?: boolean; limit?: number },
+  input: {
+    subjectSlug: string;
+    onlyUnresolved: boolean;
+    onlyDue?: boolean;
+    limit?: number;
+    strategy?: ReviewPickStrategy;
+  },
 ): Promise<{ sessionId?: string; error?: string }> {
   const note = await getSubjectWrongNoteQuestions(supabase, userId, input.subjectSlug);
   if (!note) return { error: "과목을 찾을 수 없어요." };
@@ -93,7 +105,7 @@ export async function createReviewSessionForUser(
   }
 
   const limit = Math.min(Math.max(1, input.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
-  const picked = shuffle(candidates).slice(0, limit);
+  const picked = pickReviewCandidates(candidates, limit, input.strategy ?? "weighted");
 
   const admin = createAdminClient();
   const { data: session, error: sessionError } = await admin
@@ -138,16 +150,30 @@ function chunkIds<T>(items: T[], size: number): T[][] {
 // - onlyDue: 마지막으로 푼 지 하루 지난 것만(복습).
 // - includeResolved: 이미 극복한 문항도 포함(다시 풀고 싶은 사람용).
 // user_question_status(본인 RLS) + dedup 대표로 접고, 이미지가 있는(풀 수 있는) 문항만.
+//
+// wrongCount·lastWrongAt까지 함께 돌려주는 건 층 정원제 추출(review-pick.ts)의
+// 재료이기 때문이다. lastWrongAt은 last_answered_at을 그대로 쓴다 — 기본값인
+// 미극복 후보에서는 마지막 응답이 곧 마지막 오답이라 같은 값이다(includeResolved로
+// 극복 문항까지 담을 때만 "마지막으로 푼 시각"에 가까워지는데, 그 문항은 어차피
+// 위험도가 낮아 층이 어긋나도 손해가 없다).
+export type AllReviewCandidate = {
+  paperId: string;
+  questionNumber: number;
+  wrongCount: number;
+  lastWrongAt: string;
+};
+
 export async function collectAllReviewCandidates(
   supabase: Supabase,
   userId: string,
   opts: { onlyDue?: boolean; includeResolved?: boolean },
-): Promise<{ paperId: string; questionNumber: number }[]> {
+): Promise<AllReviewCandidate[]> {
   const statusRows: {
     paper_id: string;
     question_number: number;
     last_is_correct: boolean;
     last_answered_at: string;
+    wrong_count: number | null;
   }[] = [];
   {
     let from = 0;
@@ -155,7 +181,7 @@ export async function collectAllReviewCandidates(
     while (true) {
       const { data } = await supabase
         .from("user_question_status")
-        .select("paper_id, question_number, last_is_correct, last_answered_at")
+        .select("paper_id, question_number, last_is_correct, last_answered_at, wrong_count")
         .eq("user_id", userId)
         .gt("wrong_count", 0)
         .range(from, from + SIZE - 1);
@@ -199,14 +225,19 @@ export async function collectAllReviewCandidates(
     deletedRepKeys.add(`${repId(k.slice(0, idx))}#${k.slice(idx + 1)}`);
   }
 
-  // (대표, 문항)별 최신 상태로 접기.
-  const byRepQ = new Map<string, { resolved: boolean; at: string }>();
+  // (대표, 문항)별 최신 상태로 접기. 틀린 횟수는 최신 행의 값이 아니라 접힌 행들의
+  // 최댓값을 쓴다 — 같은 문항을 중복 시험지로 나눠 응시했으면 어느 한 행만 봐서는
+  // "몇 번 무너진 문항인지"가 실제보다 작게 나온다.
+  const byRepQ = new Map<string, { resolved: boolean; at: string; wrongCount: number }>();
   for (const r of statusRows) {
     const key = `${repId(r.paper_id)}#${r.question_number}`;
     if (deletedRepKeys.has(key)) continue;
     const ex = byRepQ.get(key);
+    const wrongCount = Math.max(ex?.wrongCount ?? 0, r.wrong_count ?? 0);
     if (!ex || r.last_answered_at > ex.at) {
-      byRepQ.set(key, { resolved: r.last_is_correct, at: r.last_answered_at });
+      byRepQ.set(key, { resolved: r.last_is_correct, at: r.last_answered_at, wrongCount });
+    } else {
+      ex.wrongCount = wrongCount;
     }
   }
 
@@ -216,14 +247,19 @@ export async function collectAllReviewCandidates(
     ? new Date(Date.now() - REVIEW_COOLDOWN_HOURS * 3600 * 1000).toISOString()
     : null;
 
-  const candidates: { paperId: string; questionNumber: number }[] = [];
+  const candidates: AllReviewCandidate[] = [];
   for (const [key, v] of byRepQ) {
     if (!opts.includeResolved && v.resolved) continue;
     if (cutoff && v.at > cutoff) continue;
     const [rep, qnumStr] = key.split("#");
     const qnum = Number(qnumStr);
     if (!mediaByPaper.get(rep)?.get(qnum)?.images.length) continue; // 풀 수 있는 것만
-    candidates.push({ paperId: rep, questionNumber: qnum });
+    candidates.push({
+      paperId: rep,
+      questionNumber: qnum,
+      wrongCount: v.wrongCount,
+      lastWrongAt: v.at,
+    });
   }
   return candidates;
 }
@@ -279,12 +315,15 @@ export async function createPaperReviewSessionForUser(
 }
 
 // 전 과목 섞어풀기/복습 세션 생성. 후보를 모아 createReviewSessionFromItems로 넘긴다.
+// 뽑기는 과목 섞어풀기와 같은 층 정원제를 쓴다 — 전 과목이면 후보가 더 크게 쌓이므로
+// 균등 추출의 희석 문제가 더 심해지는 자리다.
 export async function createAllReviewSessionForUser(
   supabase: Supabase,
   userId: string,
-  opts: { onlyDue?: boolean; includeResolved?: boolean },
+  opts: { onlyDue?: boolean; includeResolved?: boolean; strategy?: ReviewPickStrategy },
 ): Promise<{ sessionId?: string; error?: string }> {
-  const items = await collectAllReviewCandidates(supabase, userId, opts);
+  const candidates = await collectAllReviewCandidates(supabase, userId, opts);
+  const items = pickReviewCandidates(candidates, MAX_LIMIT, opts.strategy ?? "weighted");
   if (items.length === 0) {
     return {
       error: opts.onlyDue
@@ -294,16 +333,24 @@ export async function createAllReviewSessionForUser(
           : "아직 안 극복한(이미지가 있는) 오답이 없어요.",
     };
   }
-  return createReviewSessionFromItems(supabase, userId, items);
+  // 이미 층 정원제로 고르고 순서까지 섞은 목록이라 여기서 다시 섞지 않는다.
+  return createReviewSessionFromItems(supabase, userId, items, items.length, {
+    keepOrder: true,
+  });
 }
 
 // 채점 결과에서 "틀린 문항만 다시 풀기": 넘겨받은 (문제지, 문항) 목록으로 새 세션을
 // 만든다. 정답·이미지는 채점/렌더 시점에 서버가 다시 조회하므로 목록엔 정답이 없다.
+//
+// keepOrder를 켜면 넘어온 순서를 그대로 쓴다. 복습 큐는 이미 우선순위와 과목
+// 섞기까지 계산해서 넘기므로(review-queue.ts), 여기서 다시 섞으면 그 편성이 통째로
+// 버려진다.
 export async function createReviewSessionFromItems(
   supabase: Supabase,
   userId: string,
   items: { paperId: string; questionNumber: number }[],
   limit: number = MAX_LIMIT,
+  opts: { keepOrder?: boolean } = {},
 ): Promise<{ sessionId?: string; error?: string }> {
   const seen = new Set<string>();
   const clean: { paperId: string; questionNumber: number }[] = [];
@@ -317,7 +364,7 @@ export async function createReviewSessionFromItems(
   if (clean.length === 0) return { error: "다시 풀 문항이 없어요." };
 
   const cap = Math.min(Math.max(1, limit), MAX_LIMIT);
-  const picked = shuffle(clean).slice(0, cap);
+  const picked = (opts.keepOrder ? clean : shuffle(clean)).slice(0, cap);
   const admin = createAdminClient();
   const { data: session, error: sessionError } = await admin
     .from("review_sessions")
@@ -347,6 +394,24 @@ export async function createReviewSessionFromItems(
     return { error: "세션 생성에 실패했어요." };
   }
   return { sessionId: session.id as string };
+}
+
+// 복습(간격 반복) 세션 생성 — 유료 전용. 어떤 문항을 어떤 순서로 낼지는 이미
+// review-queue.ts가 정해서 넘기므로 여기서는 섞지 않는다(keepOrder).
+//
+// 오늘 큐가 비어 있는 건 정상 상태다("오늘은 복습할 게 없다"). 그래서 다른 세션
+// 생성과 달리 에러 문구가 실패가 아니라 안내에 가깝다.
+export async function createDueReviewSessionForUser(
+  supabase: Supabase,
+  userId: string,
+  items: { paperId: string; questionNumber: number }[],
+): Promise<{ sessionId?: string; error?: string }> {
+  if (items.length === 0) {
+    return { error: "오늘 복습할 문항이 없어요." };
+  }
+  return createReviewSessionFromItems(supabase, userId, items, items.length, {
+    keepOrder: true,
+  });
 }
 
 // 같은 개념(keyword_title)의 기출 문항을 전체 코퍼스에서 모아 후보로 뽑는다. 진단의
