@@ -27,6 +27,11 @@ export type ReviewDueCardProps = {
   premium: boolean;
   todayCount: number;
   deferredCount: number;
+  // 오늘 큐에 처음 들어온(대기 풀에서 승격된) 문항 수.
+  newCount: number;
+  // 아직 순서를 기다리는 오답 수. 승격되지 않은 오답이 사라진 게 아니라는 걸
+  // 말해주지 않으면, 1회독 중인 사용자는 오답이 증발했다고 읽는다.
+  pendingTotal: number;
   subjects: { name: string; count: number }[];
   forecast: DueForecastDay[];
   nextDueOffset: number | null;
@@ -43,6 +48,8 @@ export function ReviewDueCard({
   premium,
   todayCount,
   deferredCount,
+  newCount,
+  pendingTotal,
   subjects,
   forecast,
   nextDueOffset,
@@ -102,9 +109,21 @@ export function ReviewDueCard({
                 ? `다음 복습은 ${nextDueOffset}일 뒤예요`
                 : "새로 틀린 문제가 생기면 여기에 예약돼요"}
           </p>
+          {newCount > 0 && (
+            <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
+              그중 {newCount}문항은 오늘 처음 복습해요
+            </p>
+          )}
           {deferredCount > 0 && (
             <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
               {deferredCount}문항은 내일 이어서 — 오늘치만 끝내면 돼요
+            </p>
+          )}
+          {/* 승격 안 된 오답은 사라진 게 아니다. 1회독 중이면 이 숫자가 수백까지
+              가는데, 말해주지 않으면 "내 오답 어디 갔냐"가 된다. */}
+          {pendingTotal > 0 && (
+            <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
+              오답 {pendingTotal}문항은 오답노트에서 차례를 기다리는 중이에요
             </p>
           )}
           {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}

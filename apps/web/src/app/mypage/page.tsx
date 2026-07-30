@@ -210,6 +210,8 @@ export default async function MyPage({
     premium,
     todayCount: dueSummary?.todayCount ?? 0,
     deferredCount: dueSummary?.deferredCount ?? 0,
+    newCount: dueSummary?.newCount ?? 0,
+    pendingTotal: dueSummary?.pendingTotal ?? 0,
     subjects: dueSummary?.subjects.map((s) => ({ name: s.name, count: s.count })) ?? [],
     forecast: dueSummary?.forecast ?? [],
     nextDueOffset: dueSummary?.nextDueOffset ?? null,

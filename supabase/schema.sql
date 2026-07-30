@@ -1231,12 +1231,25 @@ alter table user_question_status add column if not exists srs_interval_days int 
 alter table user_question_status add column if not exists srs_ease real not null default 2.5;
 alter table user_question_status add column if not exists srs_reps int not null default 0;
 alter table user_question_status add column if not exists srs_lapses int not null default 0;
--- null = 아직 SRS 대상이 아님(한 번도 틀린 적 없는 문항). 복습 큐는 오답에서만 출발한다.
+-- null = 아직 SRS 대상이 아님. 두 경우가 있다:
+--   1) 한 번도 틀린 적 없는 문항(wrong_count = 0) — 복습 큐는 오답에서만 출발한다.
+--   2) 틀린 적은 있지만 아직 안 태운 오답(wrong_count > 0) = "대기 풀".
+-- 2번이 입구 조절 장치다. 채점 경로는 이미 스케줄이 있는 문항만 굴리고(즉 여기에
+-- due를 새로 심지 않고), 복습 세션을 시작할 때 하루 신규 몫만큼만 승격한다
+-- (packages/core/src/review-queue.ts, apps/web/src/lib/review-queue.ts).
+-- 이렇게 안 하면 하루 80개씩 틀리는 1회독 사용자의 큐가 유입 속도대로 불어나
+-- 연체순 정렬 탓에 회독 첫 주 문항만 몇 주째 돈다.
 alter table user_question_status add column if not exists srs_due_at timestamptz;
 
 create index if not exists user_question_status_due_idx
   on user_question_status(user_id, srs_due_at)
   where srs_due_at is not null;
+
+-- 대기 풀 조회는 승격 순서(자주 틀린 것 먼저)대로 상위 몇백 행만 읽는다. 위 인덱스는
+-- srs_due_at is not null 부분 인덱스라 대기 행을 못 덮어 한 벌 더 둔다.
+create index if not exists user_question_status_pending_idx
+  on user_question_status(user_id, wrong_count desc, last_answered_at)
+  where srs_due_at is null;
 
 -- 기존 오답 백필. 이걸 안 하면 출시 첫날 모든 사용자의 복습 큐가 비어서 기능이
 -- 아예 시작되지 않는다. 하루 경계는 srs.ts와 같은 KST 04:00 기준으로 맞춘다.

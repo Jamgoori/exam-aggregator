@@ -13,6 +13,8 @@ type StatusRow = {
   wrong_count: number;
   // "하루 1회만 반영" 판정용 — 직전 채점이 오늘이면 정답이어도 간격을 안 벌린다.
   last_answered_at: string | null;
+  // null이면 아직 SRS 에 안 태운 문항(대기 풀). 여기서 스케줄을 심지 않는다.
+  srs_due_at: string | null;
   srs_interval_days: number | null;
   srs_ease: number | null;
   srs_reps: number | null;
@@ -31,7 +33,7 @@ export async function recordQuestionResults(
   const { data: existing } = await admin
     .from("user_question_status")
     .select(
-      "question_number, wrong_count, last_answered_at, srs_interval_days, srs_ease, srs_reps, srs_lapses",
+      "question_number, wrong_count, last_answered_at, srs_due_at, srs_interval_days, srs_ease, srs_reps, srs_lapses",
     )
     .eq("user_id", userId)
     .eq("paper_id", paperId);
@@ -46,15 +48,33 @@ export async function recordQuestionResults(
     const before = prior.get(r.question_number);
     const wrongCount = (before?.wrong_count ?? 0) + (r.is_correct ? 0 : 1);
 
-    // 한 번도 틀린 적 없는 문항은 SRS 에 넣지 않는다(due 는 계속 null).
-    const srs = wrongCount > 0
+    // 스케줄은 이미 SRS 에 올라탄 문항만 굴린다. 새 오답은 대기 풀(srs_due_at =
+    // null)에 남고, 복습 세션 시작 시 하루 신규 몫만큼만 승격된다. 근거는 웹
+    // question-status.ts 주석 참고.
+    const srs = before?.srs_due_at != null
       ? nextSrs(
-        before ? srsStateFromRow(before) : SRS_INITIAL,
+        srsStateFromRow(before),
         r.is_correct,
         at,
-        before?.last_answered_at ? new Date(before.last_answered_at) : null,
+        before.last_answered_at ? new Date(before.last_answered_at) : null,
       )
       : null;
+
+    const schedule = srs
+      ? {
+        srs_interval_days: srs.state.intervalDays,
+        srs_ease: srs.state.ease,
+        srs_reps: srs.state.reps,
+        srs_lapses: srs.state.lapses,
+        srs_due_at: srs.dueAt.toISOString(),
+      }
+      : {
+        srs_interval_days: before?.srs_interval_days ?? SRS_INITIAL.intervalDays,
+        srs_ease: before?.srs_ease ?? SRS_INITIAL.ease,
+        srs_reps: before?.srs_reps ?? SRS_INITIAL.reps,
+        srs_lapses: before?.srs_lapses ?? SRS_INITIAL.lapses,
+        srs_due_at: null,
+      };
 
     return {
       user_id: userId,
@@ -65,11 +85,7 @@ export async function recordQuestionResults(
       last_answered_at: now,
       source,
       updated_at: now,
-      srs_interval_days: srs?.state.intervalDays ?? SRS_INITIAL.intervalDays,
-      srs_ease: srs?.state.ease ?? SRS_INITIAL.ease,
-      srs_reps: srs?.state.reps ?? SRS_INITIAL.reps,
-      srs_lapses: srs?.state.lapses ?? SRS_INITIAL.lapses,
-      srs_due_at: srs?.dueAt.toISOString() ?? null,
+      ...schedule,
     };
   });
 

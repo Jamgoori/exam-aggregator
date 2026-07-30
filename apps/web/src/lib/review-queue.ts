@@ -8,8 +8,10 @@ import {
   srsDayIndex,
   DUE_FORECAST_DAYS,
   DUE_QUEUE_LIMIT,
+  NEW_QUEUE_LIMIT,
   type DueCandidate,
   type DueForecastDay,
+  type PendingCandidate,
   type SessionSchedule,
   type SessionScheduleItem,
 } from "@gongmoa/core";
@@ -27,8 +29,18 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 //
 // 편성 규칙(정렬·상한·과목 섞기)은 packages/core/review-queue.ts에 있다 — 웹과 앱이
 // 같은 큐를 내야 하고, 그 규칙은 테스트로 고정돼 있다.
+//
+// 대기 풀은 별도 컬럼 없이 "wrong_count > 0 이면서 srs_due_at is null" 로 표현한다.
+// 채점 경로가 스케줄 없는 문항에 due를 심지 않으므로(question-status.ts), 이 조합은
+// 곧 "틀린 적은 있지만 아직 SRS에 안 태운 오답"이다. 여기서 하루 신규 몫만큼 뽑아
+// 승격한다.
 
 const BATCH_SIZE = 1000;
+
+// 대기 풀에서 한 번에 훑어올 최대 행 수. 신규 몫이 10개라 이 정도면 정제(이미지
+// 없음·삭제 마크·보류 과목)로 걸러지고도 충분히 남는다. 1회독 중인 사용자는 대기가
+// 수백 개라 전량을 끌어오면 조회만 무거워진다.
+const PENDING_FETCH_LIMIT = 300;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -42,6 +54,13 @@ type StatusRow = {
   last_answered_at: string;
   srs_due_at: string;
   srs_lapses: number | null;
+};
+
+type PendingRow = {
+  paper_id: string;
+  question_number: number;
+  last_answered_at: string;
+  wrong_count: number | null;
 };
 
 // 7일 표까지 한 번에 그리려면 "오늘 due"만이 아니라 그 앞 며칠치가 필요하다.
@@ -63,11 +82,27 @@ export async function collectDueCandidates(
   now: Date = new Date(),
 ): Promise<{
   candidates: DueCandidate[];
+  // 오늘 승격 후보(정제 완료). 실제로 몇 개를 태울지는 buildDueQueue가 정한다.
+  pending: PendingCandidate[];
+  // 승격 대상 후보의 실제 저장 위치. 후보의 paperId는 dedup 대표로 접힌 값이라
+  // 그대로 update 하면 행을 못 찾는다(중복 시험지로 응시한 경우). 대표 키 →
+  // 원본 paper_id 목록으로 되짚을 수 있게 함께 돌려준다.
+  pendingSources: Map<string, string[]>;
+  // 대기 중인 오답 총계 — "나머지는 오답노트에서 기다리는 중"을 보여주는 값.
+  pendingTotal: number;
   subjectNames: Map<string, string>;
   pausedSubjectIds: Set<string>;
 }> {
   const windowEnd = forecastWindowEnd(now);
   const paused = await getPausedSubjectIds(supabase, userId);
+
+  const empty = {
+    candidates: [] as DueCandidate[],
+    pending: [] as PendingCandidate[],
+    pendingSources: new Map<string, string[]>(),
+    subjectNames: new Map<string, string>(),
+    pausedSubjectIds: paused,
+  };
 
   const statusRows: StatusRow[] = [];
   {
@@ -86,12 +121,39 @@ export async function collectDueCandidates(
       from += BATCH_SIZE;
     }
   }
-  if (statusRows.length === 0) {
-    return { candidates: [], subjectNames: new Map(), pausedSubjectIds: paused };
+
+  // 대기 풀. 승격 순서(자주 틀린 것 먼저)대로 앞에서부터 훑어온다 — 정렬을 DB에
+  // 맡겨야 수백 개 중 상위만 가져올 수 있다. 총계는 별도 count로 센다(정제 전
+  // 숫자라 실제 승격 가능 수보다 약간 클 수 있지만, 화면에 쓰는 건 "얼마나 밀려
+  // 있는지"라 이 정도 오차는 의미가 없다).
+  const [{ data: pendingData }, { count: pendingCount }] = await Promise.all([
+    supabase
+      .from("user_question_status")
+      .select("paper_id, question_number, last_answered_at, wrong_count")
+      .eq("user_id", userId)
+      .is("srs_due_at", null)
+      .gt("wrong_count", 0)
+      .order("wrong_count", { ascending: false })
+      .order("last_answered_at", { ascending: true })
+      .limit(PENDING_FETCH_LIMIT),
+    supabase
+      .from("user_question_status")
+      .select("paper_id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .is("srs_due_at", null)
+      .gt("wrong_count", 0),
+  ]);
+  const pendingRows = (pendingData ?? []) as PendingRow[];
+  const pendingTotal = pendingCount ?? 0;
+
+  if (statusRows.length === 0 && pendingRows.length === 0) {
+    return { ...empty, pendingTotal };
   }
 
   const marks = await fetchWrongNoteMarks(supabase, userId);
-  const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
+  const paperIds = [
+    ...new Set([...statusRows, ...pendingRows].map((r) => r.paper_id)),
+  ];
 
   type PaperMeta = {
     id: string;
@@ -147,7 +209,43 @@ export async function collectDueCandidates(
     });
   }
 
-  const repIds = [...new Set([...byRepQ.keys()].map((k) => k.slice(0, k.lastIndexOf("#"))))];
+  // 대기 풀도 같은 규칙으로 접는다. 틀린 횟수는 최댓값을 쓴다 — 중복 시험지로 나눠
+  // 응시했으면 어느 한 행만 봐서는 "몇 번 무너진 문항인지"가 실제보다 작게 나오고,
+  // 그러면 승격 순서가 밀린다(collectAllReviewCandidates와 같은 판단).
+  const pendingByRepQ = new Map<
+    string,
+    { wrongCount: number; at: string; subjectId: string | null }
+  >();
+  const pendingSources = new Map<string, string[]>();
+  for (const r of pendingRows) {
+    const rep = repId(r.paper_id);
+    const key = `${rep}#${r.question_number}`;
+    if (deletedRepKeys.has(key)) continue;
+    const sources = pendingSources.get(key) ?? [];
+    if (!sources.includes(r.paper_id)) sources.push(r.paper_id);
+    pendingSources.set(key, sources);
+    // 같은 문항이 이미 스케줄을 갖고 있으면(중복 시험지 중 한쪽만 승격된 경우)
+    // 대기 후보로 다시 세지 않는다 — 승격하면 같은 문제가 두 벌 들어간다.
+    if (byRepQ.has(key)) continue;
+    const ex = pendingByRepQ.get(key);
+    const wrongCount = Math.max(ex?.wrongCount ?? 0, r.wrong_count ?? 0);
+    const subj = subjectOfPaper.get(rep) ?? subjectOfPaper.get(r.paper_id) ?? null;
+    if (!ex || r.last_answered_at > ex.at) {
+      pendingByRepQ.set(key, {
+        wrongCount,
+        at: r.last_answered_at,
+        subjectId: subj?.id ?? null,
+      });
+    } else {
+      ex.wrongCount = wrongCount;
+    }
+  }
+
+  const repIds = [
+    ...new Set(
+      [...byRepQ.keys(), ...pendingByRepQ.keys()].map((k) => k.slice(0, k.lastIndexOf("#"))),
+    ),
+  ];
   const mediaByPaper = await fetchQuestionMedia(supabase, repIds);
 
   const candidates: DueCandidate[] = [];
@@ -170,10 +268,35 @@ export async function collectDueCandidates(
     });
   }
 
+  // 대기 후보도 같은 정제(이미지 있음·보류 과목 제외)를 거친다. 여기가 어긋나면
+  // 승격해 놓고 화면에 못 그리는 문항이 생긴다.
+  const pending: PendingCandidate[] = [];
+  for (const [key, v] of pendingByRepQ) {
+    const idx = key.lastIndexOf("#");
+    const paperId = key.slice(0, idx);
+    const questionNumber = Number(key.slice(idx + 1));
+    if (!mediaByPaper.get(paperId)?.get(questionNumber)?.images.length) continue;
+    if (v.subjectId && paused.has(v.subjectId)) continue;
+    pending.push({
+      paperId,
+      questionNumber,
+      subjectId: v.subjectId,
+      wrongCount: v.wrongCount,
+      lastAnsweredAt: v.at,
+    });
+  }
+
   const subjectNames = new Map<string, string>();
   for (const s of subjectOfPaper.values()) if (!paused.has(s.id)) subjectNames.set(s.id, s.name);
 
-  return { candidates, subjectNames, pausedSubjectIds: paused };
+  return {
+    candidates,
+    pending,
+    pendingSources,
+    pendingTotal,
+    subjectNames,
+    pausedSubjectIds: paused,
+  };
 }
 
 export type DueReviewSummary = {
@@ -181,6 +304,11 @@ export type DueReviewSummary = {
   todayCount: number;
   // 상한에 걸려 다음으로 밀린 문항 수. 0보다 크면 "오늘치가 끝난다"를 알려줄 수 있다.
   deferredCount: number;
+  // 오늘 큐에 든 것 중 이번에 새로 태우는 문항 수("처음 보는 오답 N개").
+  newCount: number;
+  // 아직 SRS에 안 태운 오답 총계. 승격되지 않은 나머지가 사라진 게 아니라 오답노트에
+  // 있다는 걸 알려주는 값 — 이게 없으면 1회독 중인 사용자는 오답이 증발했다고 읽는다.
+  pendingTotal: number;
   subjects: { subjectId: string | null; name: string; count: number }[];
   forecast: DueForecastDay[];
   // 오늘 큐가 비었을 때 다음 복습이 며칠 뒤인지(없으면 null). 0인 날을 그냥 비워두면
@@ -194,18 +322,30 @@ export async function getDueReviewSummary(
   userId: string,
   now: Date = new Date(),
 ): Promise<DueReviewSummary> {
-  const { candidates, subjectNames } = await collectDueCandidates(supabase, userId, now);
-  const queue = buildDueQueue(candidates, now, DUE_QUEUE_LIMIT);
+  const { candidates, pending, pendingTotal, subjectNames } = await collectDueCandidates(
+    supabase,
+    userId,
+    now,
+  );
+  const queue = buildDueQueue(candidates, pending, now, {
+    total: DUE_QUEUE_LIMIT,
+    newItems: NEW_QUEUE_LIMIT,
+  });
 
   const nowIso = now.toISOString();
   const dueTotal = candidates.filter((c) => c.dueAt <= nowIso).length;
+  const newCount = queue.filter((c) => c.isNew).length;
 
   const forecast = forecastDueByDay(candidates, now);
   const nextDue = forecast.find((d) => d.offset > 0 && d.count > 0);
 
   return {
     todayCount: queue.length,
-    deferredCount: Math.max(0, dueTotal - queue.length),
+    // 승격된 신규는 상한에 걸린 게 아니므로 "밀린 수"에서 뺀다.
+    deferredCount: Math.max(0, dueTotal - (queue.length - newCount)),
+    newCount,
+    // 오늘 태울 몫은 이미 큐에 들어왔으니 대기 중 숫자에서 뺀다.
+    pendingTotal: Math.max(0, pendingTotal - newCount),
     subjects: countBySubject(queue, (id) => (id ? (subjectNames.get(id) ?? null) : null)),
     forecast,
     nextDueOffset: queue.length === 0 ? (nextDue?.offset ?? null) : null,
@@ -289,15 +429,71 @@ export async function getSessionSchedule(
   return { items, forecast: forecastDueByDay(candidates, now) };
 }
 
+// 승격: 대기 풀에서 뽑힌 문항에 오늘자 스케줄을 심는다. 이 쓰기가 있어야 다음날부터
+// 정상적으로 due 계산에 참여한다.
+//
+// 간격·ease·reps는 손대지 않는다(초기값 그대로). 대기 중에 섞어풀기로 몇 번 맞혔든
+// 그건 간격을 두고 맞힌 게 아니라 유지력의 증거로 칠 수 없어서다 — 승격된 문항은
+// 세션에서 채점되는 순간부터 1일 → 3일로 정상 출발한다.
+//
+// user_question_status는 쓰기 정책이 없는 테이블이라 service_role로만 고친다.
+async function promotePendingItems(
+  promoted: DueCandidate[],
+  pendingSources: Map<string, string[]>,
+  userId: string,
+  now: Date,
+): Promise<void> {
+  if (promoted.length === 0) return;
+  const admin = createAdminClient();
+  const nowIso = now.toISOString();
+
+  for (const c of promoted) {
+    const key = `${c.paperId}#${c.questionNumber}`;
+    // 대표 키로 접힌 후보를 원본 행들로 되돌린다. 매핑이 없으면(이론상 없어야 하지만)
+    // 대표 id로라도 시도한다.
+    const paperIds = pendingSources.get(key) ?? [c.paperId];
+    await admin
+      .from("user_question_status")
+      .update({ srs_due_at: nowIso, updated_at: nowIso })
+      .eq("user_id", userId)
+      .eq("question_number", c.questionNumber)
+      .in("paper_id", paperIds)
+      // 그 사이 다른 경로로 스케줄이 생겼으면 덮어쓰지 않는다.
+      .is("srs_due_at", null);
+  }
+}
+
 // 오늘 큐에 들어갈 (문제지, 문항) 목록. 세션 생성이 이걸 그대로 쓴다.
+//
+// 승격 쓰기가 여기 붙어 있는 이유: 배너(getDueReviewSummary)는 같은 계산을 읽기만
+// 하고, 실제로 세션을 시작할 때만 스케줄이 심긴다. 배너를 보기만 한 사용자의 진도를
+// 건드리지 않으면서도, buildDueQueue가 결정적이라 배너 숫자와 세션 문항이 일치한다.
 export async function collectDueQueueItems(
   supabase: Supabase,
   userId: string,
   now: Date = new Date(),
 ): Promise<{ paperId: string; questionNumber: number }[]> {
-  const { candidates } = await collectDueCandidates(supabase, userId, now);
-  return buildDueQueue(candidates, now, DUE_QUEUE_LIMIT).map((c) => ({
-    paperId: c.paperId,
-    questionNumber: c.questionNumber,
-  }));
+  const { candidates, pending, pendingSources } = await collectDueCandidates(
+    supabase,
+    userId,
+    now,
+  );
+  const queue = buildDueQueue(candidates, pending, now, {
+    total: DUE_QUEUE_LIMIT,
+    newItems: NEW_QUEUE_LIMIT,
+  });
+
+  try {
+    await promotePendingItems(
+      queue.filter((c) => c.isNew),
+      pendingSources,
+      userId,
+      now,
+    );
+  } catch {
+    // 무시: 승격 실패가 세션 시작을 막지 않는다. 스케줄이 안 심긴 문항은 대기 풀에
+    // 남아 다음 기회에 다시 뽑힌다(오늘 세션에서는 정상적으로 풀린다).
+  }
+
+  return queue.map((c) => ({ paperId: c.paperId, questionNumber: c.questionNumber }));
 }

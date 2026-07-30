@@ -11,10 +11,26 @@
 // 하루 상한이 있는 이유는 스케줄 정확도보다 중요하다. 밀린 문항이 수백 개인
 // 사용자에게 그대로 다 보여주면 시작조차 안 한다 — 오늘치가 끝난다는 감각이
 // 있어야 매일 돌아온다. 넘친 문항은 사라지지 않고 다음 날 큐 맨 앞에 온다.
+//
+// 상한만으로는 1회독 중인 사용자를 감당하지 못한다. 하루 80개씩 틀리는 사람에게
+// 오답을 나는 족족 SRS에 태우면 유입 80 대 처리 20으로 매일 60씩 부채가 쌓이고,
+// 큐가 연체순이라 회독 첫 주 문항만 몇 주째 돌면서 어제 무너진 문항은 영영 안
+// 나온다. 그래서 상한을 두 몫으로 나눈다:
+//
+//  - 복습 몫: 이미 SRS에 올라탄 문항의 due. 밀리면 안 되므로 우선 채운다.
+//  - 신규 몫: 아직 스케줄이 없는 오답(대기 풀)에서 하루 NEW_QUEUE_LIMIT개까지만
+//    승격. 나머지는 오답노트·섞어풀기가 소화한다.
+//
+// 즉 SRS 진입은 오직 이 승격을 통해서만 일어난다. 섞어풀기에서 대기 문항을 맞혀도
+// 스케줄이 생기지 않는다 — 그러지 않으면 세션 한 번으로 신규 몫이 무력화된다.
 
 import { srsDayIndex } from "./srs";
 
 export const DUE_QUEUE_LIMIT = 20;
+
+// 하루에 새로 SRS에 태울 수 있는 오답 수. 크게 잡으면 며칠 뒤 복습 due가 한꺼번에
+// 몰려 결국 같은 적체가 반복된다.
+export const NEW_QUEUE_LIMIT = 10;
 
 // 향후 며칠치를 미리 보여줄지("오늘 / 내일 / 수 / 목 ...").
 export const DUE_FORECAST_DAYS = 7;
@@ -28,6 +44,19 @@ export type DueCandidate = {
   // ISO 문자열. 이 시각이 지난 문항이 "오늘 복습할 것"이다.
   dueAt: string;
   lapses: number;
+  // 이번에 대기 풀에서 승격된 문항. 호출부가 스케줄을 새로 심어야 하는 대상이다.
+  isNew?: boolean;
+};
+
+// 대기 풀 문항 — 틀린 적은 있지만 아직 스케줄이 없다(srs_due_at is null).
+export type PendingCandidate = {
+  paperId: string;
+  questionNumber: number;
+  subjectId: string | null;
+  // 승격 순서를 정하는 값. 자주 틀린 문항일수록 먼저 SRS에 태운다.
+  wrongCount: number;
+  // 마지막으로 이 문항을 푼 시각(ISO). 같은 횟수면 오래 안 본 것부터.
+  lastAnsweredAt: string;
 };
 
 // 연체가 길수록, 같으면 반복해서 무너진 문항일수록 앞으로.
@@ -65,16 +94,62 @@ function interleaveBySubject(items: DueCandidate[]): DueCandidate[] {
   return out;
 }
 
-// 오늘 낼 큐. now 기준으로 due가 지난 것만 상한까지 고른 뒤 과목을 섞어 돌려준다.
+// 대기 풀에서 먼저 승격할 순서. 자주 틀린 것 먼저, 같으면 오래 안 본 것 먼저.
+function byPendingPriority(a: PendingCandidate, b: PendingCandidate): number {
+  if (a.wrongCount !== b.wrongCount) return b.wrongCount - a.wrongCount;
+  if (a.lastAnsweredAt !== b.lastAnsweredAt) return a.lastAnsweredAt < b.lastAnsweredAt ? -1 : 1;
+  return a.paperId === b.paperId
+    ? a.questionNumber - b.questionNumber
+    : a.paperId < b.paperId
+      ? -1
+      : 1;
+}
+
+export type DueQueueLimits = {
+  // 하루에 낼 총 문항 수.
+  total?: number;
+  // 그중 대기 풀에서 새로 승격할 수 있는 최대 수.
+  newItems?: number;
+};
+
+// 오늘 낼 큐. due가 지난 문항으로 먼저 채우고, 남은 자리에 대기 풀을 신규 몫만큼
+// 승격해 붙인 뒤 과목을 섞어 돌려준다.
+//
+// 순수 함수이자 결정적(deterministic)이어야 한다 — 배너의 "오늘 20개"와 실제 세션
+// 문항이 같아야 하는데, 둘은 같은 입력으로 이 함수를 각각 호출해 계산하기 때문이다.
+// 승격 대상을 여기서 정하고 실제 쓰기는 세션 생성 시점에만 하는 것도 같은 이유다
+// (배너를 보기만 한 사용자의 스케줄을 건드리지 않는다).
 export function buildDueQueue(
   candidates: DueCandidate[],
+  pending: PendingCandidate[] = [],
   now: Date = new Date(),
-  limit: number = DUE_QUEUE_LIMIT,
+  limits: DueQueueLimits = {},
 ): DueCandidate[] {
+  const total = Math.max(1, limits.total ?? DUE_QUEUE_LIMIT);
+  const newLimit = Math.max(0, limits.newItems ?? NEW_QUEUE_LIMIT);
+
   const nowIso = now.toISOString();
   const due = candidates.filter((c) => c.dueAt <= nowIso);
-  if (due.length === 0) return [];
-  const picked = [...due].sort(byPriority).slice(0, Math.max(1, limit));
+  const picked = [...due].sort(byPriority).slice(0, total);
+
+  // 신규 몫은 복습으로 채우고 남은 자리 안에서만 쓴다. 복습이 상한을 다 먹은 날은
+  // 새 문항이 하나도 안 들어온다 — 밀린 걸 먼저 소화하는 게 맞다.
+  const room = Math.min(newLimit, total - picked.length);
+  if (room > 0 && pending.length > 0) {
+    for (const p of [...pending].sort(byPendingPriority).slice(0, room)) {
+      picked.push({
+        paperId: p.paperId,
+        questionNumber: p.questionNumber,
+        subjectId: p.subjectId,
+        // 승격 즉시 오늘 due. 세션에서 채점되면 거기서부터 간격이 붙는다.
+        dueAt: nowIso,
+        lapses: 0,
+        isNew: true,
+      });
+    }
+  }
+
+  if (picked.length === 0) return [];
   return interleaveBySubject(picked);
 }
 
