@@ -23,6 +23,7 @@ import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-
 import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { getDueReviewSummary } from "@/lib/review-queue";
+import { findUnfinishedDueSession } from "@/lib/review-session";
 import { getReviewSubjectOptions } from "@/lib/review-preferences";
 import { isPremiumMembership, trialDaysLeft, DUE_QUEUE_LIMIT } from "@gongmoa/core";
 import { getCbtAvailability } from "@/lib/cbt-availability";
@@ -200,12 +201,13 @@ export default async function MyPage({
     isAdminUser(supabase),
   ]);
   const premium = admin || isPremiumMembership(membership);
-  const [dueSummary, subjectChoices] = premium
+  const [dueSummary, subjectChoices, resumable] = premium
     ? await Promise.all([
         getDueReviewSummary(supabase, user.id),
         getReviewSubjectOptions(supabase, user.id),
+        findUnfinishedDueSession(supabase, user.id),
       ])
-    : [null, []];
+    : [null, [], null];
   const reviewDue: ReviewDueCardProps = {
     premium,
     todayCount: dueSummary?.todayCount ?? 0,
@@ -215,6 +217,7 @@ export default async function MyPage({
     overdueTotal: dueSummary?.overdueTotal ?? 0,
     relearnCount: dueSummary?.relearnCount ?? 0,
     suspendedTotal: dueSummary?.suspendedTotal ?? 0,
+    resumeSessionId: resumable?.sessionId ?? null,
     dailyLimit: dueSummary?.dailyLimit ?? DUE_QUEUE_LIMIT,
     subjects: dueSummary?.subjects.map((s) => ({ name: s.name, count: s.count })) ?? [],
     forecast: dueSummary?.forecast ?? [],

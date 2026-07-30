@@ -40,6 +40,53 @@ import type { ReviewSessionView } from "@/lib/review-session";
 // CBT 솔버(PDF·최소응시시간)와 달리 순수 문항 리스트라 가볍게 따로 뒀지만, 문제를
 // 다루는 조작(필기 캔버스, 쓸어넘김 이동, 핀치·버튼 확대, 화면 높이에 맞춘 문제 폭)은
 // CBT 문제별 풀기와 같은 코드(question-view-gestures)를 그대로 쓴다.
+// 푸는 중인 답을 기기에 임시 저장한다. 복습은 매일 여는 기능이고 대부분 모바일에서
+// 푸는데, 20문항 중 15개를 풀고 탭이 죽으면 처음부터가 된다 — 그 한 번으로 습관이
+// 끊긴다. 서버에 저장하지 않는 건 채점 전 선택이 새어 나가면 안 되기 때문이 아니라
+// (어차피 본인 것) 매 선택마다 왕복을 만들 이유가 없어서다.
+//
+// 세션 id로 키를 잡아 다른 세션과 안 섞이게 하고, 채점이 끝나면 지운다.
+const DRAFT_PREFIX = "review-draft:";
+
+function draftKey(sessionId: string): string {
+  return `${DRAFT_PREFIX}${sessionId}`;
+}
+
+function loadDraftAnswers(sessionId: string, total: number): (number | null)[] {
+  const empty = Array(total).fill(null) as (number | null)[];
+  if (typeof window === "undefined") return empty;
+  try {
+    const raw = window.localStorage.getItem(draftKey(sessionId));
+    if (!raw) return empty;
+    const saved = JSON.parse(raw);
+    if (!Array.isArray(saved)) return empty;
+    // 길이가 다르면(문항이 바뀔 일은 없지만) 있는 만큼만 채운다.
+    return empty.map((_, i) => {
+      const v = saved[i];
+      return Number.isInteger(v) ? (v as number) : null;
+    });
+  } catch {
+    // 무시: 저장소를 못 읽어도 처음부터 풀 수 있으면 된다(사파리 프라이빗 등).
+    return empty;
+  }
+}
+
+function saveDraftAnswers(sessionId: string, answers: (number | null)[]): void {
+  try {
+    window.localStorage.setItem(draftKey(sessionId), JSON.stringify(answers));
+  } catch {
+    // 무시: 용량 초과·프라이빗 모드에서도 풀이 자체는 계속돼야 한다.
+  }
+}
+
+function clearDraftAnswers(sessionId: string): void {
+  try {
+    window.localStorage.removeItem(draftKey(sessionId));
+  } catch {
+    // 무시.
+  }
+}
+
 export function ReviewSolver({
   initial,
   backHref,
@@ -50,8 +97,8 @@ export function ReviewSolver({
   subjectSlug: string;
 }) {
   const [view, setView] = useState<ReviewSessionView>(initial);
-  const [answers, setAnswers] = useState<(number | null)[]>(
-    Array(initial.total).fill(null),
+  const [answers, setAnswers] = useState<(number | null)[]>(() =>
+    loadDraftAnswers(initial.id, initial.total),
   );
   const [index, setIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -179,9 +226,21 @@ export function ReviewSolver({
     onPinchZoom: handlePinchZoom,
   });
 
-  // 채점 전 답은 클라이언트 상태로만 있어 페이지를 벗어나면 사라진다. 새로고침·닫기는
-  // beforeunload로, 뒤로가기 링크는 클릭 확인으로 막는다(하나라도 풀었을 때만).
+  // 고른 답이 바뀔 때마다 기기에 담아둔다. 탭이 죽거나 실수로 나가도 같은 주소로
+  // 돌아오면 이어서 풀 수 있다.
   const dirty = !submitted && answeredCount > 0;
+  useEffect(() => {
+    if (submitted) return;
+    saveDraftAnswers(view.id, answers);
+  }, [answers, submitted, view.id]);
+
+  // 채점이 끝나면 임시 저장분은 필요 없다(그대로 두면 저장소에 계속 쌓인다).
+  useEffect(() => {
+    if (submitted) clearDraftAnswers(view.id);
+  }, [submitted, view.id]);
+
+  // 저장은 되지만 "다시 찾아오는 길"이 카드에서 새 세션을 만드는 것뿐이라, 나가는
+  // 순간에는 여전히 한 번 잡아준다. 문구는 사라진다가 아니라 이어서 풀 수 있다로.
   useEffect(() => {
     if (!dirty) return;
     function onBeforeUnload(e: BeforeUnloadEvent) {
@@ -195,7 +254,7 @@ export function ReviewSolver({
   function confirmLeave(e: React.MouseEvent) {
     if (
       dirty &&
-      !window.confirm("지금 나가면 푼 답이 사라져요. 그래도 나갈까요?")
+      !window.confirm("아직 채점 전이에요. 이 주소로 돌아오면 이어서 풀 수 있어요. 나갈까요?")
     ) {
       e.preventDefault();
     }

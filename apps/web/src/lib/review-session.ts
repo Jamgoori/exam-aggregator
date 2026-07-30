@@ -27,6 +27,9 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
+// review_sessions.scope 값. 복습(간격 반복) 세션만 이걸 쓴다.
+const DUE_SCOPE = "due";
+
 export type ReviewItemView = {
   position: number;
   images: string[];
@@ -358,7 +361,7 @@ export async function createReviewSessionFromItems(
   userId: string,
   items: { paperId: string; questionNumber: number }[],
   limit: number = MAX_LIMIT,
-  opts: { keepOrder?: boolean } = {},
+  opts: { keepOrder?: boolean; scope?: string } = {},
 ): Promise<{ sessionId?: string; error?: string }> {
   const seen = new Set<string>();
   const clean: { paperId: string; questionNumber: number }[] = [];
@@ -379,7 +382,9 @@ export async function createReviewSessionFromItems(
     .insert({
       user_id: userId,
       subject_id: null,
-      scope: "subject",
+      // 'due'는 복습(간격 반복) 세션. 이걸로 "이어서 풀기"가 섞어풀기 세션을
+      // 잘못 집어오지 않게 구분한다.
+      scope: opts.scope ?? "subject",
       only_unresolved: true,
       total_questions: picked.length,
     })
@@ -419,7 +424,41 @@ export async function createDueReviewSessionForUser(
   }
   return createReviewSessionFromItems(supabase, userId, items, items.length, {
     keepOrder: true,
+    scope: DUE_SCOPE,
   });
+}
+
+// 채점 전에 두고 나온 복습 세션(있으면). 카드가 "이어서 풀기"를 띄우는 근거다.
+//
+// 답은 기기에 임시 저장되지만(review-solver.tsx), 그 주소로 돌아갈 길이 없으면
+// 소용이 없다 — 카드에서 새로 시작하면 다른 세션이 만들어져 저장분이 안 붙는다.
+//
+// 하루가 지난 것은 무시한다. 그때의 큐는 지금 봐야 할 것과 다르고, 며칠 전 세션을
+// 되살리면 이미 다른 경로로 푼 문항이 섞여 나온다.
+const RESUME_MAX_AGE_HOURS = 24;
+
+export async function findUnfinishedDueSession(
+  supabase: Supabase,
+  userId: string,
+  now: Date = new Date(),
+): Promise<{ sessionId: string; total: number } | null> {
+  const since = new Date(
+    now.getTime() - RESUME_MAX_AGE_HOURS * 60 * 60 * 1000,
+  ).toISOString();
+
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("review_sessions")
+    .select("id, total_questions")
+    .eq("user_id", userId)
+    .eq("scope", DUE_SCOPE)
+    .is("submitted_at", null)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  return { sessionId: data.id as string, total: data.total_questions as number };
 }
 
 // "찍었어요" — 맞힌 문항의 스케줄만 되돌린다(점수·극복 판정은 그대로).

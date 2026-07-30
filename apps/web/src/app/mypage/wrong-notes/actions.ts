@@ -8,6 +8,7 @@ import {
   createAllReviewSessionForUser,
   createDueReviewSessionForUser,
   createPaperReviewSessionForUser,
+  findUnfinishedDueSession,
   markReviewItemGuessed,
   submitReviewSessionForUser,
   type ReviewSessionView,
@@ -250,6 +251,11 @@ export async function createDueReviewSession(): Promise<CreateReviewResult> {
   if (!(await isPremium(supabase, user.id))) {
     return { error: "복습은 멤버십 기능이에요." };
   }
+
+  // 두고 나온 세션이 있으면 새로 만들지 않고 그리로 보낸다. 새로 만들면 기기에
+  // 저장해 둔 답이 안 붙고(세션 id로 키를 잡는다), 미제출 세션만 계속 쌓인다.
+  const resumable = await findUnfinishedDueSession(supabase, user.id);
+  if (resumable) return { sessionId: resumable.sessionId };
 
   const items = await collectDueQueueItems(supabase, user.id);
   return createDueReviewSessionForUser(supabase, user.id, items);

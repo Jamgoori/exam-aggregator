@@ -48,6 +48,8 @@ export type ReviewDueCardProps = {
   relearnCount: number;
   // 여덟 번 넘게 무너져 접어둔 문항 수.
   suspendedTotal: number;
+  // 채점 전에 두고 나온 세션이 있으면 그 id. 버튼이 "이어서 풀기"로 바뀐다.
+  resumeSessionId: string | null;
   dailyLimit: number;
   subjects: { name: string; count: number }[];
   forecast: DueForecastDay[];
@@ -70,6 +72,7 @@ export function ReviewDueCard({
   overdueTotal,
   relearnCount,
   suspendedTotal,
+  resumeSessionId,
   dailyLimit,
   subjects,
   forecast,
@@ -135,7 +138,9 @@ export function ReviewDueCard({
             </span>
           </p>
           <p className="text-xs text-blue-700/80 dark:text-blue-300/70">
-            {todayCount > 0
+            {resumeSessionId
+              ? "채점 전에 두고 나온 복습이 있어요 · 고른 답은 그대로예요"
+              : todayCount > 0
               ? subjects.length > 0
                 ? subjects.map((s) => `${s.name} ${s.count}`).join(" · ")
                 : "복습 예정 문항을 모았어요"
@@ -174,14 +179,14 @@ export function ReviewDueCard({
         {/* 과목 설정은 아이콘 하나로만 둔다 — 매일 누르는 버튼이 아니라서
             "복습 시작"과 같은 무게로 보이면 안 된다. */}
         <div className="flex shrink-0 items-center gap-1.5">
-          {todayCount > 0 ? (
+          {todayCount > 0 || resumeSessionId ? (
             <button
               type="button"
               onClick={startSession}
               disabled={pending}
               className="rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
             >
-              {pending ? "여는 중..." : "복습 시작"}
+              {pending ? "여는 중..." : resumeSessionId ? "이어서 풀기" : "복습 시작"}
             </button>
           ) : (
             // 오늘치를 끝냈고 대기가 남아 있을 때만. 밀린 복습이 남아 있으면
