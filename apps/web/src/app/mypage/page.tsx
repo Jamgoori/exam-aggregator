@@ -214,6 +214,7 @@ export default async function MyPage({
     pendingTotal: dueSummary?.pendingTotal ?? 0,
     overdueTotal: dueSummary?.overdueTotal ?? 0,
     relearnCount: dueSummary?.relearnCount ?? 0,
+    suspendedTotal: dueSummary?.suspendedTotal ?? 0,
     dailyLimit: dueSummary?.dailyLimit ?? DUE_QUEUE_LIMIT,
     subjects: dueSummary?.subjects.map((s) => ({ name: s.name, count: s.count })) ?? [],
     forecast: dueSummary?.forecast ?? [],

@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  isLeechTrigger,
   nextSrs,
+  SRS_LEECH_THRESHOLD,
   srsDayIndex,
   srsDueAt,
   srsGuessed,
@@ -196,6 +198,42 @@ test("예약이 없던 행(마이그레이션 전)은 같은 날이어도 정상
   assert.equal(state.reps, 1);
   assert.equal(state.intervalDays, 1);
   assert.equal(dueAt.toISOString(), kst("2026-03-04T04:00:00").toISOString());
+});
+
+test("여덟 번 무너지면 leech로 접는다(Anki 기본값)", () => {
+  let state: SrsState = { intervalDays: 3, ease: 2.0, reps: 2, lapses: 6 };
+
+  const seventh = nextSrs(state, false, kst("2026-03-02T09:00:00"));
+  assert.equal(seventh.state.lapses, 7);
+  assert.ok(!seventh.leech, "7번째는 아직 아니다");
+  state = seventh.state;
+
+  const eighth = nextSrs(state, false, kst("2026-03-03T09:00:00"));
+  assert.equal(eighth.state.lapses, SRS_LEECH_THRESHOLD);
+  assert.equal(eighth.leech, true);
+});
+
+test("다시 넣은 뒤에는 기준의 절반마다 다시 접힌다", () => {
+  // Anki와 같은 재판정 간격(8 → 12 → 16). 매번 접히면 되살리는 의미가 없고,
+  // 다시는 안 접히면 같은 문제가 또 큐를 먹는다.
+  assert.equal(isLeechTrigger(7), false);
+  assert.equal(isLeechTrigger(8), true);
+  assert.equal(isLeechTrigger(9), false);
+  assert.equal(isLeechTrigger(11), false);
+  assert.equal(isLeechTrigger(12), true);
+  assert.equal(isLeechTrigger(16), true);
+});
+
+test("맞힌 채점은 leech 판정을 건드리지 않는다", () => {
+  const state: SrsState = { intervalDays: 3, ease: 1.5, reps: 2, lapses: 8 };
+  const { leech } = nextSrs(state, true, kst("2026-03-02T09:00:00"));
+  assert.ok(!leech);
+});
+
+test("첫 오답은 lapses가 0이라 접히지 않는다", () => {
+  const { leech, state } = nextSrs(SRS_INITIAL, false, kst("2026-03-02T09:00:00"));
+  assert.equal(state.lapses, 0);
+  assert.ok(!leech);
 });
 
 test("ease는 상·하한을 넘지 않는다", () => {

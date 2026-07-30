@@ -1257,6 +1257,13 @@ create index if not exists user_question_status_pending_idx
   on user_question_status(user_id, wrong_count desc, last_answered_at)
   where srs_due_at is null;
 
+-- leech(상습범)로 접어둔 시각. null 이면 정상. SRS_LEECH_THRESHOLD(8)번 무너지면
+-- 자동으로 채워지고, 그 문항은 복습 큐에서도 대기 풀에서도 빠진다(Anki의 suspend).
+-- 간격을 더 좁혀도 안 풀리는 문항 몇 개가 우선순위 점수 탓에 매일 큐 앞자리를
+-- 영구 점유하는 걸 막는다 — 문제는 간격이 아니라 이해라 따로 봐야 한다.
+-- 스케줄(srs_due_at)은 지우지 않는다: 다시 넣을 때 진도를 잃지 않게.
+alter table user_question_status add column if not exists srs_suspended_at timestamptz;
+
 -- 기존 오답 백필. 이걸 안 하면 출시 첫날 모든 사용자의 복습 큐가 비어서 기능이
 -- 아예 시작되지 않는다. 하루 경계는 srs.ts와 같은 KST 04:00 기준으로 맞춘다.
 --   미극복(last_is_correct = false) → 다음날 04:00

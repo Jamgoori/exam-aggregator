@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { CalendarCheck, Lock, Settings, X } from "lucide-react";
 import {
   createDueReviewSession,
+  createExtraReviewSession,
+  restoreSuspendedReview,
   setReviewDailyLimit,
   spreadReviewBacklog,
   toggleReviewSubjectPaused,
@@ -44,6 +46,8 @@ export type ReviewDueCardProps = {
   overdueTotal: number;
   // 오늘 안에 한 번 더 나올 문항 수(재확인 대기 중).
   relearnCount: number;
+  // 여덟 번 넘게 무너져 접어둔 문항 수.
+  suspendedTotal: number;
   dailyLimit: number;
   subjects: { name: string; count: number }[];
   forecast: DueForecastDay[];
@@ -65,6 +69,7 @@ export function ReviewDueCard({
   pendingTotal,
   overdueTotal,
   relearnCount,
+  suspendedTotal,
   dailyLimit,
   subjects,
   forecast,
@@ -88,6 +93,21 @@ export function ReviewDueCard({
     setError(null);
     start(async () => {
       const res = await createDueReviewSession();
+      if (res.error || !res.sessionId) {
+        setError(res.error ?? "세션을 시작하지 못했어요.");
+        return;
+      }
+      router.push(`/mypage/wrong-notes/all/review/${res.sessionId}`);
+    });
+  }
+
+  // 오늘치를 끝냈는데 더 풀고 싶은 사람용. 하루 몫은 유입을 막으려는 장치지 상한을
+  // 강제하려는 게 아니라, 스스로 더 하겠다는 걸 막을 이유가 없다.
+  function startExtraSession() {
+    if (pending) return;
+    setError(null);
+    start(async () => {
+      const res = await createExtraReviewSession();
       if (res.error || !res.sessionId) {
         setError(res.error ?? "세션을 시작하지 못했어요.");
         return;
@@ -144,6 +164,9 @@ export function ReviewDueCard({
           {pendingTotal > 0 && (
             <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
               오답 {pendingTotal}문항은 오답노트에서 차례를 기다리는 중이에요
+              {todayCount > 0 && newCount === 0
+                ? " · 오늘은 밀린 복습이 많아 새 문항은 쉬어요"
+                : ""}
             </p>
           )}
           {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
@@ -151,7 +174,7 @@ export function ReviewDueCard({
         {/* 과목 설정은 아이콘 하나로만 둔다 — 매일 누르는 버튼이 아니라서
             "복습 시작"과 같은 무게로 보이면 안 된다. */}
         <div className="flex shrink-0 items-center gap-1.5">
-          {todayCount > 0 && (
+          {todayCount > 0 ? (
             <button
               type="button"
               onClick={startSession}
@@ -160,6 +183,19 @@ export function ReviewDueCard({
             >
               {pending ? "여는 중..." : "복습 시작"}
             </button>
+          ) : (
+            // 오늘치를 끝냈고 대기가 남아 있을 때만. 밀린 복습이 남아 있으면
+            // collectExtraQueueItems가 거절하므로 버튼 자체를 안 띄운다.
+            pendingTotal > 0 && (
+              <button
+                type="button"
+                onClick={startExtraSession}
+                disabled={pending}
+                className="rounded-lg border border-blue-300 px-3.5 py-2 text-sm font-bold text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-60 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/40"
+              >
+                {pending ? "여는 중..." : "복습 더하기"}
+              </button>
+            )
           )}
           {(subjectChoices.length > 0 || todayCount > 0) && (
             <button
@@ -189,6 +225,7 @@ export function ReviewDueCard({
           onChange={setChoices}
           dailyLimit={dailyLimit}
           overdueTotal={overdueTotal}
+          suspendedTotal={suspendedTotal}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -266,12 +303,14 @@ function ReviewSettingsModal({
   onChange,
   dailyLimit,
   overdueTotal,
+  suspendedTotal,
   onClose,
 }: {
   choices: ReviewSubjectChoice[];
   onChange: (next: ReviewSubjectChoice[]) => void;
   dailyLimit: number;
   overdueTotal: number;
+  suspendedTotal: number;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -281,6 +320,8 @@ function ReviewSettingsModal({
   const [limitBusy, setLimitBusy] = useState(false);
   const [spreadDone, setSpreadDone] = useState<number | null>(null);
   const [spreadBusy, setSpreadBusy] = useState(false);
+  const [restoreDone, setRestoreDone] = useState<number | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
   const [, start] = useTransition();
 
   // 열려 있는 동안 뒤 화면이 스크롤되지 않게 하고, Esc로 닫는다.
@@ -329,6 +370,22 @@ function ReviewSettingsModal({
         return;
       }
       setSpreadDone(res.spreadCount ?? 0);
+      router.refresh();
+    });
+  }
+
+  function restoreSuspended() {
+    if (restoreBusy) return;
+    setError(null);
+    setRestoreBusy(true);
+    start(async () => {
+      const res = await restoreSuspendedReview();
+      setRestoreBusy(false);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setRestoreDone(res.restoredCount ?? 0);
       router.refresh();
     });
   }
@@ -454,6 +511,36 @@ function ReviewSettingsModal({
               ) : (
                 <p className="mt-0.5 text-[11px] leading-relaxed text-amber-800/80 dark:text-amber-200/70">
                   {spreadDone}문항을 며칠에 나눠 다시 예약했어요.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* 여덟 번 넘게 무너져 자동으로 접힌 문항. 조용히 사라지면 사용자는
+              데이터가 날아간 걸로 읽으므로 어디 갔는지 여기서 말해준다. */}
+          {suspendedTotal > 0 && (
+            <div className="mx-3 mb-3 rounded-xl bg-zinc-100 px-3 py-2.5 dark:bg-zinc-800/60">
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                접어둔 문제 {suspendedTotal}문항
+              </p>
+              {restoreDone == null ? (
+                <>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                    여덟 번 넘게 틀려서 복습에서 잠시 뺐어요. 간격을 좁혀도 안 풀리는
+                    문제라, 해설을 먼저 보는 편이 빨라요.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={restoreSuspended}
+                    disabled={restoreBusy}
+                    className="mt-2 rounded-lg bg-zinc-700 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-zinc-800 disabled:opacity-60 dark:bg-zinc-600 dark:hover:bg-zinc-500"
+                  >
+                    {restoreBusy ? "되살리는 중..." : "다시 복습에 넣기"}
+                  </button>
+                </>
+              ) : (
+                <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  {restoreDone}문항을 며칠에 나눠 다시 넣었어요.
                 </p>
               )}
             </div>

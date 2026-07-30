@@ -60,6 +60,7 @@ export async function recordQuestionResults(
       )
       : null;
 
+    // leech 판정에 걸리면 접는다(srs_suspended_at). 스케줄은 지우지 않는다.
     const schedule = srs
       ? {
         srs_interval_days: srs.state.intervalDays,
@@ -67,6 +68,7 @@ export async function recordQuestionResults(
         srs_reps: srs.state.reps,
         srs_lapses: srs.state.lapses,
         srs_due_at: srs.dueAt.toISOString(),
+        ...(srs.leech ? { srs_suspended_at: now } : {}),
       }
       : {
         srs_interval_days: before?.srs_interval_days ?? SRS_INITIAL.intervalDays,

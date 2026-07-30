@@ -106,6 +106,7 @@ export async function getReviewSubjectOptions(
       .from("user_question_status")
       .select("paper_id, srs_due_at")
       .eq("user_id", userId)
+      .is("srs_suspended_at", null)
       .gt("wrong_count", 0)
       .range(from, from + BATCH_SIZE - 1);
     if (!data || data.length === 0) break;
@@ -191,6 +192,8 @@ async function respreadResumedSubject(
       .select("*")
       .eq("user_id", userId)
       .not("srs_due_at", "is", null)
+      // 접어둔 문항은 큐에 없으므로 밀린 것으로도 세지 않고 다시 뿌리지도 않는다.
+      .is("srs_suspended_at", null)
       .lte("srs_due_at", nowIso)
       .order("srs_due_at", { ascending: true })
       .range(from, from + BATCH_SIZE - 1);
@@ -252,6 +255,8 @@ export async function spreadOverdueBacklog(
       .select("*")
       .eq("user_id", userId)
       .not("srs_due_at", "is", null)
+      // 접어둔 문항은 큐에 없으므로 밀린 것으로도 세지 않고 다시 뿌리지도 않는다.
+      .is("srs_suspended_at", null)
       .lte("srs_due_at", nowIso)
       .order("srs_due_at", { ascending: true })
       .range(from, from + BATCH_SIZE - 1);
@@ -277,6 +282,63 @@ export async function spreadOverdueBacklog(
     if (error) return { error: "밀린 복습을 정리하지 못했어요." };
   }
   return { spreadCount: rows.length };
+}
+
+export type RestoreSuspendedResult = { error?: string; restoredCount?: number };
+
+// 접어둔(leech) 문항을 다시 복습에 넣는다.
+//
+// lapses는 그대로 둔다 — 진도를 잃지 않게 하려는 것이고, 덕분에 네 번 더 무너지면
+// 다시 접힌다(8 → 12 → 16, Anki와 같은 재판정 간격).
+//
+// 한꺼번에 되살리면 그 문항들이 전부 연체 상태라 다음날 큐를 통째로 먹는다. 게다가
+// 우선순위 점수가 lapses에 비례해서(leech는 8 이상) 다른 문항이 몇 주째 안 나온다.
+// 그래서 과목 재개와 같은 규칙으로 며칠에 걸쳐 나눠 예약한다.
+export async function restoreSuspendedQuestions(
+  supabase: Supabase,
+  userId: string,
+  now: Date = new Date(),
+): Promise<RestoreSuspendedResult> {
+  const { dailyLimit } = await getReviewPrefs(supabase, userId);
+
+  type Row = Record<string, unknown>;
+  const rows: Row[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("user_question_status")
+      .select("*")
+      .eq("user_id", userId)
+      .not("srs_suspended_at", "is", null)
+      .order("srs_suspended_at", { ascending: true })
+      .range(from, from + BATCH_SIZE - 1);
+    if (error) return { error: "접어둔 문제를 되살리지 못했어요." };
+    if (!data || data.length === 0) break;
+    rows.push(...(data as Row[]));
+    if (data.length < BATCH_SIZE) break;
+    from += BATCH_SIZE;
+  }
+  if (rows.length === 0) return { restoredCount: 0 };
+
+  // 하루 몫을 상한의 1/4로 잡는다. leech는 점수가 높아 큐 앞자리를 차지하므로,
+  // 재개 과목(절반)보다 더 얇게 흘려보내야 나머지 복습이 안 밀린다.
+  const dueDates = spreadResumeDueDates(rows.length, now, {
+    perDay: Math.max(1, Math.floor(dailyLimit / 4)),
+  });
+
+  const admin = createAdminClient();
+  const updated = rows.map((r, i) => ({
+    ...r,
+    srs_suspended_at: null,
+    srs_due_at: dueDates[i].toISOString(),
+  }));
+  for (const part of chunk(updated, UPSERT_CHUNK)) {
+    const { error } = await admin
+      .from("user_question_status")
+      .upsert(part, { onConflict: "user_id,paper_id,question_number" });
+    if (error) return { error: "접어둔 문제를 되살리지 못했어요." };
+  }
+  return { restoredCount: rows.length };
 }
 
 export type SetPausedResult = { error?: string; pausedSubjectIds?: string[] };

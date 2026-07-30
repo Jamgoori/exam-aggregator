@@ -46,6 +46,23 @@ export const SRS_SECOND_INTERVAL_DAYS = 3;
 // Anki의 relearning step과 같은 자리다.
 export const SRS_RELEARN_DELAY_HOURS = 3;
 
+// leech(상습범) 판정 기준 — Anki 기본값과 같은 8회. 여기까지 무너진 문항은 간격을
+// 더 좁혀도 안 풀린다. 우선순위 점수가 lapses에 비례하다 보니 방치하면 이런 문항
+// 몇 개가 매일 큐 앞자리를 영구 점유하고, 사용자는 "매일 같은 문제만 나온다"를
+// 겪다가 그만둔다. 문제는 간격이 아니라 이해라, 큐에서 빼고 따로 보게 해야 한다.
+export const SRS_LEECH_THRESHOLD = 8;
+
+// 한 번 접어둔 뒤 다시 넣었는데 또 무너지면, 이 간격마다 다시 접는다(Anki와 같이
+// 기준의 절반). 8 → 12 → 16 ...
+export const SRS_LEECH_REPEAT = SRS_LEECH_THRESHOLD / 2;
+
+// 이번 lapse로 leech 판정에 걸렸는지. lapses가 기준을 넘은 "그 순간"에만 true라
+// 매번 접히지 않는다.
+export function isLeechTrigger(lapses: number): boolean {
+  if (lapses < SRS_LEECH_THRESHOLD) return false;
+  return (lapses - SRS_LEECH_THRESHOLD) % SRS_LEECH_REPEAT === 0;
+}
+
 // 하루의 경계를 KST 04:00으로 잡는다. 자정 기준으로 하면 새벽 2시에 푼 사람의
 // "내일"이 두 시간 뒤가 돼버린다. 공시생은 새벽까지 푸는 경우가 많아 Anki와 같은
 // 방식(새벽 4시 경계)을 쓴다.
@@ -78,7 +95,12 @@ function isFirstEntry(prev: SrsState): boolean {
   return prev.reps === 0 && prev.lapses === 0 && prev.intervalDays === 0;
 }
 
-export type SrsResult = { state: SrsState; dueAt: Date };
+export type SrsResult = {
+  state: SrsState;
+  dueAt: Date;
+  // 이번 채점으로 leech 판정에 걸렸는지. 호출부가 이 문항을 큐에서 접는다.
+  leech?: boolean;
+};
 
 // 같은 "복습 하루" 안에서 이미 채점된 문항인지. 간격을 벌릴지 말지를 가른다.
 export function isSameSrsDay(a: Date, b: Date): boolean {
@@ -135,17 +157,19 @@ export function nextSrs(
 
   if (!isCorrect) {
     const first = isFirstEntry(prev);
+    const lapses = first ? 0 : prev.lapses + 1;
     return {
       state: {
         intervalDays: SRS_FIRST_INTERVAL_DAYS,
         ease: first ? prev.ease : clampEase(prev.ease - SRS_EASE_PENALTY),
         reps: 0,
-        lapses: first ? 0 : prev.lapses + 1,
+        lapses,
       },
       // 내일이 아니라 몇 시간 뒤. 오늘 안에 한 번 더 만나야 잊히기 전에 붙잡는다.
       // 간격(intervalDays)은 1일로 두므로, 재확인을 통과하면 거기서부터 1 → 3으로
       // 정상 출발한다.
       dueAt: srsRelearnDueAt(now),
+      leech: isLeechTrigger(lapses),
     };
   }
 

@@ -89,6 +89,8 @@ export async function collectDueCandidates(
   pendingSources: Map<string, string[]>;
   // 대기 중인 오답 총계 — "나머지는 오답노트에서 기다리는 중"을 보여주는 값.
   pendingTotal: number;
+  // leech로 접어둔 문항 수.
+  suspendedTotal: number;
   subjectNames: Map<string, string>;
   pausedSubjectIds: Set<string>;
   // 사용자가 고른 하루 문항 수. 큐 편성과 요약이 같은 값을 써야 하므로 여기서 함께
@@ -116,6 +118,8 @@ export async function collectDueCandidates(
         .select("paper_id, question_number, last_answered_at, srs_due_at, srs_lapses")
         .eq("user_id", userId)
         .not("srs_due_at", "is", null)
+        // 접어둔(leech) 문항은 큐에도 예보에도 안 나온다. 다시 넣기 전까지는 없는 셈.
+        .is("srs_suspended_at", null)
         .lte("srs_due_at", windowEnd)
         .range(from, from + BATCH_SIZE - 1);
       if (!data || data.length === 0) break;
@@ -129,28 +133,39 @@ export async function collectDueCandidates(
   // 맡겨야 수백 개 중 상위만 가져올 수 있다. 총계는 별도 count로 센다(정제 전
   // 숫자라 실제 승격 가능 수보다 약간 클 수 있지만, 화면에 쓰는 건 "얼마나 밀려
   // 있는지"라 이 정도 오차는 의미가 없다).
-  const [{ data: pendingData }, { count: pendingCount }] = await Promise.all([
-    supabase
-      .from("user_question_status")
-      .select("paper_id, question_number, last_answered_at, wrong_count")
-      .eq("user_id", userId)
-      .is("srs_due_at", null)
-      .gt("wrong_count", 0)
-      .order("wrong_count", { ascending: false })
-      .order("last_answered_at", { ascending: true })
-      .limit(PENDING_FETCH_LIMIT),
-    supabase
-      .from("user_question_status")
-      .select("paper_id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .is("srs_due_at", null)
-      .gt("wrong_count", 0),
-  ]);
+  const [{ data: pendingData }, { count: pendingCount }, { count: suspendedCount }] =
+    await Promise.all([
+      supabase
+        .from("user_question_status")
+        .select("paper_id, question_number, last_answered_at, wrong_count")
+        .eq("user_id", userId)
+        .is("srs_due_at", null)
+        .is("srs_suspended_at", null)
+        .gt("wrong_count", 0)
+        .order("wrong_count", { ascending: false })
+        .order("last_answered_at", { ascending: true })
+        .limit(PENDING_FETCH_LIMIT),
+      supabase
+        .from("user_question_status")
+        .select("paper_id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .is("srs_due_at", null)
+        .is("srs_suspended_at", null)
+        .gt("wrong_count", 0),
+      // 접어둔 문항 수. 큐에서 사라진 문항이 어디로 갔는지 화면에서 말해줘야 한다 —
+      // 조용히 없어지면 사용자는 데이터가 날아간 걸로 읽는다.
+      supabase
+        .from("user_question_status")
+        .select("paper_id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .not("srs_suspended_at", "is", null),
+    ]);
   const pendingRows = (pendingData ?? []) as PendingRow[];
   const pendingTotal = pendingCount ?? 0;
+  const suspendedTotal = suspendedCount ?? 0;
 
   if (statusRows.length === 0 && pendingRows.length === 0) {
-    return { ...empty, pendingTotal };
+    return { ...empty, pendingTotal, suspendedTotal };
   }
 
   const marks = await fetchWrongNoteMarks(supabase, userId);
@@ -297,6 +312,7 @@ export async function collectDueCandidates(
     pending,
     pendingSources,
     pendingTotal,
+    suspendedTotal,
     subjectNames,
     pausedSubjectIds: paused,
     dailyLimit,
@@ -313,6 +329,8 @@ export type DueReviewSummary = {
   // 아직 SRS에 안 태운 오답 총계. 승격되지 않은 나머지가 사라진 게 아니라 오답노트에
   // 있다는 걸 알려주는 값 — 이게 없으면 1회독 중인 사용자는 오답이 증발했다고 읽는다.
   pendingTotal: number;
+  // 여덟 번 넘게 무너져 접어둔 문항 수. 큐에서 사라진 게 어디 갔는지 말해줘야 한다.
+  suspendedTotal: number;
   // 지금 due가 지난 문항 전체(상한 적용 전). "밀린 복습 정리하기"를 언제 권할지
   // 판단하는 값이다.
   overdueTotal: number;
@@ -335,7 +353,7 @@ export async function getDueReviewSummary(
   userId: string,
   now: Date = new Date(),
 ): Promise<DueReviewSummary> {
-  const { candidates, pending, pendingTotal, subjectNames, dailyLimit } =
+  const { candidates, pending, pendingTotal, suspendedTotal, subjectNames, dailyLimit } =
     await collectDueCandidates(supabase, userId, now);
   const queue = buildDueQueue(candidates, pending, now, {
     total: dailyLimit,
@@ -363,6 +381,7 @@ export async function getDueReviewSummary(
     newCount,
     // 오늘 태울 몫은 이미 큐에 들어왔으니 대기 중 숫자에서 뺀다.
     pendingTotal: Math.max(0, pendingTotal - newCount),
+    suspendedTotal,
     overdueTotal: dueTotal,
     relearnCount,
     dailyLimit,
@@ -516,4 +535,48 @@ export async function collectDueQueueItems(
   }
 
   return queue.map((c) => ({ paperId: c.paperId, questionNumber: c.questionNumber }));
+}
+
+// "복습 더하기" — 오늘치를 끝낸 사람이 대기 풀에서 한 묶음 더 당겨 푼다.
+//
+// 하루 몫은 유입을 막기 위한 것이지 상한을 강제하려는 게 아니다. 밀린 복습이 커서
+// 신규 몫이 계속 0이면 대기 숫자가 몇 주째 안 줄어드는데, 그 상태에서 "왜 안 줄죠"는
+// 정당한 불만이다. 스스로 더 풀겠다는 사람을 막을 이유가 없다.
+//
+// 오늘 큐에 남은 게 있으면 거절한다 — 오늘치를 건너뛰고 새 문항만 담으면 밀린 것이
+// 영영 안 준다. "오늘치가 끝난다"는 감각도 그대로 지킨다.
+export async function collectExtraQueueItems(
+  supabase: Supabase,
+  userId: string,
+  now: Date = new Date(),
+): Promise<{ items: { paperId: string; questionNumber: number }[]; error?: string }> {
+  const { candidates, pending, pendingSources, dailyLimit } = await collectDueCandidates(
+    supabase,
+    userId,
+    now,
+  );
+
+  const nowIso = now.toISOString();
+  if (candidates.some((c) => c.dueAt <= nowIso)) {
+    return { items: [], error: "오늘 예정된 복습을 먼저 끝내주세요." };
+  }
+  if (pending.length === 0) {
+    return { items: [], error: "더 가져올 오답이 없어요." };
+  }
+
+  // due가 하나도 없는 상태라 신규 몫이 곧 한 묶음이다.
+  const batch = buildDueQueue([], pending, now, {
+    total: dailyLimit,
+    newItems: newItemsForLimit(dailyLimit),
+  });
+
+  try {
+    await promotePendingItems(batch, pendingSources, userId, now);
+  } catch {
+    // 무시: 승격 실패해도 오늘 세션은 정상으로 풀린다.
+  }
+
+  return {
+    items: batch.map((c) => ({ paperId: c.paperId, questionNumber: c.questionNumber })),
+  };
 }

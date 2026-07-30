@@ -89,6 +89,10 @@ export async function recordQuestionResults(
 
     // 대기 중이면 스케줄 컬럼을 그대로 둔다(초기값 유지). 승격 시점부터 1일 → 3일로
     // 정상 출발하게 하려는 것 — 간격 없이 맞힌 건 유지력이 아니다.
+    //
+    // leech 판정에 걸리면 접는다(srs_suspended_at). 스케줄은 지우지 않아서 다시
+    // 넣을 때 진도를 잃지 않는다. 접힌 문항이 다시 통과하면(정답) 자동으로 풀지
+    // 않는다 — 사용자가 직접 넣은 것이므로 그 판단을 존중한다.
     const schedule = srs
       ? {
           srs_interval_days: srs.state.intervalDays,
@@ -96,6 +100,7 @@ export async function recordQuestionResults(
           srs_reps: srs.state.reps,
           srs_lapses: srs.state.lapses,
           srs_due_at: srs.dueAt.toISOString(),
+          ...(srs.leech ? { srs_suspended_at: now } : {}),
         }
       : {
           srs_interval_days: before?.srs_interval_days ?? SRS_INITIAL.intervalDays,

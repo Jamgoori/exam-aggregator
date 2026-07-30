@@ -14,6 +14,7 @@ import {
 } from "@/lib/review-session";
 import {
   collectDueQueueItems,
+  collectExtraQueueItems,
   getDueReviewSummary,
   getSessionSchedule,
 } from "@/lib/review-queue";
@@ -21,6 +22,7 @@ import {
   setSubjectPaused,
   setDailyLimit,
   spreadOverdueBacklog,
+  restoreSuspendedQuestions,
   type SetDailyLimitResult,
   type SpreadBacklogResult,
 } from "@/lib/review-preferences";
@@ -272,6 +274,32 @@ export async function markReviewGuessed(input: {
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
   return markReviewItemGuessed(supabase, user.id, sessionId, position);
+}
+
+// "복습 더하기"(유료 전용) — 오늘치를 끝낸 사람이 대기 풀에서 한 묶음 더 당겨 푼다.
+export async function createExtraReviewSession(): Promise<CreateReviewResult> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) {
+    return { error: "복습은 멤버십 기능이에요." };
+  }
+
+  const { items, error } = await collectExtraQueueItems(supabase, user.id);
+  if (error) return { error };
+  return createDueReviewSessionForUser(supabase, user.id, items);
+}
+
+export type RestoreSuspendedActionResult = { error?: string; restoredCount?: number };
+
+// 접어둔(leech) 문항을 다시 복습에 넣는다(유료 전용). 되살린 문항의 복습일을 며칠에
+// 걸쳐 다시 뿌리는 쓰기가 붙으므로 여기서도 멤버십을 막는다.
+export async function restoreSuspendedReview(): Promise<RestoreSuspendedActionResult> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) {
+    return { error: "복습은 멤버십 기능이에요." };
+  }
+  return restoreSuspendedQuestions(supabase, user.id);
 }
 
 export type ToggleReviewSubjectResult = { error?: string; pausedSubjectIds?: string[] };

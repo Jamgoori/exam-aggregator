@@ -25,6 +25,14 @@ export const SRS_MAX_INTERVAL_DAYS = 180;
 export const SRS_FIRST_INTERVAL_DAYS = 1;
 export const SRS_SECOND_INTERVAL_DAYS = 3;
 export const SRS_RELEARN_DELAY_HOURS = 3;
+export const SRS_LEECH_THRESHOLD = 8;
+export const SRS_LEECH_REPEAT = SRS_LEECH_THRESHOLD / 2;
+
+// leech(상습범) 판정 — 기준을 넘은 "그 순간"에만 true. 근거는 core 쪽 주석 참고.
+export function isLeechTrigger(lapses: number): boolean {
+  if (lapses < SRS_LEECH_THRESHOLD) return false;
+  return (lapses - SRS_LEECH_THRESHOLD) % SRS_LEECH_REPEAT === 0;
+}
 
 // 하루 경계는 KST 04:00 (자정으로 하면 새벽에 푼 사람의 "내일"이 두 시간 뒤가 된다).
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -51,7 +59,7 @@ function isFirstEntry(prev: SrsState): boolean {
   return prev.reps === 0 && prev.lapses === 0 && prev.intervalDays === 0;
 }
 
-export type SrsResult = { state: SrsState; dueAt: Date };
+export type SrsResult = { state: SrsState; dueAt: Date; leech?: boolean };
 
 export function isSameSrsDay(a: Date, b: Date): boolean {
   return srsDayIndex(a) === srsDayIndex(b);
@@ -85,15 +93,17 @@ export function nextSrs(
 
   if (!isCorrect) {
     const first = isFirstEntry(prev);
+    const lapses = first ? 0 : prev.lapses + 1;
     return {
       state: {
         intervalDays: SRS_FIRST_INTERVAL_DAYS,
         ease: first ? prev.ease : clampEase(prev.ease - SRS_EASE_PENALTY),
         reps: 0,
-        lapses: first ? 0 : prev.lapses + 1,
+        lapses,
       },
       // 내일이 아니라 몇 시간 뒤(재확인 단계).
       dueAt: srsRelearnDueAt(now),
+      leech: isLeechTrigger(lapses),
     };
   }
 
