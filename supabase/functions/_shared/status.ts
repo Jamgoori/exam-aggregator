@@ -11,6 +11,8 @@ import { startTrialIfEligible } from "./membership.ts";
 type StatusRow = {
   question_number: number;
   wrong_count: number;
+  // "하루 1회만 반영" 판정용 — 직전 채점이 오늘이면 정답이어도 간격을 안 벌린다.
+  last_answered_at: string | null;
   srs_interval_days: number | null;
   srs_ease: number | null;
   srs_reps: number | null;
@@ -29,7 +31,7 @@ export async function recordQuestionResults(
   const { data: existing } = await admin
     .from("user_question_status")
     .select(
-      "question_number, wrong_count, srs_interval_days, srs_ease, srs_reps, srs_lapses",
+      "question_number, wrong_count, last_answered_at, srs_interval_days, srs_ease, srs_reps, srs_lapses",
     )
     .eq("user_id", userId)
     .eq("paper_id", paperId);
@@ -46,7 +48,12 @@ export async function recordQuestionResults(
 
     // 한 번도 틀린 적 없는 문항은 SRS 에 넣지 않는다(due 는 계속 null).
     const srs = wrongCount > 0
-      ? nextSrs(before ? srsStateFromRow(before) : SRS_INITIAL, r.is_correct, at)
+      ? nextSrs(
+        before ? srsStateFromRow(before) : SRS_INITIAL,
+        r.is_correct,
+        at,
+        before?.last_answered_at ? new Date(before.last_answered_at) : null,
+      )
       : null;
 
     return {

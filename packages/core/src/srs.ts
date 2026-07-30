@@ -75,13 +75,37 @@ function isFirstEntry(prev: SrsState): boolean {
 
 export type SrsResult = { state: SrsState; dueAt: Date };
 
+// 같은 "복습 하루" 안에서 이미 채점된 문항인지. 간격을 벌릴지 말지를 가른다.
+export function isSameSrsDay(a: Date, b: Date): boolean {
+  return srsDayIndex(a) === srsDayIndex(b);
+}
+
 // 채점 결과 하나를 스케줄에 반영한다.
 //
 // 틀리면 간격을 1일로 되돌리고 ease를 깎는다(다음부터 더 촘촘히 나옴).
 // 맞히면 1일 → 3일 → 그 뒤로는 직전 간격 × ease 로 벌어진다. 간격 계산에는 갱신 전
 // ease를 쓴다 — 이번 정답의 보너스는 다음 회차부터 반영되게 해서 한 번 맞혔다고
 // 간격이 두 배로 튀지 않게 한다.
-export function nextSrs(prev: SrsState, isCorrect: boolean, now: Date): SrsResult {
+//
+// lastGradedAt(직전 채점 시각)을 주면 "하루 1회만 반영" 규칙이 걸린다. 섞어풀기는
+// 쿨다운이 없어 같은 문항을 하루에 몇 번이고 다시 풀 수 있는데, 그때마다 reps가
+// 올라가면 1일 → 3일 → 8일이 하루 만에 지나간다. 간격을 두고 만나야 유지력이라고
+// 부를 수 있으므로, 간격 없이 연달아 맞힌 것은 유지력의 증거로 치지 않는다.
+// 틀린 것은 언제나 반영한다 — 방금 맞힌 문항을 곧바로 틀렸다면 그게 진짜 신호다.
+export function nextSrs(
+  prev: SrsState,
+  isCorrect: boolean,
+  now: Date,
+  lastGradedAt?: Date | null,
+): SrsResult {
+  // intervalDays가 0이면 아직 예약이 없는 상태(마이그레이션 전 행 등)라 되돌릴
+  // 스케줄 자체가 없다 — 그때는 정상 계산으로 보낸다.
+  if (isCorrect && lastGradedAt && prev.intervalDays >= 1 && isSameSrsDay(lastGradedAt, now)) {
+    // 직전 채점이 오늘이므로 srsDueAt(lastGradedAt, ...)은 그때 잡힌 due를 그대로
+    // 재현한다(같은 하루 번호 + 같은 간격). 별도로 due를 들고 다닐 필요가 없다.
+    return { state: prev, dueAt: srsDueAt(lastGradedAt, prev.intervalDays) };
+  }
+
   if (!isCorrect) {
     const first = isFirstEntry(prev);
     return {

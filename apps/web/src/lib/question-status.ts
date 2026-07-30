@@ -11,6 +11,8 @@ export type QuestionResultInput = {
 type StatusRow = {
   question_number: number;
   wrong_count: number;
+  // "하루 1회만 반영" 판정용 — 직전 채점이 오늘이면 정답이어도 간격을 안 벌린다.
+  last_answered_at: string | null;
   srs_interval_days: number | null;
   srs_ease: number | null;
   srs_reps: number | null;
@@ -35,7 +37,9 @@ type StatusRow = {
 // 같은 채점으로 간격 반복(SRS) 스케줄도 갱신한다. 복습 큐는 오답에서만 출발하므로
 // 한 번도 틀린 적 없는 문항은 srs_due_at을 null로 둔다(큐에 안 들어옴). 계산은
 // packages/core/srs.ts가 하고 여기는 결과만 쓴다 — 쓰기 정책이 없는 테이블이라
-// 사용자가 자기 복습일을 미루거나 앞당길 수 없다.
+// 사용자가 자기 복습일을 미루거나 앞당길 수 없다. 직전 채점 시각을 함께 넘겨
+// "같은 날 다시 맞힌 것"으로 간격이 벌어지지 않게 한다(섞어풀기는 쿨다운이 없어
+// 하루에 같은 문항을 여러 번 낼 수 있다).
 //
 // 부가 집계이므로 실패해도 채점 자체는 막지 않는다 — 호출부에서 try/catch로 삼킨다.
 // (마이그레이션 적용 전이라 테이블이 없어도 조용히 무시되게 하려는 의도이기도 하다.)
@@ -51,7 +55,7 @@ export async function recordQuestionResults(
   const { data: existing } = await admin
     .from("user_question_status")
     .select(
-      "question_number, wrong_count, srs_interval_days, srs_ease, srs_reps, srs_lapses",
+      "question_number, wrong_count, last_answered_at, srs_interval_days, srs_ease, srs_reps, srs_lapses",
     )
     .eq("user_id", userId)
     .eq("paper_id", paperId);
@@ -68,7 +72,12 @@ export async function recordQuestionResults(
 
     // 한 번도 틀린 적 없는 문항은 SRS에 넣지 않는다(due는 계속 null).
     const srs = wrongCount > 0
-      ? nextSrs(before ? srsStateFromRow(before) : SRS_INITIAL, r.is_correct, at)
+      ? nextSrs(
+          before ? srsStateFromRow(before) : SRS_INITIAL,
+          r.is_correct,
+          at,
+          before?.last_answered_at ? new Date(before.last_answered_at) : null,
+        )
       : null;
 
     return {

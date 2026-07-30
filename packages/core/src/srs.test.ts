@@ -86,6 +86,76 @@ test("맞히다 틀리면 간격 1일로 리셋 + ease 하락 + lapses 증가", 
   assert.ok(lapsed.state.ease < easeBefore);
 });
 
+test("같은 날 다시 맞히면 간격이 벌어지지 않는다(섞어풀기 연타 방지)", () => {
+  // 섞어풀기는 쿨다운이 없어 같은 문항을 하루에 몇 번이고 낼 수 있다. 그때마다
+  // reps가 올라가면 1일 → 3일 → 8일이 하루 만에 지나가, 열심히 푼 사용자일수록
+  // 복습 큐가 비는 역설이 생긴다.
+  const state = nextSrs(SRS_INITIAL, false, kst("2026-03-02T14:00:00")).state;
+
+  const morning = nextSrs(state, true, kst("2026-03-03T09:00:00"));
+  assert.equal(morning.state.intervalDays, 1);
+  assert.equal(morning.state.reps, 1);
+
+  // 같은 날 오후에 또 맞혀도 상태·due가 그대로여야 한다.
+  const afternoon = nextSrs(
+    morning.state,
+    true,
+    kst("2026-03-03T15:00:00"),
+    kst("2026-03-03T09:00:00"),
+  );
+  assert.deepEqual(afternoon.state, morning.state);
+  assert.equal(afternoon.dueAt.toISOString(), morning.dueAt.toISOString());
+
+  // 다음 날 맞히면 정상적으로 벌어진다.
+  const nextDay = nextSrs(
+    afternoon.state,
+    true,
+    kst("2026-03-04T09:00:00"),
+    kst("2026-03-03T15:00:00"),
+  );
+  assert.equal(nextDay.state.intervalDays, 3);
+  assert.equal(nextDay.state.reps, 2);
+});
+
+test("같은 날이라도 틀린 것은 언제나 반영한다", () => {
+  // 방금 맞힌 문항을 곧바로 틀렸다면 그게 진짜 신호다 — 여기서 막으면 안 된다.
+  let state = nextSrs(SRS_INITIAL, false, kst("2026-03-02T14:00:00")).state;
+  state = nextSrs(state, true, kst("2026-03-03T09:00:00")).state;
+  state = nextSrs(state, true, kst("2026-03-04T09:00:00")).state;
+  const easeBefore = state.ease;
+
+  const lapsed = nextSrs(state, false, kst("2026-03-04T15:00:00"), kst("2026-03-04T09:00:00"));
+  assert.equal(lapsed.state.intervalDays, 1);
+  assert.equal(lapsed.state.reps, 0);
+  assert.equal(lapsed.state.lapses, 1);
+  assert.ok(lapsed.state.ease < easeBefore);
+});
+
+test("하루 1회 규칙도 KST 04:00 경계를 따른다", () => {
+  // 3/3 01:00은 아직 3/2의 "복습 하루"다. 밤새 이어 푸는 사람이 자정을 넘겼다고
+  // 간격을 한 번 더 벌리면 안 된다.
+  const state = { intervalDays: 3, ease: 2.5, reps: 2, lapses: 0 };
+  const held = nextSrs(state, true, kst("2026-03-03T01:00:00"), kst("2026-03-02T22:00:00"));
+  assert.deepEqual(held.state, state);
+
+  // 04:00을 넘기면 새 하루라 정상 반영된다.
+  const advanced = nextSrs(state, true, kst("2026-03-03T05:00:00"), kst("2026-03-02T22:00:00"));
+  assert.equal(advanced.state.reps, 3);
+});
+
+test("예약이 없던 행(마이그레이션 전)은 같은 날이어도 정상 계산한다", () => {
+  // intervalDays 0 = 되돌릴 스케줄이 없는 상태. 여기서 붙잡으면 due가 영영 안 잡힌다.
+  const { state, dueAt } = nextSrs(
+    SRS_INITIAL,
+    true,
+    kst("2026-03-03T15:00:00"),
+    kst("2026-03-03T09:00:00"),
+  );
+  assert.equal(state.reps, 1);
+  assert.equal(state.intervalDays, 1);
+  assert.equal(dueAt.toISOString(), kst("2026-03-04T04:00:00").toISOString());
+});
+
 test("ease는 상·하한을 넘지 않는다", () => {
   let state: SrsState = { ...SRS_INITIAL, reps: 1, intervalDays: 1 };
   for (let i = 0; i < 30; i++) state = nextSrs(state, true, kst("2026-03-02T09:00:00")).state;

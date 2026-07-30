@@ -52,7 +52,25 @@ function isFirstEntry(prev: SrsState): boolean {
 
 export type SrsResult = { state: SrsState; dueAt: Date };
 
-export function nextSrs(prev: SrsState, isCorrect: boolean, now: Date): SrsResult {
+export function isSameSrsDay(a: Date, b: Date): boolean {
+  return srsDayIndex(a) === srsDayIndex(b);
+}
+
+// lastGradedAt 을 주면 "하루 1회만 반영" 규칙이 걸린다(같은 날 다시 맞혀도 간격을
+// 벌리지 않음). 틀린 것은 언제나 반영. 근거는 core 쪽 주석 참고.
+export function nextSrs(
+  prev: SrsState,
+  isCorrect: boolean,
+  now: Date,
+  lastGradedAt?: Date | null,
+): SrsResult {
+  if (
+    isCorrect && lastGradedAt && prev.intervalDays >= 1 &&
+    isSameSrsDay(lastGradedAt, now)
+  ) {
+    return { state: prev, dueAt: srsDueAt(lastGradedAt, prev.intervalDays) };
+  }
+
   if (!isCorrect) {
     const first = isFirstEntry(prev);
     return {
