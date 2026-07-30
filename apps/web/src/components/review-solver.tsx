@@ -472,8 +472,9 @@ export function ReviewSolver({
 // "찍었어요" 토글. 한 번 누르면 되돌리지 않는다 — 취소까지 두면 정답 화면에서
 // 판단할 거리가 하나 더 늘고, 잘못 눌러도 손해가 "며칠 뒤에 한 번 더 본다"뿐이다.
 //
-// 무료 사용자는 서버가 조용히 무시한다(스케줄 자체가 없다). 버튼을 숨기지 않는 건
-// 여기서 멤버십을 또 조회하면 결과 화면이 그만큼 늦어지기 때문이다.
+// 누른 뒤 문구를 "표시했어요"로만 두는 건, 이 화면이 복습 세션과 섞어풀기 양쪽에
+// 쓰이고 후자에는 스케줄이 없는 문항이 섞여 있기 때문이다. 전부에 "곧 다시 나와요"를
+// 약속하면 지키지 못하는 경우가 생긴다.
 function GuessedButton({
   sessionId,
   position,
@@ -489,7 +490,7 @@ function GuessedButton({
   if (marked) {
     return (
       <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
-        찍은 문제 · 곧 다시 나와요
+        찍은 문제로 표시했어요
       </span>
     );
   }

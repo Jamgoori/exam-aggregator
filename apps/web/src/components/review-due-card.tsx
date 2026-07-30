@@ -27,6 +27,8 @@ export type ReviewSubjectChoice = {
   name: string;
   paused: boolean;
   scheduledCount: number;
+  // 아직 승격되지 않고 순서를 기다리는 오답 수.
+  pendingCount: number;
 };
 
 export type ReviewDueCardProps = {
@@ -477,8 +479,15 @@ function ReviewSettingsModal({
                     </span>
                     <span className="mt-0.5 block text-xs text-zinc-400 dark:text-zinc-600">
                       {on
-                        ? `복습 예약 ${c.scheduledCount}문항`
-                        : `쉬는 중 · ${c.scheduledCount}문항 보관됨`}
+                        ? [
+                            `복습 예약 ${c.scheduledCount}문항`,
+                            // 1회독 중이면 예약 0에 대기만 수백인 과목이 흔하다.
+                            // 예약만 보여주면 "0문항"으로 떠서 끌 이유가 없어 보인다.
+                            c.pendingCount > 0 ? `대기 ${c.pendingCount}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")
+                        : `쉬는 중 · ${c.scheduledCount + c.pendingCount}문항 보관됨`}
                     </span>
                   </span>
                   <Switch on={on} busy={busyId === c.id} />

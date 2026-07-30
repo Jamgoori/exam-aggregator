@@ -253,8 +253,11 @@ export async function createDueReviewSession(): Promise<CreateReviewResult> {
   return createDueReviewSessionForUser(supabase, user.id, items);
 }
 
-// "찍었어요"(유료 전용) — 맞힌 문항의 복습 스케줄만 되돌린다. 점수와 극복 판정은
-// 그대로다. 무료 사용자는 스케줄 자체가 없어 할 일이 없다.
+// "찍었어요" — 맞힌 문항의 복습 스케줄만 되돌린다. 점수와 극복 판정은 그대로다.
+//
+// 멤버십으로 막지 않는다. 표시 자체(review_session_items.guessed)는 무료 사용자에게도
+// 남겨야 나중에 결제했을 때 "그때 찍었다고 눌러둔 것"이 살아 있다. 스케줄이 없는
+// 문항은 markReviewItemGuessed 안에서 조용히 넘어간다.
 export async function markReviewGuessed(input: {
   sessionId: string;
   position: number;
@@ -267,7 +270,6 @@ export async function markReviewGuessed(input: {
 
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  if (!(await isPremium(supabase, user.id))) return {};
 
   return markReviewItemGuessed(supabase, user.id, sessionId, position);
 }
