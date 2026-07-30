@@ -3,8 +3,8 @@
 // 섞어풀기는 후보를 통째로 섞어 앞에서 자른다(shuffle().slice()). 복습은 다르다:
 // 무엇을 낼지는 우선순위로 고르고, 어떤 순서로 낼지는 과목을 번갈아 배치한다.
 //
-//  - 고르기: 오래 연체된 것 먼저, 같으면 반복해서 무너진(lapses 많은) 것 먼저.
-//    한 문항이 몇 주째 안 뽑히는 일이 없어야 한다.
+//  - 고르기: 연체일과 무너진 횟수를 합친 점수 순. 연체일에 상한을 씌우는 게 핵심이다
+//    — 안 그러면 오래 밀린 문항이 lapses를 압도해 "자주 틀리는 문제 먼저"가 죽는다.
 //  - 순서: 한 과목이 큐를 통째로 먹으면 지루하고, 과목을 섞는 편(인터리빙)이
 //    학습 효과도 낫다.
 //
@@ -59,11 +59,27 @@ export type PendingCandidate = {
   lastAnsweredAt: string;
 };
 
-// 연체가 길수록, 같으면 반복해서 무너진 문항일수록 앞으로.
-function byPriority(a: DueCandidate, b: DueCandidate): number {
+// 연체일에 씌우는 상한. 이게 없으면 연체 40일짜리가 lapses를 통째로 압도해서,
+// "자주 무너지는 문항 먼저"가 사실상 동점 처리용 2순위로 밀린다. 2주 넘게 밀린
+// 문항끼리는 며칠 더 밀렸는지가 급한 정도를 가르지 못한다 — 둘 다 이미 잊혔다.
+export const OVERDUE_SCORE_CAP_DAYS = 14;
+
+// 한 번 무너질 때마다 얹는 점수. 3이면 lapses 5짜리(=15점)가 상한까지 연체된
+// 문항과 맞먹는다. 상습범이 매일 큐 안에 들어오게 하려는 값이다.
+export const LAPSE_SCORE_WEIGHT = 3;
+
+// 큐 앞자리를 다투는 점수. 높을수록 먼저.
+export function duePriorityScore(c: DueCandidate, now: Date): number {
+  const overdueDays = Math.max(0, srsDayIndex(now) - srsDayIndex(new Date(c.dueAt)));
+  return Math.min(overdueDays, OVERDUE_SCORE_CAP_DAYS) + c.lapses * LAPSE_SCORE_WEIGHT;
+}
+
+// 점수 높은 순 → 같으면 오래 연체된 순 → 그래도 같으면 항상 같은 순서(세션마다
+// 목록이 흔들리지 않게).
+function byPriority(a: DueCandidate, b: DueCandidate, now: Date): number {
+  const diff = duePriorityScore(b, now) - duePriorityScore(a, now);
+  if (diff !== 0) return diff;
   if (a.dueAt !== b.dueAt) return a.dueAt < b.dueAt ? -1 : 1;
-  if (a.lapses !== b.lapses) return b.lapses - a.lapses;
-  // 같은 조건이면 항상 같은 순서가 되도록(세션마다 목록이 흔들리지 않게).
   return a.paperId === b.paperId
     ? a.questionNumber - b.questionNumber
     : a.paperId < b.paperId
@@ -130,7 +146,7 @@ export function buildDueQueue(
 
   const nowIso = now.toISOString();
   const due = candidates.filter((c) => c.dueAt <= nowIso);
-  const picked = [...due].sort(byPriority).slice(0, total);
+  const picked = [...due].sort((a, b) => byPriority(a, b, now)).slice(0, total);
 
   // 신규 몫은 복습으로 채우고 남은 자리 안에서만 쓴다. 복습이 상한을 다 먹은 날은
   // 새 문항이 하나도 안 들어온다 — 밀린 걸 먼저 소화하는 게 맞다.

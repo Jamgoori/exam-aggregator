@@ -42,11 +42,14 @@ test("아직 due가 안 된 문항은 오늘 큐에 안 들어온다", () => {
   assert.equal(queue[0].questionNumber, 1);
 });
 
-test("오래 연체된 것 먼저, 같으면 반복해서 무너진 것 먼저", () => {
+test("연체일 + 무너진 횟수 점수 순으로 고른다", () => {
   const queue = buildDueQueue(
     [
+      // 0점
       cand({ questionNumber: 1, dueAt: dueDay(0), lapses: 0 }),
+      // 5점
       cand({ questionNumber: 2, dueAt: dueDay(-5), lapses: 0 }),
+      // 12점 — 연체는 오늘이지만 네 번 무너졌다.
       cand({ questionNumber: 3, dueAt: dueDay(0), lapses: 4 }),
     ],
     [],
@@ -54,7 +57,58 @@ test("오래 연체된 것 먼저, 같으면 반복해서 무너진 것 먼저",
   );
   assert.deepEqual(
     queue.map((q) => q.questionNumber),
-    [2, 3, 1],
+    [3, 2, 1],
+  );
+});
+
+test("연체일에 상한이 있어 상습범이 묻히지 않는다", () => {
+  // 예전 규칙(연체순)이라면 40일 밀린 1번이 무조건 앞이었다. 그게 1회독 백로그가
+  // 쌓인 사용자에게서 "자주 틀리는 문제 먼저"를 죽이던 자리다.
+  const queue = buildDueQueue(
+    [
+      cand({ questionNumber: 1, dueAt: dueDay(-40), lapses: 0 }),
+      cand({ questionNumber: 2, dueAt: dueDay(-1), lapses: 5 }),
+    ],
+    [],
+    NOW,
+  );
+  assert.deepEqual(
+    // 1번은 상한에 걸려 14점, 2번은 1 + 15 = 16점.
+    queue.map((q) => q.questionNumber),
+    [2, 1],
+  );
+});
+
+test("점수가 같으면 오래 연체된 것 먼저", () => {
+  const queue = buildDueQueue(
+    [
+      // 3 + 3 = 6점
+      cand({ questionNumber: 1, dueAt: dueDay(-3), lapses: 1 }),
+      // 6 + 0 = 6점
+      cand({ questionNumber: 2, dueAt: dueDay(-6), lapses: 0 }),
+    ],
+    [],
+    NOW,
+  );
+  assert.deepEqual(
+    queue.map((q) => q.questionNumber),
+    [2, 1],
+  );
+});
+
+test("점수 상한을 넘긴 문항끼리는 연체 순서를 유지한다", () => {
+  // 둘 다 14점이라 점수로는 못 가른다. 그래도 순서가 흔들리면 안 된다.
+  const queue = buildDueQueue(
+    [
+      cand({ questionNumber: 1, dueAt: dueDay(-20), lapses: 0 }),
+      cand({ questionNumber: 2, dueAt: dueDay(-60), lapses: 0 }),
+    ],
+    [],
+    NOW,
+  );
+  assert.deepEqual(
+    queue.map((q) => q.questionNumber),
+    [2, 1],
   );
 });
 
