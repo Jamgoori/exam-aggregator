@@ -32,6 +32,24 @@ export const DUE_QUEUE_LIMIT = 20;
 // 몰려 결국 같은 적체가 반복된다.
 export const NEW_QUEUE_LIMIT = 10;
 
+// 사용자가 고를 수 있는 하루 문항 수. 20이 기본이고, 시험이 가까우면 늘리고 여유가
+// 없으면 줄인다. 임의의 숫자를 받지 않는 건 "하루 3문항" 같은 설정이 스케줄을
+// 사실상 정지시키기 때문이다(유입이 처리를 영구히 앞선다).
+export const DAILY_LIMIT_OPTIONS = [10, 20, 40, 60] as const;
+
+// 저장된 값이 비었거나 목록 밖이면 기본값으로. DB 값을 그대로 믿지 않는다.
+export function normalizeDailyLimit(value: number | null | undefined): number {
+  const n = Number(value);
+  return (DAILY_LIMIT_OPTIONS as readonly number[]).includes(n) ? n : DUE_QUEUE_LIMIT;
+}
+
+// 하루 총량에 비례해 신규 몫을 정한다(기본 20 → 10, 40 → 20). 총량만 늘리고 신규를
+// 고정하면 대기 풀이 줄어드는 속도가 안 바뀌어서, 사용자가 상한을 올린 의도를
+// 배신한다.
+export function newItemsForLimit(total: number): number {
+  return Math.max(1, Math.round((total * NEW_QUEUE_LIMIT) / DUE_QUEUE_LIMIT));
+}
+
 // 향후 며칠치를 미리 보여줄지("오늘 / 내일 / 수 / 목 ...").
 export const DUE_FORECAST_DAYS = 7;
 

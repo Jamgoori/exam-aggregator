@@ -16,7 +16,13 @@ import {
   getDueReviewSummary,
   getSessionSchedule,
 } from "@/lib/review-queue";
-import { setSubjectPaused } from "@/lib/review-preferences";
+import {
+  setSubjectPaused,
+  setDailyLimit,
+  spreadOverdueBacklog,
+  type SetDailyLimitResult,
+  type SpreadBacklogResult,
+} from "@/lib/review-preferences";
 import { isPremium } from "@/lib/membership";
 import type { SessionSchedule, ReviewPickStrategy } from "@gongmoa/core";
 
@@ -264,6 +270,29 @@ export async function toggleReviewSubjectPaused(input: {
   }
 
   return setSubjectPaused(supabase, user.id, subjectId, input.paused === true);
+}
+
+// 하루 문항 수 변경(유료 전용). 값 검증은 setDailyLimit이 한다.
+export async function setReviewDailyLimit(input: {
+  limit: number;
+}): Promise<SetDailyLimitResult> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) {
+    return { error: "복습은 멤버십 기능이에요." };
+  }
+  return setDailyLimit(supabase, user.id, Number(input?.limit));
+}
+
+// "밀린 복습 정리하기"(유료 전용). 연체된 문항의 srs_due_at 을 며칠에 걸쳐 다시
+// 뿌리는 쓰기라, 화면에서 버튼을 숨기는 것과 별개로 여기서도 막는다.
+export async function spreadReviewBacklog(): Promise<SpreadBacklogResult> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) {
+    return { error: "복습은 멤버십 기능이에요." };
+  }
+  return spreadOverdueBacklog(supabase, user.id);
 }
 
 // 홈 복습 유도 모달이 마운트된 뒤 부르는 조회. 홈 서버 렌더에 복습 요약을 끼워

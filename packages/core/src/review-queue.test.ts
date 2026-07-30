@@ -4,6 +4,8 @@ import {
   buildDueQueue,
   countBySubject,
   forecastDueByDay,
+  newItemsForLimit,
+  normalizeDailyLimit,
   DUE_QUEUE_LIMIT,
   NEW_QUEUE_LIMIT,
   type DueCandidate,
@@ -268,6 +270,35 @@ test("같은 입력이면 같은 큐가 나온다(배너 숫자 = 세션 문항)
   );
 
   assert.deepEqual(buildDueQueue(due, pending, NOW), buildDueQueue(due, pending, NOW));
+});
+
+test("하루 문항 수: 목록 밖 값은 기본값으로 떨어진다", () => {
+  // DB 값을 그대로 믿으면 "하루 1문항"이나 0으로 스케줄이 사실상 정지한다.
+  assert.equal(normalizeDailyLimit(40), 40);
+  assert.equal(normalizeDailyLimit(null), DUE_QUEUE_LIMIT);
+  assert.equal(normalizeDailyLimit(undefined), DUE_QUEUE_LIMIT);
+  assert.equal(normalizeDailyLimit(0), DUE_QUEUE_LIMIT);
+  assert.equal(normalizeDailyLimit(-5), DUE_QUEUE_LIMIT);
+  assert.equal(normalizeDailyLimit(1000), DUE_QUEUE_LIMIT);
+});
+
+test("신규 몫은 하루 총량에 비례한다", () => {
+  assert.equal(newItemsForLimit(DUE_QUEUE_LIMIT), NEW_QUEUE_LIMIT);
+  assert.equal(newItemsForLimit(40), 20);
+  assert.equal(newItemsForLimit(10), 5);
+  // 총량을 줄여도 신규가 0이 되면 대기 풀이 영영 안 줄어든다.
+  assert.ok(newItemsForLimit(1) >= 1);
+});
+
+test("상한을 올리면 신규도 그만큼 더 들어온다", () => {
+  const pending = Array.from({ length: 80 }, (_, i) =>
+    pend({ paperId: "new", questionNumber: i + 1 }),
+  );
+  const queue = buildDueQueue([], pending, NOW, {
+    total: 40,
+    newItems: newItemsForLimit(40),
+  });
+  assert.equal(queue.length, 20);
 });
 
 test("7일 표: 연체분은 오늘 칸으로 접고, 0인 날도 빠지지 않는다", () => {

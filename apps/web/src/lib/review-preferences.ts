@@ -1,7 +1,11 @@
 import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { spreadResumeDueDates } from "@gongmoa/core";
+import {
+  normalizeDailyLimit,
+  spreadResumeDueDates,
+  DAILY_LIMIT_OPTIONS,
+} from "@gongmoa/core";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -14,16 +18,57 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 const BATCH_SIZE = 1000;
 const UPSERT_CHUNK = 500;
 
+export type ReviewPrefs = {
+  pausedSubjectIds: Set<string>;
+  // 하루에 낼 문항 수. 목록 밖 값은 기본값으로 정규화된다.
+  dailyLimit: number;
+};
+
+// 큐 편성이 매번 부르는 조회라 한 번에 다 읽는다(설정 두 개를 따로 읽으면 페이지당
+// 왕복이 하나 더 는다).
+export async function getReviewPrefs(
+  supabase: Supabase,
+  userId: string,
+): Promise<ReviewPrefs> {
+  const { data } = await supabase
+    .from("review_preferences")
+    .select("paused_subject_ids, daily_limit")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return {
+    pausedSubjectIds: new Set(
+      ((data?.paused_subject_ids ?? []) as string[]).filter(Boolean),
+    ),
+    dailyLimit: normalizeDailyLimit(data?.daily_limit as number | null | undefined),
+  };
+}
+
 export async function getPausedSubjectIds(
   supabase: Supabase,
   userId: string,
 ): Promise<Set<string>> {
-  const { data } = await supabase
-    .from("review_preferences")
-    .select("paused_subject_ids")
-    .eq("user_id", userId)
-    .maybeSingle();
-  return new Set(((data?.paused_subject_ids ?? []) as string[]).filter(Boolean));
+  return (await getReviewPrefs(supabase, userId)).pausedSubjectIds;
+}
+
+export type SetDailyLimitResult = { error?: string; dailyLimit?: number };
+
+// 하루 문항 수 저장. 목록 밖 값은 거절한다 — 클라이언트가 보내는 값이라 그대로
+// 저장하면 "하루 1문항"이나 음수로 복습을 정지시킬 수 있다.
+export async function setDailyLimit(
+  supabase: Supabase,
+  userId: string,
+  limit: number,
+  now: Date = new Date(),
+): Promise<SetDailyLimitResult> {
+  if (!(DAILY_LIMIT_OPTIONS as readonly number[]).includes(limit)) {
+    return { error: "고를 수 없는 값이에요." };
+  }
+  const { error } = await supabase.from("review_preferences").upsert(
+    { user_id: userId, daily_limit: limit, updated_at: now.toISOString() },
+    { onConflict: "user_id" },
+  );
+  if (error) return { error: "하루 문항 수를 저장하지 못했어요." };
+  return { dailyLimit: limit };
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -159,6 +204,61 @@ async function respreadResumedSubject(
       .from("user_question_status")
       .upsert(part, { onConflict: "user_id,paper_id,question_number" });
   }
+}
+
+export type SpreadBacklogResult = { error?: string; spreadCount?: number };
+
+// "밀린 복습 정리하기" — 연체된 문항 전체를 오늘부터 며칠에 걸쳐 다시 뿌린다.
+//
+// 과목 재개 시 재예약(respreadResumedSubject)과 같은 규칙을 과목 구분 없이 돌리는
+// 것이다. 필요한 이유도 같다: 연체가 수백 개면 예보 오늘 칸이 "412"로 굳고, 매일
+// 20개를 풀어도 숫자가 안 줄어드는 것처럼 보여 사용자가 손을 놓는다. 문항이
+// 사라지는 게 아니라 날짜만 흩어진다는 걸 화면에서도 그렇게 말해야 한다.
+//
+// 하루 몫은 상한의 절반으로 잡는다 — 밀린 것만으로 큐를 가득 채우면 신규 몫이 0이
+// 돼서 대기 풀이 영영 안 줄어든다.
+export async function spreadOverdueBacklog(
+  supabase: Supabase,
+  userId: string,
+  now: Date = new Date(),
+): Promise<SpreadBacklogResult> {
+  const nowIso = now.toISOString();
+  const { dailyLimit } = await getReviewPrefs(supabase, userId);
+
+  type Row = Record<string, unknown> & { srs_due_at: string };
+  const rows: Row[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from("user_question_status")
+      .select("*")
+      .eq("user_id", userId)
+      .not("srs_due_at", "is", null)
+      .lte("srs_due_at", nowIso)
+      .order("srs_due_at", { ascending: true })
+      .range(from, from + BATCH_SIZE - 1);
+    if (error) return { error: "밀린 복습을 정리하지 못했어요." };
+    if (!data || data.length === 0) break;
+    rows.push(...(data as Row[]));
+    if (data.length < BATCH_SIZE) break;
+    from += BATCH_SIZE;
+  }
+  if (rows.length === 0) return { spreadCount: 0 };
+
+  // 오래 연체된 것부터 앞날에 배치한다(위 order 유지).
+  const dueDates = spreadResumeDueDates(rows.length, now, {
+    perDay: Math.max(1, Math.floor(dailyLimit / 2)),
+  });
+
+  const admin = createAdminClient();
+  const updated = rows.map((r, i) => ({ ...r, srs_due_at: dueDates[i].toISOString() }));
+  for (const part of chunk(updated, UPSERT_CHUNK)) {
+    const { error } = await admin
+      .from("user_question_status")
+      .upsert(part, { onConflict: "user_id,paper_id,question_number" });
+    if (error) return { error: "밀린 복습을 정리하지 못했어요." };
+  }
+  return { spreadCount: rows.length };
 }
 
 export type SetPausedResult = { error?: string; pausedSubjectIds?: string[] };

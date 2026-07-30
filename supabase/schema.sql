@@ -1284,6 +1284,12 @@ create table if not exists review_preferences (
   updated_at timestamptz not null default now()
 );
 
+-- 하루에 낼 복습 문항 수. 고를 수 있는 값은 DAILY_LIMIT_OPTIONS(10/20/40/60)로
+-- 제한한다 — 임의의 수를 허용하면 "하루 1문항" 같은 설정으로 스케줄이 사실상
+-- 정지한다(유입이 처리를 영구히 앞선다). 검증은 서버 쪽 setDailyLimit이 한다.
+-- 신규 몫은 이 값에 비례한다(20 → 10, 40 → 20).
+alter table review_preferences add column if not exists daily_limit int not null default 20;
+
 alter table review_preferences enable row level security;
 
 -- 이 테이블은 표시 설정만 담는다(어떤 과목을 큐에서 빼둘지). 정답·채점·멤버십과

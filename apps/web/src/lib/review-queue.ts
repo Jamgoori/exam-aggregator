@@ -6,9 +6,8 @@ import {
   countBySubject,
   forecastDueByDay,
   srsDayIndex,
+  newItemsForLimit,
   DUE_FORECAST_DAYS,
-  DUE_QUEUE_LIMIT,
-  NEW_QUEUE_LIMIT,
   type DueCandidate,
   type DueForecastDay,
   type PendingCandidate,
@@ -17,7 +16,7 @@ import {
 } from "@gongmoa/core";
 import { representativePaperIds } from "@/lib/dedup-papers";
 import { fetchQuestionMedia, fetchWrongNoteMarks } from "@/lib/wrong-notes";
-import { getPausedSubjectIds } from "@/lib/review-preferences";
+import { getReviewPrefs } from "@/lib/review-preferences";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -92,9 +91,12 @@ export async function collectDueCandidates(
   pendingTotal: number;
   subjectNames: Map<string, string>;
   pausedSubjectIds: Set<string>;
+  // 사용자가 고른 하루 문항 수. 큐 편성과 요약이 같은 값을 써야 하므로 여기서 함께
+  // 실어 보낸다(따로 읽으면 왕복이 늘고, 그 사이 값이 바뀌면 숫자가 어긋난다).
+  dailyLimit: number;
 }> {
   const windowEnd = forecastWindowEnd(now);
-  const paused = await getPausedSubjectIds(supabase, userId);
+  const { pausedSubjectIds: paused, dailyLimit } = await getReviewPrefs(supabase, userId);
 
   const empty = {
     candidates: [] as DueCandidate[],
@@ -102,6 +104,7 @@ export async function collectDueCandidates(
     pendingSources: new Map<string, string[]>(),
     subjectNames: new Map<string, string>(),
     pausedSubjectIds: paused,
+    dailyLimit,
   };
 
   const statusRows: StatusRow[] = [];
@@ -296,6 +299,7 @@ export async function collectDueCandidates(
     pendingTotal,
     subjectNames,
     pausedSubjectIds: paused,
+    dailyLimit,
   };
 }
 
@@ -309,6 +313,11 @@ export type DueReviewSummary = {
   // 아직 SRS에 안 태운 오답 총계. 승격되지 않은 나머지가 사라진 게 아니라 오답노트에
   // 있다는 걸 알려주는 값 — 이게 없으면 1회독 중인 사용자는 오답이 증발했다고 읽는다.
   pendingTotal: number;
+  // 지금 due가 지난 문항 전체(상한 적용 전). "밀린 복습 정리하기"를 언제 권할지
+  // 판단하는 값이다.
+  overdueTotal: number;
+  // 사용자가 고른 하루 문항 수.
+  dailyLimit: number;
   subjects: { subjectId: string | null; name: string; count: number }[];
   forecast: DueForecastDay[];
   // 오늘 큐가 비었을 때 다음 복습이 며칠 뒤인지(없으면 null). 0인 날을 그냥 비워두면
@@ -322,14 +331,11 @@ export async function getDueReviewSummary(
   userId: string,
   now: Date = new Date(),
 ): Promise<DueReviewSummary> {
-  const { candidates, pending, pendingTotal, subjectNames } = await collectDueCandidates(
-    supabase,
-    userId,
-    now,
-  );
+  const { candidates, pending, pendingTotal, subjectNames, dailyLimit } =
+    await collectDueCandidates(supabase, userId, now);
   const queue = buildDueQueue(candidates, pending, now, {
-    total: DUE_QUEUE_LIMIT,
-    newItems: NEW_QUEUE_LIMIT,
+    total: dailyLimit,
+    newItems: newItemsForLimit(dailyLimit),
   });
 
   const nowIso = now.toISOString();
@@ -346,6 +352,8 @@ export async function getDueReviewSummary(
     newCount,
     // 오늘 태울 몫은 이미 큐에 들어왔으니 대기 중 숫자에서 뺀다.
     pendingTotal: Math.max(0, pendingTotal - newCount),
+    overdueTotal: dueTotal,
+    dailyLimit,
     subjects: countBySubject(queue, (id) => (id ? (subjectNames.get(id) ?? null) : null)),
     forecast,
     nextDueOffset: queue.length === 0 ? (nextDue?.offset ?? null) : null,
@@ -473,14 +481,14 @@ export async function collectDueQueueItems(
   userId: string,
   now: Date = new Date(),
 ): Promise<{ paperId: string; questionNumber: number }[]> {
-  const { candidates, pending, pendingSources } = await collectDueCandidates(
+  const { candidates, pending, pendingSources, dailyLimit } = await collectDueCandidates(
     supabase,
     userId,
     now,
   );
   const queue = buildDueQueue(candidates, pending, now, {
-    total: DUE_QUEUE_LIMIT,
-    newItems: NEW_QUEUE_LIMIT,
+    total: dailyLimit,
+    newItems: newItemsForLimit(dailyLimit),
   });
 
   try {

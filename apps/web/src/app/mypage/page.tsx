@@ -24,7 +24,7 @@ import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { getDueReviewSummary } from "@/lib/review-queue";
 import { getReviewSubjectOptions } from "@/lib/review-preferences";
-import { isPremiumMembership, trialDaysLeft } from "@gongmoa/core";
+import { isPremiumMembership, trialDaysLeft, DUE_QUEUE_LIMIT } from "@gongmoa/core";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@gongmoa/core";
 import { computeStreakDays, streakTier } from "@/lib/streak";
@@ -212,6 +212,8 @@ export default async function MyPage({
     deferredCount: dueSummary?.deferredCount ?? 0,
     newCount: dueSummary?.newCount ?? 0,
     pendingTotal: dueSummary?.pendingTotal ?? 0,
+    overdueTotal: dueSummary?.overdueTotal ?? 0,
+    dailyLimit: dueSummary?.dailyLimit ?? DUE_QUEUE_LIMIT,
     subjects: dueSummary?.subjects.map((s) => ({ name: s.name, count: s.count })) ?? [],
     forecast: dueSummary?.forecast ?? [],
     nextDueOffset: dueSummary?.nextDueOffset ?? null,

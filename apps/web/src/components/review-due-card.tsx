@@ -5,9 +5,15 @@ import { useRouter } from "next/navigation";
 import { CalendarCheck, Lock, Settings, X } from "lucide-react";
 import {
   createDueReviewSession,
+  setReviewDailyLimit,
+  spreadReviewBacklog,
   toggleReviewSubjectPaused,
 } from "@/app/mypage/wrong-notes/actions";
-import type { DueForecastDay } from "@gongmoa/core";
+import { DAILY_LIMIT_OPTIONS, type DueForecastDay } from "@gongmoa/core";
+
+// 밀린 문항이 이만큼 넘으면 "정리하기"를 권한다. 하루 상한의 몇 배쯤 되면 매일
+// 풀어도 숫자가 안 줄어드는 것처럼 보여 손을 놓게 된다.
+const BACKLOG_NUDGE_MIN = 100;
 
 // 오답노트 탭의 "오늘의 복습" 카드(멤버십 전용). 홈에는 두지 않는다 — 홈은 매번
 // 보는 자리라, 잠긴 카드가 거기 있으면 결제 안 한 사용자가 오답노트 자체를 피하게
@@ -32,6 +38,9 @@ export type ReviewDueCardProps = {
   // 아직 순서를 기다리는 오답 수. 승격되지 않은 오답이 사라진 게 아니라는 걸
   // 말해주지 않으면, 1회독 중인 사용자는 오답이 증발했다고 읽는다.
   pendingTotal: number;
+  // 지금 due가 지난 문항 전체. 이게 크면 "밀린 복습 정리하기"를 권한다.
+  overdueTotal: number;
+  dailyLimit: number;
   subjects: { name: string; count: number }[];
   forecast: DueForecastDay[];
   nextDueOffset: number | null;
@@ -50,6 +59,8 @@ export function ReviewDueCard({
   deferredCount,
   newCount,
   pendingTotal,
+  overdueTotal,
+  dailyLimit,
   subjects,
   forecast,
   nextDueOffset,
@@ -141,12 +152,12 @@ export function ReviewDueCard({
               {pending ? "여는 중..." : "복습 시작"}
             </button>
           )}
-          {subjectChoices.length > 0 && (
+          {(subjectChoices.length > 0 || todayCount > 0) && (
             <button
               type="button"
               onClick={() => setSettingsOpen(true)}
-              aria-label="과목 설정"
-              title="과목 설정"
+              aria-label="복습 설정"
+              title="복습 설정"
               className="flex h-9 w-9 items-center justify-center rounded-lg text-blue-700/70 transition-colors hover:bg-blue-100 hover:text-blue-800 dark:text-blue-300/60 dark:hover:bg-blue-900/40 dark:hover:text-blue-200"
             >
               <Settings size={17} />
@@ -164,9 +175,11 @@ export function ReviewDueCard({
       )}
 
       {settingsOpen && (
-        <SubjectSettingsModal
+        <ReviewSettingsModal
           choices={choices}
           onChange={setChoices}
+          dailyLimit={dailyLimit}
+          overdueTotal={overdueTotal}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -231,26 +244,34 @@ function LockedCard() {
   );
 }
 
-// 과목 설정 모달. 복습에 넣을 과목을 행 단위로 켜고 끈다.
+// 복습 설정 모달. 하루 문항 수 → 밀린 복습 정리 → 과목 켜고 끄기 순으로 담는다.
 //
 // 카드 안 접힌 칩이 아니라 모달인 이유: 과목이 열 개 가까이 되면 칩이 카드를 밀어내
 // 매일 보는 "오늘 복습" 숫자가 접힌다. 설정은 가끔 여는 것이고, 그 순간에는 화면을
 // 다 써도 된다.
 //
-// 저장은 "끈 과목"으로 한다(review_preferences.paused_subject_ids). 켠 과목 목록으로
-// 저장하면 나중에 새로 공부를 시작한 과목이 조용히 빠진 채로 남는다.
-function SubjectSettingsModal({
+// 과목은 "끈 과목"으로 저장한다(review_preferences.paused_subject_ids). 켠 과목
+// 목록으로 저장하면 나중에 새로 공부를 시작한 과목이 조용히 빠진 채로 남는다.
+function ReviewSettingsModal({
   choices,
   onChange,
+  dailyLimit,
+  overdueTotal,
   onClose,
 }: {
   choices: ReviewSubjectChoice[];
   onChange: (next: ReviewSubjectChoice[]) => void;
+  dailyLimit: number;
+  overdueTotal: number;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [limit, setLimit] = useState(dailyLimit);
+  const [limitBusy, setLimitBusy] = useState(false);
+  const [spreadDone, setSpreadDone] = useState<number | null>(null);
+  const [spreadBusy, setSpreadBusy] = useState(false);
   const [, start] = useTransition();
 
   // 열려 있는 동안 뒤 화면이 스크롤되지 않게 하고, Esc로 닫는다.
@@ -268,6 +289,40 @@ function SubjectSettingsModal({
   }, [onClose]);
 
   const onCount = choices.filter((c) => !c.paused).length;
+
+  function changeLimit(next: number) {
+    if (limitBusy || next === limit) return;
+    setError(null);
+    setLimitBusy(true);
+    const previous = limit;
+    setLimit(next);
+    start(async () => {
+      const res = await setReviewDailyLimit({ limit: next });
+      setLimitBusy(false);
+      if (res.error) {
+        setError(res.error);
+        setLimit(previous);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  function spreadBacklog() {
+    if (spreadBusy) return;
+    setError(null);
+    setSpreadBusy(true);
+    start(async () => {
+      const res = await spreadReviewBacklog();
+      setSpreadBusy(false);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setSpreadDone(res.spreadCount ?? 0);
+      router.refresh();
+    });
+  }
 
   function toggle(target: ReviewSubjectChoice) {
     if (busyId) return;
@@ -319,9 +374,9 @@ function SubjectSettingsModal({
 
         <div className="flex items-start gap-3 px-5 pt-4 pb-3">
           <div className="min-w-0 flex-1">
-            <h3 className="text-base font-bold">과목 설정</h3>
+            <h3 className="text-base font-bold">복습 설정</h3>
             <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-              복습에 넣을 과목을 골라요 · {onCount}/{choices.length} 켜짐
+              하루 {limit}문항 · 과목 {onCount}/{choices.length} 켜짐
             </p>
           </div>
           <button
@@ -335,6 +390,71 @@ function SubjectSettingsModal({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-1">
+          <div className="px-3 pb-3">
+            <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              하루에 풀 문항 수
+            </p>
+            <div className="mt-2 flex gap-1.5">
+              {DAILY_LIMIT_OPTIONS.map((n) => {
+                const on = n === limit;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => changeLimit(n)}
+                    disabled={limitBusy}
+                    aria-pressed={on}
+                    className={`flex-1 rounded-lg py-2 text-sm font-bold tabular-nums transition-colors disabled:opacity-60 ${
+                      on
+                        ? "bg-blue-600 text-white"
+                        : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+              밀린 복습을 먼저 채우고, 남는 자리에 처음 보는 오답을 하루{" "}
+              {Math.max(1, Math.round(limit / 2))}문항까지 새로 넣어요.
+            </p>
+          </div>
+
+          {/* 연체가 크게 쌓였을 때만 보인다. 평소에 있으면 "정리해야 하나" 하는
+              불안만 준다. */}
+          {overdueTotal >= BACKLOG_NUDGE_MIN && (
+            <div className="mx-3 mb-3 rounded-xl bg-amber-50 px-3 py-2.5 dark:bg-amber-950/30">
+              <p className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+                밀린 복습 {overdueTotal}문항
+              </p>
+              {spreadDone == null ? (
+                <>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-amber-800/80 dark:text-amber-200/70">
+                    앞으로 며칠에 걸쳐 나눠서 다시 예약해요. 문항이 사라지지는 않아요.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={spreadBacklog}
+                    disabled={spreadBusy}
+                    className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
+                  >
+                    {spreadBusy ? "정리하는 중..." : "밀린 복습 정리하기"}
+                  </button>
+                </>
+              ) : (
+                <p className="mt-0.5 text-[11px] leading-relaxed text-amber-800/80 dark:text-amber-200/70">
+                  {spreadDone}문항을 며칠에 나눠 다시 예약했어요.
+                </p>
+              )}
+            </div>
+          )}
+
+          {choices.length > 0 && (
+            <p className="px-3 pb-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              복습에 넣을 과목
+            </p>
+          )}
           <div className="flex flex-col">
             {choices.map((c) => {
               const on = !c.paused;
