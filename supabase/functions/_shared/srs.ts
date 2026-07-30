@@ -24,6 +24,7 @@ export const SRS_EASE_BONUS = 0.1;
 export const SRS_MAX_INTERVAL_DAYS = 180;
 export const SRS_FIRST_INTERVAL_DAYS = 1;
 export const SRS_SECOND_INTERVAL_DAYS = 3;
+export const SRS_RELEARN_DELAY_HOURS = 3;
 
 // 하루 경계는 KST 04:00 (자정으로 하면 새벽에 푼 사람의 "내일"이 두 시간 뒤가 된다).
 const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -56,6 +57,16 @@ export function isSameSrsDay(a: Date, b: Date): boolean {
   return srsDayIndex(a) === srsDayIndex(b);
 }
 
+// 재확인(그날 안에 다시 만나기) 예약 시각. 하루 단위로 접지 않는 유일한 자리.
+export function srsRelearnDueAt(now: Date): Date {
+  return new Date(now.getTime() + SRS_RELEARN_DELAY_HOURS * 60 * 60 * 1000);
+}
+
+// 찍어서 맞힌 문항 — 점수·극복 판정은 그대로 두고 스케줄만 붙잡는다.
+export function srsGuessed(prev: SrsState, now: Date): SrsResult {
+  return { state: prev, dueAt: srsRelearnDueAt(now) };
+}
+
 // lastGradedAt 을 주면 "하루 1회만 반영" 규칙이 걸린다(같은 날 다시 맞혀도 간격을
 // 벌리지 않음). 틀린 것은 언제나 반영. 근거는 core 쪽 주석 참고.
 export function nextSrs(
@@ -64,8 +75,9 @@ export function nextSrs(
   now: Date,
   lastGradedAt?: Date | null,
 ): SrsResult {
+  // reps 0(재확인 중)은 붙잡지 않는다 — 그날 안에 다시 만나는 장치가 죽는다.
   if (
-    isCorrect && lastGradedAt && prev.intervalDays >= 1 &&
+    isCorrect && lastGradedAt && prev.reps >= 1 && prev.intervalDays >= 1 &&
     isSameSrsDay(lastGradedAt, now)
   ) {
     return { state: prev, dueAt: srsDueAt(lastGradedAt, prev.intervalDays) };
@@ -80,7 +92,8 @@ export function nextSrs(
         reps: 0,
         lapses: first ? 0 : prev.lapses + 1,
       },
-      dueAt: srsDueAt(now, SRS_FIRST_INTERVAL_DAYS),
+      // 내일이 아니라 몇 시간 뒤(재확인 단계).
+      dueAt: srsRelearnDueAt(now),
     };
   }
 

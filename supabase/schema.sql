@@ -720,6 +720,12 @@ create table if not exists review_session_items (
 create index if not exists review_session_items_session_idx
   on review_session_items(session_id, position);
 
+-- 맞혔지만 사용자가 "찍었어요"로 표시한 문항. 점수·극복 판정은 그대로 두고 복습
+-- 스케줄만 붙잡는다(4지선다는 모르고도 25%가 맞는데, 그걸 유지력으로 인정하면
+-- 모르는 문항이 "아는 문제"로 분류돼 큐에서 빠져나간다). 채점 후 결과 화면에서만
+-- 눌리며, 쓰기는 서버 액션이 service_role로 한다(이 테이블은 RLS 정책 0개).
+alter table review_session_items add column if not exists guessed boolean not null default false;
+
 alter table review_session_items enable row level security;
 -- 클라이언트 직접 접근 없음: 서버 액션에서 service_role로만.
 

@@ -4,6 +4,7 @@ import {
   nextSrs,
   srsDayIndex,
   srsDueAt,
+  srsGuessed,
   srsStateFromRow,
   SRS_INITIAL,
   SRS_MAX_EASE,
@@ -20,14 +21,52 @@ function kst(iso: string): Date {
   return new Date(`${iso}+09:00`);
 }
 
-test("첫 오답: 1일 뒤로 예약, ease·lapses는 건드리지 않는다", () => {
+test("첫 오답: 그날 안에 재확인, ease·lapses는 건드리지 않는다", () => {
   const { state, dueAt } = nextSrs(SRS_INITIAL, false, kst("2026-03-02T14:00:00"));
   assert.equal(state.intervalDays, 1);
   assert.equal(state.reps, 0);
   // 처음 틀린 건 "복습하다 무너진 것"이 아니므로 페널티 없음.
   assert.equal(state.ease, SRS_INITIAL.ease);
   assert.equal(state.lapses, 0);
-  assert.equal(dueAt.toISOString(), kst("2026-03-03T04:00:00").toISOString());
+  // 내일이 아니라 몇 시간 뒤 — 망각이 가장 빠른 구간을 놓치지 않으려는 것.
+  assert.equal(dueAt.toISOString(), kst("2026-03-02T17:00:00").toISOString());
+});
+
+test("재확인을 통과하면 같은 날이라도 1일 → 3일로 출발한다", () => {
+  // 여기가 막히면 "그날 안에 다시 만나기"가 통째로 죽는다. reps 0(재확인 중)은
+  // 하루 1회 규칙에서 빼는 이유가 이것이다.
+  const lapsed = nextSrs(SRS_INITIAL, false, kst("2026-03-02T14:00:00"));
+  assert.equal(lapsed.state.reps, 0);
+
+  const recheck = nextSrs(
+    lapsed.state,
+    true,
+    kst("2026-03-02T18:00:00"),
+    kst("2026-03-02T14:00:00"),
+  );
+  assert.equal(recheck.state.reps, 1);
+  assert.equal(recheck.state.intervalDays, 1);
+  assert.equal(recheck.dueAt.toISOString(), kst("2026-03-03T04:00:00").toISOString());
+
+  // 재확인을 통과한 뒤에는 다시 하루 1회 규칙이 걸린다(연타로 간격 불리기 방지).
+  const again = nextSrs(
+    recheck.state,
+    true,
+    kst("2026-03-02T21:00:00"),
+    kst("2026-03-02T18:00:00"),
+  );
+  assert.deepEqual(again.state, recheck.state);
+});
+
+test("찍었어요: 점수는 그대로 두고 스케줄만 붙잡는다", () => {
+  // 4지선다는 모르고도 25%가 맞는다. 그걸 유지력으로 인정하면 모르는 문항이
+  // "아는 문제"로 분류돼 큐에서 빠져나간다.
+  const state: SrsState = { intervalDays: 3, ease: 2.5, reps: 2, lapses: 1 };
+  const { state: next, dueAt } = srsGuessed(state, kst("2026-03-02T14:00:00"));
+
+  // ease를 깎거나 lapses를 올리지는 않는다 — 틀린 게 아니라 "인정 안 함"이다.
+  assert.deepEqual(next, state);
+  assert.equal(dueAt.toISOString(), kst("2026-03-02T17:00:00").toISOString());
 });
 
 test("맞히면 1일 → 3일 → 직전 간격 × ease 로 벌어진다", () => {
@@ -58,7 +97,8 @@ test("2주 체험 안에 4회차까지 돈다", () => {
   let state = SRS_INITIAL;
   let due = nextSrs(state, false, day0);
   state = due.state;
-  assert.equal(dayOf(due.dueAt), 1);
+  // 첫 오답은 그날 안에 재확인부터 한다(내일이 아니라 몇 시간 뒤).
+  assert.equal(dayOf(due.dueAt), 0);
 
   // 예약된 날마다 정오에 풀었다고 보고 굴린다.
   const solveAt = (at: Date) => new Date(at.getTime() + 8 * 60 * 60 * 1000);
@@ -69,7 +109,9 @@ test("2주 체험 안에 4회차까지 돈다", () => {
     schedule.push(dayOf(due.dueAt));
   }
 
-  assert.deepEqual(schedule, [2, 5, 13]);
+  // 재확인 → 1일 → 3일 → ×ease. 재확인 단계가 붙으면서 예전(2,5,13)보다 오히려
+  // 앞당겨졌다 — 체험 안에 회차를 더 보여준다.
+  assert.deepEqual(schedule, [1, 4, 12]);
   assert.ok(schedule[schedule.length - 1] <= 14, "마지막 회차가 체험 기간 안에 들어와야 한다");
 });
 

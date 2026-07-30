@@ -10,7 +10,12 @@ import {
 import { representativePaperIds } from "@/lib/dedup-papers";
 import { recordQuestionResults } from "@/lib/question-status";
 import { sanitizeSelectedChoice } from "@/lib/cbt-attempt";
-import { pickReviewCandidates, type ReviewPickStrategy } from "@gongmoa/core";
+import {
+  pickReviewCandidates,
+  srsGuessed,
+  srsStateFromRow,
+  type ReviewPickStrategy,
+} from "@gongmoa/core";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -33,6 +38,8 @@ export type ReviewItemView = {
   paperId: string | null;
   paperTitle: string | null;
   questionNumber: number | null;
+  // 맞혔지만 "찍었어요"로 표시한 문항. 채점 후에만 의미가 있다.
+  guessed: boolean;
 };
 
 export type ReviewSessionView = {
@@ -52,6 +59,7 @@ type ItemRow = {
   position: number;
   selected_choice: number | null;
   is_correct: boolean | null;
+  guessed?: boolean | null;
 };
 
 function shuffle<T>(arr: T[]): T[] {
@@ -414,6 +422,65 @@ export async function createDueReviewSessionForUser(
   });
 }
 
+// "찍었어요" — 맞힌 문항의 스케줄만 되돌린다(점수·극복 판정은 그대로).
+//
+// 채점 중이 아니라 결과 화면에서 누른다. 풀이 중에 체크박스를 두면 매 문항 판단이
+// 하나 늘어 시험처럼 푸는 흐름이 끊기는데, 결과 화면에서는 "정답 · 다음 8일 뒤"를
+// 보고 나서 "그건 찍은 건데" 하고 되돌리는 게 자연스럽다.
+//
+// 그래서 이미 반영된 스케줄을 사후에 고치는 쓰기가 된다. 여러 번 눌러도 결과가 같다
+// (상태는 그대로 두고 due만 몇 시간 뒤로 다시 잡는다).
+export async function markReviewItemGuessed(
+  supabase: Supabase,
+  userId: string,
+  sessionId: string,
+  position: number,
+  now: Date = new Date(),
+): Promise<{ error?: string }> {
+  const admin = createAdminClient();
+
+  const { data: session } = await admin
+    .from("review_sessions")
+    .select("id, user_id, submitted_at")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (!session || session.user_id !== userId) return { error: "세션을 찾을 수 없어요." };
+  // 채점 전에는 정답을 모르므로 "찍었다"를 받을 자리가 없다(정답 유출 방지도 겸한다).
+  if (session.submitted_at == null) return { error: "채점 후에 표시할 수 있어요." };
+
+  const { data: item } = await admin
+    .from("review_session_items")
+    .select("id, paper_id, question_number, is_correct")
+    .eq("session_id", sessionId)
+    .eq("position", position)
+    .maybeSingle();
+  if (!item) return { error: "문항을 찾을 수 없어요." };
+  // 틀린 문항은 이미 재확인으로 잡혀 있다 — 더 당길 것이 없다.
+  if (item.is_correct !== true) return {};
+
+  await admin.from("review_session_items").update({ guessed: true }).eq("id", item.id);
+
+  // 스케줄이 없는(대기 풀) 문항은 건드릴 게 없다. 승격될 때 어차피 처음부터 시작한다.
+  const { data: status } = await admin
+    .from("user_question_status")
+    .select("srs_interval_days, srs_ease, srs_reps, srs_lapses, srs_due_at")
+    .eq("user_id", userId)
+    .eq("paper_id", item.paper_id)
+    .eq("question_number", item.question_number)
+    .maybeSingle();
+  if (!status?.srs_due_at) return {};
+
+  const { dueAt } = srsGuessed(srsStateFromRow(status), now);
+  await admin
+    .from("user_question_status")
+    .update({ srs_due_at: dueAt.toISOString(), updated_at: now.toISOString() })
+    .eq("user_id", userId)
+    .eq("paper_id", item.paper_id)
+    .eq("question_number", item.question_number);
+
+  return {};
+}
+
 // 같은 개념(keyword_title)의 기출 문항을 전체 코퍼스에서 모아 후보로 뽑는다. 진단의
 // "같은개념 기출 5문제 풀기"용 — 유저 오답이 아니라 기출 전체가 소스다. 개념은 과목에
 // 걸쳐 표기가 겹칠 수 있어 subjectSlug로 좁힌다. 이미지 없는(못 푸는)·voided(정답 없음)
@@ -523,7 +590,7 @@ export async function getReviewSessionView(
 
   const { data: itemRows } = await admin
     .from("review_session_items")
-    .select("id, paper_id, question_number, position, selected_choice, is_correct")
+    .select("id, paper_id, question_number, position, selected_choice, is_correct, guessed")
     .eq("session_id", sessionId)
     .order("position", { ascending: true });
   const items = (itemRows ?? []) as ItemRow[];
@@ -588,6 +655,7 @@ export async function getReviewSessionView(
       paperId: submitted ? it.paper_id : null,
       paperTitle: submitted ? (meta?.title ?? null) : null,
       questionNumber: submitted ? it.question_number : null,
+      guessed: submitted ? it.guessed === true : false,
     };
   });
 

@@ -8,6 +8,7 @@ import {
   createAllReviewSessionForUser,
   createDueReviewSessionForUser,
   createPaperReviewSessionForUser,
+  markReviewItemGuessed,
   submitReviewSessionForUser,
   type ReviewSessionView,
 } from "@/lib/review-session";
@@ -250,6 +251,25 @@ export async function createDueReviewSession(): Promise<CreateReviewResult> {
 
   const items = await collectDueQueueItems(supabase, user.id);
   return createDueReviewSessionForUser(supabase, user.id, items);
+}
+
+// "찍었어요"(유료 전용) — 맞힌 문항의 복습 스케줄만 되돌린다. 점수와 극복 판정은
+// 그대로다. 무료 사용자는 스케줄 자체가 없어 할 일이 없다.
+export async function markReviewGuessed(input: {
+  sessionId: string;
+  position: number;
+}): Promise<{ error?: string }> {
+  const sessionId = String(input?.sessionId ?? "");
+  const position = Number(input?.position);
+  if (!sessionId || !Number.isInteger(position) || position < 0) {
+    return { error: "잘못된 접근입니다." };
+  }
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) return {};
+
+  return markReviewItemGuessed(supabase, user.id, sessionId, position);
 }
 
 export type ToggleReviewSubjectResult = { error?: string; pausedSubjectIds?: string[] };

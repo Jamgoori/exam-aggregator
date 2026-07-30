@@ -17,6 +17,7 @@ import {
 import {
   submitReviewSession,
   createReviewFromWrong,
+  markReviewGuessed,
 } from "@/app/mypage/wrong-notes/actions";
 import { CbtDrawingToolbar, PEN_COLORS } from "@/components/cbt-drawing-toolbar";
 import { ReviewScheduleSection } from "@/components/review-schedule-section";
@@ -468,6 +469,51 @@ export function ReviewSolver({
   );
 }
 
+// "찍었어요" 토글. 한 번 누르면 되돌리지 않는다 — 취소까지 두면 정답 화면에서
+// 판단할 거리가 하나 더 늘고, 잘못 눌러도 손해가 "며칠 뒤에 한 번 더 본다"뿐이다.
+//
+// 무료 사용자는 서버가 조용히 무시한다(스케줄 자체가 없다). 버튼을 숨기지 않는 건
+// 여기서 멤버십을 또 조회하면 결과 화면이 그만큼 늦어지기 때문이다.
+function GuessedButton({
+  sessionId,
+  position,
+  initial,
+}: {
+  sessionId: string;
+  position: number;
+  initial: boolean;
+}) {
+  const [marked, setMarked] = useState(initial);
+  const [busy, setBusy] = useState(false);
+
+  if (marked) {
+    return (
+      <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
+        찍은 문제 · 곧 다시 나와요
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={async () => {
+        if (busy) return;
+        setBusy(true);
+        // 실패해도 되돌리지 않는다. 사용자가 할 수 있는 게 없고, 최악이 "간격이
+        // 그대로 유지된다"라 되돌리는 쪽이 더 혼란스럽다.
+        setMarked(true);
+        await markReviewGuessed({ sessionId, position });
+        setBusy(false);
+      }}
+      className="ml-auto rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-500 transition-colors hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-amber-900 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
+    >
+      찍었어요
+    </button>
+  );
+}
+
 // 채점 결과: 점수 + 문항별 정오/정답/출처 공개.
 function ReviewResult({
   view,
@@ -614,6 +660,15 @@ function ReviewResult({
                 <span className="ml-1 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500">
                   풀지 않음
                 </span>
+              )}
+              {/* 맞힌 문항에만. 찍어서 맞은 걸 유지력으로 인정하면 정작 모르는
+                  문항이 "아는 문제"로 분류돼 복습에서 빠져나간다. */}
+              {it.isCorrect && (
+                <GuessedButton
+                  sessionId={view.id}
+                  position={it.position}
+                  initial={it.guessed}
+                />
               )}
             </div>
           </div>

@@ -41,6 +41,11 @@ export const SRS_MAX_INTERVAL_DAYS = 180;
 export const SRS_FIRST_INTERVAL_DAYS = 1;
 export const SRS_SECOND_INTERVAL_DAYS = 3;
 
+// 틀린 문항을 그날 안에 다시 만나기까지의 시간(재확인 단계). 망각 곡선이 가장 급하게
+// 떨어지는 구간이 직후 몇 시간이라, 최소 간격이 "내일"이면 그 구간을 통째로 놓친다.
+// Anki의 relearning step과 같은 자리다.
+export const SRS_RELEARN_DELAY_HOURS = 3;
+
 // 하루의 경계를 KST 04:00으로 잡는다. 자정 기준으로 하면 새벽 2시에 푼 사람의
 // "내일"이 두 시간 뒤가 돼버린다. 공시생은 새벽까지 푸는 경우가 많아 Anki와 같은
 // 방식(새벽 4시 경계)을 쓴다.
@@ -80,6 +85,20 @@ export function isSameSrsDay(a: Date, b: Date): boolean {
   return srsDayIndex(a) === srsDayIndex(b);
 }
 
+// 재확인 예약 시각. 하루 단위로 반올림하지 않는 유일한 자리다 — "몇 시간 뒤"가
+// 핵심이라 srsDayStart로 접으면 의미가 사라진다.
+export function srsRelearnDueAt(now: Date): Date {
+  return new Date(now.getTime() + SRS_RELEARN_DELAY_HOURS * 60 * 60 * 1000);
+}
+
+// 맞히긴 했는데 찍은 문항. 점수·극복 판정은 정답 그대로 두고 스케줄만 붙잡는다.
+// 4지선다는 모르고도 25%가 맞는데, 그걸 유지력으로 인정하면 정작 모르는 문항이
+// "아는 문제"로 분류돼 큐에서 빠져나간다. 틀린 것으로 치지 않는 이유는 ease를 깎고
+// lapses를 올리는 건 과한 처벌이고, 극복 판정까지 뒤집히기 때문이다.
+export function srsGuessed(prev: SrsState, now: Date): SrsResult {
+  return { state: prev, dueAt: srsRelearnDueAt(now) };
+}
+
 // 채점 결과 하나를 스케줄에 반영한다.
 //
 // 틀리면 간격을 1일로 되돌리고 ease를 깎는다(다음부터 더 촘촘히 나옴).
@@ -92,15 +111,23 @@ export function isSameSrsDay(a: Date, b: Date): boolean {
 // 올라가면 1일 → 3일 → 8일이 하루 만에 지나간다. 간격을 두고 만나야 유지력이라고
 // 부를 수 있으므로, 간격 없이 연달아 맞힌 것은 유지력의 증거로 치지 않는다.
 // 틀린 것은 언제나 반영한다 — 방금 맞힌 문항을 곧바로 틀렸다면 그게 진짜 신호다.
+//
+// 단, reps가 0인 문항(= 아직 한 번도 못 맞혔거나 방금 무너져 재확인 중)은 붙잡지
+// 않는다. 그 상태의 같은 날 정답은 "연타로 간격 불리기"가 아니라 재확인 단계를
+// 통과한 것이라, 여기서 막으면 그날 안에 다시 만나는 장치가 통째로 죽는다.
 export function nextSrs(
   prev: SrsState,
   isCorrect: boolean,
   now: Date,
   lastGradedAt?: Date | null,
 ): SrsResult {
-  // intervalDays가 0이면 아직 예약이 없는 상태(마이그레이션 전 행 등)라 되돌릴
-  // 스케줄 자체가 없다 — 그때는 정상 계산으로 보낸다.
-  if (isCorrect && lastGradedAt && prev.intervalDays >= 1 && isSameSrsDay(lastGradedAt, now)) {
+  if (
+    isCorrect &&
+    lastGradedAt &&
+    prev.reps >= 1 &&
+    prev.intervalDays >= 1 &&
+    isSameSrsDay(lastGradedAt, now)
+  ) {
     // 직전 채점이 오늘이므로 srsDueAt(lastGradedAt, ...)은 그때 잡힌 due를 그대로
     // 재현한다(같은 하루 번호 + 같은 간격). 별도로 due를 들고 다닐 필요가 없다.
     return { state: prev, dueAt: srsDueAt(lastGradedAt, prev.intervalDays) };
@@ -115,7 +142,10 @@ export function nextSrs(
         reps: 0,
         lapses: first ? 0 : prev.lapses + 1,
       },
-      dueAt: srsDueAt(now, SRS_FIRST_INTERVAL_DAYS),
+      // 내일이 아니라 몇 시간 뒤. 오늘 안에 한 번 더 만나야 잊히기 전에 붙잡는다.
+      // 간격(intervalDays)은 1일로 두므로, 재확인을 통과하면 거기서부터 1 → 3으로
+      // 정상 출발한다.
+      dueAt: srsRelearnDueAt(now),
     };
   }
 
