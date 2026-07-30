@@ -42,6 +42,8 @@ export type ReviewDueCardProps = {
   pendingTotal: number;
   // 지금 due가 지난 문항 전체. 이게 크면 "밀린 복습 정리하기"를 권한다.
   overdueTotal: number;
+  // 오늘 안에 한 번 더 나올 문항 수(재확인 대기 중).
+  relearnCount: number;
   dailyLimit: number;
   subjects: { name: string; count: number }[];
   forecast: DueForecastDay[];
@@ -62,6 +64,7 @@ export function ReviewDueCard({
   newCount,
   pendingTotal,
   overdueTotal,
+  relearnCount,
   dailyLimit,
   subjects,
   forecast,
@@ -116,11 +119,15 @@ export function ReviewDueCard({
               ? subjects.length > 0
                 ? subjects.map((s) => `${s.name} ${s.count}`).join(" · ")
                 : "복습 예정 문항을 모았어요"
-              : // 0인 날을 그냥 비워두면 기능이 멈춘 걸로 오해한다. 쉬어도 되는
-                // 날이라는 것 자체가 간격 반복의 값어치다.
-                nextDueOffset != null
-                ? `다음 복습은 ${nextDueOffset}일 뒤예요`
-                : "새로 틀린 문제가 생기면 여기에 예약돼요"}
+              : // 방금 틀린 문항은 몇 시간 뒤 재확인으로 돌아온다. 이걸 안 알리면
+                // "없어요"를 보고 닫았다가 세 시간 뒤 숫자가 다시 생긴다.
+                relearnCount > 0
+                ? `방금 틀린 ${relearnCount}문항이 몇 시간 뒤 한 번 더 나와요`
+                : // 0인 날을 그냥 비워두면 기능이 멈춘 걸로 오해한다. 쉬어도 되는
+                  // 날이라는 것 자체가 간격 반복의 값어치다.
+                  nextDueOffset != null
+                  ? `다음 복습은 ${nextDueOffset}일 뒤예요`
+                  : "새로 틀린 문제가 생기면 여기에 예약돼요"}
           </p>
           {newCount > 0 && (
             <p className="text-xs text-blue-700/60 dark:text-blue-300/50">

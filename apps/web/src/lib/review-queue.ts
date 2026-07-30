@@ -316,6 +316,10 @@ export type DueReviewSummary = {
   // 지금 due가 지난 문항 전체(상한 적용 전). "밀린 복습 정리하기"를 언제 권할지
   // 판단하는 값이다.
   overdueTotal: number;
+  // 아직 시각이 안 됐지만 오늘 안에 다시 나올 문항 수(재확인 단계). 이걸 안 세면
+  // 세션을 막 끝낸 사용자에게 "오늘 복습할 문항 없어요"가 뜨고, 세 시간 뒤 숫자가
+  // 다시 생겨서 기능이 제멋대로 구는 것처럼 보인다.
+  relearnCount: number;
   // 사용자가 고른 하루 문항 수.
   dailyLimit: number;
   subjects: { subjectId: string | null; name: string; count: number }[];
@@ -342,6 +346,13 @@ export async function getDueReviewSummary(
   const dueTotal = candidates.filter((c) => c.dueAt <= nowIso).length;
   const newCount = queue.filter((c) => c.isNew).length;
 
+  // 재확인은 "오늘 안, 아직 시각 전"이다. 하루 경계(KST 04:00)를 쓰므로 자정을
+  // 넘겨 예약된 것도 같은 하루로 잡힌다.
+  const today = srsDayIndex(now);
+  const relearnCount = candidates.filter(
+    (c) => c.dueAt > nowIso && srsDayIndex(new Date(c.dueAt)) === today,
+  ).length;
+
   const forecast = forecastDueByDay(candidates, now);
   const nextDue = forecast.find((d) => d.offset > 0 && d.count > 0);
 
@@ -353,6 +364,7 @@ export async function getDueReviewSummary(
     // 오늘 태울 몫은 이미 큐에 들어왔으니 대기 중 숫자에서 뺀다.
     pendingTotal: Math.max(0, pendingTotal - newCount),
     overdueTotal: dueTotal,
+    relearnCount,
     dailyLimit,
     subjects: countBySubject(queue, (id) => (id ? (subjectNames.get(id) ?? null) : null)),
     forecast,
