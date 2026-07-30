@@ -19,6 +19,8 @@ type StatusRow = {
   srs_ease: number | null;
   srs_reps: number | null;
   srs_lapses: number | null;
+  // leech로 접어둔 시각. 채점할 때마다 그대로 다시 써서 값을 잃지 않게 한다.
+  srs_suspended_at: string | null;
 };
 
 // 응시 채점 결과를 문항 단위 통합 상태(user_question_status)에 반영한다. 오답노트
@@ -57,7 +59,7 @@ export async function recordQuestionResults(
   const { data: existing } = await admin
     .from("user_question_status")
     .select(
-      "question_number, wrong_count, last_answered_at, srs_due_at, srs_interval_days, srs_ease, srs_reps, srs_lapses",
+      "question_number, wrong_count, last_answered_at, srs_due_at, srs_interval_days, srs_ease, srs_reps, srs_lapses, srs_suspended_at",
     )
     .eq("user_id", userId)
     .eq("paper_id", paperId);
@@ -91,8 +93,13 @@ export async function recordQuestionResults(
     // 정상 출발하게 하려는 것 — 간격 없이 맞힌 건 유지력이 아니다.
     //
     // leech 판정에 걸리면 접는다(srs_suspended_at). 스케줄은 지우지 않아서 다시
-    // 넣을 때 진도를 잃지 않는다. 접힌 문항이 다시 통과하면(정답) 자동으로 풀지
-    // 않는다 — 사용자가 직접 넣은 것이므로 그 판단을 존중한다.
+    // 넣을 때 진도를 잃지 않는다. 이미 접힌 문항은 그 값을 그대로 유지한다 —
+    // 섞어풀기로 그 문항을 맞혀도 자동으로 풀리면 안 된다(되살리기는 수동).
+    //
+    // 모든 행이 같은 키를 갖게 하는 게 중요하다. PostgREST는 배열 upsert에서 키가
+    // 다른 객체가 섞이면 요청 전체를 거절한다 — 한 문항이 leech에 걸렸다는 이유로
+    // 그 응시의 상태 갱신이 통째로 날아가면 안 된다.
+    const suspendedAt = srs?.leech ? now : (before?.srs_suspended_at ?? null);
     const schedule = srs
       ? {
           srs_interval_days: srs.state.intervalDays,
@@ -100,7 +107,7 @@ export async function recordQuestionResults(
           srs_reps: srs.state.reps,
           srs_lapses: srs.state.lapses,
           srs_due_at: srs.dueAt.toISOString(),
-          ...(srs.leech ? { srs_suspended_at: now } : {}),
+          srs_suspended_at: suspendedAt,
         }
       : {
           srs_interval_days: before?.srs_interval_days ?? SRS_INITIAL.intervalDays,
@@ -108,6 +115,7 @@ export async function recordQuestionResults(
           srs_reps: before?.srs_reps ?? SRS_INITIAL.reps,
           srs_lapses: before?.srs_lapses ?? SRS_INITIAL.lapses,
           srs_due_at: null,
+          srs_suspended_at: suspendedAt,
         };
 
     return {

@@ -692,7 +692,9 @@ create table if not exists review_sessions (
   user_id uuid not null references auth.users(id) on delete cascade,
   -- null이면 전체 과목 범위. 과목이 지워져도 세션 기록은 남기려 set null.
   subject_id uuid references subjects(id) on delete set null,
-  scope text not null default 'subject',      -- 'subject' | 'all'
+  -- 'subject' | 'all' | 'due'(복습=간격 반복 세션). 'due'는 "이어서 풀기"가 섞어풀기
+  -- 세션을 잘못 집어오지 않게 구분하는 용도다.
+  scope text not null default 'subject',
   only_unresolved boolean not null default true,
   total_questions int not null default 0,
   score int,                                   -- 채점 후 채워짐
