@@ -94,6 +94,19 @@ export function ReviewDueCard({
   const [choices, setChoices] = useState<ReviewSubjectChoice[]>(subjectChoices);
   const pausedNames = choices.filter((c) => c.paused).map((c) => c.name);
 
+  // 이 줄은 다목적이다 — 오늘 낼 게 있으면 과목 분포지만, 없으면 "몇 시간 뒤 한 번
+  // 더 나와요" 같은 상태 안내가 온다. 좁은 화면에서 빼는 건 과목 분포일 때뿐이고,
+  // 나머지 분기는 그게 없으면 카드가 왜 비었는지 알 수 없어진다.
+  const isSubjectLine = !resumeSessionId && todayCount > 0 && subjects.length > 0;
+
+  // 보조 문구 세 줄을 좁은 화면에서는 한 줄로 압축한다. 세 개가 동시에 뜨는 날이
+  // 흔한데(신규 승격 + 상한 초과 + 대기 풀), 그러면 카드가 세 줄 길어진다.
+  const compactMeta = [
+    newCount > 0 ? `처음 ${newCount}` : null,
+    deferredCount > 0 ? `내일 ${deferredCount}` : null,
+    pendingTotal > 0 ? `대기 ${pendingTotal}` : null,
+  ].filter(Boolean) as string[];
+
   if (!premium) return <LockedCard />;
 
   function startSession() {
@@ -150,7 +163,11 @@ export function ReviewDueCard({
               멤버십
             </span>
           </p>
-          <p className="text-xs text-blue-700/80 dark:text-blue-300/70">
+          <p
+            className={`text-xs text-blue-700/80 dark:text-blue-300/70 ${
+              isSubjectLine ? "hidden sm:block" : ""
+            }`}
+          >
             {resumeSessionId
               ? "채점 전에 두고 나온 복습이 있어요 · 고른 답은 그대로예요"
               : todayCount > 0
@@ -167,26 +184,36 @@ export function ReviewDueCard({
                   ? `다음 복습은 ${nextDueOffset}일 뒤예요`
                   : "새로 틀린 문제가 생기면 여기에 예약돼요"}
           </p>
-          {newCount > 0 && (
-            <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
-              그중 {newCount}문항은 오늘 처음 복습해요
+          {/* 좁은 화면: 세 줄을 한 줄로. 말이 짧아진 만큼 뜻은 ? 안내가 받아준다. */}
+          {compactMeta.length > 0 && (
+            <p className="text-xs text-blue-700/60 sm:hidden dark:text-blue-300/50">
+              {compactMeta.join(" · ")}
             </p>
           )}
-          {deferredCount > 0 && (
-            <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
-              {deferredCount}문항은 내일 이어서 — 오늘치만 끝내면 돼요
-            </p>
-          )}
-          {/* 승격 안 된 오답은 사라진 게 아니다. 1회독 중이면 이 숫자가 수백까지
-              가는데, 말해주지 않으면 "내 오답 어디 갔냐"가 된다. */}
-          {pendingTotal > 0 && (
-            <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
-              오답 {pendingTotal}문항은 오답노트에서 차례를 기다리는 중이에요
-              {todayCount > 0 && newCount === 0
-                ? " · 오늘은 밀린 복습이 많아 새 문항은 쉬어요"
-                : ""}
-            </p>
-          )}
+
+          {/* 넓은 화면: 문장 그대로. 여기서까지 줄일 이유가 없다. */}
+          <div className="hidden sm:block">
+            {newCount > 0 && (
+              <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
+                그중 {newCount}문항은 오늘 처음 복습해요
+              </p>
+            )}
+            {deferredCount > 0 && (
+              <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
+                {deferredCount}문항은 내일 이어서 — 오늘치만 끝내면 돼요
+              </p>
+            )}
+            {/* 승격 안 된 오답은 사라진 게 아니다. 1회독 중이면 이 숫자가 수백까지
+                가는데, 말해주지 않으면 "내 오답 어디 갔냐"가 된다. */}
+            {pendingTotal > 0 && (
+              <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
+                오답 {pendingTotal}문항은 오답노트에서 차례를 기다리는 중이에요
+                {todayCount > 0 && newCount === 0
+                  ? " · 오늘은 밀린 복습이 많아 새 문항은 쉬어요"
+                  : ""}
+              </p>
+            )}
+          </div>
           {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
         </div>
         {/* 과목 설정은 아이콘 하나로만 둔다 — 매일 누르는 버튼이 아니라서
@@ -242,7 +269,7 @@ export function ReviewDueCard({
         </div>
       </div>
 
-      <ForecastStrip forecast={forecast} />
+      <ForecastBlock forecast={forecast} />
 
       {pausedNames.length > 0 && (
         <p className="text-[11px] text-blue-700/60 dark:text-blue-300/50">
@@ -271,6 +298,53 @@ export function ReviewDueCard({
         </p>
       )}
     </div>
+  );
+}
+
+// 좁은 화면에서는 7칸을 접고 한 줄 요약만 남긴다. 요일+숫자 두 단이라 카드에서
+// 가장 높이를 많이 먹는 자리인데, 매일 확인해야 할 정보는 아니다("오늘 몇 개"는
+// 이미 제목에 있다). 접힌 줄에 주간 총량을 넣어, 펼치지 않아도 이번 주 부담이
+// 얼마인지는 알 수 있게 했다.
+//
+// 넓은 화면은 그대로 펼쳐 둔다 — 자리가 남는데 굳이 한 번 더 누르게 할 이유가 없다.
+function ForecastBlock({ forecast }: { forecast: DueForecastDay[] }) {
+  const [open, setOpen] = useState(false);
+  if (forecast.length === 0) return null;
+
+  const weekTotal = forecast.reduce((n, d) => n + d.count, 0);
+
+  return (
+    <>
+      <div className="hidden sm:block">
+        <ForecastStrip forecast={forecast} />
+      </div>
+
+      <div className="sm:hidden">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-1.5 rounded-lg px-1 py-1 text-xs font-medium text-blue-700/70 transition-colors hover:bg-blue-100/60 dark:text-blue-300/60 dark:hover:bg-blue-900/30"
+        >
+          <span>이번 주 {weekTotal}문항</span>
+          <svg
+            aria-hidden
+            viewBox="0 0 20 20"
+            className={`h-3.5 w-3.5 transition-transform duration-200 ${
+              open ? "rotate-180" : ""
+            }`}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M5 7.5 10 12.5 15 7.5" />
+          </svg>
+        </button>
+        {open && <ForecastStrip forecast={forecast} />}
+      </div>
+    </>
   );
 }
 
