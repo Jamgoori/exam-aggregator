@@ -61,8 +61,11 @@ export type ReviewDueCardProps = {
   subjectChoices: ReviewSubjectChoice[];
 };
 
+// break-keep: 이게 없으면 브라우저가 한글을 글자 단위로 끊어서 좁은 화면에서
+// "10문 / 항" 처럼 단어 안이 갈라진다. 카드 안에서만 건다 — body에 걸면 사이트
+// 모든 페이지의 줄바꿈이 같이 바뀐다.
 const SHELL =
-  "flex flex-col gap-3 rounded-2xl border px-4 py-3.5 border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/25";
+  "flex flex-col gap-3 rounded-2xl border px-4 py-3.5 break-keep border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/25";
 
 export function ReviewDueCard({
   premium,
@@ -123,19 +126,27 @@ export function ReviewDueCard({
 
   return (
     <div className={SHELL}>
-      <div className="flex flex-wrap items-start gap-3">
+      {/* 좁은 화면에서는 버튼을 제목 아래 줄로 내린다. 한 줄에 같이 두면 제목이
+          아이콘 세 개에 밀려 40px 남짓만 남고, 거기서 "10문항"이 갈라진다. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 text-sm font-bold text-blue-900 dark:text-blue-100">
-            <CalendarCheck size={16} />
-            {todayCount > 0 ? (
-              <>
-                오늘 복습할{" "}
-                <span className="text-blue-600 dark:text-blue-300">{todayCount}문항</span>
-              </>
-            ) : (
-              "오늘 복습할 문항 없어요"
-            )}
-            <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm font-bold text-blue-900 dark:text-blue-100">
+            <CalendarCheck size={16} className="shrink-0" />
+            {/* 텍스트를 한 덩어리로 감싼다 — 나눠두면 "10문항"이 별도 flex 아이템이
+                되어 줄바꿈 대상이 된다. */}
+            <span className="min-w-0">
+              {todayCount > 0 ? (
+                <>
+                  오늘 복습할{" "}
+                  <span className="text-blue-600 dark:text-blue-300">
+                    {todayCount}문항
+                  </span>
+                </>
+              ) : (
+                "오늘 복습할 문항 없어요"
+              )}
+            </span>
+            <span className="shrink-0 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
               멤버십
             </span>
           </p>
@@ -180,13 +191,15 @@ export function ReviewDueCard({
         </div>
         {/* 과목 설정은 아이콘 하나로만 둔다 — 매일 누르는 버튼이 아니라서
             "복습 시작"과 같은 무게로 보이면 안 된다. */}
-        <div className="flex shrink-0 items-center gap-1.5">
+        {/* 시작 버튼이 없는 날(오늘치 끝 + 대기 없음)에는 아이콘만 남는데, 그때
+            왼쪽에 붙어 있으면 제목 아래 허공에 뜬다. 오른쪽으로 몰아둔다. */}
+        <div className="flex items-center justify-end gap-1.5 sm:shrink-0">
           {todayCount > 0 || resumeSessionId ? (
             <button
               type="button"
               onClick={startSession}
               disabled={pending}
-              className="rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+              className="flex-1 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-60 sm:flex-none"
             >
               {pending ? "여는 중..." : resumeSessionId ? "이어서 풀기" : "복습 시작"}
             </button>
@@ -198,7 +211,7 @@ export function ReviewDueCard({
                 type="button"
                 onClick={startExtraSession}
                 disabled={pending}
-                className="rounded-lg border border-blue-300 px-3.5 py-2 text-sm font-bold text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-60 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                className="flex-1 rounded-lg border border-blue-300 px-3.5 py-2 text-sm font-bold text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-60 sm:flex-none dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/40"
               >
                 {pending ? "여는 중..." : "복습 더하기"}
               </button>
@@ -211,7 +224,7 @@ export function ReviewDueCard({
             onClick={() => setGuideOpen(true)}
             aria-label="복습 안내"
             title="복습이 어떻게 돌아가나요?"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-blue-700/60 transition-colors hover:bg-blue-100 hover:text-blue-800 dark:text-blue-300/50 dark:hover:bg-blue-900/40 dark:hover:text-blue-200"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-blue-700/60 transition-colors hover:bg-blue-100 hover:text-blue-800 dark:text-blue-300/50 dark:hover:bg-blue-900/40 dark:hover:text-blue-200"
           >
             <HelpCircle size={17} />
           </button>
@@ -221,7 +234,7 @@ export function ReviewDueCard({
               onClick={() => setSettingsOpen(true)}
               aria-label="복습 설정"
               title="복습 설정"
-              className="flex h-9 w-9 items-center justify-center rounded-lg text-blue-700/70 transition-colors hover:bg-blue-100 hover:text-blue-800 dark:text-blue-300/60 dark:hover:bg-blue-900/40 dark:hover:text-blue-200"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-blue-700/70 transition-colors hover:bg-blue-100 hover:text-blue-800 dark:text-blue-300/60 dark:hover:bg-blue-900/40 dark:hover:text-blue-200"
             >
               <Settings size={17} />
             </button>
