@@ -17,6 +17,16 @@ import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
 import { getHomeStats } from "@/lib/home-stats";
 import { getCachedHomeData } from "@/lib/home-data";
 import { getMyUnresolvedTotal } from "@/lib/wrong-notes";
+import type { Metadata } from "next";
+
+// 검색 파라미터(?q=·?level=·?page=)로 걸러진 홈은 내용이 홈과 사실상 같으므로
+// canonical을 "/"로 고정해 같은 목록의 변형 URL들이 서로 순위를 나눠 갖지 않게 한다.
+export const metadata: Metadata = {
+  // 루트 레이아웃의 template("%s | 공모아")이 붙지 않도록 absolute로 준다.
+  title: { absolute: "공모아 - 공무원 기출문제 무료 자료실 (국가직·지방직 기출)" },
+  alternates: { canonical: "/" },
+  openGraph: { url: "/" },
+};
 
 export default async function Home({
   searchParams,

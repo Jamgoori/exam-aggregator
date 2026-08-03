@@ -22,6 +22,8 @@ import { ExamCard } from "@/components/exam-card";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { MyCbtRecordModal } from "@/components/my-cbt-record-modal";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
+import { JsonLd } from "@/components/json-ld";
+import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 import {
   getPaper,
   getPaperDetailData,
@@ -47,7 +49,19 @@ export async function generateMetadata({
     .replace(/\s+/g, " ")
     .trim();
 
-  return { title, description };
+  return {
+    title,
+    description,
+    // 하단 목록 탭이 ?level=·?examTypes= 를 붙여 같은 문제지로 가는 URL을 수십 개
+    // 만들어낸다. 정본을 파라미터 없는 주소로 못 박아 색인이 흩어지지 않게 한다.
+    alternates: { canonical: `/papers/${id}` },
+    openGraph: {
+      type: "article",
+      url: `/papers/${id}`,
+      title,
+      description,
+    },
+  };
 }
 
 export default async function PaperDetailPage({
@@ -93,6 +107,64 @@ export default async function PaperDetailPage({
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-14 px-4 pb-12 pt-6 sm:pt-8">
+      {/* 검색 결과에 "공모아 > 국어 > 2026 지방직 9급 국어" 경로가 URL 대신 표시되게
+          하는 빵부스러기. 화면에는 "← 홈으로" 링크만 있고 시각적 breadcrumb은 없지만,
+          과목 목록이 실제로 존재하는 상위 페이지라 구조상 정직한 계층이다. */}
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@graph": [
+            {
+              "@type": "BreadcrumbList",
+              itemListElement: [
+                { "@type": "ListItem", position: 1, name: "홈", item: SITE_URL },
+                ...(subject
+                  ? [
+                      {
+                        "@type": "ListItem",
+                        position: 2,
+                        name: subject.name,
+                        item: absoluteUrl(`/subjects/${subject.slug}`),
+                      },
+                    ]
+                  : []),
+                {
+                  "@type": "ListItem",
+                  position: subject ? 3 : 2,
+                  name: displayTitle,
+                },
+              ],
+            },
+            {
+              "@type": "LearningResource",
+              name: `${displayTitle} 기출문제`,
+              url: absoluteUrl(`/papers/${paper.id}`),
+              inLanguage: "ko-KR",
+              learningResourceType: "기출문제",
+              educationalLevel: paper.level ?? undefined,
+              about: subject?.name,
+              datePublished: String(paper.year),
+              isAccessibleForFree: true,
+              publisher: { "@id": `${SITE_URL}/#organization` },
+              ...(paper.question_count
+                ? { numberOfItems: paper.question_count }
+                : {}),
+              ...(voteCount > 0 && averageScore !== null
+                ? {
+                    aggregateRating: {
+                      "@type": "AggregateRating",
+                      // 화면의 난이도 별점(1~5)을 그대로 노출한다.
+                      ratingValue: Number(averageScore.toFixed(1)),
+                      ratingCount: voteCount,
+                      bestRating: 5,
+                      worstRating: 1,
+                    },
+                  }
+                : {}),
+            },
+          ],
+        }}
+      />
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-14">
       <div className="flex flex-col gap-4">
         <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">

@@ -29,6 +29,8 @@ export async function generateMetadata({
   return {
     title: `${displayTitle} 해설`,
     description: `${displayTitle} 전체 문항 해설을 문제 이미지·정답과 함께 열람하세요.`,
+    // ?download=1로 열면 인쇄창만 뜰 뿐 내용이 같으므로 정본은 파라미터 없는 주소다.
+    alternates: { canonical: `/papers/${id}/explanations` },
   };
 }
 

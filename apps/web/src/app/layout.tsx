@@ -8,14 +8,45 @@ import { SiteFooter } from "@/components/site-footer";
 import { ReviewFab } from "@/components/review-fab";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
 import { createClient } from "@/lib/supabase/server";
+import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site-url";
+import { JsonLd } from "@/components/json-ld";
 import "./globals.css";
 
+// canonical(alternates)과 openGraph.url은 여기 두면 안 된다 — Next의 메타데이터는
+// 하위 라우트가 덮어쓰지 않는 필드를 그대로 물려받아서, 루트에 canonical을 박으면
+// 모든 문제지 상세페이지가 홈을 정본으로 가리키며 색인에서 통째로 사라진다.
+// 페이지마다 자기 canonical을 선언한다(홈은 app/page.tsx).
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "공모아 - 공무원 기출문제 자료실",
     template: "%s | 공모아",
   },
-  description: "공무원 시험 기출문제 아그리게이터",
+  description:
+    "국가직·지방직·서울시·법원직·경찰·소방 등 공무원 시험 기출문제를 연도별·과목별로 모아 정답과 함께 무료로 보고 내려받으세요. 온라인 CBT 풀이와 해설도 제공합니다.",
+  applicationName: SITE_NAME,
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    locale: "ko_KR",
+  },
+  twitter: { card: "summary" },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      // 검색 결과에 본문 발췌와 미리보기 이미지가 잘리지 않고 나오도록 상한을 푼다.
+      "max-snippet": -1,
+      "max-image-preview": "large",
+      "max-video-preview": -1,
+    },
+  },
+  // Search Console 소유권 확인용 메타 태그. env를 넣으면 자동으로 붙는다.
+  verification: process.env.GOOGLE_SITE_VERIFICATION
+    ? { google: process.env.GOOGLE_SITE_VERIFICATION }
+    : undefined,
 };
 
 // 기본값(resizes-content)은 모바일 키보드가 열고 닫힐 때 레이아웃 뷰포트 자체의
@@ -76,6 +107,39 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full">
+        {/* 사이트 전역 구조화 데이터. WebSite+SearchAction은 검색 결과에 사이트
+            내부 검색창(sitelinks searchbox)이 붙을 수 있게 하고, 두 엔티티에 @id를
+            달아 페이지별 JSON-LD(문제지 상세의 BreadcrumbList 등)가 같은 사이트를
+            가리키도록 묶어준다. */}
+        <JsonLd
+          data={{
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "WebSite",
+                "@id": `${SITE_URL}/#website`,
+                url: SITE_URL,
+                name: SITE_NAME,
+                inLanguage: "ko-KR",
+                publisher: { "@id": `${SITE_URL}/#organization` },
+                potentialAction: {
+                  "@type": "SearchAction",
+                  target: {
+                    "@type": "EntryPoint",
+                    urlTemplate: absoluteUrl("/?q={search_term_string}"),
+                  },
+                  "query-input": "required name=search_term_string",
+                },
+              },
+              {
+                "@type": "Organization",
+                "@id": `${SITE_URL}/#organization`,
+                name: SITE_NAME,
+                url: SITE_URL,
+              },
+            ],
+          }}
+        />
         {/* 폴백은 정적 셸에 들어가므로 usePathname(런타임 데이터)을 쓰는
             SiteHeaderGate 대신 순수한 SiteHeader를 깔아둔다. 몰입형(CBT) 화면
             여부에 따른 숨김은 실제 헤더가 스트리밍되면서 적용된다. */}

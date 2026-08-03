@@ -37,9 +37,16 @@ export async function generateMetadata({
   const subject = await getSubject(slug);
   if (!subject) return {};
 
+  const title = `${subject.name} 기출문제 모음`;
+  const description = `${subject.name} 과목의 공무원 기출문제를 국가직·지방직 등 시행처별, 연도별·급수별로 모아 정답과 함께 무료로 제공합니다.`;
+
   return {
-    title: `${subject.name} 기출문제 모음`,
-    description: `${subject.name} 과목의 공무원 기출문제를 연도별·급수별로 모아봤어요.`,
+    title,
+    description,
+    // 급수·직렬 탭과 페이지네이션(?level=·?examTypes=·?page=)이 같은 목록의 변형
+    // URL을 잔뜩 만들어내므로, 정본을 파라미터 없는 주소로 고정한다.
+    alternates: { canonical: `/subjects/${slug}` },
+    openGraph: { url: `/subjects/${slug}`, title, description },
   };
 }
 
