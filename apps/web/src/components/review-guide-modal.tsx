@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Settings, Sparkles, X } from "lucide-react";
 import { newItemsForLimit } from "@gongmoa/core";
 
 // 복습이 어떻게 돌아가는지 설명하는 모달(카드 헤더의 ? 버튼).
@@ -15,6 +15,11 @@ import { newItemsForLimit } from "@gongmoa/core";
 //
 // 용어는 화면에 쓰는 말로만 쓴다. ease·lapses·간격 반복·SRS 같은 말이 한 번이라도
 // 나오면 첫 사용자는 자기가 이해 못 할 기능이라고 결론 내고 닫는다.
+//
+// 줄바꿈: 본문에 break-keep(word-break: keep-all)을 건다. 이게 없으면 브라우저가
+// 한글을 글자 단위로 끊어서 "필요 없어 / 요." 처럼 조사·어미만 다음 줄로 떨어진다.
+// 전역(body)에 걸지 않는 건 사이트 모든 페이지의 줄바꿈이 같이 바뀌기 때문이다 —
+// 여기서만 쓴다. text-pretty는 그 위에서 마지막 줄에 한 어절만 남는 걸 줄인다.
 
 export function ReviewGuideModal({
   dailyLimit,
@@ -49,137 +54,145 @@ export function ReviewGuideModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="animate-modal-panel-in flex max-h-[85vh] w-full max-w-md flex-col rounded-t-3xl bg-white shadow-2xl ring-1 ring-zinc-900/5 sm:rounded-2xl dark:bg-zinc-900 dark:ring-white/10"
+        className="animate-modal-panel-in flex max-h-[88vh] w-full max-w-md flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl ring-1 ring-zinc-900/5 sm:rounded-3xl dark:bg-zinc-900 dark:ring-white/10"
       >
         <div className="flex justify-center pt-2.5 sm:hidden">
           <span className="h-1 w-9 rounded-full bg-zinc-200 dark:bg-zinc-700" />
         </div>
 
-        <div className="flex items-start gap-3 px-5 pt-4 pb-3">
+        {/* 헤더에만 옅은 색을 깔아 본문과 층을 나눈다. 스크롤이 헤더 밑으로 지나가도
+            제목이 본문에 섞여 보이지 않는다. */}
+        <div className="flex items-center gap-3 border-b border-zinc-100 bg-gradient-to-b from-blue-50/80 to-transparent px-5 pt-4 pb-4 dark:border-zinc-800 dark:from-blue-950/30">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-sm shadow-blue-500/25">
+            <Sparkles size={17} />
+          </span>
           <div className="min-w-0 flex-1">
-            <h3 className="text-base font-bold">복습이 어떻게 돌아가나요?</h3>
+            <h3 className="text-[15px] font-bold tracking-tight">
+              복습이 어떻게 돌아가나요?
+            </h3>
             <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-              1분이면 다 읽어요
+              읽는 데 1분이면 충분해요
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="닫기"
-            className="-mr-1.5 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+            className="-mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-white/70 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
           >
             <X size={17} />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-2">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-2 break-keep">
           {/* 핵심 3장은 항상 펼쳐둔다. 이것만 읽고 닫아도 기능을 쓸 수 있어야 한다. */}
           <Step n={1} title="틀린 문제는 잊어버릴 때쯤 다시 나와요">
-            <p>사람은 배운 걸 하루만 지나도 절반을 잊어요.</p>
-            <p className="mt-1.5">
-              그래서 <B>딱 잊어버릴 때쯤</B> 다시 보여줘요. 그때 다시 보면 오래 남아요.
-            </p>
-            <p className="mt-1.5">
-              언제 다시 볼지는 문제마다 따로 정해져요. 직접 고르실 필요 없어요.
-            </p>
+            <P>배운 건 하루만 지나도 절반이 날아가요.</P>
+            <P>
+              그래서 <B>딱 잊어버릴 때쯤</B> 다시 보여줘요. 그때 다시 보면 훨씬 오래
+              남아요.
+            </P>
+            <P>언제 다시 볼지는 문제마다 따로 정해요. 직접 고르지 않아도 돼요.</P>
           </Step>
 
           <Step n={2} title="맞히면 멀어지고, 틀리면 가까워져요">
-            <p>한 문제가 어떻게 움직이는지 볼게요.</p>
+            <P>한 문제가 어떻게 움직이는지 볼까요?</P>
             <Timeline />
-            <p className="mt-2">
+            <P>
               계속 맞히면 점점 안 나와요. 그게 <B>외웠다</B>는 뜻이에요.
-            </p>
-            <p className="mt-1.5">
-              그러다 한 번 틀리면 다시 처음부터 시작해요. 가까워졌다 멀어졌다 하면서,
-              진짜 아는 문제만 조용히 사라져요.
-            </p>
+            </P>
+            <P>
+              그러다 한 번 틀리면 다시 처음부터예요. 가까워졌다 멀어졌다 하면서, 진짜
+              아는 문제만 조용히 사라져요.
+            </P>
           </Step>
 
-          <Step n={3} title="오늘 할 건 오늘 것뿐이에요">
-            <p>
+          <Step n={3} title="오늘은 오늘 것만 하면 돼요" last>
+            <P>
               하루에 <B>{dailyLimit}문항</B>만 나와요.
-            </p>
-            <p className="mt-1.5">
-              밀린 게 300개여도 오늘 화면엔 {dailyLimit}개만 떠요. 그거 끝내면{" "}
+            </P>
+            <P>
+              밀린 게 300개라도 오늘 화면엔 {dailyLimit}개만 떠요. 그것만 끝내면{" "}
               <B>오늘은 끝</B>이에요. 더 안 해도 돼요.
-            </p>
+            </P>
           </Step>
 
           {/* 아래는 접어둔다. 한 번에 다 보이면 스크롤 길이만 보고 닫는다. */}
-          <p className="mt-5 mb-1 text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+          <p className="mt-6 mb-1 text-[11px] font-bold tracking-wide text-zinc-400 uppercase dark:text-zinc-500">
             더 궁금하면
           </p>
 
           <Faq q="맞혔는데 왜 또 나와요?">
-            <p>한 번 맞힌 거랑 아는 건 달라요.</p>
-            <p className="mt-1.5">
+            <P first>한 번 맞힌 거랑 아는 건 달라요.</P>
+            <P>
               찍어서 맞았을 수도 있고, 오늘은 기억나도 다음 주엔 잊을 수도 있어요. 그래서{" "}
               <B>간격을 두고</B> 한 번 더 물어봐요. 거기서 또 맞히면 그다음엔 훨씬
               나중에 나와요.
-            </p>
+            </P>
           </Faq>
 
           <Faq q="제 오답은 훨씬 많은데 왜 조금만 나와요?">
-            <p>
+            <P first>
               나머지는 <B>차례를 기다리는 중</B>이에요. 없어진 게 아니에요.
-            </p>
-            <p className="mt-1.5">
-              한꺼번에 다 넣으면 며칠 뒤에 복습할 게 수백 개씩 몰려요. 그럼 아무도 못
+            </P>
+            <P>
+              한꺼번에 다 넣으면 며칠 뒤에 복습할 게 수백 개씩 몰려요. 그러면 아무도 못
               해요. 그래서 하루에 <B>{newLimit}개씩만</B> 새로 넣어요.
-            </p>
-            <p className="mt-1.5">
+            </P>
+            <P>
               밀린 복습이 많은 날은 새 문제를 아예 안 넣어요. 밀린 걸 먼저 비우는 게
               순서니까요.
-            </p>
-            <p className="mt-1.5 text-zinc-500 dark:text-zinc-400">
+            </P>
+            <Note>
               기다리는 문제도 오답노트의 <B>섞어풀기</B>로는 지금 바로 풀 수 있어요.
-            </p>
+            </Note>
           </Faq>
 
           <Faq q="며칠 쉬면 엄청 쌓이나요?">
-            <p>
+            <P first>
               아니요. 쉬는 동안엔 <B>새 문제가 안 들어와요.</B>
-            </p>
-            <p className="mt-1.5">
-              3일 쉬면 그 3일에 예약돼 있던 것만 밀려요. 돌아와서 며칠 풀면 원래대로
+            </P>
+            <P>
+              3일 쉬면 그 3일에 예약돼 있던 것만 밀려요. 며칠만 풀면 금방 원래대로
               돌아와요.
-            </p>
-            <p className="mt-1.5">
-              너무 많이 밀렸으면 ⚙️ 설정에서 <B>밀린 복습 정리하기</B>를 누르세요. 며칠에
-              나눠서 다시 예약해줘요. 문제가 지워지는 건 아니에요.
-            </p>
+            </P>
+            <P>
+              너무 많이 밀렸다면 <Chip /> 에서 <B>밀린 복습 정리하기</B>를 누르세요.
+              며칠에 나눠서 다시 예약해줘요. 문제가 지워지는 건 아니에요.
+            </P>
           </Faq>
 
           <Faq q="없어진 문제가 있어요">
-            <p>
+            <P first>
               여덟 번 넘게 틀린 문제는 복습에서 <B>잠깐 빼놨어요.</B>
-            </p>
-            <p className="mt-1.5">
+            </P>
+            <P>
               계속 보여줘도 안 외워지는 문제예요. 그런 건 자꾸 푸는 것보다 해설을 한 번
               제대로 읽는 게 빨라요.
-            </p>
-            <p className="mt-1.5">
-              ⚙️ 설정 → <B>접어둔 문제</B>에서 확인하고, 다시 넣을 수도 있어요.
-            </p>
+            </P>
+            <P>
+              <Chip /> 의 <B>접어둔 문제</B>에서 확인하고, 다시 넣을 수도 있어요.
+            </P>
           </Faq>
 
           <Faq q="위에 있는 날짜 줄은 뭐예요?">
-            <p>앞으로 며칠 동안 몇 개씩 나올지예요.</p>
-            <p className="mt-1.5">
+            <P first>앞으로 며칠 동안 몇 개씩 나올지 보여줘요.</P>
+            <P>
               <B>−는 쉬는 날</B>이에요. 그날은 복습할 게 없어요.
-            </p>
+            </P>
           </Faq>
 
           <Faq q="양을 바꾸고 싶어요">
-            <p>⚙️ 설정에서 바꿀 수 있어요.</p>
-            <p className="mt-1.5">
+            <P first>
+              <Chip /> 에서 바꿀 수 있어요.
+            </P>
+            <P>
               <B>하루에 풀 문항 수</B> — 시험이 가까우면 늘리고, 여유가 없으면 줄이세요.
-            </p>
-            <p className="mt-1.5">
+            </P>
+            <P>
               <B>복습에 넣을 과목</B> — 지금 안 보는 과목은 꺼두세요. 진도는 안 지워지고,
               다시 켜면 며칠에 나눠서 돌려줘요.
-            </p>
+            </P>
           </Faq>
         </div>
 
@@ -187,7 +200,7 @@ export function ReviewGuideModal({
           <button
             type="button"
             onClick={onClose}
-            className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700"
+            className="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700"
           >
             알겠어요
           </button>
@@ -197,27 +210,63 @@ export function ReviewGuideModal({
   );
 }
 
+// 문단. 첫 문단만 위 여백을 없앤다(제목·질문 바로 아래에 붙어야 한 덩어리로 읽힌다).
+function P({ children, first }: { children: React.ReactNode; first?: boolean }) {
+  return (
+    <p className={`text-pretty ${first ? "" : "mt-2"}`}>{children}</p>
+  );
+}
+
 function B({ children }: { children: React.ReactNode }) {
   return <span className="font-bold text-zinc-900 dark:text-zinc-100">{children}</span>;
 }
 
+// 본문보다 한 단계 낮은 곁다리. 이모지(⚙️) 대신 실제 아이콘을 쓰는 건 설정 버튼과
+// 같은 모양이어야 어디를 누르라는 건지 바로 알기 때문이다.
+function Chip() {
+  return (
+    <span className="mx-0.5 inline-flex items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 align-baseline text-[12px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+      <Settings size={11} />
+      설정
+    </span>
+  );
+}
+
+function Note({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-2.5 rounded-lg border-l-2 border-blue-300 bg-blue-50/60 py-1.5 pr-2 pl-2.5 text-pretty text-zinc-600 dark:border-blue-800 dark:bg-blue-950/25 dark:text-zinc-300">
+      {children}
+    </p>
+  );
+}
+
+// 번호 원과 그 아래로 흐르는 세로선. 세 장이 따로 노는 카드가 아니라 순서가 있는
+// 한 흐름이라는 걸 선 하나로 알린다.
 function Step({
   n,
   title,
   children,
+  last,
 }: {
   n: number;
   title: string;
   children: React.ReactNode;
+  last?: boolean;
 }) {
   return (
-    <section className="flex gap-3 py-3">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+    <section className="relative flex gap-3.5 pb-6 last:pb-1">
+      {!last && (
+        <span
+          aria-hidden
+          className="absolute top-8 bottom-2 left-[13.5px] w-px bg-gradient-to-b from-blue-200 to-blue-100/0 dark:from-blue-800 dark:to-blue-900/0"
+        />
+      )}
+      <span className="relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 text-xs font-bold text-white shadow-sm shadow-blue-500/25">
         {n}
       </span>
-      <div className="min-w-0 flex-1">
-        <h4 className="text-sm font-bold">{title}</h4>
-        <div className="mt-1.5 text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-300">
+      <div className="min-w-0 flex-1 pt-0.5">
+        <h4 className="text-[14px] font-bold text-pretty">{title}</h4>
+        <div className="mt-2 text-[13px] leading-[1.75] text-zinc-600 dark:text-zinc-300">
           {children}
         </div>
       </div>
@@ -226,37 +275,66 @@ function Step({
 }
 
 // 이 모달에서 가장 중요한 요소. 글로 읽지 않아도 "맞히면 간격이 벌어진다"가 보여야
-// 한다 — 왼쪽 칸의 ⭕/❌와 오른쪽 칸의 늘어나는 숫자가 그 자체로 설명이다.
-const TIMELINE: { ok: boolean; when: string }[] = [
-  { ok: false, when: "3시간 뒤" },
-  { ok: true, when: "내일" },
-  { ok: true, when: "3일 뒤" },
-  { ok: true, when: "8일 뒤" },
-  { ok: true, when: "20일 뒤" },
+// 한다 — 막대가 길어지는 것 자체가 설명이라, 숫자를 안 읽어도 전달된다.
+const TIMELINE: { ok: boolean; when: string; pct: number }[] = [
+  { ok: false, when: "3시간 뒤", pct: 6 },
+  { ok: true, when: "내일", pct: 16 },
+  { ok: true, when: "3일 뒤", pct: 34 },
+  { ok: true, when: "8일 뒤", pct: 62 },
+  { ok: true, when: "20일 뒤", pct: 100 },
 ];
 
 function Timeline() {
+  // 열자마자 막대가 차례로 늘어난다. 정지된 그림이면 "길이가 다르다"에서 그치는데,
+  // 늘어나는 걸 보면 "점점 벌어진다"가 된다.
+  //
+  // 움직임을 줄여달라고 한 사용자에게는 처음부터 다 자란 상태로 준다 — 이 애니메이션은
+  // 장식이 아니라 내용이라, 빼는 게 아니라 결과만 보여줘야 한다.
+  const [grown, setGrown] = useState(false);
+  const [still, setStill] = useState(false);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setStill(true);
+      setGrown(true);
+      return;
+    }
+    const id = requestAnimationFrame(() => setGrown(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   return (
-    <ul className="mt-2 flex flex-col rounded-xl bg-zinc-50 px-3 py-2 dark:bg-zinc-800/60">
+    <ul className="my-3 flex flex-col gap-2 rounded-xl bg-zinc-50 px-3.5 py-3 dark:bg-zinc-800/50">
       {TIMELINE.map((row, i) => (
-        <li key={i} className="flex items-center gap-2.5 py-1">
+        <li key={i} className="flex items-center gap-2.5">
           <span
             aria-hidden
-            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white ${
-              row.ok ? "bg-emerald-500" : "bg-red-500"
+            className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full text-white ${
+              row.ok ? "bg-emerald-500" : "bg-rose-500"
             }`}
           >
-            {row.ok ? "O" : "X"}
+            {row.ok ? <Check size={11} strokeWidth={3.5} /> : <X size={11} strokeWidth={3.5} />}
           </span>
-          <span className="text-[13px] text-zinc-500 dark:text-zinc-400">
-            {row.ok ? "맞힘" : "틀림"}
+          <span className="sr-only">{row.ok ? "맞힘" : "틀림"}</span>
+
+          <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-200/80 dark:bg-zinc-700/60">
+            <span
+              className={`block h-full rounded-full ${
+                still ? "" : "transition-[width] duration-700 ease-out"
+              } ${
+                row.ok
+                  ? "bg-gradient-to-r from-blue-400 to-blue-600"
+                  : "bg-gradient-to-r from-rose-400 to-rose-500"
+              }`}
+              style={{
+                width: grown ? `${row.pct}%` : "0%",
+                transitionDelay: still ? undefined : `${i * 90}ms`,
+              }}
+            />
           </span>
-          <span
-            aria-hidden
-            className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700"
-            style={{ marginLeft: i * 6 }}
-          />
-          <span className="shrink-0 text-[13px] font-bold tabular-nums">{row.when}</span>
+
+          <span className="w-[52px] shrink-0 text-right text-[12px] font-bold tabular-nums">
+            {row.when}
+          </span>
         </li>
       ))}
     </ul>
@@ -267,17 +345,23 @@ function Timeline() {
 // 리더 동작이 브라우저 기본으로 맞는다.
 function Faq({ q, children }: { q: string; children: React.ReactNode }) {
   return (
-    <details className="group border-t border-zinc-100 py-2.5 dark:border-zinc-800">
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-[13px] font-semibold marker:hidden hover:text-blue-700 dark:hover:text-blue-300">
-        <span className="min-w-0 flex-1">{q}</span>
-        <span
+    <details className="group border-t border-zinc-100 dark:border-zinc-800">
+      <summary className="-mx-2 flex cursor-pointer list-none items-center gap-2 rounded-lg px-2 py-3 text-[13px] font-semibold transition-colors marker:hidden hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+        <span className="min-w-0 flex-1 text-pretty">{q}</span>
+        <svg
           aria-hidden
-          className="shrink-0 text-zinc-400 transition-transform group-open:rotate-180 dark:text-zinc-500"
+          viewBox="0 0 20 20"
+          className="h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-200 group-open:rotate-180 dark:text-zinc-500"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         >
-          ▾
-        </span>
+          <path d="M5 7.5 10 12.5 15 7.5" />
+        </svg>
       </summary>
-      <div className="mt-2 pr-5 text-[13px] leading-relaxed text-zinc-600 dark:text-zinc-300">
+      <div className="pb-3.5 pl-0.5 text-[13px] leading-[1.75] text-zinc-600 dark:text-zinc-300">
         {children}
       </div>
     </details>
