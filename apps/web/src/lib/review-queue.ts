@@ -371,7 +371,14 @@ export async function getDueReviewSummary(
     (c) => c.dueAt > nowIso && srsDayIndex(new Date(c.dueAt)) === today,
   ).length;
 
-  const forecast = forecastDueByDay(candidates, now);
+  // 표도 큐와 같은 상한으로 계산한다 — 따로 세면 카드 제목("오늘 20문항")과 표의
+  // 오늘 칸이 어긋난다. 대기 재고는 정제를 마친 pending을 쓴다(pendingTotal은 정제
+  // 전 숫자라 앞날 칸이 부풀려진다).
+  const forecast = forecastDueByDay(candidates, now, {
+    total: dailyLimit,
+    newItems: newItemsForLimit(dailyLimit),
+    pendingCount: pending.length,
+  });
   const nextDue = forecast.find((d) => d.offset > 0 && d.count > 0);
 
   return {
@@ -464,8 +471,19 @@ export async function getSessionSchedule(
     };
   });
 
-  const { candidates } = await collectDueCandidates(supabase, userId, now);
-  return { items, forecast: forecastDueByDay(candidates, now) };
+  const { candidates, pending, dailyLimit } = await collectDueCandidates(
+    supabase,
+    userId,
+    now,
+  );
+  return {
+    items,
+    forecast: forecastDueByDay(candidates, now, {
+      total: dailyLimit,
+      newItems: newItemsForLimit(dailyLimit),
+      pendingCount: pending.length,
+    }),
+  };
 }
 
 // 승격: 대기 풀에서 뽑힌 문항에 오늘자 스케줄을 심는다. 이 쓰기가 있어야 다음날부터

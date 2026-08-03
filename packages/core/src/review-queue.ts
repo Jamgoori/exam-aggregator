@@ -188,9 +188,20 @@ export function buildDueQueue(
 }
 
 export type DueForecastDay = {
-  // 오늘로부터 며칠 뒤인지(0 = 오늘). 오늘 칸에는 연체된 것까지 모두 포함한다.
+  // 오늘로부터 며칠 뒤인지(0 = 오늘).
   offset: number;
+  // 그날 실제로 화면에 뜰 문항 수(하루 상한 적용 후).
   count: number;
+};
+
+export type DueForecastInput = {
+  // 하루에 낼 총 문항 수.
+  total?: number;
+  // 그중 대기 풀에서 승격할 수 있는 최대 수.
+  newItems?: number;
+  // 아직 승격되지 않은 오답 수(정제 후). 앞날의 신규 몫을 채우는 재고다.
+  pendingCount?: number;
+  days?: number;
 };
 
 // "오늘 12 · 내일 5 · 수 8 ..." 표에 쓸 향후 며칠치 분포.
@@ -198,23 +209,48 @@ export type DueForecastDay = {
 // 무료(24시간 고정)와 유료의 차이가 사용자 눈에 드러나는 유일한 자리다 — 무료는
 // 매일 같은 더미가 오늘에 몰려 있고, 유료는 날짜별로 흩어지며 0인 날이 생긴다.
 // 그래서 개수가 0인 날도 빼지 않고 그대로 돌려준다.
+//
+// 세는 게 아니라 buildDueQueue를 며칠치 돌린 것이다. 연체분을 그대로 오늘 칸에
+// 쌓아 올리던 때는 카드 제목("오늘 복습할 20문항")과 표("오늘 136")가 같은 화면에서
+// 어긋났고, 밀린 116개는 날짜가 과거라 내일 칸에 안 잡혀서 "116문항은 내일 이어서"
+// 바로 밑에 "내일 −"이 떴다. 상한을 적용해 넘치는 만큼을 다음 날로 흘려보내면 세
+// 숫자가 같은 뜻이 되고, "−"가 비로소 진짜 쉬는 날을 뜻한다.
+//
+// 다만 이건 "지금 예약된 것"의 소화 계획이지 미래 예측이 아니다. 오늘 푼 문항은
+// 채점 결과에 따라 1·3·8일 뒤로 다시 들어오는데, 그 재진입은 정답률을 가정해야
+// 하므로 여기서 모델링하지 않는다(앞날 칸은 실제보다 조금 적게 나온다).
 export function forecastDueByDay(
   candidates: DueCandidate[],
   now: Date = new Date(),
-  days: number = DUE_FORECAST_DAYS,
+  input: DueForecastInput = {},
 ): DueForecastDay[] {
-  const today = srsDayIndex(now);
-  const out: DueForecastDay[] = Array.from({ length: days }, (_, offset) => ({
-    offset,
-    count: 0,
-  }));
+  const days = input.days ?? DUE_FORECAST_DAYS;
+  const total = Math.max(1, input.total ?? DUE_QUEUE_LIMIT);
+  const newLimit = Math.max(0, input.newItems ?? NEW_QUEUE_LIMIT);
+  let pendingLeft = Math.max(0, input.pendingCount ?? 0);
 
+  const today = srsDayIndex(now);
+  const arriving = new Array<number>(days).fill(0);
   for (const c of candidates) {
-    // 연체분은 오늘 칸으로 접는다(지난 날짜 칸을 따로 보여줘야 할 이유가 없다).
+    // 연체분은 오늘 도착한 것으로 친다(지난 날짜 칸을 따로 보여줄 이유가 없다).
     const offset = Math.max(0, srsDayIndex(new Date(c.dueAt)) - today);
-    if (offset < days) out[offset].count++;
+    if (offset < days) arriving[offset]++;
   }
-  return out;
+
+  // 상한을 넘긴 만큼은 사라지지 않고 다음 날 큐 맨 앞으로 간다 — buildDueQueue가
+  // 연체를 우선 채우는 것과 같은 순서다.
+  let carry = 0;
+  return arriving.map((incoming, offset) => {
+    const pool = carry + incoming;
+    const dueShown = Math.min(pool, total);
+    carry = pool - dueShown;
+
+    // 복습으로 채우고 남은 자리에만 신규가 들어온다(buildDueQueue와 같은 규칙).
+    const promoted = Math.min(newLimit, total - dueShown, pendingLeft);
+    pendingLeft -= promoted;
+
+    return { offset, count: dueShown + promoted };
+  });
 }
 
 // 채점 결과 화면의 "다음 복습 예약" 섹션이 쓰는 모양. 조회는 각 앱의 서버 계층이

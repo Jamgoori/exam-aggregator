@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarCheck, Lock, Settings, X } from "lucide-react";
+import { CalendarCheck, HelpCircle, Lock, Settings, X } from "lucide-react";
+import { ReviewGuideModal } from "@/components/review-guide-modal";
 import {
   createDueReviewSession,
   createExtraReviewSession,
@@ -84,6 +85,7 @@ export function ReviewDueCard({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   // 서버가 준 목록으로 시작하고, 이후에는 화면이 진실이다. 토글은 낙관적으로 즉시
   // 반영하고 실패하면 되돌린다(모달 안에서).
   const [choices, setChoices] = useState<ReviewSubjectChoice[]>(subjectChoices);
@@ -202,6 +204,17 @@ export function ReviewDueCard({
               </button>
             )
           )}
+          {/* 톱니 왼쪽 — 설정보다 먼저 눌러야 할 것이다. 예약이 하나도 없는 첫
+              사용자에게 가장 필요하므로 조건 없이 띄운다. */}
+          <button
+            type="button"
+            onClick={() => setGuideOpen(true)}
+            aria-label="복습 안내"
+            title="복습이 어떻게 돌아가나요?"
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-blue-700/60 transition-colors hover:bg-blue-100 hover:text-blue-800 dark:text-blue-300/50 dark:hover:bg-blue-900/40 dark:hover:text-blue-200"
+          >
+            <HelpCircle size={17} />
+          </button>
           {(subjectChoices.length > 0 || todayCount > 0) && (
             <button
               type="button"
@@ -222,6 +235,10 @@ export function ReviewDueCard({
         <p className="text-[11px] text-blue-700/60 dark:text-blue-300/50">
           {pausedNames.join(" · ")} 쉬는 중
         </p>
+      )}
+
+      {guideOpen && (
+        <ReviewGuideModal dailyLimit={dailyLimit} onClose={() => setGuideOpen(false)} />
       )}
 
       {settingsOpen && (

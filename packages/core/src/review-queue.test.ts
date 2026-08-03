@@ -323,6 +323,69 @@ test("7일 표: 연체분은 오늘 칸으로 접고, 0인 날도 빠지지 않�
   assert.equal(forecast[1].offset, 1);
 });
 
+test("7일 표: 상한을 넘긴 연체는 다음 날로 흘러간다", () => {
+  // 밀린 50문항 · 하루 20 → 20 / 20 / 10 / 0 ...
+  const candidates = Array.from({ length: 50 }, (_, i) =>
+    cand({ questionNumber: i + 1, dueAt: dueDay(-3) }),
+  );
+  const forecast = forecastDueByDay(candidates, NOW, { total: 20, newItems: 0 });
+
+  assert.deepEqual(
+    forecast.map((d) => d.count),
+    [20, 20, 10, 0, 0, 0, 0],
+  );
+});
+
+test("7일 표의 오늘 칸은 실제 큐 길이와 같아야 한다", () => {
+  // 카드 제목("오늘 복습할 N문항")과 표의 오늘 칸이 어긋나면 안 된다. 밀린 것이
+  // 상한을 다 먹는 날(신규 0)과 자리가 남는 날(신규 승격) 양쪽을 확인한다.
+  const limits = { total: 20, newItems: newItemsForLimit(20) };
+  const pending = Array.from({ length: 40 }, (_, i) =>
+    pend({ paperId: "new", questionNumber: i + 1 }),
+  );
+
+  for (const overdue of [136, 5, 0]) {
+    const candidates = Array.from({ length: overdue }, (_, i) =>
+      cand({ questionNumber: i + 1, dueAt: dueDay(-2) }),
+    );
+    const queue = buildDueQueue(candidates, pending, NOW, limits);
+    const forecast = forecastDueByDay(candidates, NOW, {
+      ...limits,
+      pendingCount: pending.length,
+    });
+    assert.equal(forecast[0].count, queue.length, `연체 ${overdue}일 때`);
+  }
+});
+
+test("7일 표: 밀린 것이 상한을 다 먹으면 다음 날 칸도 비지 않는다", () => {
+  // "116문항은 내일 이어서"라고 써놓고 표에는 "내일 −"이 뜨던 회귀. 연체분은 날짜가
+  // 과거라 내일 칸에 안 잡혔었다.
+  const candidates = Array.from({ length: 136 }, (_, i) =>
+    cand({ questionNumber: i + 1, dueAt: dueDay(-1) }),
+  );
+  const forecast = forecastDueByDay(candidates, NOW, { total: 20, newItems: 0 });
+
+  assert.equal(forecast[0].count, 20);
+  assert.ok(forecast[1].count > 0, "내일 칸이 비면 안 된다");
+});
+
+test("7일 표: 복습이 상한을 다 먹은 날은 신규가 안 들어온다", () => {
+  const candidates = Array.from({ length: 60 }, (_, i) =>
+    cand({ questionNumber: i + 1, dueAt: dueDay(0) }),
+  );
+  const forecast = forecastDueByDay(candidates, NOW, {
+    total: 20,
+    newItems: 10,
+    pendingCount: 500,
+  });
+
+  // 앞 3일은 밀린 복습이 20을 다 채우고, 4일째부터 신규 몫 10개만 남는다.
+  assert.deepEqual(
+    forecast.map((d) => d.count),
+    [20, 20, 20, 10, 10, 10, 10],
+  );
+});
+
 test("과목별 분포는 많은 순, 이름 못 찾는 과목은 뺀다", () => {
   const items = [
     cand({ paperId: "k", questionNumber: 1, subjectId: "korean", dueAt: dueDay(0) }),
