@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Check, Settings, Sparkles, X } from "lucide-react";
 import { newItemsForLimit } from "@gongmoa/core";
 
@@ -284,23 +284,46 @@ const TIMELINE: { ok: boolean; when: string; pct: number }[] = [
   { ok: true, when: "20일 뒤", pct: 100 },
 ];
 
+// 모션 설정은 React 밖(브라우저)에 있는 상태라 useSyncExternalStore로 읽는다.
+// useState 초기값으로 읽으면 서버 렌더 결과(모션 허용)와 어긋나 하이드레이션이 깨지고,
+// useEffect에서 setState로 읽으면 첫 페인트가 지난 뒤라 0%짜리 막대가 한 번 스쳤다가
+// 튄다 — 움직임을 줄여달라고 한 사용자에게 정확히 보이면 안 되는 그림이다.
+// 서버 스냅샷을 false로 두는 건 theme-toggle.tsx와 같은 이유다(서버는 알 수 없으므로
+// 기본값으로 그리고, 클라이언트에서 실제 값으로 맞춘다).
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function subscribeReducedMotion(onChange: () => void) {
+  const mql = window.matchMedia(REDUCED_MOTION_QUERY);
+  mql.addEventListener("change", onChange);
+  return () => mql.removeEventListener("change", onChange);
+}
+
+function getReducedMotion() {
+  return window.matchMedia(REDUCED_MOTION_QUERY).matches;
+}
+
+function getReducedMotionOnServer() {
+  return false;
+}
+
 function Timeline() {
   // 열자마자 막대가 차례로 늘어난다. 정지된 그림이면 "길이가 다르다"에서 그치는데,
   // 늘어나는 걸 보면 "점점 벌어진다"가 된다.
   //
   // 움직임을 줄여달라고 한 사용자에게는 처음부터 다 자란 상태로 준다 — 이 애니메이션은
   // 장식이 아니라 내용이라, 빼는 게 아니라 결과만 보여줘야 한다.
-  const [grown, setGrown] = useState(false);
-  const [still, setStill] = useState(false);
+  const still = useSyncExternalStore(
+    subscribeReducedMotion,
+    getReducedMotion,
+    getReducedMotionOnServer,
+  );
+  const [started, setStarted] = useState(false);
   useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setStill(true);
-      setGrown(true);
-      return;
-    }
-    const id = requestAnimationFrame(() => setGrown(true));
+    if (still) return;
+    const id = requestAnimationFrame(() => setStarted(true));
     return () => cancelAnimationFrame(id);
-  }, []);
+  }, [still]);
+  const grown = still || started;
 
   return (
     <ul className="my-3 flex flex-col gap-2 rounded-xl bg-zinc-50 px-3.5 py-3 dark:bg-zinc-800/50">
