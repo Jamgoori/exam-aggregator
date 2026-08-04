@@ -8,6 +8,7 @@ import {
   normalizeDailyLimit,
   DUE_QUEUE_LIMIT,
   NEW_QUEUE_LIMIT,
+  SUBJECT_MIN_SLOTS,
   type DueCandidate,
   type PendingCandidate,
 } from "./review-queue";
@@ -259,6 +260,67 @@ test("승격된 신규도 과목 섞기에 함께 들어간다", () => {
     if (queue[i].subjectId === queue[i - 1].subjectId) sameNeighbors++;
   }
   assert.equal(sameNeighbors, 0);
+});
+
+test("한 과목이 due를 독점해도 다른 과목이 최소 몫을 받는다", () => {
+  // 인터리빙은 "뽑은 것의 순서"만 바꾼다. 뽑기가 점수순뿐이면 행정법 200개짜리
+  // 사용자의 큐는 20자리 전부 행정법이고, 국어는 그게 다 빠질 때까지 안 나온다.
+  const items = [
+    ...Array.from({ length: 100 }, (_, i) =>
+      cand({ paperId: "a", questionNumber: i + 1, subjectId: "admin", dueAt: dueDay(-1) }),
+    ),
+    ...Array.from({ length: 5 }, (_, i) =>
+      cand({ paperId: "k", questionNumber: i + 1, subjectId: "korean", dueAt: dueDay(-1) }),
+    ),
+  ];
+
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  assert.equal(queue.length, 20);
+  assert.equal(queue.filter((q) => q.subjectId === "korean").length, SUBJECT_MIN_SLOTS);
+  // 나머지 자리는 예전처럼 위험도 경쟁 — 밀린 과목이 더 많이 나오는 건 맞는 동작이다.
+  assert.equal(queue.filter((q) => q.subjectId === "admin").length, 20 - SUBJECT_MIN_SLOTS);
+});
+
+test("최소 몫은 하루 총량에 비례한다", () => {
+  const items = [
+    ...Array.from({ length: 100 }, (_, i) =>
+      cand({ paperId: "a", questionNumber: i + 1, subjectId: "admin", dueAt: dueDay(-1) }),
+    ),
+    ...Array.from({ length: 20 }, (_, i) =>
+      cand({ paperId: "k", questionNumber: i + 1, subjectId: "korean", dueAt: dueDay(-1) }),
+    ),
+  ];
+
+  const queue = buildDueQueue(items, [], NOW, { total: 40, newItems: 0 });
+  assert.equal(queue.filter((q) => q.subjectId === "korean").length, 4);
+});
+
+test("과목 수가 상한보다 많아도 자리를 다 채운다", () => {
+  // 최소 몫 × 과목 수가 상한을 넘으면 몫을 줄인다. 여기서 자리를 남기면 큐가 짧아진다.
+  const items = Array.from({ length: 25 }, (_, i) =>
+    cand({ paperId: `p${i}`, questionNumber: 1, subjectId: `s${i}`, dueAt: dueDay(-1) }),
+  );
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  assert.equal(queue.length, 20);
+  assert.equal(new Set(queue.map((q) => q.subjectId)).size, 20);
+});
+
+test("신규 승격도 과목을 번갈아 태운다", () => {
+  // 승격 순서는 "자주 틀린 것 먼저"인데 1회독 중에는 전부 동점이라, 그대로 두면
+  // 오래된 시험지부터 순서대로 = 신규 10개가 통째로 한 과목이 된다.
+  const pending = [
+    ...Array.from({ length: 30 }, (_, i) =>
+      pend({ paperId: "a", questionNumber: i + 1, subjectId: "admin", wrongCount: 3 }),
+    ),
+    ...Array.from({ length: 5 }, (_, i) =>
+      pend({ paperId: "k", questionNumber: i + 1, subjectId: "korean", wrongCount: 1 }),
+    ),
+  ];
+
+  const queue = buildDueQueue([], pending, NOW, { total: 20, newItems: 10 });
+  assert.equal(queue.length, 10);
+  assert.equal(queue.filter((q) => q.subjectId === "korean").length, 5);
+  assert.equal(queue.filter((q) => q.subjectId === "admin").length, 5);
 });
 
 test("같은 입력이면 같은 큐가 나온다(배너 숫자 = 세션 문항)", () => {

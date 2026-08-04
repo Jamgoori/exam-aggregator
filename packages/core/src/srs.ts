@@ -5,6 +5,12 @@
 // 채점(맞다/틀리다 2단계)에 맞게 줄인 형태다 — Anki식 4단계 자기평가 버튼은 두지
 // 않는다. CBT는 정오답이 자동으로 나오므로 사용자에게 등급을 또 묻는 건 이중 입력이다.
 //
+// 순수 SM-2와 다른 점이 하나 더 있다: 채점이 예정일에만 일어나지 않는다는 걸 전제로
+// 한다. Anki는 카드를 봐야 채점이 생기지만 여기는 회독(문제지 통째 재응시)과
+// 섞어풀기가 스케줄과 무관하게 같은 문항을 다시 채점한다. 그래서 정답·오답을 그대로
+// 받지 않고 "예정일 대비 얼마나 일찍 만났는지 / 배정한 간격 중 얼마나 버텼는지"로
+// 한 번 걸러서 반영한다(dueProgress·retainedProgress).
+//
 // 여기는 계산만 한다. 저장은 user_question_status의 srs_* 컬럼이고, 그 쓰기는 서버
 // 채점 경로(recordQuestionResults)만 한다 — 클라이언트가 자기 복습일을 미루거나
 // 앞당길 수 없어야 하기 때문이다.
@@ -28,9 +34,21 @@ export const SRS_INITIAL: SrsState = {
 };
 
 export const SRS_MIN_EASE = 1.3;
-export const SRS_MAX_EASE = 2.8;
+
+// ease 상한을 초기값과 같은 2.5로 둔다 = "정답으로는 기본값보다 후해지지 않는다".
+//
+// 예전에는 상한이 2.8이고 정답마다 +0.1이라, 세 번만 맞히면 상한에 붙었다. 그건
+// SM-2에서 q=5(완벽하게 즉시 기억)일 때의 보정값인데, 우리 채점은 맞다/틀리다
+// 2단계라 "겨우 맞힌 것"과 "확실히 아는 것"을 구분할 수 없다. 구분이 안 되면
+// 낮은 쪽(Anki의 '보통')으로 잡는 게 맞다 — 4지선다는 몰라도 25%가 맞고, 두
+// 개까지 좁혀 찍으면 50%다. 그 정답에 보너스까지 주면 모르는 문항이 "아는 문제"로
+// 분류돼 큐에서 빠진다.
+//
+// 그래도 보너스를 0으로 없애지는 않는다. 무너져서 ease가 깎인 문항이 다시 안정될
+// 때 되돌아올 길이 있어야 한다 — 상한이 2.5라 회복 전용으로만 작동한다.
+export const SRS_MAX_EASE = 2.5;
 export const SRS_EASE_PENALTY = 0.2;
-export const SRS_EASE_BONUS = 0.1;
+export const SRS_EASE_BONUS = 0.05;
 
 // 간격 상한. 공시는 시험일이 정해져 있어 무한정 벌리는 게 의미가 없고, 반년 뒤로
 // 밀린 문항은 사실상 큐에서 사라진 것과 같아진다.
@@ -55,6 +73,30 @@ export const SRS_LEECH_THRESHOLD = 8;
 // 한 번 접어둔 뒤 다시 넣었는데 또 무너지면, 이 간격마다 다시 접는다(Anki와 같이
 // 기준의 절반). 8 → 12 → 16 ...
 export const SRS_LEECH_REPEAT = SRS_LEECH_THRESHOLD / 2;
+
+// 예정일의 이 비율도 안 지나서 틀린 것은 "조기 실패"로 본다(간격 반감, lapse 없음).
+//
+// 이 서비스에서 채점은 복습 세션에서만 일어나지 않는다. 공시생의 기본 학습 방식은
+// 같은 문제지 회독이고, 섞어풀기도 스케줄을 보지 않는다. 그래서 간격 62일짜리
+// 문항을 5일 만에 다시 만나 틀리는 일이 정상적으로 벌어지는데, 그걸 예정일에
+// 무너진 것과 똑같이 처리하면(간격 1일 리셋 + lapse + leech 진행) 회독을 열심히
+// 할수록 복습 스케줄이 망가진다. 5일 만에 못 맞히는 건 당연한 일이라 벌이 아니다.
+export const SRS_EARLY_LAPSE_RATIO = 0.5;
+
+// 조기 실패일 때 간격에 곱하는 값. 리셋이 아니라 반감이다 — 정보가 없는 게 아니라
+// "생각보다 덜 익었다" 정도의 정보라서.
+export const SRS_EARLY_LAPSE_FACTOR = 0.5;
+
+// 이 일수 이상인 간격만 흔든다(fuzz). 1·3일 학습 단계는 흔들면 의미가 사라진다.
+export const SRS_FUZZ_MIN_DAYS = 4;
+
+// 흔드는 폭(±비율). Anki와 같은 자리다.
+//
+// 간격이 결정적이면 하루에 푼 20문항이 영원히 같은 날 함께 움직인다(1 → 3 → 8 →
+// 20이 전부 같으므로). 그 결과가 예보표의 "오늘 0, 3일 뒤 40" 같은 요철이고,
+// 밀린 복습 정리·보류 해제 재분산 같은 사후 보정이 필요했던 원인 중 하나다.
+// 코호트를 조금씩 흩어 두면 애초에 뭉치지 않는다.
+export const SRS_FUZZ_RATIO = 0.1;
 
 // 이번 lapse로 leech 판정에 걸렸는지. lapses가 기준을 넘은 "그 순간"에만 true라
 // 매번 접히지 않는다.
@@ -121,6 +163,54 @@ export function srsGuessed(prev: SrsState, now: Date): SrsResult {
   return { state: prev, dueAt: srsRelearnDueAt(now) };
 }
 
+// 예정일까지 얼마나 왔는지(0~1). 1이면 예정일이 됐거나 지났다.
+//
+// "이 오답이 진짜 실패인가"를 가르는 값이다. 예정일이 안 됐는데 만난 문항은
+// 회독이나 섞어풀기가 끌어온 것이고, 거기서 틀린 건 스케줄의 실패가 아니다.
+// dueAt을 모르면(마이그레이션 전·승격 직후) 1로 본다 — 예전 동작 그대로.
+function dueProgress(prev: SrsState, now: Date, dueAt?: Date | null): number {
+  if (!dueAt || prev.intervalDays <= 0) return 1;
+  const remaining = srsDayIndex(dueAt) - srsDayIndex(now);
+  if (remaining <= 0) return 1;
+  return Math.max(0, (prev.intervalDays - remaining) / prev.intervalDays);
+}
+
+// 배정한 간격 중 실제로 버틴 비율(0~1). 1이면 배정한 만큼을 다 기억했다는 뜻이다.
+//
+// "이 정답을 얼마나 인정할 것인가"를 가르는 값이다. 62일 뒤에 보라고 배정해 둔
+// 문항을 5일 만에 회독에서 맞혔다면 그건 5일치 기억이지 62일치 기억이 아니다.
+// 예전에는 이걸 안 봐서 간격이 62 → 174로 뛰었다.
+function retainedProgress(
+  prev: SrsState,
+  now: Date,
+  lastGradedAt?: Date | null,
+): number {
+  if (!lastGradedAt || prev.intervalDays <= 0) return 1;
+  const elapsed = srsDayIndex(now) - srsDayIndex(lastGradedAt);
+  return Math.max(0, Math.min(1, elapsed / prev.intervalDays));
+}
+
+// 간격을 ±SRS_FUZZ_RATIO 만큼 흔든다. rand가 없으면 그대로 둔다 — 기본을 결정적으로
+// 두어야 테스트가 간격을 고정할 수 있고, 흔들지 말아야 할 자리(재확인·학습 단계)에
+// 실수로 새어 들어가지 않는다.
+export function fuzzInterval(days: number, rand?: () => number): number {
+  if (!rand || days < SRS_FUZZ_MIN_DAYS) return days;
+  const span = Math.max(1, Math.round(days * SRS_FUZZ_RATIO));
+  const delta = Math.round((rand() * 2 - 1) * span);
+  return Math.min(
+    SRS_MAX_INTERVAL_DAYS,
+    Math.max(SRS_FUZZ_MIN_DAYS, days + delta),
+  );
+}
+
+export type NextSrsOptions = {
+  // 지금 저장돼 있는 예약 시각(user_question_status.srs_due_at). 이걸 줘야 "예정된
+  // 복습"과 "예정보다 이른 재응시"를 구분한다. 안 주면 전부 예정된 복습으로 친다.
+  dueAt?: Date | null;
+  // 간격 흔들기용 난수(보통 Math.random). 안 주면 흔들지 않는다.
+  fuzz?: () => number;
+};
+
 // 채점 결과 하나를 스케줄에 반영한다.
 //
 // 틀리면 간격을 1일로 되돌리고 ease를 깎는다(다음부터 더 촘촘히 나옴).
@@ -142,6 +232,7 @@ export function nextSrs(
   isCorrect: boolean,
   now: Date,
   lastGradedAt?: Date | null,
+  opts: NextSrsOptions = {},
 ): SrsResult {
   if (
     isCorrect &&
@@ -157,6 +248,32 @@ export function nextSrs(
 
   if (!isCorrect) {
     const first = isFirstEntry(prev);
+
+    // 예정일 전에 끌려 나와 틀린 것(회독·섞어풀기)은 반감만 하고 lapse를 세지
+    // 않는다. 여기서 리셋하면 회독할수록 스케줄이 무너지고, leech 카운트까지
+    // 올라가 멀쩡한 문항이 큐에서 접힌다. 간격 1일짜리는 반감해도 1일이라 제외.
+    if (
+      !first &&
+      prev.intervalDays >= 2 &&
+      dueProgress(prev, now, opts.dueAt) < SRS_EARLY_LAPSE_RATIO
+    ) {
+      return {
+        state: {
+          intervalDays: Math.max(
+            SRS_FIRST_INTERVAL_DAYS,
+            Math.round(prev.intervalDays * SRS_EARLY_LAPSE_FACTOR),
+          ),
+          ease: clampEase(prev.ease - SRS_EASE_PENALTY / 2),
+          // reps를 지우지 않는다. 지우면 다음 정답이 1일로 되돌아가 반감이 무의미해진다.
+          reps: prev.reps,
+          lapses: prev.lapses,
+        },
+        // 그래도 오늘 안에 한 번 더 만난다 — 못 맞힌 건 사실이다. 그 재확인에서
+        // 또 틀리면 그때는 예정일이 지난 뒤라 정상 lapse로 처리된다.
+        dueAt: srsRelearnDueAt(now),
+      };
+    }
+
     const lapses = first ? 0 : prev.lapses + 1;
     return {
       state: {
@@ -173,15 +290,27 @@ export function nextSrs(
     };
   }
 
+  // 정답으로 간격을 얼마나 벌릴지는 "실제로 얼마나 버텼는지"에 비례시킨다.
+  // 다 버텼으면(비율 1) 예전과 똑같이 × ease, 절반만 버텼으면 그 절반만큼만.
+  // 예정일을 안 지났어도 성장이 0은 아니다 — 적은 증거에 적은 credit을 준다.
+  const progress = Math.min(
+    dueProgress(prev, now, opts.dueAt),
+    retainedProgress(prev, now, lastGradedAt),
+  );
+  const growth = 1 + (prev.ease - 1) * progress;
+
   const reps = prev.reps + 1;
   const intervalDays =
     reps === 1
       ? SRS_FIRST_INTERVAL_DAYS
       : reps === 2
         ? SRS_SECOND_INTERVAL_DAYS
-        : Math.min(
-            SRS_MAX_INTERVAL_DAYS,
-            Math.max(1, Math.round(prev.intervalDays * prev.ease)),
+        : fuzzInterval(
+            Math.min(
+              SRS_MAX_INTERVAL_DAYS,
+              Math.max(1, Math.round(prev.intervalDays * growth)),
+            ),
+            opts.fuzz,
           );
 
   return {

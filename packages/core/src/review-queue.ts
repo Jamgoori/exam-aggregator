@@ -5,8 +5,10 @@
 //
 //  - 고르기: 연체일과 무너진 횟수를 합친 점수 순. 연체일에 상한을 씌우는 게 핵심이다
 //    — 안 그러면 오래 밀린 문항이 lapses를 압도해 "자주 틀리는 문제 먼저"가 죽는다.
+//    단, 과목마다 최소 몫을 먼저 떼어 둔다(SUBJECT_MIN_SLOTS). 점수순으로만 자르면
+//    한 과목이 20자리를 통째로 먹고 다른 과목은 며칠이고 안 나온다.
 //  - 순서: 한 과목이 큐를 통째로 먹으면 지루하고, 과목을 섞는 편(인터리빙)이
-//    학습 효과도 낫다.
+//    학습 효과도 낫다. 이건 "뽑은 것을 어떻게 늘어놓을지"라 뽑기와는 다른 층이다.
 //
 // 하루 상한이 있는 이유는 스케줄 정확도보다 중요하다. 밀린 문항이 수백 개인
 // 사용자에게 그대로 다 보여주면 시작조차 안 한다 — 오늘치가 끝난다는 감각이
@@ -105,6 +107,69 @@ function byPriority(a: DueCandidate, b: DueCandidate, now: Date): number {
       : 1;
 }
 
+// 하루 20문항 기준, 과목마다 보장하는 최소 자리 수.
+//
+// 인터리빙은 "뽑은 것을 어떤 순서로 낼지"만 정한다. 뽑기 자체가 점수순이면 행정법
+// due가 200개인 사용자는 20자리를 행정법이 통째로 먹고, 국어는 그 200개가 다 빠질
+// 때까지 며칠이고 안 나온다 — 인터리빙은 그 상태에서 아무 일도 못 한다. 공시는
+// 5과목을 같은 날 보므로 한 과목이 큐를 독점하는 건 그 자체로 사고다.
+// (과목 보류 기능이 필요했던 것도 절반은 이 증상의 우회로였다.)
+//
+// 균등 배분은 하지 않는다. 최소 몫만 떼어 두고 나머지 자리는 예전처럼 위험도
+// 경쟁에 맡긴다 — 밀린 과목이 더 많이 나오는 건 맞는 동작이다.
+export const SUBJECT_MIN_SLOTS = 2;
+
+// 하루 총량에 비례한 과목별 최소 몫(20 → 2, 40 → 4).
+export function subjectFloorForLimit(total: number): number {
+  return Math.max(1, Math.round((total * SUBJECT_MIN_SLOTS) / DUE_QUEUE_LIMIT));
+}
+
+// 우선순위대로 정렬된 목록에서 cap개를 뽑되, 과목마다 minPerSubject개를 먼저
+// 확보한 뒤 남은 자리를 원래 순서로 채운다.
+//
+// 결정적이어야 한다(배너 숫자 = 세션 문항). Map은 삽입 순서를 지키고 그 순서는
+// 정렬된 목록을 훑어 만들어지므로, 과목 순회 순서 = "그 과목 최고 점수" 순이다.
+// 자리가 모자라면 위험한 과목부터 최소 몫을 받는다.
+function takeWithSubjectFloor<T extends { subjectId: string | null }>(
+  sorted: T[],
+  cap: number,
+  minPerSubject: number,
+): T[] {
+  if (cap <= 0 || sorted.length === 0) return [];
+  if (sorted.length <= cap) return sorted;
+
+  const groups = new Map<string, T[]>();
+  for (const it of sorted) {
+    const key = it.subjectId ?? "";
+    const list = groups.get(key) ?? [];
+    list.push(it);
+    groups.set(key, list);
+  }
+  // 과목이 하나면 예전과 완전히 같다(순수 점수순).
+  if (groups.size <= 1) return sorted.slice(0, cap);
+
+  // 과목 수가 많아 최소 몫을 다 못 주면 몫을 줄인다. 그래도 1은 보장한다.
+  const floor = Math.max(1, Math.min(minPerSubject, Math.floor(cap / groups.size)));
+
+  const picked: T[] = [];
+  const chosen = new Set<T>();
+  for (let i = 0; i < floor && picked.length < cap; i++) {
+    for (const list of groups.values()) {
+      if (picked.length >= cap) break;
+      const next = list[i];
+      if (!next) continue;
+      picked.push(next);
+      chosen.add(next);
+    }
+  }
+
+  for (const it of sorted) {
+    if (picked.length >= cap) break;
+    if (!chosen.has(it)) picked.push(it);
+  }
+  return picked;
+}
+
 // 뽑힌 문항을 과목이 번갈아 나오도록 재배열한다. 과목별 묶음에서 한 개씩 돌아가며
 // 꺼내되, 큐에 많이 든 과목부터 시작해 한 과목이 뒤쪽에 몰리지 않게 한다.
 function interleaveBySubject(items: DueCandidate[]): DueCandidate[] {
@@ -164,13 +229,20 @@ export function buildDueQueue(
 
   const nowIso = now.toISOString();
   const due = candidates.filter((c) => c.dueAt <= nowIso);
-  const picked = [...due].sort((a, b) => byPriority(a, b, now)).slice(0, total);
+  const picked = takeWithSubjectFloor(
+    [...due].sort((a, b) => byPriority(a, b, now)),
+    total,
+    subjectFloorForLimit(total),
+  );
 
   // 신규 몫은 복습으로 채우고 남은 자리 안에서만 쓴다. 복습이 상한을 다 먹은 날은
   // 새 문항이 하나도 안 들어온다 — 밀린 걸 먼저 소화하는 게 맞다.
   const room = Math.min(newLimit, total - picked.length);
   if (room > 0 && pending.length > 0) {
-    for (const p of [...pending].sort(byPendingPriority).slice(0, room)) {
+    // 신규는 과목을 완전히 번갈아 태운다(최소 몫 = 자리 전부). 승격 순서가 "자주
+    // 틀린 것 먼저"인데 1회독 중에는 전부 wrong_count 1로 동점이라, 그대로 두면
+    // 가장 오래전에 푼 시험지부터 순서대로 = 한 과목이 신규 몫을 통째로 먹는다.
+    for (const p of takeWithSubjectFloor([...pending].sort(byPendingPriority), room, room)) {
       picked.push({
         paperId: p.paperId,
         questionNumber: p.questionNumber,

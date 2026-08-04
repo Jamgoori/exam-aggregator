@@ -18,15 +18,23 @@ export const SRS_INITIAL: SrsState = {
 };
 
 export const SRS_MIN_EASE = 1.3;
-export const SRS_MAX_EASE = 2.8;
+// 상한 = 초기값. 정답으로는 기본값보다 후해지지 않고, 무너져 깎인 ease의 회복
+// 전용으로만 오른다(근거는 core 쪽 주석).
+export const SRS_MAX_EASE = 2.5;
 export const SRS_EASE_PENALTY = 0.2;
-export const SRS_EASE_BONUS = 0.1;
+export const SRS_EASE_BONUS = 0.05;
 export const SRS_MAX_INTERVAL_DAYS = 180;
 export const SRS_FIRST_INTERVAL_DAYS = 1;
 export const SRS_SECOND_INTERVAL_DAYS = 3;
 export const SRS_RELEARN_DELAY_HOURS = 3;
 export const SRS_LEECH_THRESHOLD = 8;
 export const SRS_LEECH_REPEAT = SRS_LEECH_THRESHOLD / 2;
+// 예정일의 절반도 안 지나서 틀린 것은 "조기 실패" — 간격 반감만 하고 lapse를 세지
+// 않는다. 회독·섞어풀기가 스케줄과 무관하게 같은 문항을 끌어오기 때문이다.
+export const SRS_EARLY_LAPSE_RATIO = 0.5;
+export const SRS_EARLY_LAPSE_FACTOR = 0.5;
+export const SRS_FUZZ_MIN_DAYS = 4;
+export const SRS_FUZZ_RATIO = 0.1;
 
 // leech(상습범) 판정 — 기준을 넘은 "그 순간"에만 true. 근거는 core 쪽 주석 참고.
 export function isLeechTrigger(lapses: number): boolean {
@@ -75,13 +83,48 @@ export function srsGuessed(prev: SrsState, now: Date): SrsResult {
   return { state: prev, dueAt: srsRelearnDueAt(now) };
 }
 
+// 예정일까지 얼마나 왔는지(0~1). 1이면 예정일이 됐거나 지났다.
+function dueProgress(prev: SrsState, now: Date, dueAt?: Date | null): number {
+  if (!dueAt || prev.intervalDays <= 0) return 1;
+  const remaining = srsDayIndex(dueAt) - srsDayIndex(now);
+  if (remaining <= 0) return 1;
+  return Math.max(0, (prev.intervalDays - remaining) / prev.intervalDays);
+}
+
+// 배정한 간격 중 실제로 버틴 비율(0~1). 62일 뒤로 잡아둔 문항을 5일 만에 맞혔다면
+// 그건 5일치 기억이지 62일치 기억이 아니다.
+function retainedProgress(
+  prev: SrsState,
+  now: Date,
+  lastGradedAt?: Date | null,
+): number {
+  if (!lastGradedAt || prev.intervalDays <= 0) return 1;
+  const elapsed = srsDayIndex(now) - srsDayIndex(lastGradedAt);
+  return Math.max(0, Math.min(1, elapsed / prev.intervalDays));
+}
+
+// 간격 흔들기. rand 가 없으면 그대로 둔다(기본은 결정적).
+export function fuzzInterval(days: number, rand?: () => number): number {
+  if (!rand || days < SRS_FUZZ_MIN_DAYS) return days;
+  const span = Math.max(1, Math.round(days * SRS_FUZZ_RATIO));
+  const delta = Math.round((rand() * 2 - 1) * span);
+  return Math.min(
+    SRS_MAX_INTERVAL_DAYS,
+    Math.max(SRS_FUZZ_MIN_DAYS, days + delta),
+  );
+}
+
+export type NextSrsOptions = { dueAt?: Date | null; fuzz?: () => number };
+
 // lastGradedAt 을 주면 "하루 1회만 반영" 규칙이 걸린다(같은 날 다시 맞혀도 간격을
-// 벌리지 않음). 틀린 것은 언제나 반영. 근거는 core 쪽 주석 참고.
+// 벌리지 않음). 틀린 것은 언제나 반영. opts.dueAt 을 주면 예정일 전에 끌려 나온
+// 채점(회독·섞어풀기)을 구분해 완화한다. 근거는 core 쪽 주석 참고.
 export function nextSrs(
   prev: SrsState,
   isCorrect: boolean,
   now: Date,
   lastGradedAt?: Date | null,
+  opts: NextSrsOptions = {},
 ): SrsResult {
   // reps 0(재확인 중)은 붙잡지 않는다 — 그날 안에 다시 만나는 장치가 죽는다.
   if (
@@ -93,6 +136,27 @@ export function nextSrs(
 
   if (!isCorrect) {
     const first = isFirstEntry(prev);
+
+    // 예정일 전에 끌려 나와 틀린 것은 반감만 하고 lapse·leech 를 진행하지 않는다.
+    if (
+      !first && prev.intervalDays >= 2 &&
+      dueProgress(prev, now, opts.dueAt) < SRS_EARLY_LAPSE_RATIO
+    ) {
+      return {
+        state: {
+          intervalDays: Math.max(
+            SRS_FIRST_INTERVAL_DAYS,
+            Math.round(prev.intervalDays * SRS_EARLY_LAPSE_FACTOR),
+          ),
+          ease: clampEase(prev.ease - SRS_EASE_PENALTY / 2),
+          // reps 유지 — 지우면 다음 정답이 1일로 되돌아가 반감이 무의미해진다.
+          reps: prev.reps,
+          lapses: prev.lapses,
+        },
+        dueAt: srsRelearnDueAt(now),
+      };
+    }
+
     const lapses = first ? 0 : prev.lapses + 1;
     return {
       state: {
@@ -107,14 +171,24 @@ export function nextSrs(
     };
   }
 
+  // 실제로 버틴 만큼만 간격을 벌린다(비율 1이면 예전과 같은 × ease).
+  const progress = Math.min(
+    dueProgress(prev, now, opts.dueAt),
+    retainedProgress(prev, now, lastGradedAt),
+  );
+  const growth = 1 + (prev.ease - 1) * progress;
+
   const reps = prev.reps + 1;
   const intervalDays = reps === 1
     ? SRS_FIRST_INTERVAL_DAYS
     : reps === 2
     ? SRS_SECOND_INTERVAL_DAYS
-    : Math.min(
-      SRS_MAX_INTERVAL_DAYS,
-      Math.max(1, Math.round(prev.intervalDays * prev.ease)),
+    : fuzzInterval(
+      Math.min(
+        SRS_MAX_INTERVAL_DAYS,
+        Math.max(1, Math.round(prev.intervalDays * growth)),
+      ),
+      opts.fuzz,
     );
 
   return {

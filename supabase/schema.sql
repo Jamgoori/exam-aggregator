@@ -1283,6 +1283,54 @@ set
   )
 where srs_due_at is null and wrong_count > 0;
 
+-- ── 복습 이력(append-only) ──────────────────────────────────────────────────
+-- 채점 한 번당 한 행. user_question_status 는 "지금 상태"만 들고 있어서, 배정한
+-- 간격에서 실제로 몇 %가 맞았는지를 아무도 셀 수 없었다. 그러면 ease 2.5도,
+-- 1·3일 학습 단계도, 연체 점수 상한 14일도 맞는지 확인할 방법이 없다 — 간격 반복은
+-- 상수를 실측으로 조정해야 쓸 만해지는 알고리즘이라 그 측정 축이 없으면 영원히
+-- 추측으로 남는다. 지금부터 안 쌓으면 반년 뒤에도 못 한다.
+--
+-- 조회는 "간격 구간별 정답률"이 기본이라 prev_interval_days 를 함께 박아 둔다
+-- (조인 없이 group by 가 되게). elapsed_days 는 예정일과 실제 응답 시점이 어긋난
+-- 경우(회독·섞어풀기·밀린 복습 정리)를 걸러내는 축이다.
+--
+-- 스케줄이 있는 문항(srs_due_at is not null)의 채점만 남긴다. 대기 풀 오답은 아직
+-- 복습이 아니라서 유지율 통계에 섞이면 안 된다.
+create table if not exists srs_reviews (
+  id bigint generated always as identity primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  question_number int not null,
+  reviewed_at timestamptz not null default now(),
+  is_correct boolean not null,
+  -- 'cbt'(문제지 응시) | 'review'(섞어풀기·복습 세션). 예정일 밖 채점이 어디서
+  -- 얼마나 들어오는지 보는 축이다.
+  source text not null default 'cbt',
+  -- 채점 직전 상태 = 이 복습이 검증한 대상.
+  prev_interval_days int not null,
+  prev_ease real not null,
+  prev_reps int not null,
+  prev_lapses int not null,
+  -- 직전 채점 이후 실제 경과일. 예정일에 제때 봤다면 prev_interval_days 와 같다.
+  elapsed_days int,
+  -- 채점 후 새로 배정된 간격.
+  next_interval_days int not null
+);
+
+create index if not exists srs_reviews_user_idx on srs_reviews(user_id, reviewed_at);
+-- 유지율 집계용("간격 N일 구간의 정답률"). 사용자 무관 전체 통계가 기본 쓰임이다.
+create index if not exists srs_reviews_interval_idx on srs_reviews(prev_interval_days);
+
+alter table srs_reviews enable row level security;
+
+drop policy if exists "select own srs reviews" on srs_reviews;
+create policy "select own srs reviews" on srs_reviews
+  for select to authenticated using (auth.uid() = user_id);
+
+-- 쓰기 정책은 의도적으로 없다: user_question_status 와 같은 이유다. 이 로그로
+-- 알고리즘 상수를 조정할 거라, 클라이언트가 행을 넣을 수 있으면 그 근거가 오염된다.
+drop policy if exists "insert own srs reviews" on srs_reviews;
+
 -- ── 복습 설정(과목 보류) ────────────────────────────────────────────────────
 -- 복습 큐에서 특정 과목을 잠시 빼두는 설정. "지금은 국어만 판다" 같은 시기에
 -- 다른 과목이 매일 큐에 섞여 들어오면 복습 자체를 안 하게 되기 때문이다.

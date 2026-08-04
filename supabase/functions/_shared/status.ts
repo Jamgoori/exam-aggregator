@@ -5,7 +5,7 @@
 // 같은 채점으로 간격 반복(SRS) 스케줄도 갱신한다. 복습 큐는 오답에서만 출발하므로
 // 한 번도 틀린 적 없는 문항은 srs_due_at 을 null 로 둔다(큐에 안 들어옴).
 // deno-lint-ignore-file no-explicit-any
-import { nextSrs, SRS_INITIAL, srsStateFromRow } from "./srs.ts";
+import { nextSrs, srsDayIndex, SRS_INITIAL, srsStateFromRow } from "./srs.ts";
 import { startTrialIfEligible } from "./membership.ts";
 
 type StatusRow = {
@@ -46,6 +46,10 @@ export async function recordQuestionResults(
 
   const at = new Date();
   const now = at.toISOString();
+
+  // 복습 이력. 스케줄이 있는 문항의 채점만 담는다(대기 풀 오답은 아직 복습이 아니다).
+  const reviewLog: Record<string, unknown>[] = [];
+
   const rows = results.map((r) => {
     const before = prior.get(r.question_number);
     const wrongCount = (before?.wrong_count ?? 0) + (r.is_correct ? 0 : 1);
@@ -53,14 +57,39 @@ export async function recordQuestionResults(
     // 스케줄은 이미 SRS 에 올라탄 문항만 굴린다. 새 오답은 대기 풀(srs_due_at =
     // null)에 남고, 복습 세션 시작 시 하루 신규 몫만큼만 승격된다. 근거는 웹
     // question-status.ts 주석 참고.
+    //
+    // srs_due_at 을 함께 넘겨 "예정된 복습"과 "회독·섞어풀기가 끌어온 조기 채점"을
+    // 구분한다. 안 그러면 회독할수록 스케줄이 망가진다.
     const srs = before?.srs_due_at != null
       ? nextSrs(
         srsStateFromRow(before),
         r.is_correct,
         at,
         before.last_answered_at ? new Date(before.last_answered_at) : null,
+        { dueAt: new Date(before.srs_due_at), fuzz: Math.random },
       )
       : null;
+
+    // 이 채점이 무엇을 검증했는지 남긴다(간격 구간별 실제 유지율 측정용).
+    if (srs && before) {
+      const prevState = srsStateFromRow(before);
+      reviewLog.push({
+        user_id: userId,
+        paper_id: paperId,
+        question_number: r.question_number,
+        reviewed_at: now,
+        is_correct: r.is_correct,
+        source,
+        prev_interval_days: prevState.intervalDays,
+        prev_ease: prevState.ease,
+        prev_reps: prevState.reps,
+        prev_lapses: prevState.lapses,
+        elapsed_days: before.last_answered_at
+          ? srsDayIndex(at) - srsDayIndex(new Date(before.last_answered_at))
+          : null,
+        next_interval_days: srs.state.intervalDays,
+      });
+    }
 
     // leech 판정에 걸리면 접는다(srs_suspended_at). 스케줄은 지우지 않고, 이미
     // 접힌 문항은 그 값을 유지한다(되살리기는 수동).
@@ -102,6 +131,15 @@ export async function recordQuestionResults(
   await admin
     .from("user_question_status")
     .upsert(rows, { onConflict: "user_id,paper_id,question_number" });
+
+  // 이력은 부가 기록이라 실패해도 조용히 넘긴다(마이그레이션 전이면 테이블이 없다).
+  if (reviewLog.length > 0) {
+    try {
+      await admin.from("srs_reviews").insert(reviewLog);
+    } catch {
+      // 무시
+    }
+  }
 
   // 체험은 첫 CBT 채점에 켠다(가입일 기준이 아니라). 섞어풀기 채점은 이미 오답이
   // 있다는 뜻이라 시작점으로 삼지 않는다.

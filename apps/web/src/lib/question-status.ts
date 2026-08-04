@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { nextSrs, srsStateFromRow, SRS_INITIAL } from "@gongmoa/core";
+import { nextSrs, srsDayIndex, srsStateFromRow, SRS_INITIAL } from "@gongmoa/core";
 import { startTrialIfEligible } from "@/lib/membership";
 
 export type QuestionResultInput = {
@@ -70,6 +70,10 @@ export async function recordQuestionResults(
 
   const at = new Date();
   const now = at.toISOString();
+
+  // 복습 이력. 스케줄이 있는 문항의 채점만 담는다(대기 풀 오답은 아직 복습이 아니다).
+  const reviewLog: Record<string, unknown>[] = [];
+
   const rows = results.map((r) => {
     const before = prior.get(r.question_number);
     const wrongCount = (before?.wrong_count ?? 0) + (r.is_correct ? 0 : 1);
@@ -79,6 +83,12 @@ export async function recordQuestionResults(
     // (review-queue.ts). 여기서 태우면 하루 80개씩 틀리는 1회독 사용자의 큐가
     // 유입 속도대로 불어나 손댈 수 없게 된다. 대기 문항을 섞어풀기로 풀어도
     // 마찬가지 — 세션 한 번으로 신규 몫이 무력화되면 안 된다.
+    //
+    // 저장된 예약 시각(srs_due_at)을 함께 넘긴다. 이 서비스의 채점은 복습 세션에서만
+    // 일어나지 않는다 — 회독(문제지 통째 재응시)과 섞어풀기가 스케줄과 무관하게 같은
+    // 문항을 다시 채점한다. 그걸 예정된 복습과 똑같이 처리하면 간격 62일짜리가 5일
+    // 만에 맞혔다고 174일로 뛰거나, 5일 만에 틀렸다고 1일로 리셋되고 leech까지
+    // 진행된다. 판단은 srs.ts가 하고 여기는 재료만 준다.
     const srs =
       before?.srs_due_at != null
         ? nextSrs(
@@ -86,6 +96,7 @@ export async function recordQuestionResults(
             r.is_correct,
             at,
             before.last_answered_at ? new Date(before.last_answered_at) : null,
+            { dueAt: new Date(before.srs_due_at), fuzz: Math.random },
           )
         : null;
 
@@ -99,6 +110,29 @@ export async function recordQuestionResults(
     // 모든 행이 같은 키를 갖게 하는 게 중요하다. PostgREST는 배열 upsert에서 키가
     // 다른 객체가 섞이면 요청 전체를 거절한다 — 한 문항이 leech에 걸렸다는 이유로
     // 그 응시의 상태 갱신이 통째로 날아가면 안 된다.
+    // 이 채점이 무엇을 검증했는지 남긴다. 상태만 덮어쓰면 "간격 8일에서 실제
+    // 정답률이 몇 %였나"를 영영 셀 수 없고, 그러면 ease·학습 단계·점수 상한이
+    // 맞는 값인지 확인할 방법이 없다.
+    if (srs && before) {
+      const prevState = srsStateFromRow(before);
+      reviewLog.push({
+        user_id: userId,
+        paper_id: paperId,
+        question_number: r.question_number,
+        reviewed_at: now,
+        is_correct: r.is_correct,
+        source,
+        prev_interval_days: prevState.intervalDays,
+        prev_ease: prevState.ease,
+        prev_reps: prevState.reps,
+        prev_lapses: prevState.lapses,
+        elapsed_days: before.last_answered_at
+          ? srsDayIndex(at) - srsDayIndex(new Date(before.last_answered_at))
+          : null,
+        next_interval_days: srs.state.intervalDays,
+      });
+    }
+
     const suspendedAt = srs?.leech ? now : (before?.srs_suspended_at ?? null);
     const schedule = srs
       ? {
@@ -134,6 +168,16 @@ export async function recordQuestionResults(
   await admin
     .from("user_question_status")
     .upsert(rows, { onConflict: "user_id,paper_id,question_number" });
+
+  // 이력은 순수 부가 기록이라 실패해도 조용히 넘긴다(마이그레이션 전이면 테이블이
+  // 없다). 스케줄 갱신이 이미 끝난 뒤라 여기서 던져도 얻을 게 없다.
+  if (reviewLog.length > 0) {
+    try {
+      await admin.from("srs_reviews").insert(reviewLog);
+    } catch {
+      // 무시
+    }
+  }
 
   // 체험은 첫 CBT 채점에 켠다(가입일 기준이 아니라). 섞어풀기 채점은 이미 오답이
   // 있다는 뜻이라 시작점으로 삼지 않는다.
