@@ -5,6 +5,7 @@ import {
   normalizeDailyLimit,
   spreadResumeDueDates,
   DAILY_LIMIT_OPTIONS,
+  type StudyPhase,
 } from "@gongmoa/core";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -26,6 +27,11 @@ export type ReviewPrefs = {
 
 // 큐 편성이 매번 부르는 조회라 한 번에 다 읽는다(설정 두 개를 따로 읽으면 페이지당
 // 왕복이 하나 더 는다).
+//
+// 여기에 study_phase를 끼워 넣지 않는다. PostgREST는 없는 컬럼을 고르면 쿼리
+// 전체를 거절하는데, 이 함수는 error를 삼키고 기본값을 돌려주므로 마이그레이션
+// 적용 전에는 기존 사용자의 과목 보류와 하루 상한이 조용히 초기화된 것처럼
+// 보이게 된다. 국면은 없어도 되는 파생값이라 따로 읽는다(getStoredStudyPhase).
 export async function getReviewPrefs(
   supabase: Supabase,
   userId: string,
@@ -41,6 +47,40 @@ export async function getReviewPrefs(
     ),
     dailyLimit: normalizeDailyLimit(data?.daily_limit as number | null | undefined),
   };
+}
+
+// 직전에 판정된 학습 국면(히스테리시스의 입력). 마이그레이션 전이거나 값이
+// 이상하면 null — 첫 판정으로 처리되고 다음 저장에서 채워진다.
+export async function getStoredStudyPhase(
+  supabase: Supabase,
+  userId: string,
+): Promise<StudyPhase | null> {
+  const { data } = await supabase
+    .from("review_preferences")
+    .select("study_phase")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const phase = data?.study_phase as string | null | undefined;
+  return phase === "expanding" || phase === "settling" ? phase : null;
+}
+
+// 국면이 바뀐 순간에만 부른다(읽을 때마다 쓰지 않는다). 파생값이라 실패해도
+// 화면은 계산된 국면 그대로 그린다 — 다음 방문에서 다시 시도된다.
+export async function saveStudyPhase(
+  supabase: Supabase,
+  userId: string,
+  phase: StudyPhase,
+  now: Date = new Date(),
+): Promise<void> {
+  await supabase.from("review_preferences").upsert(
+    {
+      user_id: userId,
+      study_phase: phase,
+      study_phase_at: now.toISOString(),
+      updated_at: now.toISOString(),
+    },
+    { onConflict: "user_id" },
+  );
 }
 
 export async function getPausedSubjectIds(

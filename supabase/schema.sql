@@ -1353,6 +1353,28 @@ create table if not exists review_preferences (
 -- 신규 몫은 이 값에 비례한다(20 → 10, 40 → 20).
 alter table review_preferences add column if not exists daily_limit int not null default 20;
 
+-- 학습 국면(확장기/정착기). 유입(최근 7일 새 오답) 대비 처리량(daily_limit) 비율로
+-- 판정하고, 헤드라인 숫자와 오늘 카드 CTA를 가른다 — 확장기 사용자에게 "남은 오답
+-- 470"은 8개월치 부채 통지서라 대신 올라가는 숫자(극복 누계·문제지 진도)를 보여준다.
+-- 규칙 정본은 packages/core/src/study-phase.ts.
+--
+-- 저장하는 이유는 히스테리시스다. 진입(2.5 초과)과 이탈(1.5 미만) 임계가 달라서
+-- 직전 국면을 모르면 사이 구간 사용자의 화면이 날마다 뒤집힌다. 쓰기는 국면이
+-- 바뀐 순간에만 한다. study_phase_at은 전환 안내를 한 번만 띄우기 위한 시각.
+alter table review_preferences add column if not exists study_phase text;
+alter table review_preferences add column if not exists study_phase_at timestamptz;
+
+-- 모드가 셋이 되는 순간 사용자도 우리도 어느 모드인지 헷갈린다 — 이원화의 핵심
+-- 제약이라 스키마에서 막는다.
+do $$
+begin
+  alter table review_preferences
+    add constraint review_preferences_study_phase_check
+    check (study_phase is null or study_phase in ('expanding', 'settling'));
+exception
+  when duplicate_object then null;
+end $$;
+
 alter table review_preferences enable row level security;
 
 -- 이 테이블은 표시 설정만 담는다(어떤 과목을 큐에서 빼둘지). 정답·채점·멤버십과
