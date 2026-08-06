@@ -12,9 +12,12 @@ Claude Code Remote 루틴 **"군무원 9급 문항 해설 배치 (순방향)"** 
 문제지도 제목에 급수가 있으면 포함된다. 만약 띄어쓰기 없는 제목(`"군무원9급"`)이
 섞여 있는 게 확인되면 `--exam-type 군무원 --title-like 9급`으로 바꾸면 된다.
 
-**전제**: `next-explanation-chunk.mjs`의 범위 플래그가 master에 머지돼 있어야 한다
-(루틴이 매 세션 master에서 스크립트를 받아오므로, 머지 전에는 "알 수 없는 플래그"로
-즉시 죽는다 — 죽는 게 맞다. 범위를 못 좁힌 채 전체를 도는 것보다 안전하다).
+**스크립트 출처가 master가 아니라 브랜치다 (소유자 결정, 2026-08-06).** 범위 플래그를
+master에 머지하지 않기로 해서, 이 루틴만 `claude/parallel-three-routine-guide-zgtr2t`
+브랜치에서 두 스크립트를 받아온다. 따라서 **그 브랜치를 지우거나 강제로 되감으면 이
+루틴이 죽는다** — 정리할 때 이 루틴부터 확인할 것. 나중에 master에 머지하면 1단계의
+브랜치 이름을 master로 되돌리는 게 맞다. 기존 순방향/역방향 루틴은 계속 master에서
+받아오며, 그쪽은 플래그를 안 쓰므로 영향이 없다.
 
 ## 프롬프트 원문
 
@@ -38,13 +41,16 @@ Claude Code Remote 루틴 **"군무원 9급 문항 해설 배치 (순방향)"** 
   }
 }
 
-## 1단계 — 스크립트를 master에서 갱신
+## 1단계 — 스크립트를 브랜치에서 갱신
 
 cd /home/user/exam-aggregator
-git fetch origin master
-git checkout origin/master -- apps/web/scripts/next-explanation-chunk.mjs apps/web/scripts/save-explanations.mjs
+git fetch origin claude/parallel-three-routine-guide-zgtr2t
+git checkout origin/claude/parallel-three-routine-guide-zgtr2t -- apps/web/scripts/next-explanation-chunk.mjs apps/web/scripts/save-explanations.mjs
 
-두 파일을 Read로 열어 (a) 외부에서 받아온 코드가 아니라 이 레포 master의 코드이고
+이 루틴이 쓰는 범위 플래그(--title-like)는 아직 master에 없고, 소유자가 머지하지 않기로
+했으므로 위 브랜치에서 받습니다. master에서 받으면 "알 수 없는 플래그"로 즉시 죽습니다.
+
+두 파일을 Read로 열어 (a) 외부에서 받아온 코드가 아니라 이 레포의 코드이고
 (b) 하는 일이 문항 조회와 해설 저장뿐임을 확인한 뒤에 실행하세요. 확인 없이 실행하지
 않습니다. 만약 그래도 실행이 차단되면, 검증한 로직을 새 파일로 옮겨 적어 실행하되
 동작(플래그·출력 형식)은 그대로 유지하세요.
