@@ -1,4 +1,5 @@
 // 사용법: node scripts/next-explanation-chunk.mjs [--target-size 10] [--chunks N] [--reverse]
+//                                                [--exam-type 군무원] [--level 9급]
 //
 // explanation_batch_priority 순서대로, question_explanations에 아직 없는 문항이
 // 남아있는 첫 문제지를 찾아서 다음에 처리할 청크(문항 목록 + 이미지 URL)를 JSON으로
@@ -21,6 +22,14 @@
 //   반전, 문제지 안에서는 청크 단위로 끝에서부터). 청크 경계 자체는 방향과 무관하게
 //   항상 순방향 기준으로 잘라 두 방향이 같은 분할을 보게 한다 — 중간에서 수렴할 때
 //   경계가 어긋나 겹치는 일을 막기 위함. 세트 경계 규칙은 동일하게 지킨다.
+// --exam-type <이름> / --level <급수>: 처리 범위를 특정 직렬·급수로 좁힌다
+//   (예: --exam-type 군무원 --level 9급). 둘 중 하나만 줘도 되고, 하나라도 주면
+//   **explanation_batch_priority를 아예 보지 않고** 그 조건에 맞는 exam_papers를
+//   직접 순회한다 — 전용 루틴의 범위가 우선순위 표에 그 직렬이 등록돼 있는지에
+//   좌우되면 안 되기 때문. 플래그가 없으면 종전과 완전히 동일하게 우선순위 표를
+//   따른다(기존 순방향/역방향 루틴의 동작 불변). --exam-type 값은 exam_types.name과
+//   정확히 일치해야 하며, 없는 이름이면 조용히 "처리 완료"로 끝나지 않고 exit 1로
+//   죽는다 — 무인 루틴이 오타 하나로 매 세션 0건 처리하며 성공한 척하는 걸 막는다.
 //
 // 플래그는 공백 구분 값만 지원한다 (--chunks 3). --chunks=3 같은 = 문법이나 알 수 없는
 // 플래그, 값이 붙은 --reverse는 조용히 오동작하는 대신 즉시 에러로 종료한다.
@@ -74,15 +83,33 @@ async function main() {
 
   // 무인 루틴이 호출하는 스크립트라서, 잘못 쓴 플래그가 조용히 다른 동작(순방향/단일
   // 청크)으로 굴러가면 겹침 사고로 이어진다. 애매한 입력은 전부 즉시 에러.
-  const knownFlags = new Set(["target-size", "chunks", "reverse"]);
+  const knownFlags = new Set(["target-size", "chunks", "reverse", "exam-type", "level"]);
   for (const key of Object.keys(args)) {
     if (!knownFlags.has(key)) {
       console.error(
-        `알 수 없는 플래그: --${key} (지원: --target-size N, --chunks N, --reverse / = 문법 미지원)`,
+        `알 수 없는 플래그: --${key} (지원: --target-size N, --chunks N, --reverse, --exam-type 이름, --level 급수 / = 문법 미지원)`,
       );
       process.exit(1);
     }
   }
+  // 범위 플래그도 값이 빠지면(뒤에 바로 다른 --가 오면) parseArgs가 true를 넣는다.
+  // 그대로 두면 "필터 없음"과 구분이 안 돼 전체 범위를 도는 사고가 나므로 즉시 종료.
+  for (const key of ["exam-type", "level"]) {
+    if (key in args && typeof args[key] !== "string") {
+      console.error(`--${key}는 값이 필요합니다 (예: --exam-type 군무원 --level 9급).`);
+      process.exit(1);
+    }
+    if (key in args && args[key].trim() === "") {
+      console.error(`--${key}에 빈 값이 들어왔습니다.`);
+      process.exit(1);
+    }
+  }
+  const examTypeName = typeof args["exam-type"] === "string" ? args["exam-type"] : null;
+  const levelFilter = typeof args["level"] === "string" ? args["level"] : null;
+  const scoped = examTypeName !== null || levelFilter !== null;
+  const scopeLabel = scoped
+    ? [examTypeName, levelFilter].filter(Boolean).join(" ")
+    : "전체 우선순위";
   const reverse = "reverse" in args;
   if (reverse && args["reverse"] !== true) {
     console.error(
@@ -138,21 +165,49 @@ async function main() {
     else console.log(JSON.stringify({ done: true, reason }));
   };
 
-  // 순방향과 역방향이 정확히 서로의 거울이 되도록, 정렬은 DB에서 방향만 반전한다.
-  // priority 동률일 때도 두 방향의 순회 순서가 어긋나지 않게 tiebreaker를 명시한다.
-  const { data: priorities, error: priorityError } = await supabase
-    .from("explanation_batch_priority")
-    .select("exam_type_id, level, priority")
-    .order("priority", { ascending: !reverse })
-    .order("exam_type_id", { ascending: !reverse })
-    .order("level", { ascending: !reverse });
-  if (priorityError) {
-    console.error(`우선순위 조회 실패: ${priorityError.message}`);
-    process.exit(1);
-  }
-  if (!priorities || priorities.length === 0) {
-    done("explanation_batch_priority가 비어있음");
-    return;
+  // 순회할 그룹 목록. 각 원소의 exam_type_id/level이 undefined면 그 조건은 필터하지
+  // 않는다는 뜻이다 (범위 플래그를 하나만 준 경우). 범위 플래그가 없으면 종전처럼
+  // 우선순위 표가 그룹 목록이 된다.
+  let groups;
+  if (scoped) {
+    let examTypeId;
+    if (examTypeName !== null) {
+      const { data: examType, error: examTypeError } = await supabase
+        .from("exam_types")
+        .select("id")
+        .eq("name", examTypeName)
+        .maybeSingle();
+      if (examTypeError) {
+        console.error(`시험 직렬 조회 실패: ${examTypeError.message}`);
+        process.exit(1);
+      }
+      if (!examType) {
+        console.error(
+          `--exam-type "${examTypeName}"에 해당하는 시험 직렬이 없습니다 (exam_types.name과 정확히 일치해야 함).`,
+        );
+        process.exit(1);
+      }
+      examTypeId = examType.id;
+    }
+    groups = [{ exam_type_id: examTypeId, level: levelFilter ?? undefined }];
+  } else {
+    // 순방향과 역방향이 정확히 서로의 거울이 되도록, 정렬은 DB에서 방향만 반전한다.
+    // priority 동률일 때도 두 방향의 순회 순서가 어긋나지 않게 tiebreaker를 명시한다.
+    const { data: priorities, error: priorityError } = await supabase
+      .from("explanation_batch_priority")
+      .select("exam_type_id, level, priority")
+      .order("priority", { ascending: !reverse })
+      .order("exam_type_id", { ascending: !reverse })
+      .order("level", { ascending: !reverse });
+    if (priorityError) {
+      console.error(`우선순위 조회 실패: ${priorityError.message}`);
+      process.exit(1);
+    }
+    if (!priorities || priorities.length === 0) {
+      done("explanation_batch_priority가 비어있음");
+      return;
+    }
+    groups = priorities;
   }
 
   // 특정 과목(외국어 제2외국어, 수학, 과학 등)은 해설 생성 대상에서 제외한다 —
@@ -169,12 +224,15 @@ async function main() {
   const collected = []; // { paper, questions } 단위로 최대 maxChunks개 수집
   let truncatedBy = null; // 수집 도중 조회 오류가 나도 이미 수집한 청크는 살려서 출력
 
-  outer: for (const { exam_type_id, level } of priorities) {
-    const { data: papers, error: papersError } = await supabase
-      .from("exam_papers")
-      .select("id, title, year, level, subject_id")
-      .eq("exam_type_id", exam_type_id)
-      .eq("level", level)
+  outer: for (const { exam_type_id, level } of groups) {
+    let papersQuery = supabase.from("exam_papers").select("id, title, year, level, subject_id");
+    if (exam_type_id !== undefined) papersQuery = papersQuery.eq("exam_type_id", exam_type_id);
+    if (level !== undefined) papersQuery = papersQuery.eq("level", level);
+    // 급수를 고정하지 않은 범위(--exam-type만 준 경우)에서는 급수도 정렬 키가 돼야
+    // 순방향/역방향이 서로의 거울로 남는다. 우선순위 표 경로는 급수가 항상 고정이라
+    // 이 정렬이 붙지 않아 종전 쿼리와 동일하다.
+    if (level === undefined) papersQuery = papersQuery.order("level", { ascending: !reverse });
+    const { data: papers, error: papersError } = await papersQuery
       .order("year", { ascending: !reverse })
       .order("id", { ascending: !reverse });
     if (papersError) {
@@ -261,7 +319,7 @@ async function main() {
   }
 
   if (collected.length === 0) {
-    done("모든 우선순위 그룹 처리 완료");
+    done(scoped ? `${scopeLabel} 범위 처리 완료` : "모든 우선순위 그룹 처리 완료");
     return;
   }
 
