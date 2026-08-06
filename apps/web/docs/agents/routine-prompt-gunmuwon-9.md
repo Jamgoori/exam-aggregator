@@ -7,7 +7,10 @@ Claude Code Remote 루틴 **"군무원 9급 문항 해설 배치 (순방향)"** 
 
 설계 배경(왜 90분인지, 왜 청크 경계가 순방향 고정인지 등)은
 `explanation-batch-routines.md`를 읽을 것. 이 루틴에만 있는 특징은 범위 플래그
-`--exam-type 군무원 --level 9급`뿐이고, 나머지 규칙은 기존 v3 병렬 배치와 같다.
+`--title-like "군무원 9급"`(제목 부분일치)뿐이고, 나머지 규칙은 기존 v3 병렬 배치와
+같다. 제목이 `"2024 군무원 9급 국어"` 형태라 이 한 줄로 잡히고, `level` 컬럼이 빈
+문제지도 제목에 급수가 있으면 포함된다. 만약 띄어쓰기 없는 제목(`"군무원9급"`)이
+섞여 있는 게 확인되면 `--exam-type 군무원 --title-like 9급`으로 바꾸면 된다.
 
 **전제**: `next-explanation-chunk.mjs`의 범위 플래그가 master에 머지돼 있어야 한다
 (루틴이 매 세션 master에서 스크립트를 받아오므로, 머지 전에는 "알 수 없는 플래그"로
@@ -62,7 +65,7 @@ curl -fsSL "$NEXT_PUBLIC_SUPABASE_URL/storage/v1/object/public/exam-papers/_batc
 
 (1) 다음 배치 받기 — 반드시 이 플래그 그대로:
 
-    node apps/web/scripts/next-explanation-chunk.mjs --chunks 3 --exam-type 군무원 --level 9급
+    node apps/web/scripts/next-explanation-chunk.mjs --chunks 3 --title-like "군무원 9급"
 
     출력이 {"done": true, ...} 면 군무원 9급 범위가 끝난 것입니다. 루프를 끝내고
     보고하세요. --reverse 는 이 루틴에서 절대 쓰지 않습니다(순방향 전용).

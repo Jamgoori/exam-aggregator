@@ -22,8 +22,13 @@
 //   반전, 문제지 안에서는 청크 단위로 끝에서부터). 청크 경계 자체는 방향과 무관하게
 //   항상 순방향 기준으로 잘라 두 방향이 같은 분할을 보게 한다 — 중간에서 수렴할 때
 //   경계가 어긋나 겹치는 일을 막기 위함. 세트 경계 규칙은 동일하게 지킨다.
-// --exam-type <이름> / --level <급수>: 처리 범위를 특정 직렬·급수로 좁힌다
-//   (예: --exam-type 군무원 --level 9급). 둘 중 하나만 줘도 되고, 하나라도 주면
+// --exam-type <이름> / --level <급수> / --title-like <문구>: 처리 범위를 좁힌다.
+//   앞 둘은 exam_papers의 exam_type_id·level 컬럼으로, --title-like는 제목
+//   부분일치(대소문자 무시)로 거른다 — 제목이 "2024 군무원 9급 국어" 형태라
+//   `--title-like "군무원 9급"` 한 방으로 지정할 수 있고, level 컬럼이 비어 있는
+//   문제지도 제목에 급수가 있으면 잡힌다(반대로 제목 표기가 다르면 놓친다).
+//   와일드카드는 스크립트가 양옆에 붙이며, 값에 %나 _가 있으면 의도보다 넓게 도는
+//   걸 막으려고 exit 1. 셋을 섞어 쓰면 AND로 걸린다. 하나라도 주면
 //   **explanation_batch_priority를 아예 보지 않고** 그 조건에 맞는 exam_papers를
 //   직접 순회한다 — 전용 루틴의 범위가 우선순위 표에 그 직렬이 등록돼 있는지에
 //   좌우되면 안 되기 때문. 플래그가 없으면 종전과 완전히 동일하게 우선순위 표를
@@ -83,20 +88,20 @@ async function main() {
 
   // 무인 루틴이 호출하는 스크립트라서, 잘못 쓴 플래그가 조용히 다른 동작(순방향/단일
   // 청크)으로 굴러가면 겹침 사고로 이어진다. 애매한 입력은 전부 즉시 에러.
-  const knownFlags = new Set(["target-size", "chunks", "reverse", "exam-type", "level"]);
+  const knownFlags = new Set(["target-size", "chunks", "reverse", "exam-type", "level", "title-like"]);
   for (const key of Object.keys(args)) {
     if (!knownFlags.has(key)) {
       console.error(
-        `알 수 없는 플래그: --${key} (지원: --target-size N, --chunks N, --reverse, --exam-type 이름, --level 급수 / = 문법 미지원)`,
+        `알 수 없는 플래그: --${key} (지원: --target-size N, --chunks N, --reverse, --exam-type 이름, --level 급수, --title-like 문구 / = 문법 미지원)`,
       );
       process.exit(1);
     }
   }
   // 범위 플래그도 값이 빠지면(뒤에 바로 다른 --가 오면) parseArgs가 true를 넣는다.
   // 그대로 두면 "필터 없음"과 구분이 안 돼 전체 범위를 도는 사고가 나므로 즉시 종료.
-  for (const key of ["exam-type", "level"]) {
+  for (const key of ["exam-type", "level", "title-like"]) {
     if (key in args && typeof args[key] !== "string") {
-      console.error(`--${key}는 값이 필요합니다 (예: --exam-type 군무원 --level 9급).`);
+      console.error(`--${key}는 값이 필요합니다 (예: --exam-type 군무원 --level 9급, --title-like "군무원 9급").`);
       process.exit(1);
     }
     if (key in args && args[key].trim() === "") {
@@ -106,9 +111,18 @@ async function main() {
   }
   const examTypeName = typeof args["exam-type"] === "string" ? args["exam-type"] : null;
   const levelFilter = typeof args["level"] === "string" ? args["level"] : null;
-  const scoped = examTypeName !== null || levelFilter !== null;
+  const titleLike = typeof args["title-like"] === "string" ? args["title-like"] : null;
+  // LIKE 와일드카드가 값에 섞이면 의도보다 넓은 범위를 조용히 돈다. 무인 루틴에서는
+  // 그게 곧 사고이므로, 부분일치는 스크립트가 양옆에 %를 붙여서만 만든다.
+  if (titleLike !== null && /[%_]/.test(titleLike)) {
+    console.error(
+      `--title-like 값에 LIKE 와일드카드(% 또는 _)를 넣을 수 없습니다 (받은 값: ${JSON.stringify(titleLike)}). 부분일치는 자동으로 적용됩니다.`,
+    );
+    process.exit(1);
+  }
+  const scoped = examTypeName !== null || levelFilter !== null || titleLike !== null;
   const scopeLabel = scoped
-    ? [examTypeName, levelFilter].filter(Boolean).join(" ")
+    ? [examTypeName, levelFilter, titleLike && `제목~"${titleLike}"`].filter(Boolean).join(" ")
     : "전체 우선순위";
   const reverse = "reverse" in args;
   if (reverse && args["reverse"] !== true) {
@@ -189,7 +203,13 @@ async function main() {
       }
       examTypeId = examType.id;
     }
-    groups = [{ exam_type_id: examTypeId, level: levelFilter ?? undefined }];
+    groups = [
+      {
+        exam_type_id: examTypeId,
+        level: levelFilter ?? undefined,
+        title_like: titleLike ?? undefined,
+      },
+    ];
   } else {
     // 순방향과 역방향이 정확히 서로의 거울이 되도록, 정렬은 DB에서 방향만 반전한다.
     // priority 동률일 때도 두 방향의 순회 순서가 어긋나지 않게 tiebreaker를 명시한다.
@@ -224,14 +244,19 @@ async function main() {
   const collected = []; // { paper, questions } 단위로 최대 maxChunks개 수집
   let truncatedBy = null; // 수집 도중 조회 오류가 나도 이미 수집한 청크는 살려서 출력
 
-  outer: for (const { exam_type_id, level } of groups) {
+  outer: for (const { exam_type_id, level, title_like } of groups) {
     let papersQuery = supabase.from("exam_papers").select("id, title, year, level, subject_id");
     if (exam_type_id !== undefined) papersQuery = papersQuery.eq("exam_type_id", exam_type_id);
     if (level !== undefined) papersQuery = papersQuery.eq("level", level);
+    if (title_like !== undefined) papersQuery = papersQuery.ilike("title", `%${title_like}%`);
     // 급수를 고정하지 않은 범위(--exam-type만 준 경우)에서는 급수도 정렬 키가 돼야
     // 순방향/역방향이 서로의 거울로 남는다. 우선순위 표 경로는 급수가 항상 고정이라
     // 이 정렬이 붙지 않아 종전 쿼리와 동일하다.
-    if (level === undefined) papersQuery = papersQuery.order("level", { ascending: !reverse });
+    // nullsFirst를 방향에 맞춰 명시한다(Postgres 기본값과 같지만, level이 비어 있는
+    // 문제지가 섞이면 순방향/역방향이 서로의 거울이 아니게 되는 걸 기본값에 맡기지 않는다).
+    if (level === undefined) {
+      papersQuery = papersQuery.order("level", { ascending: !reverse, nullsFirst: reverse });
+    }
     const { data: papers, error: papersError } = await papersQuery
       .order("year", { ascending: !reverse })
       .order("id", { ascending: !reverse });
