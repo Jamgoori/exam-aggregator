@@ -33,6 +33,41 @@ Vercel 프로젝트 **Settings → Build & Deployment → Root Directory** 를 *
 
 검증됨: `apps/web` 에서 `npx next build` 성공.
 
+#### 도메인 — `gongmoa.kr` (등록처 yesnic, 2031/08/07 만료)
+
+코드상 정본 주소는 `apps/web/src/lib/site-url.ts` 의 `PRODUCTION_URL` 하나다.
+Vercel 위(`process.env.VERCEL`)에서는 프리뷰 배포까지 이 값을 canonical·sitemap·
+robots·OG 이미지에 쓴다 — 프리뷰 주소가 검색에 중복 색인되지 않게 하려는 것.
+도메인을 바꿀 일이 생기면 이 상수를 고치거나, 임시로는 `NEXT_PUBLIC_SITE_URL`
+환경변수로 덮어쓴다.
+
+연결 절차(코드 밖 작업, 순서대로):
+
+1. **Vercel** — 프로젝트 Settings → Domains 에 `gongmoa.kr` 과 `www.gongmoa.kr`
+   추가. Vercel 이 화면에 띄우는 DNS 레코드 값(apex 용 A 레코드 IP, www 용 CNAME
+   대상)을 그대로 복사한다. **문서에 적힌 옛 IP 를 외워 쓰지 말 것** — Vercel 이
+   바꿔 왔다.
+2. **yesnic DNS** — 두 방법 중 하나.
+   - 레코드만 추가: yesnic 도메인 관리(네임서버는 `dns1~4.yesnic.com` 그대로) 의
+     DNS 레코드에 1번에서 복사한 A(호스트 `@`)·CNAME(호스트 `www`) 을 넣는다.
+   - 또는 네임서버 자체를 Vercel 것으로 변경(`네임서버 변경` 메뉴). DNS 를 Vercel
+     한 곳에서 관리하게 되지만 메일·다른 레코드도 같이 옮겨야 한다.
+   전파는 보통 수십 분, `.kr` 은 최대 24시간. `dig gongmoa.kr` 로 확인.
+3. **Vercel** — 두 도메인 중 `gongmoa.kr` 을 Primary 로, `www` 는 redirect 로 둔다
+   (둘 다 200 을 주면 같은 문서가 두 주소로 색인된다). HTTPS 인증서는 자동 발급.
+4. **Supabase** — Authentication → URL Configuration 의 Site URL 을
+   `https://gongmoa.kr`, Redirect URLs 에 `https://gongmoa.kr/**` 추가. 안 하면
+   새 도메인에서 소셜 로그인이 끝에서 튕긴다(로그인 콜백은 요청 호스트를 그대로
+   쓴다 — `apps/web/src/app/actions.ts` 의 `getOrigin`).
+5. **소셜 로그인 콘솔** — Google Cloud OAuth 클라이언트의 승인된 자바스크립트
+   원본, Kakao 앱의 사이트 도메인에 `https://gongmoa.kr` 추가.
+6. **Search Console / GA** — 새 속성(도메인 속성)으로 `gongmoa.kr` 등록 후
+   `https://gongmoa.kr/sitemap.xml` 제출. 예전 `*.vercel.app` 주소가 이미 색인돼
+   있으면 vercel.app 은 redirect 로 남겨 두면 정리된다.
+7. **모바일** — `apps/mobile/.env` 와 GitHub Actions 시크릿의
+   `EXPO_PUBLIC_WEB_URL` 을 `https://gongmoa.kr` 로. 앱의 약관/개인정보처리방침이
+   이 주소를 연다.
+
 #### 루트 `optionalDependencies` 는 지우지 말 것
 
 루트 `package.json` 의 `optionalDependencies`(lightningcss / @tailwindcss/oxide /
