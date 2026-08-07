@@ -42,7 +42,7 @@ EXPO_PUBLIC_SUPABASE_URL=<결과 A>
 EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<결과 B>
 EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=<3단계 결과>
 EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=<3단계 결과, iOS용>
-EXPO_PUBLIC_WEB_URL=<웹 배포 도메인, 예: https://gongmoa.com>
+EXPO_PUBLIC_WEB_URL=https://gongmoa.kr
 ```
 
 > `EXPO_PUBLIC_WEB_URL` 은 앱의 "이용약관 / 개인정보처리방침"이 여는 주소다(웹의
@@ -148,9 +148,9 @@ eas update --branch production --message "설명"   # OTA 배포 (스토어 심�
   `version` 을 올리고 스토어 빌드를 새로 올려야 한다(OTA 로는 네이티브가 안 바뀐다).
 
 **웹 주소로 앱 열기(딥링크)는 도메인 확인이 필요하다.** 지금은 `gongmoa://` 커스텀 스킴만
-동작한다. `https://<도메인>/papers/...` 로 앱이 열리게 하려면:
+동작한다. `https://gongmoa.kr/papers/...` 로 앱이 열리게 하려면:
 
-- iOS: `app.json` 의 `ios.associatedDomains` 에 `applinks:<도메인>` 추가 +
+- iOS: `app.json` 의 `ios.associatedDomains` 에 `applinks:gongmoa.kr` 추가 +
   웹 서버에 `/.well-known/apple-app-site-association` 배포
 - Android: `android.intentFilters` 에 `autoVerify` 링크 추가 +
   `/.well-known/assetlinks.json` 배포(서명 인증서 지문 필요)
@@ -192,7 +192,7 @@ GitHub 웹(모바일 브라우저)에서 된다.
    | `EXPO_TOKEN` | expo.dev → Account → Access tokens (**필수**) |
    | `EXPO_PUBLIC_SUPABASE_URL` | Supabase Project URL (**필수**) |
    | `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase anon(publishable) 키 |
-   | `EXPO_PUBLIC_WEB_URL` | 웹 배포 도메인 |
+   | `EXPO_PUBLIC_WEB_URL` | 웹 배포 도메인 (`https://gongmoa.kr`) |
    | `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID` | Google Web 클라이언트 ID |
    | `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` | Google iOS 클라이언트 ID |
 

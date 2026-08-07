@@ -1,0 +1,87 @@
+# 도메인(gongmoa.kr) 연결 상태를 밖에서 실제로 찔러보는 점검이다.
+# DNS·Vercel·인증서 설정은 저장소 밖에서 하는 일이라 코드로 강제할 수 없다 —
+# 대신 "지금 제대로 붙었는지"를 GitHub 웹(폰 브라우저 포함)에서 한 번에 확인한다.
+#
+# Actions → "도메인 점검" → Run workflow.
+name: 도메인 점검
+
+on:
+  workflow_dispatch:
+  # DNS 전파·인증서 만료·설정 되돌아감을 조용히 놓치지 않도록 주 1회도 돈다.
+  schedule:
+    - cron: "0 21 * * 0" # 매주 월요일 06:00 KST
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 점검
+        run: |
+          APEX=https://gongmoa.kr
+          fail=0
+          out=""
+
+          note() { out="${out}$1"$'\n'; }
+          ok()   { note "- ✅ $1"; }
+          bad()  { note "- ❌ $1"; fail=1; }
+
+          # 1. apex 가 200 을 주는가 (인증서가 유효해야 curl 이 통과한다)
+          code=$(curl -sS -o /tmp/home.html -w '%{http_code}' --max-time 20 "$APEX/" || echo 000)
+          if [ "$code" = "200" ]; then
+            ok "apex \`$APEX\` → HTTP 200 (TLS 인증서 유효)"
+          else
+            bad "apex \`$APEX\` → HTTP $code. DNS 가 아직 Vercel 을 안 가리키거나 인증서 발급 전이다."
+          fi
+
+          # 2. www 는 apex 로 넘겨야 한다 (둘 다 200 이면 같은 문서가 두 주소로 색인된다)
+          loc=$(curl -sS -o /dev/null -w '%{redirect_url}' --max-time 20 https://www.gongmoa.kr/ || true)
+          case "$loc" in
+            "$APEX"/*|"$APEX") ok "www → \`$loc\` 리다이렉트" ;;
+            "") bad "www 가 리다이렉트하지 않는다(또는 응답 없음). Vercel Domains 에서 www 를 apex 로 redirect 설정." ;;
+            *)  bad "www 가 \`$loc\` 로 간다 — apex 가 아니다." ;;
+          esac
+
+          # 3. 홈의 canonical 이 새 도메인을 가리키는가 (여기가 틀리면 색인이 갈린다)
+          if grep -qi 'rel="canonical" href="https://gongmoa.kr/"' /tmp/home.html 2>/dev/null; then
+            ok "홈 canonical = \`$APEX/\`"
+          else
+            found=$(grep -oi 'rel="canonical" href="[^"]*"' /tmp/home.html 2>/dev/null | head -1)
+            bad "홈 canonical 이 예상과 다르다: \`${found:-없음}\`"
+          fi
+
+          # 4. robots.txt 의 Host·Sitemap 줄
+          robots=$(curl -sS --max-time 20 "$APEX/robots.txt" || true)
+          if printf '%s' "$robots" | grep -qi "^Host: $APEX"; then
+            ok "robots.txt Host 줄 정상"
+          else
+            bad "robots.txt 의 Host 가 \`$APEX\` 가 아니다."
+          fi
+          if printf '%s' "$robots" | grep -qi "^Sitemap: $APEX/sitemap.xml"; then
+            ok "robots.txt Sitemap 줄 정상"
+          else
+            bad "robots.txt 에 \`$APEX/sitemap.xml\` 이 없다."
+          fi
+
+          # 5. 사이트맵이 열리고 새 도메인 URL 을 담고 있는가
+          code=$(curl -sS -o /tmp/sitemap.xml -w '%{http_code}' --max-time 60 "$APEX/sitemap.xml" || echo 000)
+          # grep -c 는 0건일 때 종료코드 1이라 `|| echo 0` 을 붙이면 출력이 두 줄이 된다.
+          urls=$(grep -o '<loc>https://gongmoa.kr' /tmp/sitemap.xml 2>/dev/null | wc -l)
+          if [ "$code" = "200" ] && [ "$urls" -gt 0 ]; then
+            ok "sitemap.xml → HTTP 200, \`gongmoa.kr\` URL $urls 개"
+          else
+            bad "sitemap.xml → HTTP $code, \`gongmoa.kr\` URL $urls 개"
+          fi
+
+          {
+            echo "## 도메인 점검 — gongmoa.kr"
+            echo ""
+            echo "$out"
+            echo ""
+            if [ "$fail" = "0" ]; then
+              echo "전부 통과. Search Console 에 \`$APEX/sitemap.xml\` 제출까지 끝냈는지만 확인하면 된다."
+            else
+              echo "연결 절차는 루트 \`README.md\` 의 **도메인 — gongmoa.kr** 항목 참고."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$fail"

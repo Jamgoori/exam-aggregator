@@ -8,6 +8,19 @@ const nextConfig: NextConfig = {
   // Suspense 경계 뒤에서 스트리밍한다. 정적 셸을 미리 만들어 첫 표시가 빨라지고,
   // 경계가 빠진 곳은 빌드가 에러로 잡아준다.
   cacheComponents: true,
+  // www 는 정본이 아니다. Vercel 대시보드에서 www.gongmoa.kr 을 redirect 로 잡아두면
+  // 여기까지 오지도 않지만, 대시보드 설정이 빠졌을 때 같은 문서가 두 주소로 200 을
+  // 주며 색인이 갈리는 것을 코드에서도 막아둔다. host 매칭이라 프리뷰·로컬은 무관.
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www.gongmoa.kr" }],
+        destination: "https://gongmoa.kr/:path*",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {

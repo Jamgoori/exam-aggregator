@@ -21,7 +21,8 @@ Next.js + Supabase 기반. 관리자가 연도/시험/과목 라벨을 붙여 PD
      위와 같은 callback 주소를 넣고, 동의항목에서 **카카오계정(이메일)** 을 설정한다
      (이메일 동의가 없으면 계정에 이메일이 비어 저장될 수 있다).
    - Authentication > URL Configuration > Redirect URLs에 사이트 주소(`http://localhost:3000/**`,
-     프로덕션 도메인)를 등록해야 로그인 후 돌아올 수 있다.
+     `https://gongmoa.kr/**`, `https://*.vercel.app/**`)를 등록해야 로그인 후 돌아올 수 있다.
+     Site URL 은 `https://gongmoa.kr` 로 둔다.
    - 대시보드에 이메일 신규 가입 차단 옵션이 있으면 꺼두는 것을 권장 — 앱에는 가입 경로가
      없지만 raw API로 이메일 가입을 시도하는 것까지 서버 수준에서 막힌다 (관리자 로그인은
      sign-in이라 영향 없음).

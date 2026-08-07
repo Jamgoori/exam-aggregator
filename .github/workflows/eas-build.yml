@@ -7,7 +7,7 @@
 #   EXPO_TOKEN                            expo.dev → Account → Access tokens (필수)
 #   EXPO_PUBLIC_SUPABASE_URL              Supabase Project URL
 #   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY  Supabase anon(publishable) 키
-#   EXPO_PUBLIC_WEB_URL                   웹 배포 도메인 (약관·처리방침을 여는 주소)
+#   EXPO_PUBLIC_WEB_URL                   웹 배포 도메인 (비워두면 https://gongmoa.kr)
 #   EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID      Google Cloud Console – Web 클라이언트 ID
 #   EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID      Google Cloud Console – iOS 클라이언트 ID
 #
@@ -66,7 +66,7 @@ jobs:
             exit 1
           fi
           if [ -z "${{ secrets.EXPO_PUBLIC_WEB_URL }}" ]; then
-            echo "::warning::EXPO_PUBLIC_WEB_URL 이 비어 있습니다. 앱에서 이용약관·개인정보처리방침이 열리지 않아 스토어 심사에서 반려됩니다."
+            echo "::notice::EXPO_PUBLIC_WEB_URL 시크릿이 없어 기본값 https://gongmoa.kr 을 씁니다."
           fi
 
       # EXPO_PUBLIC_* 는 JS 번들에 박히는 값이라 **EAS 빌드 서버**에 있어야 한다.
@@ -83,7 +83,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
-          WEB_URL: ${{ secrets.EXPO_PUBLIC_WEB_URL }}
+          # 도메인은 gongmoa.kr 로 확정됐다. 시크릿이 비어 있어도 약관·개인정보처리방침이
+          # 열리도록 기본값을 둔다(비어 있으면 스토어 심사에서 반려된다).
+          WEB_URL: ${{ secrets.EXPO_PUBLIC_WEB_URL || 'https://gongmoa.kr' }}
           GOOGLE_WEB: ${{ secrets.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID }}
           GOOGLE_IOS: ${{ secrets.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID }}
         run: |
