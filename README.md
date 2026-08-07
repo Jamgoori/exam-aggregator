@@ -55,6 +55,8 @@ robots·OG 이미지에 쓴다 — 프리뷰 주소가 검색에 중복 색인�
    전파는 보통 수십 분, `.kr` 은 최대 24시간. `dig gongmoa.kr` 로 확인.
 3. **Vercel** — 두 도메인 중 `gongmoa.kr` 을 Primary 로, `www` 는 redirect 로 둔다
    (둘 다 200 을 주면 같은 문서가 두 주소로 색인된다). HTTPS 인증서는 자동 발급.
+   이 설정이 빠져도 `apps/web/next.config.ts` 의 host 매칭 redirect 가 `www` 를
+   apex 로 넘긴다 — 대시보드 설정은 그래도 해두는 게 낫다(앱까지 안 오고 끝난다).
 4. **Supabase** — Authentication → URL Configuration 의 Site URL 을
    `https://gongmoa.kr`, Redirect URLs 에 `https://gongmoa.kr/**` 추가. 안 하면
    새 도메인에서 소셜 로그인이 끝에서 튕긴다(로그인 콜백은 요청 호스트를 그대로
@@ -64,9 +66,18 @@ robots·OG 이미지에 쓴다 — 프리뷰 주소가 검색에 중복 색인�
 6. **Search Console / GA** — 새 속성(도메인 속성)으로 `gongmoa.kr` 등록 후
    `https://gongmoa.kr/sitemap.xml` 제출. 예전 `*.vercel.app` 주소가 이미 색인돼
    있으면 vercel.app 은 redirect 로 남겨 두면 정리된다.
-7. **모바일** — `apps/mobile/.env` 와 GitHub Actions 시크릿의
-   `EXPO_PUBLIC_WEB_URL` 을 `https://gongmoa.kr` 로. 앱의 약관/개인정보처리방침이
-   이 주소를 연다.
+7. **모바일** — `apps/mobile/.env` 의 `EXPO_PUBLIC_WEB_URL` 을 `https://gongmoa.kr`
+   로. GitHub Actions 쪽은 시크릿이 비어 있으면 이 값을 기본으로 쓰므로 따로
+   등록하지 않아도 된다(다른 도메인을 쓸 때만 시크릿으로 덮어쓴다).
+
+연결이 끝났는지는 **Actions → "도메인 점검" → Run workflow** 로 확인한다(폰에서도
+된다). apex 200·`www` 리다이렉트·홈 canonical·robots.txt·sitemap 을 밖에서 실제로
+찔러보고 어디가 틀렸는지 요약에 남긴다. 주 1회 자동으로도 돌아 설정이 되돌아가거나
+인증서가 만료되면 잡힌다.
+
+아직 남은 것(값이 있어야 가능): 웹 주소로 앱이 열리는 딥링크. Apple Team ID 와
+안드로이드 서명 인증서 SHA-256 이 필요해 `apps/mobile/SETUP.md` 5-1 절차대로
+따로 해야 한다.
 
 #### 루트 `optionalDependencies` 는 지우지 말 것
 
