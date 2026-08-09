@@ -170,11 +170,15 @@ async function main() {
   let truncatedBy = null; // 수집 도중 조회 오류가 나도 이미 수집한 청크는 살려서 출력
 
   outer: for (const { exam_type_id, level } of priorities) {
-    const { data: papers, error: papersError } = await supabase
+    // 경찰·계리직처럼 급수(level)가 없는 직렬은 priority 행의 level이 null이다.
+    // .eq("level", null)은 에러 없이 0건만 매칭해 그룹이 조용히 건너뛰어지므로
+    // (2026-08-09 실측), null은 반드시 .is()로 걸러야 한다.
+    let papersQuery = supabase
       .from("exam_papers")
       .select("id, title, year, level, subject_id")
-      .eq("exam_type_id", exam_type_id)
-      .eq("level", level)
+      .eq("exam_type_id", exam_type_id);
+    papersQuery = level === null ? papersQuery.is("level", null) : papersQuery.eq("level", level);
+    const { data: papers, error: papersError } = await papersQuery
       .order("year", { ascending: !reverse })
       .order("id", { ascending: !reverse });
     if (papersError) {

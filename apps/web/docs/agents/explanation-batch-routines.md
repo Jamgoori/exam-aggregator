@@ -47,6 +47,25 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
   `node --env-file=.env.local scripts/deploy-law-explanations.mjs`를 실행**하는
   것이 확립된 방법이다 (Storage 교체 + 정규식 스캔 + JSON 백업 + 삭제 + `--restore`
   복원까지 한 스크립트).
+- **큐 확장 (2026-08-09): `explanation_batch_priority`가 6행 → 18행.** 신규 업로드
+  직렬(법원직·기상직·국회직·군무원·계리직·경찰)과 5급 그룹을 전부 등록했다. 알아둘 것:
+  - **이 테이블에 없는 (exam_type_id, level) 그룹은 영원히 처리되지 않는다.** 새
+    직렬·시험지를 업로드하면 `node --env-file=.env.local scripts/explanation-queue-status.mjs`
+    (소유자 전용, service role)로 미등록 그룹을 확인하고 행을 추가할 것.
+  - **"최후순위" 그룹은 목록 맨 뒤가 아니라 잔여량 기준 정중앙에 둔다.** 역방향
+    루틴이 맨 뒤에서부터 시작하므로, 맨 뒤 = 역방향이 가장 먼저 집는 자리다. 순/역이
+    마지막에 수렴하는 곳은 앞뒤 잔여량이 같아지는 중간 지점이고, 그래서 5급 3종
+    (국가직·국회직·법원직)은 priority 13~15에 있다 (등록 시점 균형: 앞 17,870 /
+    5급 2,218 / 뒤 18,065문항). 균형이 크게 무너지면 priority 번호로 조정.
+  - **급수 없는 직렬(경찰·계리직)은 priority 행의 level이 null이다.** 이걸 위해
+    level 컬럼의 NOT NULL을 해제했고(DDL은 `supabase db query --linked`로 실행 —
+    CLI가 소유자 계정으로 로그인돼 있음), `next-explanation-chunk.mjs`가 null이면
+    `.eq()` 대신 `.is()`로 문제지를 거른다. `.eq("level", null)`은 에러 없이 0건만
+    매칭해 그룹이 **조용히 건너뛰어진다**(2026-08-09 실측) — 구버전 스크립트가 도는
+    루틴은 경찰·계리직을 스킵할 뿐 죽지는 않지만, master 반영 전까지는 이 두 직렬이
+    처리되지 않는다.
+  - 국회직 5급은 등록 시점에 크롭된 문항이 0개다 — 큐에 미리 넣어뒀으므로 크롭이
+    끝나면 자동으로 편입된다.
 - **순방향/역방향은 양 끝에서 좁혀오는 방식.** 순방향은 문항 목록 앞에서부터,
   역방향은 `--reverse` 플래그로 뒤에서부터 진행해 중간에서 만난다(`done:true`).
   `--reverse`는 2026-07-18부터 스크립트에 정식 내장이다 (그 전엔 역방향 루틴이
