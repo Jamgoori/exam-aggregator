@@ -1106,6 +1106,15 @@ begin
     return new;
   end if;
 
+  -- 닉네임이 그대로인 갱신은 검사하지 않는다. 소셜 로그인은 로그인할 때마다 provider
+  -- 프로필로 raw_user_meta_data 를 갱신하는데, 그때마다 아래 검사를 다시 돌리면 금칙어
+  -- 목록을 늘리는 순간 그 닉네임을 이미 쓰던 사람이 로그인 자체를 못 하게 된다 — 예외가
+  -- 나면 auth.users 갱신이 통째로 롤백돼 로그인이 실패하고, 닉네임을 바꿀 화면까지
+  -- 로그인 뒤에 있으니 앱 안에는 복구 경로가 없다. 검사는 실제로 바꿀 때만 건다.
+  if tg_op = 'UPDATE' and nn is not distinct from btrim(old.raw_user_meta_data->>'nickname') then
+    return new;
+  end if;
+
   -- packages/core/src/nickname.ts 의 NICKNAME_MIN/MAX 와 같은 값.
   if char_length(nn) < 2 or char_length(nn) > 10 then
     raise exception '닉네임은 2~10자로 입력해주세요.';
