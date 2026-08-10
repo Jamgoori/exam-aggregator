@@ -21,9 +21,22 @@ jobs:
           fail=0
           out=""
 
-          note() { out="${out}$1"$'\n'; }
+          # 결과는 요약(Summary)과 로그 양쪽에 남긴다. 요약만 쓰면 실패 원인을 보려고
+          # 매번 요약 화면을 따로 열어야 하고, API 로 로그만 받아보면 아무것도 안 보인다.
+          note() { out="${out}$1"$'\n'; echo "$1"; }
           ok()   { note "- ✅ $1"; }
           bad()  { note "- ❌ $1"; fail=1; }
+
+          # 원시 값 먼저 로그에 남긴다 — 아래 판정이 실패했을 때 DNS 단계에서 막힌 건지
+          # Vercel 응답이 이상한 건지를 이 출력만 보고 가른다.
+          echo "--- 원시 값 ---"
+          dig +short NS gongmoa.kr || true
+          dig +short A gongmoa.kr || true
+          dig +short CNAME www.gongmoa.kr || true
+          curl -sS -o /dev/null -w 'apex   : code=%{http_code} redirect=%{redirect_url}\n' --max-time 20 "$APEX/" || true
+          curl -sS -o /dev/null -w 'apex -L: code=%{http_code} final=%{url_effective}\n' -L --max-time 20 "$APEX/" || true
+          curl -sS -o /dev/null -w 'www    : code=%{http_code} redirect=%{redirect_url}\n' --max-time 20 https://www.gongmoa.kr/ || true
+          echo "---"
 
           # 1. apex 가 200 을 주는가 (인증서가 유효해야 curl 이 통과한다)
           code=$(curl -sS -o /tmp/home.html -w '%{http_code}' --max-time 20 "$APEX/" || echo 000)
@@ -31,6 +44,8 @@ jobs:
             ok "apex \`$APEX\` → HTTP 200 (TLS 인증서 유효)"
           else
             bad "apex \`$APEX\` → HTTP $code. DNS 가 아직 Vercel 을 안 가리키거나 인증서 발급 전이다."
+            # Vercel 의 오류 페이지는 본문에 DEPLOYMENT_NOT_FOUND 같은 코드를 담고 있다.
+            echo "응답 본문 앞부분:"; head -c 400 /tmp/home.html 2>/dev/null; echo
           fi
 
           # 2. www 는 apex 로 넘겨야 한다 (둘 다 200 이면 같은 문서가 두 주소로 색인된다)
