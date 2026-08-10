@@ -3,7 +3,9 @@ import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   buildDueQueue,
+  conceptKeyOf,
   countBySubject,
+  duePriorityScore,
   forecastDueByDay,
   srsDayIndex,
   newItemsForLimit,
@@ -52,6 +54,16 @@ const PENDING_FETCH_LIMIT = 300;
 // 태울지는 buildDueQueue(NEW_RECENT_RATIO)가 정한다 — 여기는 재료만 준다.
 const PENDING_RECENT_FETCH_LIMIT = 100;
 
+// 개념 키를 조회할 후보 수(하루 상한의 몇 배).
+//
+// 개념 상한은 "뽑기"에 걸리므로 후보 단계에서 개념을 알아야 한다. 그렇다고 후보
+// 전체(수백~수천)의 해설을 매번 끌어오면, 이 조회가 마이페이지를 여는 경로에
+// 붙어 있어서 부담이 크다. 우선순위 상위 몇 배수만 조회하면 상한이 실제로 걸리는
+// 구간은 다 덮인다 — 하위 후보는 어차피 오늘 큐에 못 들어온다.
+//
+// 개념을 못 알아낸 문항은 conceptKey가 null이라 상한에서 빠진다(막지 않는다).
+const CONCEPT_WINDOW_MULTIPLIER = 3;
+
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
@@ -83,6 +95,37 @@ function forecastWindowEnd(now: Date): string {
   ).toISOString();
 }
 
+// 문항 id → 개념 그룹 키. question_explanations 는 service_role(또는 admin)만 읽으므로
+// admin 클라이언트로 조회한다. 해설이 아직 없는 문항은 맵에 없고, 호출부는 그런
+// 문항의 conceptKey 를 null 로 둔다.
+//
+// 실패해도 삼킨다. 개념은 큐를 더 고르게 만드는 부가 정보라, 조회가 안 된다고 복습
+// 자체를 막을 이유가 없다(마이그레이션 전이라 컬럼이 없을 수도 있다).
+async function fetchConceptKeys(
+  questionIds: string[],
+  adminFactory: AdminFactory,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (questionIds.length === 0) return out;
+
+  try {
+    const admin = adminFactory();
+    for (const ids of chunk(questionIds, 200)) {
+      const { data } = await admin
+        .from("question_explanations")
+        .select("question_id, keyword_title")
+        .in("question_id", ids);
+      for (const row of (data ?? []) as { question_id: string; keyword_title: string | null }[]) {
+        const key = conceptKeyOf(row.keyword_title);
+        if (key) out.set(row.question_id, key);
+      }
+    }
+  } catch {
+    // 무시: 개념 없이도 큐는 정상으로 짜인다.
+  }
+  return out;
+}
+
 // 향후 DUE_FORECAST_DAYS일 안에 볼 문항 후보. 정제 규칙은 섞어풀기와 동일하게
 // 맞춘다(대표 시험지로 접기, 삭제 마크 제외, 이미지 있는 것만) — 여기가 어긋나면
 // 배너에 뜬 숫자와 실제 세션 문항 수가 달라진다.
@@ -90,6 +133,7 @@ export async function collectDueCandidates(
   supabase: Supabase,
   userId: string,
   now: Date = new Date(),
+  adminFactory: AdminFactory = createAdminClient,
 ): Promise<{
   candidates: DueCandidate[];
   // 오늘 승격 후보(정제 완료). 실제로 몇 개를 태울지는 buildDueQueue가 정한다.
@@ -343,6 +387,40 @@ export async function collectDueCandidates(
     });
   }
 
+  // 개념 키 붙이기. 우선순위 상위 후보에만 붙인다 — 하위 후보는 오늘 큐에 못 들어와서
+  // 상한 계산에 영향을 주지 않는다. 문항 id는 위 미디어 조회가 이미 실어 왔다.
+  {
+    const window = Math.max(60, dailyLimit * CONCEPT_WINDOW_MULTIPLIER);
+    const nowIso = now.toISOString();
+    const topDue = candidates
+      .filter((c) => c.dueAt <= nowIso)
+      .sort((a, b) => duePriorityScore(b, now) - duePriorityScore(a, now))
+      .slice(0, window);
+    const topPending = [...pending]
+      .sort(
+        (a, b) =>
+          b.wrongCount - a.wrongCount || (a.lastAnsweredAt < b.lastAnsweredAt ? -1 : 1),
+      )
+      .slice(0, window);
+
+    const questionIdOf = (paperId: string, questionNumber: number) =>
+      mediaByPaper.get(paperId)?.get(questionNumber)?.questionId ?? null;
+
+    const ids = new Set<string>();
+    for (const c of [...topDue, ...topPending]) {
+      const id = questionIdOf(c.paperId, c.questionNumber);
+      if (id) ids.add(id);
+    }
+
+    const conceptByQuestionId = await fetchConceptKeys([...ids], adminFactory);
+    if (conceptByQuestionId.size > 0) {
+      for (const c of [...topDue, ...topPending]) {
+        const id = questionIdOf(c.paperId, c.questionNumber);
+        c.conceptKey = id ? (conceptByQuestionId.get(id) ?? null) : null;
+      }
+    }
+  }
+
   const subjectNames = new Map<string, string>();
   for (const s of subjectOfPaper.values()) if (!paused.has(s.id)) subjectNames.set(s.id, s.name);
 
@@ -391,9 +469,10 @@ export async function getDueReviewSummary(
   supabase: Supabase,
   userId: string,
   now: Date = new Date(),
+  adminFactory?: AdminFactory,
 ): Promise<DueReviewSummary> {
   const { candidates, pending, pendingTotal, suspendedTotal, subjectNames, dailyLimit } =
-    await collectDueCandidates(supabase, userId, now);
+    await collectDueCandidates(supabase, userId, now, adminFactory);
   const queue = buildDueQueue(candidates, pending, now, {
     total: dailyLimit,
     newItems: newItemsForLimit(dailyLimit),
@@ -579,6 +658,7 @@ export async function collectDueQueueItems(
     supabase,
     userId,
     now,
+    adminFactory,
   );
   const queue = buildDueQueue(candidates, pending, now, {
     total: dailyLimit,
@@ -619,6 +699,7 @@ export async function collectExtraQueueItems(
     supabase,
     userId,
     now,
+    adminFactory,
   );
 
   const nowIso = now.toISOString();

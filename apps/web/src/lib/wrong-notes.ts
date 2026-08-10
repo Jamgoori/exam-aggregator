@@ -168,12 +168,19 @@ export type WrongNoteQuestionDetail = WrongNoteQuestionSummary & {
   pinned: boolean;
 };
 
-export type QuestionMediaEntry = { choiceCount: number | null; images: string[] };
+export type QuestionMediaEntry = {
+  choiceCount: number | null;
+  images: string[];
+  // questions.id — 해설(question_explanations)을 되짚을 때 쓴다. 이 조회가 이미
+  // 문항 행을 훑으므로 id를 함께 실어 오면 왕복이 하나 준다.
+  questionId: string;
+};
 
 const QUESTION_MEDIA_SELECT =
-  "paper_id, question_number, choice_count, question_images(order_index, image_path)";
+  "id, paper_id, question_number, choice_count, question_images(order_index, image_path)";
 
 type QuestionMediaRow = {
+  id: string;
   paper_id: string;
   question_number: number;
   choice_count: number;
@@ -207,6 +214,7 @@ export async function fetchQuestionMedia(
       paperMap.set(row.question_number, {
         choiceCount: row.choice_count,
         images,
+        questionId: row.id,
       });
       byPaper.set(row.paper_id, paperMap);
     }
