@@ -18,6 +18,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | 중복 시험지 표시 통합 (`dedup-papers.ts`, 목록에 같은 시험지가 여러 장 보이는 문제) | `docs/agents/dedup-papers.md` |
 | 정답 등록·검수 (`extract-answer-keys.mjs`, `list-pending-answer-keys.mjs`, `paper_answers` 직접 조작) | `docs/agents/answer-keys-tracks.md` |
 | 통합본 PDF 과목별 분리 (`split-by-toc.mjs`/`split-combined-pdf.mjs`/`split-by-subject-header.mjs`) | `docs/agents/split-combined-pdfs.md` |
+| 복습 스케줄(SRS) 상수 조정 (`packages/core/src/srs.ts`, 학습 단계·ease·leech·연체 점수) | `docs/agents/srs-tuning.md` |
 
 # 금지선 (문서 안 읽었어도 이것만은 절대)
 
@@ -34,6 +35,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
   말 것.
 - **dedup**: 목록의 카드 병합은 버그가 아님 — 표시 로직을 되돌리거나 중복으로
   보이는 `exam_papers` 행을 삭제하지 말 것.
+- **SRS 상수**: 실측(`npm run retention-report`) 없이 간격·ease·leech 상수를 바꾸지
+  말 것. 바꿀 때는 `packages/core/src/srs.ts`와 `supabase/functions/_shared/srs.ts`를
+  반드시 함께 고칠 것 (한쪽만 고치면 웹과 앱의 복습일이 조용히 어긋난다).
 - **정답 등록**: `question_count`와 길이가 다른 정답 배열을 덮어쓰지 말 것.
   공통과목이라고 정답을 다른 직류(track) 문제지에 수동 복사하지 말 것 (법원직
   서기보는 국어·한국사 15문항/영어 20문항 별도 문제지 — 실측 사고 있음).

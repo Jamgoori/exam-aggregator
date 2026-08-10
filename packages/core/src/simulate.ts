@@ -19,6 +19,12 @@ import {
   type PendingCandidate,
 } from "./review-queue";
 import { nextSrs, srsDayIndex, srsDayStart, SRS_INITIAL, type SrsState } from "./srs";
+import {
+  formatRetentionTable,
+  summarizeRetention,
+  type ReviewLogRow,
+  type RetentionSummary,
+} from "./srs-retention";
 
 // ── 가상 학습자 ──────────────────────────────────────────────────────────────
 
@@ -177,7 +183,7 @@ function applyGrading(
   isCorrect: boolean,
   day: number,
   atMs: number,
-): { scheduled: boolean; prevInterval: number } {
+): { scheduled: boolean; prevInterval: number; elapsedDays: number | null } {
   const k = key(paperId, questionNumber);
   const before = status.get(k);
   const row: StatusRow = before ?? {
@@ -192,6 +198,7 @@ function applyGrading(
   };
 
   const prevInterval = row.srs.intervalDays;
+  const elapsedDays = row.lastAnsweredDay == null ? null : day - row.lastAnsweredDay;
   let scheduled = false;
 
   if (row.dueDay != null) {
@@ -207,7 +214,7 @@ function applyGrading(
   if (!isCorrect) row.wrongCount += 1;
   row.lastAnsweredDay = day;
   status.set(k, row);
-  return { scheduled, prevInterval };
+  return { scheduled, prevInterval, elapsedDays };
 }
 
 function lastGradedAt(row: StatusRow): Date | null {
@@ -236,8 +243,8 @@ export function seededRandom(seed: number): () => number {
 export type SimulationReport = {
   profile: string;
   days: number;
-  // 예정된 복습에서의 간격 구간별 실제 정답률. SRS가 겨냥하는 유지율과 비교한다.
-  retentionByInterval: { bucket: string; reviews: number; accuracy: number }[];
+  // 간격 구간별 유지율. 실측(srs_reviews)과 같은 함수로 접으므로 나란히 비교된다.
+  retention: RetentionSummary;
   // 오답이 처음 복습 큐에 뜨기까지 걸린 일수. 최근 오답이 굶으면 여기가 커진다.
   daysToFirstReview: { median: number; p90: number; max: number; never: number };
   // 하루 큐 안에서 "같은 문제지 문항"이 차지한 최대 비율. 사용자가 "왜 이 시험지만
@@ -282,7 +289,7 @@ export function simulate(
   const solvedPapers: { paperId: string; subjectId: string }[] = [];
 
   // 지표 수집용
-  const retention = new Map<string, { reviews: number; correct: number }>();
+  const reviewLog: ReviewLogRow[] = [];
   const firstWrongDay = new Map<QuestionKey, number>();
   const firstQueueDay = new Map<QuestionKey, number>();
   const lastQueuedDay = new Map<QuestionKey, number>();
@@ -326,6 +333,20 @@ export function simulate(
     return correct;
   }
 
+  // 스케줄이 있던 채점만 로그에 남긴다. 앱의 recordQuestionResults 와 같은 규칙이다
+  // (대기 풀 오답은 아직 복습이 아니라 검증할 간격이 없다).
+  function record(
+    result: { scheduled: boolean; prevInterval: number; elapsedDays: number | null },
+    isCorrect: boolean,
+  ): void {
+    if (!result.scheduled) return;
+    reviewLog.push({
+      prevIntervalDays: result.prevInterval,
+      elapsedDays: result.elapsedDays,
+      isCorrect,
+    });
+  }
+
   function gradePaper(
     paper: { paperId: string; subjectId: string },
     day: number,
@@ -334,7 +355,10 @@ export function simulate(
     for (let q = 1; q <= profile.questionsPerPaper; q++) {
       const k = key(paper.paperId, q);
       const correct = answer(k, day);
-      applyGrading(status, paper.paperId, q, paper.subjectId, correct, day, atMs);
+      record(
+        applyGrading(status, paper.paperId, q, paper.subjectId, correct, day, atMs),
+        correct,
+      );
       studyGradings++;
       if (!correct && !firstWrongDay.has(k)) firstWrongDay.set(k, day);
     }
@@ -439,22 +463,21 @@ export function simulate(
       lastQueuedDay.set(k, day);
       queuedTotal++;
 
-      const prevInterval = row.srs.intervalDays;
-      const wasDue = row.dueDay != null && row.dueDay <= day;
       const correct = answer(k, day);
-      applyGrading(status, item.paperId, item.questionNumber, row.subjectId, correct, day, evening);
+      record(
+        applyGrading(
+          status,
+          item.paperId,
+          item.questionNumber,
+          row.subjectId,
+          correct,
+          day,
+          evening,
+        ),
+        correct,
+      );
       reviewGradings++;
       if (!correct && !firstWrongDay.has(k)) firstWrongDay.set(k, day);
-
-      // 유지율은 "예정일이 돼서 나온 복습"만 센다. 승격 직후 첫 채점은 간격이 없어
-      // 유지력을 말할 수 없다.
-      if (wasDue && prevInterval >= 1) {
-        const bucket = intervalBucket(prevInterval);
-        const acc = retention.get(bucket) ?? { reviews: 0, correct: 0 };
-        acc.reviews++;
-        if (correct) acc.correct++;
-        retention.set(bucket, acc);
-      }
     }
 
     // 4) 재확인(그날 안에 다시 만나기). 틀린 문항의 due는 3시간 뒤라, 세션을 마치고
@@ -474,14 +497,17 @@ export function simulate(
       .slice(0, profile.dailyLimit);
     for (const row of recheck) {
       const correct = answer(key(row.paperId, row.questionNumber), day);
-      applyGrading(
-        status,
-        row.paperId,
-        row.questionNumber,
-        row.subjectId,
+      record(
+        applyGrading(
+          status,
+          row.paperId,
+          row.questionNumber,
+          row.subjectId,
+          correct,
+          day,
+          recheckAt,
+        ),
         correct,
-        day,
-        recheckAt,
       );
       reviewGradings++;
     }
@@ -511,13 +537,7 @@ export function simulate(
   return {
     profile: profile.name,
     days,
-    retentionByInterval: [...retention.entries()]
-      .sort((a, b) => bucketOrder(a[0]) - bucketOrder(b[0]))
-      .map(([bucket, v]) => ({
-        bucket,
-        reviews: v.reviews,
-        accuracy: v.reviews === 0 ? 0 : v.correct / v.reviews,
-      })),
+    retention: summarizeRetention(reviewLog),
     daysToFirstReview: {
       median: percentile(waits, 0.5),
       p90: percentile(waits, 0.9),
@@ -541,20 +561,6 @@ export function simulate(
   };
 }
 
-const BUCKETS = ["1-2일", "3-7일", "8-20일", "21-60일", "60일+"] as const;
-
-function intervalBucket(interval: number): string {
-  if (interval <= 2) return BUCKETS[0];
-  if (interval <= 7) return BUCKETS[1];
-  if (interval <= 20) return BUCKETS[2];
-  if (interval <= 60) return BUCKETS[3];
-  return BUCKETS[4];
-}
-
-function bucketOrder(bucket: string): number {
-  return BUCKETS.indexOf(bucket as (typeof BUCKETS)[number]);
-}
-
 function percentile(sorted: number[], q: number): number {
   if (sorted.length === 0) return 0;
   const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * q));
@@ -571,8 +577,6 @@ export function formatReport(r: SimulationReport): string {
     `   3일 내 재노출 ${(r.repeatWithin3Days * 100).toFixed(0)}% · 빈 큐 ${r.emptyQueueDays}일`,
     `   대기 ${r.finalPending} · 스케줄 ${r.finalScheduled} · 접힘 ${r.suspended} · 성숙 간격 평균 ${r.matureAverageInterval.toFixed(1)}일`,
   ];
-  for (const b of r.retentionByInterval) {
-    lines.push(`   유지율 ${b.bucket}: ${(b.accuracy * 100).toFixed(0)}% (${b.reviews}회)`);
-  }
+  lines.push(formatRetentionTable(r.retention));
   return lines.join("\n");
 }
