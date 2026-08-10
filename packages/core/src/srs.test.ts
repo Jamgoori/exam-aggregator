@@ -286,15 +286,16 @@ test("예정일에 맞히면 예전 그대로 × ease", () => {
   assert.equal(state.intervalDays, Math.round(60 * 2.5));
 });
 
-test("예정일 한참 전에 회독으로 맞히면 그 며칠치만 인정한다", () => {
+test("예정일 한참 전에 회독으로 맞히면 간격을 늘리지 않는다", () => {
   // 62일 뒤에 보라고 잡아둔 문항을 6일 만에 맞힌 건 6일치 기억이다. 예전에는
   // 이걸 60 → 150으로 인정해, 회독하는 사용자의 문항이 큐에서 조용히 사라졌다.
   const now = kst("2026-03-10T09:00:00");
   const { state } = nextSrs(MATURE, true, now, daysFrom(now, -6), {
     dueAt: daysFrom(now, 54),
   });
-  // 60 × (1 + 1.5 × 0.1) = 69. 벌어지긴 하되 적은 증거엔 적은 credit.
-  assert.equal(state.intervalDays, 69);
+  // 6일치 증거가 감당하는 간격은 6 × 2.5 = 15일뿐이라 이미 배정된 60일을 늘릴
+  // 근거가 없다. 줄이지도 않는다 — 맞힌 건 사실이다.
+  assert.equal(state.intervalDays, 60);
 });
 
 test("예정일이 지났어도 실제로 버틴 만큼만 인정한다", () => {
@@ -302,7 +303,39 @@ test("예정일이 지났어도 실제로 버틴 만큼만 인정한다", () => 
   // 앞으로 당긴다. 그때 "예정일이 됐으니 만점"으로 치면 2일 만에 60 → 150이 된다.
   const now = kst("2026-03-10T09:00:00");
   const { state } = nextSrs(MATURE, true, now, daysFrom(now, -2), { dueAt: now });
-  assert.equal(state.intervalDays, 63); // 60 × (1 + 1.5 × 2/60)
+  // 2일치 증거 = 5일. 이미 60일이 배정돼 있으니 그대로 둔다.
+  assert.equal(state.intervalDays, 60);
+});
+
+test("조기 정답이 반복돼도 간격이 복리로 불어나지 않는다", () => {
+  // 회독하는 사용자는 예정일과 무관하게 같은 문항을 매일 다시 채점한다. 회차마다
+  // 조금씩(1 + 1.5 × 1/60 = 1.025배) 붙는 걸 그대로 두면 20일 만에 60 → 98이 되고,
+  // due는 늘 "오늘 + 간격"이라 복습일이 그만큼 계속 미래로 밀린다. 성실히 회독할수록
+  // 복습 큐가 비는 역설이 여기서 나왔다.
+  let state = MATURE;
+  let lastGradedAt = kst("2026-03-10T09:00:00");
+
+  for (let i = 1; i <= 20; i++) {
+    const now = daysFrom(lastGradedAt, 1);
+    const result = nextSrs(state, true, now, lastGradedAt, {
+      dueAt: daysFrom(lastGradedAt, MATURE.intervalDays),
+    });
+    state = result.state;
+    lastGradedAt = now;
+  }
+
+  assert.equal(state.intervalDays, MATURE.intervalDays);
+});
+
+test("예정일 근처에서 맞히면 거의 전부 인정한다", () => {
+  // 상한이 조기 정답만 건드려야 한다 — 하루 이틀 일찍 푼 것까지 깎으면
+  // "제날짜에 풀어도 간격이 안 늘어난다"가 된다.
+  const now = kst("2026-03-10T09:00:00");
+  const { state } = nextSrs(MATURE, true, now, daysFrom(now, -58), {
+    dueAt: daysFrom(now, 2),
+  });
+  // 58일치 증거 = 145일. 곱셈 결과(60 × (1 + 1.5 × 58/60) = 147)를 살짝 깎는다.
+  assert.equal(state.intervalDays, 145);
 });
 
 test("예정일 전에 끌려 나와 틀린 것은 반감만 하고 lapse를 세지 않는다", () => {
