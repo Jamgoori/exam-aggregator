@@ -525,6 +525,10 @@ export async function getSessionSchedule(
   };
 }
 
+// service_role 클라이언트를 만드는 함수. 테스트에서 갈아끼우기 위한 이음매이고,
+// 앱 코드는 이 인자를 주지 않는다(기본값 = 진짜 admin 클라이언트).
+export type AdminFactory = () => ReturnType<typeof createAdminClient>;
+
 // 승격: 대기 풀에서 뽑힌 문항에 오늘자 스케줄을 심는다. 이 쓰기가 있어야 다음날부터
 // 정상적으로 due 계산에 참여한다.
 //
@@ -538,9 +542,10 @@ async function promotePendingItems(
   pendingSources: Map<string, string[]>,
   userId: string,
   now: Date,
+  adminFactory: AdminFactory = createAdminClient,
 ): Promise<void> {
   if (promoted.length === 0) return;
-  const admin = createAdminClient();
+  const admin = adminFactory();
   const nowIso = now.toISOString();
 
   for (const c of promoted) {
@@ -568,6 +573,7 @@ export async function collectDueQueueItems(
   supabase: Supabase,
   userId: string,
   now: Date = new Date(),
+  adminFactory?: AdminFactory,
 ): Promise<{ paperId: string; questionNumber: number }[]> {
   const { candidates, pending, pendingSources, dailyLimit } = await collectDueCandidates(
     supabase,
@@ -585,6 +591,7 @@ export async function collectDueQueueItems(
       pendingSources,
       userId,
       now,
+      adminFactory,
     );
   } catch {
     // 무시: 승격 실패가 세션 시작을 막지 않는다. 스케줄이 안 심긴 문항은 대기 풀에
@@ -606,6 +613,7 @@ export async function collectExtraQueueItems(
   supabase: Supabase,
   userId: string,
   now: Date = new Date(),
+  adminFactory?: AdminFactory,
 ): Promise<{ items: { paperId: string; questionNumber: number }[]; error?: string }> {
   const { candidates, pending, pendingSources, dailyLimit } = await collectDueCandidates(
     supabase,
@@ -628,7 +636,7 @@ export async function collectExtraQueueItems(
   });
 
   try {
-    await promotePendingItems(batch, pendingSources, userId, now);
+    await promotePendingItems(batch, pendingSources, userId, now, adminFactory);
   } catch {
     // 무시: 승격 실패해도 오늘 세션은 정상으로 풀린다.
   }
