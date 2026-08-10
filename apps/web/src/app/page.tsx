@@ -24,7 +24,12 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   // 루트 레이아웃의 template("%s | 공모아")이 붙지 않도록 absolute로 준다.
   title: { absolute: "공모아 - 공무원 기출문제 무료 자료실 (국가직·지방직 기출)" },
-  alternates: { canonical: "/" },
+  alternates: {
+    canonical: "/",
+    // 새 문제지 피드(app/rss.xml). 네이버 웹마스터도구에 직접 제출하지만,
+    // <link rel="alternate">가 있어야 피드 리더와 다른 수집기도 찾아낸다.
+    types: { "application/rss+xml": [{ url: "/rss.xml", title: "공모아 새 기출문제" }] },
+  },
   openGraph: { url: "/" },
 };
 
