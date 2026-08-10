@@ -72,6 +72,18 @@ export const PROFILES: Record<string, LearnerProfile> = {
     reviewOnDays: 1,
     dailyLimit: 20,
   },
+  // 한 과목만 파는 사람(또는 나머지 과목을 보류해 둔 사람). 과목 인터리빙이 아무
+  // 일도 못 하는 유일한 조건이라, 문제지 편중이 여기서 제일 크게 드러난다.
+  focused: {
+    name: "단일 과목 집중(1과목·3일마다 회독)",
+    papersPerDay: 1,
+    questionsPerPaper: 20,
+    subjects: 1,
+    baseKnowledge: 0.5,
+    rereadEveryDays: 3,
+    reviewOnDays: 1,
+    dailyLimit: 20,
+  },
   // 복습을 매일 열지 않는 사람. 밀린 큐가 어떻게 흘러가는지 본다.
   irregular: {
     name: "간헐형(복습 이틀에 한 번)",
@@ -233,6 +245,9 @@ export type SimulationReport = {
   maxSamePaperShare: number;
   // 하루 큐 안 최다 과목 비율.
   maxSameSubjectShare: number;
+  // 큐에서 같은 문제지가 연달아 나온 비율. 사용자가 실제로 체감하는 편중은
+  // "오늘 큐의 몇 %가 그 시험지인가"보다 "연달아 같은 시험지가 나오는가"다.
+  adjacentSamePaper: number;
   // 3일 안에 같은 문항이 다시 큐에 뜬 비율(재확인 단계 제외분). 반복 노출 체감.
   repeatWithin3Days: number;
   // 복습을 연 날 중 큐가 비어 있던 날 수.
@@ -273,6 +288,8 @@ export function simulate(
   const lastQueuedDay = new Map<QuestionKey, number>();
   let repeatWithin3 = 0;
   let queuedTotal = 0;
+  let adjacentSamePaper = 0;
+  let adjacentPairs = 0;
   let maxSamePaperShare = 0;
   let maxSameSubjectShare = 0;
   let emptyQueueDays = 0;
@@ -393,6 +410,11 @@ export function simulate(
     }
     // 큐가 짧은 날은 비율이 무의미하다(2문항이면 같은 시험지라도 100%가 된다).
     // 편중은 "자리가 충분한 날"에만 잰다.
+    for (let i = 1; i < queue.length; i++) {
+      adjacentPairs++;
+      if (queue[i].paperId === queue[i - 1].paperId) adjacentSamePaper++;
+    }
+
     if (queue.length >= METRIC_MIN_QUEUE) {
       maxSamePaperShare = Math.max(
         maxSamePaperShare,
@@ -504,6 +526,7 @@ export function simulate(
     },
     maxSamePaperShare,
     maxSameSubjectShare,
+    adjacentSamePaper: adjacentPairs === 0 ? 0 : adjacentSamePaper / adjacentPairs,
     repeatWithin3Days: queuedTotal === 0 ? 0 : repeatWithin3 / queuedTotal,
     emptyQueueDays,
     finalPending: pendingLeft,
@@ -544,7 +567,7 @@ export function formatReport(r: SimulationReport): string {
     `── ${r.profile} · ${r.days}일`,
     `   응시 채점 ${r.studyGradings} · 복습 채점 ${r.reviewGradings}`,
     `   오답 → 첫 복습까지: 중앙값 ${r.daysToFirstReview.median}일 · p90 ${r.daysToFirstReview.p90}일 · 최대 ${r.daysToFirstReview.max}일 · 못 만난 문항 ${r.daysToFirstReview.never}개`,
-    `   하루 큐 최대 편중: 같은 문제지 ${(r.maxSamePaperShare * 100).toFixed(0)}% · 같은 과목 ${(r.maxSameSubjectShare * 100).toFixed(0)}%`,
+    `   하루 큐 최대 편중: 같은 문제지 ${(r.maxSamePaperShare * 100).toFixed(0)}% · 같은 과목 ${(r.maxSameSubjectShare * 100).toFixed(0)}% · 같은 문제지 연속 ${(r.adjacentSamePaper * 100).toFixed(0)}%`,
     `   3일 내 재노출 ${(r.repeatWithin3Days * 100).toFixed(0)}% · 빈 큐 ${r.emptyQueueDays}일`,
     `   대기 ${r.finalPending} · 스케줄 ${r.finalScheduled} · 접힘 ${r.suspended} · 성숙 간격 평균 ${r.matureAverageInterval.toFixed(1)}일`,
   ];
