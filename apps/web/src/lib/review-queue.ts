@@ -41,6 +41,17 @@ const BATCH_SIZE = 1000;
 // 수백 개라 전량을 끌어오면 조회만 무거워진다.
 const PENDING_FETCH_LIMIT = 300;
 
+// 최근에 틀린 순으로 따로 훑어올 행 수.
+//
+// 위 조회는 "자주 틀린 것 → 오래 안 본 것" 순으로 앞에서 300개를 자른다. 1회독
+// 중인 사용자는 대기가 거의 전부 wrong_count 1 동점이라 그 300개가 사실상 "가장
+// 오래된 300개"로 고정되고, 어제 틀린 문항은 창 안에 들어오지도 못한다. 대기가
+// 수천 개면 하루 10개씩 빠져도 반년이 걸린다.
+//
+// 그래서 최근분을 별도 조회로 한 벌 더 가져와 후보에 합친다. 몇 개를 실제로
+// 태울지는 buildDueQueue(NEW_RECENT_RATIO)가 정한다 — 여기는 재료만 준다.
+const PENDING_RECENT_FETCH_LIMIT = 100;
+
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
@@ -133,34 +144,62 @@ export async function collectDueCandidates(
   // 맡겨야 수백 개 중 상위만 가져올 수 있다. 총계는 별도 count로 센다(정제 전
   // 숫자라 실제 승격 가능 수보다 약간 클 수 있지만, 화면에 쓰는 건 "얼마나 밀려
   // 있는지"라 이 정도 오차는 의미가 없다).
-  const [{ data: pendingData }, { count: pendingCount }, { count: suspendedCount }] =
-    await Promise.all([
-      supabase
-        .from("user_question_status")
-        .select("paper_id, question_number, last_answered_at, wrong_count")
-        .eq("user_id", userId)
-        .is("srs_due_at", null)
-        .is("srs_suspended_at", null)
-        .gt("wrong_count", 0)
-        .order("wrong_count", { ascending: false })
-        .order("last_answered_at", { ascending: true })
-        .limit(PENDING_FETCH_LIMIT),
-      supabase
-        .from("user_question_status")
-        .select("paper_id", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .is("srs_due_at", null)
-        .is("srs_suspended_at", null)
-        .gt("wrong_count", 0),
-      // 접어둔 문항 수. 큐에서 사라진 문항이 어디로 갔는지 화면에서 말해줘야 한다 —
-      // 조용히 없어지면 사용자는 데이터가 날아간 걸로 읽는다.
-      supabase
-        .from("user_question_status")
-        .select("paper_id", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .not("srs_suspended_at", "is", null),
-    ]);
-  const pendingRows = (pendingData ?? []) as PendingRow[];
+  const [
+    { data: pendingData },
+    { data: pendingRecentData },
+    { count: pendingCount },
+    { count: suspendedCount },
+  ] = await Promise.all([
+    supabase
+      .from("user_question_status")
+      .select("paper_id, question_number, last_answered_at, wrong_count")
+      .eq("user_id", userId)
+      .is("srs_due_at", null)
+      .is("srs_suspended_at", null)
+      .gt("wrong_count", 0)
+      .order("wrong_count", { ascending: false })
+      .order("last_answered_at", { ascending: true })
+      .limit(PENDING_FETCH_LIMIT),
+    // 최근에 틀린 순 한 벌 더. 위 조회의 창이 오래된 쪽에 고정돼 있어, 이게
+    // 없으면 어제 오답이 승격 후보에 아예 못 들어온다.
+    supabase
+      .from("user_question_status")
+      .select("paper_id, question_number, last_answered_at, wrong_count")
+      .eq("user_id", userId)
+      .is("srs_due_at", null)
+      .is("srs_suspended_at", null)
+      .gt("wrong_count", 0)
+      .order("last_answered_at", { ascending: false })
+      .limit(PENDING_RECENT_FETCH_LIMIT),
+    supabase
+      .from("user_question_status")
+      .select("paper_id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .is("srs_due_at", null)
+      .is("srs_suspended_at", null)
+      .gt("wrong_count", 0),
+    // 접어둔 문항 수. 큐에서 사라진 문항이 어디로 갔는지 화면에서 말해줘야 한다 —
+    // 조용히 없어지면 사용자는 데이터가 날아간 걸로 읽는다.
+    supabase
+      .from("user_question_status")
+      .select("paper_id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .not("srs_suspended_at", "is", null),
+  ]);
+
+  // 두 조회는 겹칠 수 있다(자주 틀렸으면서 최근이기도 한 문항). 같은 행이 두 번
+  // 들어와도 아래 (대표, 문항) 접기에서 하나로 합쳐지지만, 여기서 미리 걷어내
+  // 이후 루프가 같은 행을 두 번 훑지 않게 한다.
+  const pendingRows: PendingRow[] = [];
+  {
+    const seen = new Set<string>();
+    for (const r of [...(pendingData ?? []), ...(pendingRecentData ?? [])] as PendingRow[]) {
+      const key = `${r.paper_id}#${r.question_number}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pendingRows.push(r);
+    }
+  }
   const pendingTotal = pendingCount ?? 0;
   const suspendedTotal = suspendedCount ?? 0;
 

@@ -21,7 +21,8 @@
 //
 //  - 복습 몫: 이미 SRS에 올라탄 문항의 due. 밀리면 안 되므로 우선 채운다.
 //  - 신규 몫: 아직 스케줄이 없는 오답(대기 풀)에서 하루 NEW_QUEUE_LIMIT개까지만
-//    승격. 나머지는 오답노트·섞어풀기가 소화한다.
+//    승격. 나머지는 오답노트·섞어풀기가 소화한다. 그 몫의 일부(NEW_RECENT_RATIO)는
+//    최근에 틀린 문항에 떼어 둔다 — 안 그러면 어제 오답이 큐 뒤에 영영 갇힌다.
 //
 // 즉 SRS 진입은 오직 이 승격을 통해서만 일어난다. 섞어풀기에서 대기 문항을 맞혀도
 // 스케줄이 생기지 않는다 — 그러지 않으면 세션 한 번으로 신규 몫이 무력화된다.
@@ -204,6 +205,54 @@ function byPendingPriority(a: PendingCandidate, b: PendingCandidate): number {
       : 1;
 }
 
+// 최근에 틀린 순. 같은 날이면 자주 틀린 것부터.
+function byRecentWrong(a: PendingCandidate, b: PendingCandidate): number {
+  if (a.lastAnsweredAt !== b.lastAnsweredAt) return a.lastAnsweredAt < b.lastAnsweredAt ? 1 : -1;
+  if (a.wrongCount !== b.wrongCount) return b.wrongCount - a.wrongCount;
+  return a.paperId === b.paperId
+    ? a.questionNumber - b.questionNumber
+    : a.paperId < b.paperId
+      ? -1
+      : 1;
+}
+
+// 신규 몫 중 "최근에 틀린 것"에 떼어 두는 비율.
+//
+// byPendingPriority 하나로만 승격하면 1회독 중인 사용자의 어제 오답이 영영 안
+// 나온다. 그 사용자의 대기 풀은 거의 전부 wrong_count 1 동점이라 실질 정렬이
+// "오래된 것부터"가 되고, 조회도 그 순서로 앞에서 잘라 오기 때문이다(웹
+// PENDING_FETCH_LIMIT). 대기가 2000개면 어제 틀린 문항은 앞의 것들이 다 빠질
+// 때까지 후보에 들어오지도 않는다 — 하루 10개 승격이면 반년이다.
+//
+// 망각 곡선상 어제 오답의 재노출이 가장 싸고 효과가 크다. 그래서 몫의 일부를
+// 최근분에 고정으로 떼어 둔다. 다수는 그대로 "자주 틀린 것·오래된 것"이 가져간다
+// — 오래돼서 잊은 오답이 제일 위험하다는 판단은 그대로다.
+export const NEW_RECENT_RATIO = 0.3;
+
+// 신규 몫에서 최근분에 줄 자리 수. 내림이라 몫이 작을 때(3개 이하)는 0 —
+// 자리가 몇 개 없을 때 쪼개면 양쪽 다 제 몫을 못 한다.
+export function recentItemsForNew(newQuota: number): number {
+  return Math.max(0, Math.floor(Math.max(0, newQuota) * NEW_RECENT_RATIO));
+}
+
+// 승격할 대기 문항 고르기. 최근분 몫을 목록 맨 앞에 얹은 뒤, 자르기는 한 번만
+// 한다 — 두 번 자르면 과목 균등 배분이 두 조각으로 쪼개져 무너진다.
+//
+// 과목 번갈아 태우기(최소 몫 = 자리 전부)는 그대로 유지한다. 승격 순서가 1회독
+// 중에는 전부 wrong_count 1로 동점이라, 안 걸면 한 과목이 신규 몫을 통째로 먹는다.
+// 최근분은 자기 과목 묶음의 맨 앞에 서게 되므로 그 과목 몫 안에서 먼저 뽑힌다.
+function pickPending(pending: PendingCandidate[], room: number): PendingCandidate[] {
+  const recentRoom = Math.min(room, recentItemsForNew(room));
+  const recent = recentRoom > 0 ? [...pending].sort(byRecentWrong).slice(0, recentRoom) : [];
+  const chosen = new Set(recent);
+
+  const ordered = [
+    ...recent,
+    ...[...pending].sort(byPendingPriority).filter((p) => !chosen.has(p)),
+  ];
+  return takeWithSubjectFloor(ordered, room, room);
+}
+
 export type DueQueueLimits = {
   // 하루에 낼 총 문항 수.
   total?: number;
@@ -239,10 +288,7 @@ export function buildDueQueue(
   // 새 문항이 하나도 안 들어온다 — 밀린 걸 먼저 소화하는 게 맞다.
   const room = Math.min(newLimit, total - picked.length);
   if (room > 0 && pending.length > 0) {
-    // 신규는 과목을 완전히 번갈아 태운다(최소 몫 = 자리 전부). 승격 순서가 "자주
-    // 틀린 것 먼저"인데 1회독 중에는 전부 wrong_count 1로 동점이라, 그대로 두면
-    // 가장 오래전에 푼 시험지부터 순서대로 = 한 과목이 신규 몫을 통째로 먹는다.
-    for (const p of takeWithSubjectFloor([...pending].sort(byPendingPriority), room, room)) {
+    for (const p of pickPending(pending, room)) {
       picked.push({
         paperId: p.paperId,
         questionNumber: p.questionNumber,

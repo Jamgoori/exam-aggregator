@@ -6,6 +6,7 @@ import {
   forecastDueByDay,
   newItemsForLimit,
   normalizeDailyLimit,
+  recentItemsForNew,
   DUE_QUEUE_LIMIT,
   NEW_QUEUE_LIMIT,
   SUBJECT_MIN_SLOTS,
@@ -237,6 +238,67 @@ test("신규 승격은 자주 틀린 것 먼저, 같으면 오래 안 본 것 �
     // 5회 틀린 둘이 먼저, 그중 오래 안 본 3번이 앞. 1회짜리는 아직 안 태운다.
     [3, 2],
   );
+});
+
+test("신규 몫의 일부는 최근에 틀린 문항이 가져간다", () => {
+  // 1회독 중인 사용자의 대기 풀은 거의 전부 wrong_count 1 동점이라, 우선순위만
+  // 따르면 "가장 오래된 것부터"가 되어 어제 오답이 영영 안 나온다. 조회 창까지
+  // 오래된 쪽에 고정돼 있어 후보에 들어오지도 못한다.
+  const pending = [
+    ...Array.from({ length: 30 }, (_, i) =>
+      pend({
+        paperId: "old",
+        questionNumber: i + 1,
+        lastAnsweredAt: "2025-09-01T00:00:00.000Z",
+      }),
+    ),
+    ...Array.from({ length: 30 }, (_, i) =>
+      pend({
+        paperId: "recent",
+        questionNumber: i + 1,
+        lastAnsweredAt: "2026-03-09T00:00:00.000Z",
+      }),
+    ),
+  ];
+
+  const queue = buildDueQueue([], pending, NOW, { total: 20, newItems: 10 });
+  assert.equal(queue.length, 10);
+  // 10 × 0.3 = 3자리는 최근분 몫. 나머지 7은 예전대로 오래된 쪽이 가져간다.
+  assert.equal(queue.filter((q) => q.paperId === "recent").length, 3);
+  assert.equal(queue.filter((q) => q.paperId === "old").length, 7);
+});
+
+test("최근분 몫이 자주 틀린 문항의 자리를 빼앗지는 않는다", () => {
+  // 최근분은 몫의 30%뿐이다. 반복해서 무너지는 문항이 우선이라는 판단은 그대로다.
+  const pending = [
+    ...Array.from({ length: 20 }, (_, i) =>
+      pend({
+        paperId: "repeat",
+        questionNumber: i + 1,
+        wrongCount: 4,
+        lastAnsweredAt: "2025-09-01T00:00:00.000Z",
+      }),
+    ),
+    ...Array.from({ length: 20 }, (_, i) =>
+      pend({
+        paperId: "recent",
+        questionNumber: i + 1,
+        wrongCount: 1,
+        lastAnsweredAt: "2026-03-09T00:00:00.000Z",
+      }),
+    ),
+  ];
+
+  const queue = buildDueQueue([], pending, NOW, { total: 20, newItems: 10 });
+  assert.equal(queue.filter((q) => q.paperId === "repeat").length, 7);
+});
+
+test("신규 몫이 3개 이하면 쪼개지 않는다", () => {
+  // 자리가 몇 개 없을 때 나누면 양쪽 다 제 몫을 못 한다(내림).
+  assert.equal(recentItemsForNew(3), 0);
+  assert.equal(recentItemsForNew(10), 3);
+  assert.equal(recentItemsForNew(20), 6);
+  assert.equal(recentItemsForNew(0), 0);
 });
 
 test("신규 몫을 0으로 주면 대기 풀은 전혀 안 건드린다", () => {
