@@ -61,6 +61,27 @@ npm test                                  # simulate.test.ts 포함
   반영되고, 이미 배정된 `srs_due_at`은 그대로 남는다.
 - `packages/core/src/srs.test.ts`에 근거를 케이스로 남긴다.
 
+## 개념 축(keyword_title)
+
+같은 개념이 하루 큐를 도배하지 않게 `question_explanations.keyword_title` 에서
+그룹 키를 뽑아 쓴다(`packages/core/src/concept-key.ts`).
+
+`keyword_title` 은 통제 어휘가 아니라 해설 배치가 매번 자유롭게 쓴 문자열이라
+("대칭키 암호" / "대칭키 암호화 방식" / "대칭키 암호 개념"), 정밀하게 통일하지 않고
+**제목의 첫 의미 토큰**으로 거칠게 묶는다. 이 용도에서는 양쪽 실패가 전부 싸기
+때문이다 — 잘못 묶이면 그 문항이 하루 밀리고, 안 묶이면 지금과 같다.
+
+커버리지·표기 분포가 궁금하면:
+
+```sql
+select keyword_title, count(*) from question_explanations
+where keyword_title is not null
+group by 1 order by 2 desc limit 30;
+```
+
+상위 개념이 여러 건씩 뭉쳐 있으면 그대로 잘 돈다. 전부 1건씩 흩어져 있으면
+`concept-key.ts` 의 절단 규칙을 조절할 자리다(꼬리말 목록·파생 접미사).
+
 ## 금지선
 
 - **실측 표만 보고 상수를 한 번에 크게 바꾸지 말 것.** 구간당 100건 이상, 가능하면
@@ -71,6 +92,10 @@ npm test                                  # simulate.test.ts 포함
 - **유지율이 낮다고 `ease`부터 낮추지 말 것.** 학습 단계(1·3일)는 고정값이라 `ease`가
   닿지 않는다. 시뮬레이션에서 ease를 2.5 → 1.8로 낮춰도 1-2일·3-7일 구간 유지율은
   거의 안 움직였다. 그 구간이 문제면 손댈 곳은 학습 단계나 재확인 간격이다.
+- **정밀 개념 분류가 필요하면 `concept-key.ts` 를 늘리지 말 것.** 약점 진단("대칭키가
+  약합니다")처럼 사용자에게 개념을 말해주는 기능은 틀리면 안 되므로 통제 어휘 사전이
+  있어야 한다. 이 파일은 큐 다양성 전용이고, 그 둘을 한 함수로 겸하려 들면 양쪽 다
+  못 한다.
 - 조기 채점(회독) 완화 규칙(`SRS_EARLY_LAPSE_RATIO`, `boundByElapsed`)을 지울 때는
   회독형 프로필 시뮬레이션을 먼저 돌릴 것. 이 규칙들이 없으면 회독을 성실히 할수록
   복습 큐가 미래로 비워진다.

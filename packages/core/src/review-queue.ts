@@ -65,6 +65,9 @@ export type DueCandidate = {
   // ISO 문자열. 이 시각이 지난 문항이 "오늘 복습할 것"이다.
   dueAt: string;
   lapses: number;
+  // 개념 그룹 키(해설 keyword_title 에서 파생, concept-key.ts). 해설이 아직 없는
+  // 문항은 null 이고, 그런 문항에는 개념 상한을 걸지 않는다.
+  conceptKey?: string | null;
   // 이번에 대기 풀에서 승격된 문항. 호출부가 스케줄을 새로 심어야 하는 대상이다.
   isNew?: boolean;
 };
@@ -78,6 +81,7 @@ export type PendingCandidate = {
   wrongCount: number;
   // 마지막으로 이 문항을 푼 시각(ISO). 같은 횟수면 오래 안 본 것부터.
   lastAnsweredAt: string;
+  conceptKey?: string | null;
 };
 
 // 연체일에 씌우는 상한. 이게 없으면 연체 40일짜리가 lapses를 통째로 압도해서,
@@ -139,8 +143,27 @@ export function paperCapForLimit(total: number): number {
   return Math.max(2, Math.round(total * PAPER_MAX_SHARE));
 }
 
+// 한 개념이 하루 큐에서 차지할 수 있는 자리 비율.
+//
+// 같은 개념을 모르면 여러 해 기출에서 각각 틀리고, 그 문항들이 따로 쌓여 같은 날
+// 큐에 몰린다. 문제지 상한은 이걸 못 막는다 — 2015·2018·2021 문항은 서로 다른
+// 시험지라 상한에 안 걸리기 때문이다.
+//
+// 문제지 상한(0.25)보다 촘촘하게 잡는다. 한 개념을 하루에 세 번 보는 것보다 세
+// 개념을 하루씩 보는 편이 낫고, 사용자가 "비슷한 문제만 나온다"고 느끼는 단위도
+// 시험지가 아니라 개념이다.
+export const CONCEPT_MAX_SHARE = 0.15;
+
+// 하루 총량에 비례한 개념별 자리 상한(20 → 3, 40 → 6).
+export function conceptCapForLimit(total: number): number {
+  return Math.max(2, Math.round(total * CONCEPT_MAX_SHARE));
+}
+
+// 뽑기에 거는 그룹 상한. 문제지·개념이 같은 규칙이라 배열로 받는다.
+type GroupCap<T> = { keyOf: (it: T) => string | null; max: number };
+
 // 우선순위대로 정렬된 목록에서 cap개를 뽑되, 과목마다 minPerSubject개를 먼저
-// 확보하고, 남은 자리는 한 문제지가 maxPerPaper개를 넘지 않는 선에서 원래 순서로
+// 확보하고, 남은 자리는 그룹 상한(caps)을 넘지 않는 선에서 원래 순서로
 // 채운다. 그러고도 자리가 남으면 상한을 풀고 마저 채운다 — 오늘 볼 게 스무 개인데
 // 상한 때문에 다섯 개만 주면 나머지는 그냥 밀린다. 큐를 짧게 만드는 건 편중보다
 // 나쁘다.
@@ -152,7 +175,7 @@ function takeWithSubjectFloor<T extends { subjectId: string | null; paperId: str
   sorted: T[],
   cap: number,
   minPerSubject: number,
-  maxPerPaper = Number.POSITIVE_INFINITY,
+  caps: GroupCap<T>[] = [],
 ): T[] {
   if (cap <= 0 || sorted.length === 0) return [];
   if (sorted.length <= cap) return sorted;
@@ -167,12 +190,23 @@ function takeWithSubjectFloor<T extends { subjectId: string | null; paperId: str
 
   const picked: T[] = [];
   const chosen = new Set<T>();
-  const perPaper = new Map<string, number>();
+  // 그룹 상한별 카운터. 키가 null 인 문항(개념 미상)은 세지 않는다 — 모른다는
+  // 이유로 서로 묶이면 해설 없는 문항끼리 상한에 걸린다.
+  const counters = caps.map(() => new Map<string, number>());
   const take = (it: T) => {
     picked.push(it);
     chosen.add(it);
-    perPaper.set(it.paperId, (perPaper.get(it.paperId) ?? 0) + 1);
+    caps.forEach((c, i) => {
+      const key = c.keyOf(it);
+      if (key == null) return;
+      counters[i].set(key, (counters[i].get(key) ?? 0) + 1);
+    });
   };
+  const withinCaps = (it: T) =>
+    caps.every((c, i) => {
+      const key = c.keyOf(it);
+      return key == null || (counters[i].get(key) ?? 0) < c.max;
+    });
 
   // 과목이 하나뿐이면 최소 몫 단계는 의미가 없다(예전처럼 순수 점수순). 문제지
   // 상한은 그때도 건다 — 한 과목만 남은 사용자야말로 같은 시험지가 몰린다.
@@ -191,7 +225,7 @@ function takeWithSubjectFloor<T extends { subjectId: string | null; paperId: str
 
   for (const it of sorted) {
     if (picked.length >= cap) break;
-    if (chosen.has(it) || (perPaper.get(it.paperId) ?? 0) >= maxPerPaper) continue;
+    if (chosen.has(it) || !withinCaps(it)) continue;
     take(it);
   }
 
@@ -202,46 +236,49 @@ function takeWithSubjectFloor<T extends { subjectId: string | null; paperId: str
   return picked;
 }
 
-// 묶음 하나를 키가 번갈아 나오도록 재배열한다(많이 든 키부터 시작해 한 키가 뒤쪽에
-// 몰리지 않게). 과목 섞기와 문제지 섞기가 같은 규칙이라 하나로 둔다.
-function roundRobin<T>(items: T[], keyOf: (it: T) => string): T[] {
-  const groups = new Map<string, T[]>();
-  for (const it of items) {
-    const k = keyOf(it);
-    const list = groups.get(k) ?? [];
-    list.push(it);
-    groups.set(k, list);
-  }
-  if (groups.size <= 1) return items;
+// 뽑힌 문항을 늘어놓는 순서. 바로 앞 문항과 과목·문제지·개념이 겹치지 않는 것을
+// 앞에서부터 골라 채운다(그리디).
+//
+// 예전에는 축마다 라운드로빈을 겹쳐 돌렸는데, 축이 서로 다른 분할이라 뒤에 돌린
+// 것이 앞의 것을 흐트러뜨렸다(개념으로 돌리자 같은 시험지가 붙는 비율이 2% → 9%로
+// 올랐다). 축이 셋이면 "번갈아"라는 규칙 자체를 한 번에 풀어야 한다.
+//
+// 가중치는 사용자가 반복이라고 느끼는 순서다. 같은 개념이 연달아 나오면 "또
+// 대칭키?"가 제일 먼저 보이고, 그다음이 같은 시험지, 과목은 5과목뿐이라 어느 정도
+// 겹치는 게 정상이다.
+const ADJACENT_PENALTY = { concept: 4, paper: 2, subject: 1 };
 
-  const buckets = [...groups.values()].sort((a, b) => b.length - a.length);
-  const out: T[] = [];
-  for (let i = 0; out.length < items.length; i++) {
-    for (const bucket of buckets) {
-      const next = bucket[i];
-      if (next) out.push(next);
-    }
-  }
-  return out;
+function adjacentPenalty(a: DueCandidate, b: DueCandidate): number {
+  let score = 0;
+  if (a.conceptKey != null && a.conceptKey === b.conceptKey) score += ADJACENT_PENALTY.concept;
+  if (a.paperId === b.paperId) score += ADJACENT_PENALTY.paper;
+  if ((a.subjectId ?? "") === (b.subjectId ?? "")) score += ADJACENT_PENALTY.subject;
+  return score;
 }
 
-// 뽑힌 문항을 과목이 번갈아 나오도록 재배열하되, 같은 과목 안에서는 문제지도
-// 번갈아 나오게 한다.
-//
-// 과목만 섞으면 "국어 5문항"이 전부 같은 시험지에서 연달아 나온다. 사용자에게는
-// 과목이 섞였다는 사실보다 같은 시험지가 이어진다는 사실이 먼저 보인다.
+// 우선순위 순서를 기본으로 두고, 앞 문항과 덜 겹치는 것을 먼저 낸다. 겹침이 같으면
+// 우선순위가 앞선 것 — 결정적이어야 한다(배너 숫자 = 세션 문항).
 function interleaveBySubject(items: DueCandidate[]): DueCandidate[] {
-  const bySubject = new Map<string, DueCandidate[]>();
-  for (const it of items) {
-    const k = it.subjectId ?? "";
-    const list = bySubject.get(k) ?? [];
-    list.push(it);
-    bySubject.set(k, list);
-  }
-  const paperMixed: DueCandidate[] = [];
-  for (const list of bySubject.values()) paperMixed.push(...roundRobin(list, (it) => it.paperId));
+  if (items.length <= 2) return items;
 
-  return roundRobin(paperMixed, (it) => it.subjectId ?? "");
+  const remaining = [...items];
+  const out: DueCandidate[] = [remaining.shift()!];
+
+  while (remaining.length > 0) {
+    const prev = out[out.length - 1];
+    let bestIndex = 0;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < remaining.length; i++) {
+      const score = adjacentPenalty(prev, remaining[i]);
+      if (score < bestScore) {
+        bestScore = score;
+        bestIndex = i;
+        if (score === 0) break;
+      }
+    }
+    out.push(remaining.splice(bestIndex, 1)[0]);
+  }
+  return out;
 }
 
 // 대기 풀에서 먼저 승격할 순서. 자주 틀린 것 먼저, 같으면 오래 안 본 것 먼저.
@@ -302,7 +339,10 @@ function pickPending(pending: PendingCandidate[], room: number): PendingCandidat
   ];
   // 문제지 상한도 같이 건다. 회독 직후에는 한 시험지의 오답이 무더기로 대기 풀에
   // 들어오므로, 안 걸면 오늘 승격분 전부가 같은 시험지가 된다.
-  return takeWithSubjectFloor(ordered, room, room, paperCapForLimit(room));
+  return takeWithSubjectFloor(ordered, room, room, [
+    { keyOf: (p) => p.paperId, max: paperCapForLimit(room) },
+    { keyOf: (p) => p.conceptKey ?? null, max: conceptCapForLimit(room) },
+  ]);
 }
 
 export type DueQueueLimits = {
@@ -334,7 +374,10 @@ export function buildDueQueue(
     [...due].sort((a, b) => byPriority(a, b, now)),
     total,
     subjectFloorForLimit(total),
-    paperCapForLimit(total),
+    [
+      { keyOf: (c) => c.paperId, max: paperCapForLimit(total) },
+      { keyOf: (c) => c.conceptKey ?? null, max: conceptCapForLimit(total) },
+    ],
   );
 
   // 신규 몫은 복습으로 채우고 남은 자리 안에서만 쓴다. 복습이 상한을 다 먹은 날은
@@ -346,6 +389,7 @@ export function buildDueQueue(
         paperId: p.paperId,
         questionNumber: p.questionNumber,
         subjectId: p.subjectId,
+        conceptKey: p.conceptKey ?? null,
         // 승격 즉시 오늘 due. 세션에서 채점되면 거기서부터 간격이 붙는다.
         dueAt: nowIso,
         lapses: 0,

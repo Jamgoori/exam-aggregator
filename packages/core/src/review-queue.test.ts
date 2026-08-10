@@ -6,6 +6,7 @@ import {
   forecastDueByDay,
   newItemsForLimit,
   normalizeDailyLimit,
+  conceptCapForLimit,
   paperCapForLimit,
   recentItemsForNew,
   DUE_QUEUE_LIMIT,
@@ -616,5 +617,129 @@ test("신규 승격도 한 문제지에 몰리지 않는다", () => {
   assert.ok(
     queue.filter((q) => q.paperId === "hot").length <= paperCapForLimit(10),
     "신규 몫도 문제지 상한을 지켜야 한다",
+  );
+});
+
+// ── 개념 축 ──────────────────────────────────────────────────────────────────
+
+function withConcept(c: DueCandidate, conceptKey: string | null): DueCandidate {
+  return { ...c, conceptKey };
+}
+
+test("같은 개념이 하루 큐를 도배하지 않는다", () => {
+  // 개념 하나를 모르면 여러 해 기출에서 각각 틀린다. 문제지 상한은 이걸 못 막는다 —
+  // 2015·2018·2021 문항은 서로 다른 시험지라 상한에 안 걸린다.
+  const items = [
+    ...Array.from({ length: 12 }, (_, i) =>
+      withConcept(
+        cand({
+          paperId: `y${i}`,
+          questionNumber: 1,
+          subjectId: "security",
+          dueAt: dueDay(-3),
+        }),
+        "대칭키",
+      ),
+    ),
+    // 상한은 "다른 후보가 있을 때"만 건다. 자리를 메울 다른 개념을 넉넉히 둔다.
+    ...Array.from({ length: 30 }, (_, i) =>
+      withConcept(
+        cand({
+          paperId: `y${i % 12}`,
+          questionNumber: 2 + Math.floor(i / 12),
+          subjectId: "security",
+          dueAt: dueDay(-1),
+        }),
+        `기타${i}`,
+      ),
+    ),
+  ];
+
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  assert.equal(queue.length, 20);
+  assert.equal(
+    queue.filter((q) => q.conceptKey === "대칭키").length,
+    conceptCapForLimit(20),
+  );
+});
+
+test("개념을 모르는 문항은 상한에 걸리지 않는다", () => {
+  // 해설이 아직 없는 문항은 conceptKey가 null이다. 모른다는 이유로 서로 묶이면
+  // 해설 없는 문항끼리 상한에 걸려 큐가 텅 빈다.
+  const items = Array.from({ length: 30 }, (_, i) =>
+    withConcept(
+      cand({ paperId: `p${i % 6}`, questionNumber: i + 1, dueAt: dueDay(-1) }),
+      null,
+    ),
+  );
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  assert.equal(queue.length, 20);
+});
+
+test("개념 후보가 그것뿐이면 상한을 풀고 채운다", () => {
+  const items = Array.from({ length: 30 }, (_, i) =>
+    withConcept(
+      cand({ paperId: `p${i % 6}`, questionNumber: i + 1, dueAt: dueDay(-1) }),
+      "대칭키",
+    ),
+  );
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  assert.equal(queue.length, 20, "상한 때문에 큐가 짧아지면 안 된다");
+});
+
+test("같은 개념이 연달아 나오지 않는다", () => {
+  const items = [
+    ...Array.from({ length: 3 }, (_, i) =>
+      withConcept(
+        cand({ paperId: `a${i}`, questionNumber: 1, subjectId: "s", dueAt: dueDay(-1) }),
+        "대칭키",
+      ),
+    ),
+    ...Array.from({ length: 3 }, (_, i) =>
+      withConcept(
+        cand({ paperId: `b${i}`, questionNumber: 1, subjectId: "s", dueAt: dueDay(-1) }),
+        "공개키",
+      ),
+    ),
+  ];
+
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  let sameNeighbors = 0;
+  for (let i = 1; i < queue.length; i++) {
+    if (queue[i].conceptKey === queue[i - 1].conceptKey) sameNeighbors++;
+  }
+  assert.equal(sameNeighbors, 0);
+});
+
+test("승격된 신규도 개념 키를 들고 큐에 들어온다", () => {
+  // 여기서 잃으면 승격분에는 개념 상한이 안 걸린다.
+  const pending = Array.from({ length: 20 }, (_, i) => ({
+    ...pend({ paperId: `p${i}`, questionNumber: 1 }),
+    conceptKey: "대칭키",
+  }));
+
+  const queue = buildDueQueue([], pending, NOW, { total: 20, newItems: 10 });
+  assert.ok(queue.every((q) => q.conceptKey === "대칭키"));
+  // 대체 후보가 없으므로 상한은 풀린다 — 신규 몫을 비워두는 게 더 나쁘다.
+  assert.equal(queue.length, 10);
+});
+
+test("승격도 개념 상한을 지킨다(대체 후보가 있을 때)", () => {
+  const pending = [
+    ...Array.from({ length: 10 }, (_, i) => ({
+      ...pend({ paperId: `a${i}`, questionNumber: 1, wrongCount: 3 }),
+      conceptKey: "대칭키",
+    })),
+    ...Array.from({ length: 20 }, (_, i) => ({
+      ...pend({ paperId: `b${i}`, questionNumber: 1, wrongCount: 3 }),
+      conceptKey: `기타${i}`,
+    })),
+  ];
+
+  const queue = buildDueQueue([], pending, NOW, { total: 20, newItems: 10 });
+  assert.equal(queue.length, 10);
+  assert.equal(
+    queue.filter((q) => q.conceptKey === "대칭키").length,
+    conceptCapForLimit(10),
   );
 });

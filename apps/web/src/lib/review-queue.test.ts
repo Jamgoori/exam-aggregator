@@ -48,13 +48,24 @@ function status(o: StatusOverrides = {}): Row {
 }
 
 // 문항 미디어. 이미지가 없으면 화면에 그릴 수 없어 후보에서 빠진다.
+// id는 해설(개념)을 되짚는 열쇠라 함께 둔다.
+function questionId(paper: string, q: number): string {
+  return `${paper}:${q}`;
+}
+
 function question(paper: string, q: number, withImage = true): Row {
   return {
+    id: questionId(paper, q),
     paper_id: paper,
     question_number: q,
     choice_count: 4,
     question_images: withImage ? [{ order_index: 0, image_path: `${paper}/${q}.webp` }] : [],
   };
+}
+
+// 해설 한 줄. keyword_title 이 개념 축의 원재료다.
+function explanation(paper: string, q: number, keywordTitle: string | null): Row {
+  return { question_id: questionId(paper, q), keyword_title: keywordTitle };
 }
 
 function paper(id: string, subjectId: string, year = 2020, round = 1): Row {
@@ -76,6 +87,7 @@ type Fixture = {
   papers?: Row[];
   marks?: Row[];
   prefs?: Row | null;
+  explanations?: Row[];
 };
 
 function db(f: Fixture = {}): FakeSupabase {
@@ -84,8 +96,15 @@ function db(f: Fixture = {}): FakeSupabase {
     questions: f.questions ?? [],
     exam_papers: f.papers ?? [paper("p-korean", "korean"), paper("p-history", "history")],
     wrong_note_marks: f.marks ?? [],
+    question_explanations: f.explanations ?? [],
     review_preferences: f.prefs === null ? [] : [f.prefs ?? { user_id: USER, daily_limit: 20 }],
   });
+}
+
+// question_explanations 는 service_role 로만 읽으므로 조회 계층이 admin 클라이언트를
+// 따로 만든다. 테스트에서는 같은 가짜를 admin 자리에도 끼운다.
+function adminOf(fake: FakeSupabase) {
+  return () => asSupabase(fake);
 }
 
 test("이미지가 없는 문항은 큐에도 배너에도 안 잡힌다", async () => {
@@ -321,4 +340,95 @@ test("한 문제지가 오늘 큐를 도배하지 않는다", async () => {
   const korean = items.filter((it) => it.paperId === "p-korean").length;
   assert.ok(korean <= 15, `한 문제지가 ${korean}/20 자리를 먹었다`);
   assert.ok(items.some((it) => it.paperId === "p-history"));
+});
+
+// ── 개념 축 ──────────────────────────────────────────────────────────────────
+
+test("같은 개념이 오늘 큐를 도배하지 않는다", async () => {
+  // 개념 하나를 모르면 여러 해 기출에서 각각 틀린다. 서로 다른 시험지라 문제지
+  // 상한에는 걸리지 않는다 — 개념 축이 없으면 오늘 큐가 "대칭키"로 덮인다.
+  const statuses: Row[] = [];
+  const questions: Row[] = [];
+  const papers: Row[] = [];
+  const explanations: Row[] = [];
+
+  for (let p = 0; p < 12; p++) {
+    papers.push(paper(`y${p}`, "security", 2010 + p));
+    // 오래 밀린 대칭키 문항(우선순위가 높다)
+    statuses.push(status({ paper: `y${p}`, q: 1, dueAt: daysFromNow(-5) }));
+    questions.push(question(`y${p}`, 1));
+    explanations.push(explanation(`y${p}`, 1, "대칭키 암호화 방식"));
+    // 자리를 메울 다른 개념들
+    for (let q = 2; q <= 4; q++) {
+      statuses.push(status({ paper: `y${p}`, q, dueAt: daysFromNow(-1) }));
+      questions.push(question(`y${p}`, q));
+      explanations.push(explanation(`y${p}`, q, `기타개념${p}${q}`));
+    }
+  }
+
+  const fake = db({ statuses, questions, papers, explanations });
+  const items = await collectDueQueueItems(asSupabase(fake), USER, NOW, adminOf(fake));
+
+  assert.equal(items.length, 20);
+  const symmetric = items.filter((it) => it.questionNumber === 1).length;
+  assert.ok(symmetric <= 5, `대칭키 문항이 ${symmetric}개 들어왔다`);
+});
+
+test("해설이 없는 문항은 개념 상한에서 빠진다", async () => {
+  // 개념을 모른다는 이유로 서로 묶이면 해설 없는 문항끼리 상한에 걸려 큐가 비어버린다.
+  const statuses: Row[] = [];
+  const questions: Row[] = [];
+  for (let q = 1; q <= 30; q++) {
+    statuses.push(status({ paper: "p-korean", q, dueAt: daysFromNow(-1) }));
+    questions.push(question("p-korean", q));
+  }
+
+  const fake = db({ statuses, questions, explanations: [] });
+  const items = await collectDueQueueItems(asSupabase(fake), USER, NOW, adminOf(fake));
+  assert.equal(items.length, 20);
+});
+
+test("해설 조회가 실패해도 큐는 정상으로 나온다", async () => {
+  // 개념은 큐를 더 고르게 만드는 부가 정보다. 이것 때문에 복습이 막히면 안 된다.
+  const statuses: Row[] = [];
+  const questions: Row[] = [];
+  for (let q = 1; q <= 25; q++) {
+    statuses.push(status({ paper: "p-korean", q, dueAt: daysFromNow(-1) }));
+    questions.push(question("p-korean", q));
+  }
+
+  const fake = db({ statuses, questions });
+  const items = await collectDueQueueItems(asSupabase(fake), USER, NOW, () => {
+    throw new Error("service role 없음");
+  });
+  assert.equal(items.length, 20);
+});
+
+test("표기가 흔들린 개념도 한 묶음으로 본다", async () => {
+  // "대칭키 암호" / "대칭키 암호화 방식" / "대칭키 알고리즘"은 사용자에게 같은
+  // 개념이다. 이게 갈리면 상한이 아예 안 걸린다.
+  const titles = ["대칭키 암호", "대칭키 암호화 방식", "대칭키 알고리즘", "대칭키 암호 개념"];
+  const statuses: Row[] = [];
+  const questions: Row[] = [];
+  const papers: Row[] = [];
+  const explanations: Row[] = [];
+
+  titles.forEach((title, i) => {
+    papers.push(paper(`t${i}`, "security", 2010 + i));
+    statuses.push(status({ paper: `t${i}`, q: 1, dueAt: daysFromNow(-5) }));
+    questions.push(question(`t${i}`, 1));
+    explanations.push(explanation(`t${i}`, 1, title));
+  });
+  // 자리를 메울 다른 개념
+  for (let q = 1; q <= 20; q++) {
+    papers.push(paper(`o${q}`, "security", 2100 + q));
+    statuses.push(status({ paper: `o${q}`, q: 1, dueAt: daysFromNow(-1) }));
+    questions.push(question(`o${q}`, 1));
+    explanations.push(explanation(`o${q}`, 1, `다른개념${q}`));
+  }
+
+  const fake = db({ statuses, questions, papers, explanations });
+  const items = await collectDueQueueItems(asSupabase(fake), USER, NOW, adminOf(fake));
+  const symmetric = items.filter((it) => it.paperId.startsWith("t")).length;
+  assert.ok(symmetric <= 3, `표기만 다른 같은 개념이 ${symmetric}개 들어왔다`);
 });
