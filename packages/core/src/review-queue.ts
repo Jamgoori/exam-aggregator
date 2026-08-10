@@ -125,16 +125,34 @@ export function subjectFloorForLimit(total: number): number {
   return Math.max(1, Math.round((total * SUBJECT_MIN_SLOTS) / DUE_QUEUE_LIMIT));
 }
 
+// 한 문제지가 하루 큐에서 차지할 수 있는 자리 비율.
+//
+// 과목 최소 몫은 "한 과목이 큐를 먹는 것"만 막는다. 그 과목 안에서 시험지 하나가
+// 자리를 다 가져가는 건 그대로 남는데, 회독 직후에는 그 시험지 문항이 한꺼번에
+// due가 되므로 실제로 그렇게 된다. 사용자 눈에는 "2019 국가직 국어만 스무 개"라,
+// 우선순위상 옳더라도 납득이 안 된다.
+export const PAPER_MAX_SHARE = 0.25;
+
+// 하루 총량에 비례한 문제지별 자리 상한(20 → 5, 40 → 10). 최소 2는 준다 — 1이면
+// 문제지가 적은 사용자의 큐가 지나치게 흩어진다.
+export function paperCapForLimit(total: number): number {
+  return Math.max(2, Math.round(total * PAPER_MAX_SHARE));
+}
+
 // 우선순위대로 정렬된 목록에서 cap개를 뽑되, 과목마다 minPerSubject개를 먼저
-// 확보한 뒤 남은 자리를 원래 순서로 채운다.
+// 확보하고, 남은 자리는 한 문제지가 maxPerPaper개를 넘지 않는 선에서 원래 순서로
+// 채운다. 그러고도 자리가 남으면 상한을 풀고 마저 채운다 — 오늘 볼 게 스무 개인데
+// 상한 때문에 다섯 개만 주면 나머지는 그냥 밀린다. 큐를 짧게 만드는 건 편중보다
+// 나쁘다.
 //
 // 결정적이어야 한다(배너 숫자 = 세션 문항). Map은 삽입 순서를 지키고 그 순서는
 // 정렬된 목록을 훑어 만들어지므로, 과목 순회 순서 = "그 과목 최고 점수" 순이다.
 // 자리가 모자라면 위험한 과목부터 최소 몫을 받는다.
-function takeWithSubjectFloor<T extends { subjectId: string | null }>(
+function takeWithSubjectFloor<T extends { subjectId: string | null; paperId: string }>(
   sorted: T[],
   cap: number,
   minPerSubject: number,
+  maxPerPaper = Number.POSITIVE_INFINITY,
 ): T[] {
   if (cap <= 0 || sorted.length === 0) return [];
   if (sorted.length <= cap) return sorted;
@@ -146,45 +164,58 @@ function takeWithSubjectFloor<T extends { subjectId: string | null }>(
     list.push(it);
     groups.set(key, list);
   }
-  // 과목이 하나면 예전과 완전히 같다(순수 점수순).
-  if (groups.size <= 1) return sorted.slice(0, cap);
-
-  // 과목 수가 많아 최소 몫을 다 못 주면 몫을 줄인다. 그래도 1은 보장한다.
-  const floor = Math.max(1, Math.min(minPerSubject, Math.floor(cap / groups.size)));
 
   const picked: T[] = [];
   const chosen = new Set<T>();
-  for (let i = 0; i < floor && picked.length < cap; i++) {
-    for (const list of groups.values()) {
-      if (picked.length >= cap) break;
-      const next = list[i];
-      if (!next) continue;
-      picked.push(next);
-      chosen.add(next);
+  const perPaper = new Map<string, number>();
+  const take = (it: T) => {
+    picked.push(it);
+    chosen.add(it);
+    perPaper.set(it.paperId, (perPaper.get(it.paperId) ?? 0) + 1);
+  };
+
+  // 과목이 하나뿐이면 최소 몫 단계는 의미가 없다(예전처럼 순수 점수순). 문제지
+  // 상한은 그때도 건다 — 한 과목만 남은 사용자야말로 같은 시험지가 몰린다.
+  if (groups.size > 1) {
+    // 과목 수가 많아 최소 몫을 다 못 주면 몫을 줄인다. 그래도 1은 보장한다.
+    const floor = Math.max(1, Math.min(minPerSubject, Math.floor(cap / groups.size)));
+    for (let i = 0; i < floor && picked.length < cap; i++) {
+      for (const list of groups.values()) {
+        if (picked.length >= cap) break;
+        const next = list[i];
+        if (!next) continue;
+        take(next);
+      }
     }
   }
 
   for (const it of sorted) {
     if (picked.length >= cap) break;
-    if (!chosen.has(it)) picked.push(it);
+    if (chosen.has(it) || (perPaper.get(it.paperId) ?? 0) >= maxPerPaper) continue;
+    take(it);
+  }
+
+  for (const it of sorted) {
+    if (picked.length >= cap) break;
+    if (!chosen.has(it)) take(it);
   }
   return picked;
 }
 
-// 뽑힌 문항을 과목이 번갈아 나오도록 재배열한다. 과목별 묶음에서 한 개씩 돌아가며
-// 꺼내되, 큐에 많이 든 과목부터 시작해 한 과목이 뒤쪽에 몰리지 않게 한다.
-function interleaveBySubject(items: DueCandidate[]): DueCandidate[] {
-  const groups = new Map<string, DueCandidate[]>();
+// 묶음 하나를 키가 번갈아 나오도록 재배열한다(많이 든 키부터 시작해 한 키가 뒤쪽에
+// 몰리지 않게). 과목 섞기와 문제지 섞기가 같은 규칙이라 하나로 둔다.
+function roundRobin<T>(items: T[], keyOf: (it: T) => string): T[] {
+  const groups = new Map<string, T[]>();
   for (const it of items) {
-    const key = it.subjectId ?? "";
-    const list = groups.get(key) ?? [];
+    const k = keyOf(it);
+    const list = groups.get(k) ?? [];
     list.push(it);
-    groups.set(key, list);
+    groups.set(k, list);
   }
   if (groups.size <= 1) return items;
 
   const buckets = [...groups.values()].sort((a, b) => b.length - a.length);
-  const out: DueCandidate[] = [];
+  const out: T[] = [];
   for (let i = 0; out.length < items.length; i++) {
     for (const bucket of buckets) {
       const next = bucket[i];
@@ -192,6 +223,25 @@ function interleaveBySubject(items: DueCandidate[]): DueCandidate[] {
     }
   }
   return out;
+}
+
+// 뽑힌 문항을 과목이 번갈아 나오도록 재배열하되, 같은 과목 안에서는 문제지도
+// 번갈아 나오게 한다.
+//
+// 과목만 섞으면 "국어 5문항"이 전부 같은 시험지에서 연달아 나온다. 사용자에게는
+// 과목이 섞였다는 사실보다 같은 시험지가 이어진다는 사실이 먼저 보인다.
+function interleaveBySubject(items: DueCandidate[]): DueCandidate[] {
+  const bySubject = new Map<string, DueCandidate[]>();
+  for (const it of items) {
+    const k = it.subjectId ?? "";
+    const list = bySubject.get(k) ?? [];
+    list.push(it);
+    bySubject.set(k, list);
+  }
+  const paperMixed: DueCandidate[] = [];
+  for (const list of bySubject.values()) paperMixed.push(...roundRobin(list, (it) => it.paperId));
+
+  return roundRobin(paperMixed, (it) => it.subjectId ?? "");
 }
 
 // 대기 풀에서 먼저 승격할 순서. 자주 틀린 것 먼저, 같으면 오래 안 본 것 먼저.
@@ -250,7 +300,9 @@ function pickPending(pending: PendingCandidate[], room: number): PendingCandidat
     ...recent,
     ...[...pending].sort(byPendingPriority).filter((p) => !chosen.has(p)),
   ];
-  return takeWithSubjectFloor(ordered, room, room);
+  // 문제지 상한도 같이 건다. 회독 직후에는 한 시험지의 오답이 무더기로 대기 풀에
+  // 들어오므로, 안 걸면 오늘 승격분 전부가 같은 시험지가 된다.
+  return takeWithSubjectFloor(ordered, room, room, paperCapForLimit(room));
 }
 
 export type DueQueueLimits = {
@@ -282,6 +334,7 @@ export function buildDueQueue(
     [...due].sort((a, b) => byPriority(a, b, now)),
     total,
     subjectFloorForLimit(total),
+    paperCapForLimit(total),
   );
 
   // 신규 몫은 복습으로 채우고 남은 자리 안에서만 쓴다. 복습이 상한을 다 먹은 날은
