@@ -2,13 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
-import {
-  attachDrawing,
-  DEFAULT_PEN_WIDTH,
-  type DrawTool,
-} from "@/components/pdf-canvas-viewer";
+import { DEFAULT_PEN_WIDTH, type DrawTool } from "@/components/pdf-canvas-viewer";
 import {
   useFitContentWidth,
+  useQuestionDrawing,
   useSwipeNavigation,
 } from "@/components/question-view-gestures";
 
@@ -71,16 +68,6 @@ export function SingleQuestionView({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const toolRef = useRef(tool);
-  const penColorRef = useRef(penColor);
-  const penWidthRef = useRef(penWidth);
-  // attachDrawing은 마운트 시 한 번만 붙어 그때의 콜백을 가둬두므로, 매 렌더 바뀌는
-  // onPinchZoom은 ref로 감싸 항상 최신 것을 부르게 한다.
-  const onPinchZoomRef = useRef(onPinchZoom);
-  // 문제별 보기의 확대/축소는 CSS zoom이 아니라 문제 영역의 실제 너비를 키우는
-  // 방식이라(아래 maxWidth), 캔버스도 리사이즈 옵저버로 같이 커진다. 즉 캔버스
-  // 좌표계와 화면 크기가 늘 1:1이므로 필기 좌표 보정 배율은 항상 1이다.
-  const zoomRef = useRef(1);
 
   const { contentWidth, handleImageLoad } = useFitContentWidth({
     scrollAreaRef,
@@ -89,76 +76,22 @@ export function SingleQuestionView({
     zoom,
   });
 
-  useEffect(() => {
-    onPinchZoomRef.current = onPinchZoom;
-  }, [onPinchZoom]);
+  // 필기는 문항별로 기록해둔다 — 다음 문제로 넘어갔다 돌아와도, 확대/축소로 캔버스
+  // 크기가 바뀌어도 그 문항에 남긴 필기가 그대로 다시 그려진다.
+  const { clearCurrent } = useQuestionDrawing({
+    scrollAreaRef,
+    contentRef,
+    canvasRef,
+    itemKey: questionIndex,
+    tool,
+    penColor,
+    penWidth,
+    onPinchZoom,
+  });
 
   useEffect(() => {
-    toolRef.current = tool;
-    if (canvasRef.current) {
-      canvasRef.current.style.pointerEvents = tool === "move" ? "none" : "auto";
-    }
-  }, [tool]);
-
-  useEffect(() => {
-    penColorRef.current = penColor;
-  }, [penColor]);
-
-  useEffect(() => {
-    penWidthRef.current = penWidth;
-  }, [penWidth]);
-
-  useEffect(() => {
-    onClearReady?.(() => {
-      const canvas = canvasRef.current;
-      const ctx = canvas?.getContext("2d");
-      if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-    });
-  }, [onClearReady]);
-
-  // 문제 이미지 아래 남는 빈 공간까지 필기 캔버스로 덮어서, 문제와 답 고르는 부분
-  // 사이를 오가며 자유롭게 메모할 수 있게 한다. 캔버스 크기는 문제 영역(이미지 높이
-  // 또는 화면에 보이는 높이 중 더 큰 값)에 맞춰 리사이즈 옵저버로 계속 맞춰준다.
-  useEffect(() => {
-    const scrollArea = scrollAreaRef.current;
-    const content = contentRef.current;
-    const canvas = canvasRef.current;
-    if (!scrollArea || !content || !canvas) return;
-
-    attachDrawing(canvas, toolRef, penColorRef, zoomRef, penWidthRef, (factor) =>
-      onPinchZoomRef.current?.(factor),
-    );
-
-    function syncSize() {
-      const width = content!.clientWidth;
-      const height = Math.max(content!.clientHeight, scrollArea!.clientHeight);
-      // 필기 캔버스 버퍼를 화면 배율(dpr)만큼 더 촘촘하게 만들어야 고해상도 화면에서
-      // 획이 흐릿하게 늘어나 보이지 않는다(attachDrawing이 좌표/선굵기에 같은 dpr을
-      // 곱해 그린다). CSS 크기는 그대로 두고 내부 픽셀 버퍼만 dpr배로 키운다.
-      const dpr = window.devicePixelRatio || 1;
-      const pixelWidth = Math.round(width * dpr);
-      const pixelHeight = Math.round(height * dpr);
-      if (canvas!.width !== pixelWidth || canvas!.height !== pixelHeight) {
-        canvas!.width = pixelWidth;
-        canvas!.height = pixelHeight;
-        canvas!.style.width = `${width}px`;
-        canvas!.style.height = `${height}px`;
-      }
-    }
-
-    syncSize();
-    const observer = new ResizeObserver(syncSize);
-    observer.observe(scrollArea);
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, []);
-
-  // 문항을 넘기면 이미지가 통째로 바뀌어 좌표가 더 이상 의미 없으므로 필기를 지운다.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }, [questionIndex]);
+    onClearReady?.(clearCurrent);
+  }, [onClearReady, clearCurrent]);
 
   const swipeHandlers = useSwipeNavigation({
     tool,

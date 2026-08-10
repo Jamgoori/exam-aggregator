@@ -22,16 +22,13 @@ import {
 import { CbtDrawingToolbar, PEN_COLORS } from "@/components/cbt-drawing-toolbar";
 import { clearReviewFabCache } from "@/components/review-fab";
 import { ReviewScheduleSection } from "@/components/review-schedule-section";
-import {
-  attachDrawing,
-  DEFAULT_PEN_WIDTH,
-  type DrawTool,
-} from "@/components/pdf-canvas-viewer";
+import { DEFAULT_PEN_WIDTH, type DrawTool } from "@/components/pdf-canvas-viewer";
 import {
   MAX_ZOOM,
   MIN_ZOOM,
   useContentZoom,
   useFitContentWidth,
+  useQuestionDrawing,
   useSwipeNavigation,
 } from "@/components/question-view-gestures";
 import type { ReviewSessionView } from "@/lib/review-session";
@@ -108,94 +105,31 @@ export function ReviewSolver({
   const submitted = view.submitted;
   const answeredCount = answers.filter((a) => a !== null).length;
 
-  // 필기 도구 상태. CBT 문제별 풀기(SingleQuestionView)와 같은 attachDrawing 캔버스를
-  // 문제 카드 위에 덮는다. 최신 값은 ref로 넘겨 캔버스 이벤트 핸들러가 항상 참조한다.
+  // 필기 도구 상태. CBT 문제별 풀기(SingleQuestionView)와 같은 캔버스를 문제 카드
+  // 위에 덮고, 문항별 필기 보관·다시 그리기도 같은 훅(useQuestionDrawing)에 맡긴다.
   const [tool, setTool] = useState<DrawTool>("move");
   const [penColor, setPenColor] = useState(PEN_COLORS[0]);
   const [penWidth, setPenWidth] = useState(DEFAULT_PEN_WIDTH);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const toolRef = useRef(tool);
-  const penColorRef = useRef(penColor);
-  const penWidthRef = useRef(penWidth);
-  // 문제별 보기의 확대/축소는 CSS zoom이 아니라 문제 영역의 실제 너비를 키우는
-  // 방식이라(아래 contentWidth), 캔버스도 리사이즈 옵저버로 같이 커진다. 즉 캔버스
-  // 좌표계와 화면 크기가 늘 1:1이므로 필기 좌표 보정 배율은 항상 1이다.
-  const zoomRef = useRef(1);
 
   const { zoom, zoomIn, zoomOut, handlePinchZoom } = useContentZoom();
-  // attachDrawing은 마운트 시 한 번만 붙어 그때의 콜백을 가둬두므로, 핀치 콜백은
-  // ref로 감싸 항상 최신 것을 부르게 한다(CBT 문제별 보기와 같은 방식).
-  const onPinchZoomRef = useRef(handlePinchZoom);
-  useEffect(() => {
-    onPinchZoomRef.current = handlePinchZoom;
+
+  // 문항별로 필기를 기록해둬서 앞뒤로 오가도, 확대/축소해도 남아 있게 한다.
+  // "전체 지우기"(clearDrawing)는 지금 보고 있는 문항 것만 지운다.
+  const { clearCurrent: clearDrawing } = useQuestionDrawing({
+    scrollAreaRef,
+    contentRef,
+    canvasRef,
+    itemKey: index,
+    tool,
+    penColor,
+    penWidth,
+    onPinchZoom: handlePinchZoom,
+    // 채점이 끝나면 결과 화면으로 바뀌어 캔버스 자체가 사라진다.
+    enabled: !submitted,
   });
-
-  useEffect(() => {
-    toolRef.current = tool;
-    if (canvasRef.current) {
-      canvasRef.current.style.pointerEvents = tool === "move" ? "none" : "auto";
-    }
-  }, [tool]);
-
-  useEffect(() => {
-    penColorRef.current = penColor;
-  }, [penColor]);
-
-  useEffect(() => {
-    penWidthRef.current = penWidth;
-  }, [penWidth]);
-
-  function clearDrawing() {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }
-
-  // 문제 이미지 아래 남는 빈 공간까지 필기 캔버스로 덮는다. 캔버스 크기는 문제
-  // 영역(이미지 높이 또는 화면에 보이는 높이 중 더 큰 값)에 맞춰 리사이즈 옵저버로
-  // 계속 맞춰주고, 내부 픽셀 버퍼는 dpr배로 키워 고해상도 화면에서도 선명하게 그린다.
-  useEffect(() => {
-    if (submitted) return;
-    const scrollArea = scrollAreaRef.current;
-    const content = contentRef.current;
-    const canvas = canvasRef.current;
-    if (!scrollArea || !content || !canvas) return;
-
-    // 펜/지우개 모드에서는 캔버스가 포인터를 잡으므로 두 손가락 핀치도 여기서
-    // 받아 확대/축소로 넘긴다(이동 모드의 핀치는 아래 스크롤 영역 터치가 잡는다).
-    attachDrawing(canvas, toolRef, penColorRef, zoomRef, penWidthRef, (factor) =>
-      onPinchZoomRef.current(factor),
-    );
-
-    function syncSize() {
-      const width = content!.clientWidth;
-      const height = Math.max(content!.clientHeight, scrollArea!.clientHeight);
-      const dpr = window.devicePixelRatio || 1;
-      const pixelWidth = Math.round(width * dpr);
-      const pixelHeight = Math.round(height * dpr);
-      if (canvas!.width !== pixelWidth || canvas!.height !== pixelHeight) {
-        canvas!.width = pixelWidth;
-        canvas!.height = pixelHeight;
-        canvas!.style.width = `${width}px`;
-        canvas!.style.height = `${height}px`;
-      }
-    }
-
-    syncSize();
-    const observer = new ResizeObserver(syncSize);
-    observer.observe(scrollArea);
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [submitted]);
-
-  // 문항을 넘기면 이미지가 통째로 바뀌어 좌표가 더 이상 의미 없으므로 필기를 지운다.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }, [index]);
 
   // 넘길 때마다 이미지를 새로 받으면 번호만 먼저 바뀌고 문제 사진이 늦게 뜬다. CBT
   // 문제별 풀기와 같이 들어오자마자 전 문항 이미지를 브라우저 캐시에 받아둬서, 쓸어넘김

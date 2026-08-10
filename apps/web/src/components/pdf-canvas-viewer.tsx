@@ -17,6 +17,20 @@ const ERASER_LINE_WIDTH = 24;
 
 type Point = { x: number; y: number };
 
+// 한 번에 그은 획 하나. 좌표와 굵기를 캔버스에 그린 픽셀로만 두지 않고 이렇게 따로
+// 기록해두면, 캔버스 크기가 바뀌거나(캔버스는 크기를 바꾸는 순간 내용이 통째로
+// 지워진다) 다른 문항을 보여줬다 돌아왔을 때 그대로 다시 그릴 수 있다.
+//
+// 좌표·굵기는 모두 "캔버스 버퍼 폭 대비 비율"이다. 확대/축소로 캔버스가 커지거나
+// 작아져도 같은 비율에 새 폭을 곱하면 문제 그림 위 같은 자리에 같은 두께로 다시
+// 그려진다 — 종이에 밴 잉크처럼 문제와 함께 커지고 작아진다.
+export type DrawnStroke = {
+  erase: boolean;
+  color: string;
+  width: number;
+  points: Point[];
+};
+
 function midPoint(a: Point, b: Point): Point {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
@@ -35,21 +49,36 @@ const LOADING_MESSAGES = [
 // 커져 저사양 기기에서 메모리 문제가 생길 수 있어 페이지 단위로 나눴다).
 // 지우개는 destination-out으로 그려서, 이 캔버스(필기)에서만 지나간 자리만큼 지워지고
 // 아래 PDF 페이지 캔버스에는 전혀 영향을 주지 않는다.
-export function attachDrawing(
-  canvas: HTMLCanvasElement,
-  toolRef: { current: DrawTool },
-  penColorRef: { current: string },
-  zoomRef: { current: number },
-  penWidthRef: { current: number },
+export function attachDrawing({
+  canvas,
+  toolRef,
+  penColorRef,
+  zoomRef,
+  penWidthRef,
+  onPinchZoom,
+  onStrokeEnd,
+}: {
+  canvas: HTMLCanvasElement;
+  toolRef: { current: DrawTool };
+  penColorRef: { current: string };
+  zoomRef: { current: number };
+  penWidthRef: { current: number };
   // 두 손가락으로 동시에 짚으면(핀치) 필기 대신 확대/축소로 처리하기 위한 콜백.
   // factor는 직전 프레임 대비 손가락 사이 거리 변화 비율(예: 1.02 = 2% 더 벌어짐)이라,
   // 호출하는 쪽에서 현재 zoom에 그대로 곱해주면 된다. 없으면(문제별 보기처럼 줌 개념이
   // 없는 화면) 두 손가락이 닿아도 그냥 무시한다.
-  onPinchZoom?: (factor: number) => void,
-) {
+  onPinchZoom?: (factor: number) => void;
+  // 획을 하나 다 그을 때마다 그 획을 넘겨준다(DrawnStroke 주석 참고). 받아서 보관해두면
+  // 캔버스가 리사이즈되거나 문항이 바뀌어 내용이 지워져도 redrawStrokes로 되살릴 수
+  // 있다. 안 넘기면 캔버스에 그려진 픽셀이 전부다(전체보기 PDF는 페이지 캔버스를
+  // 통째로 다시 만들며 필기도 같이 비우는 구조라 기록하지 않는다).
+  onStrokeEnd?: (stroke: DrawnStroke) => void;
+}): () => void {
   let drawing = false;
   let p0: Point | null = null;
   let p1: Point | null = null;
+  // 지금 긋고 있는 획의 기록. 손을 떼는 순간 onStrokeEnd로 넘긴다.
+  let stroke: DrawnStroke | null = null;
 
   // 화면(clientX/Y) 기준 좌표로 손가락 두 개의 간격을 추적한다. CSS zoom과 무관하게
   // 항상 실제 보이는 간격이라, 비율만 보면 되고 별도 배율 보정이 필요 없다.
@@ -73,6 +102,12 @@ export function attachDrawing(
     };
   }
 
+  // 캔버스 버퍼 좌표를 폭 대비 비율로 바꾼다(DrawnStroke 주석 참고).
+  function toStrokeSpace(p: Point): Point {
+    const scale = canvas.width || 1;
+    return { x: p.x / scale, y: p.y / scale };
+  }
+
   function pinchDistance(): number | null {
     const pts = [...activePointers.values()];
     if (pts.length < 2) return null;
@@ -80,15 +115,17 @@ export function attachDrawing(
     return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
-  canvas.addEventListener("pointerdown", (e) => {
+  function handlePointerDown(e: PointerEvent) {
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     if (activePointers.size >= 2) {
       // 두 번째 손가락이 닿는 순간부터 핀치 제스처로 취급하고, 진행 중이던
-      // 한 손가락 필기는 어중간한 획으로 남지 않게 취소한다.
+      // 한 손가락 필기는 어중간한 획으로 남지 않게 취소한다(기록도 버린다 —
+      // 화면에 남은 자국은 확대/축소로 캔버스를 다시 그릴 때 같이 사라진다).
       drawing = false;
       p0 = null;
       p1 = null;
+      stroke = null;
       lastPinchDistance = pinchDistance();
       return;
     }
@@ -97,9 +134,18 @@ export function attachDrawing(
     drawing = true;
     p0 = getPoint(e);
     p1 = null;
-  });
+    const isEraser = toolRef.current === "eraser";
+    stroke = {
+      erase: isEraser,
+      color: penColorRef.current,
+      width:
+        ((isEraser ? ERASER_LINE_WIDTH : penWidthRef.current) * dpr) /
+        (canvas.width || 1),
+      points: [toStrokeSpace(p0)],
+    };
+  }
 
-  canvas.addEventListener("pointermove", (e) => {
+  function handlePointerMove(e: PointerEvent) {
     if (!activePointers.has(e.pointerId)) return;
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -117,6 +163,7 @@ export function attachDrawing(
     if (!ctx) return;
     const isEraser = toolRef.current === "eraser";
     const point = getPoint(e);
+    stroke?.points.push(toStrokeSpace(point));
     ctx.globalCompositeOperation = isEraser ? "destination-out" : "source-over";
     ctx.strokeStyle = penColorRef.current;
     ctx.lineWidth = (isEraser ? ERASER_LINE_WIDTH : penWidthRef.current) * dpr;
@@ -143,20 +190,74 @@ export function attachDrawing(
     ctx.stroke();
     p0 = p1;
     p1 = point;
-  });
+  }
 
   function stop(e: PointerEvent) {
     activePointers.delete(e.pointerId);
     if (activePointers.size < 2) lastPinchDistance = null;
     if (activePointers.size === 0) {
+      // 점 하나짜리(움직이지 않은 탭)는 화면에도 아무것도 안 그려지므로 넘기지 않는다.
+      if (stroke && stroke.points.length > 1) onStrokeEnd?.(stroke);
+      stroke = null;
       drawing = false;
       p0 = null;
       p1 = null;
     }
   }
+
+  canvas.addEventListener("pointerdown", handlePointerDown);
+  canvas.addEventListener("pointermove", handlePointerMove);
   canvas.addEventListener("pointerup", stop);
   canvas.addEventListener("pointerleave", stop);
   canvas.addEventListener("pointercancel", stop);
+
+  return function detach() {
+    canvas.removeEventListener("pointerdown", handlePointerDown);
+    canvas.removeEventListener("pointermove", handlePointerMove);
+    canvas.removeEventListener("pointerup", stop);
+    canvas.removeEventListener("pointerleave", stop);
+    canvas.removeEventListener("pointercancel", stop);
+  };
+}
+
+// 보관해둔 획을 캔버스에 다시 그린다(캔버스는 먼저 비운다). 지우개 획도 그은 순서
+// 그대로 다시 태워야 "지운 자리"가 똑같이 남으므로 배열 순서대로 처리한다.
+//
+// 경로를 만드는 방식은 실시간으로 그을 때(위 pointermove)와 똑같다 — 첫 두 점은
+// 직선, 그 뒤로는 중점끼리 잇는 2차 곡선. 방식이 어긋나면 리사이즈 직후 획 모양이
+// 미묘하게 달라져 "필기가 흔들린다"고 느껴진다.
+export function redrawStrokes(canvas: HTMLCanvasElement, strokes: DrawnStroke[]) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const scale = canvas.width;
+  for (const stroke of strokes) {
+    if (stroke.points.length < 2) continue;
+    const pts = stroke.points.map((p) => ({ x: p.x * scale, y: p.y * scale }));
+    ctx.globalCompositeOperation = stroke.erase ? "destination-out" : "source-over";
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = stroke.width * scale;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    ctx.lineTo(pts[1].x, pts[1].y);
+    if (pts.length > 2) {
+      const start = midPoint(pts[0], pts[1]);
+      ctx.moveTo(start.x, start.y);
+      for (let i = 1; i < pts.length - 1; i++) {
+        const mid = midPoint(pts[i], pts[i + 1]);
+        ctx.quadraticCurveTo(pts[i].x, pts[i].y, mid.x, mid.y);
+      }
+    }
+    ctx.stroke();
+  }
+
+  // 지우개 획으로 끝났을 수 있으니 합성 모드를 원래대로 돌려놓는다(같은 컨텍스트에
+  // 이어서 실시간 필기가 그려진다).
+  ctx.globalCompositeOperation = "source-over";
 }
 
 export function PdfCanvasViewer({
@@ -370,14 +471,14 @@ export function PdfCanvasViewer({
             toolRef.current === "move" ? "none" : "auto";
           pageWrapper.appendChild(annotationCanvas);
           annotationCanvasesRef.current.push(annotationCanvas);
-          attachDrawing(
-            annotationCanvas,
+          attachDrawing({
+            canvas: annotationCanvas,
             toolRef,
             penColorRef,
             zoomRef,
             penWidthRef,
-            (factor) => onZoomChangeRef.current?.(factor),
-          );
+            onPinchZoom: (factor) => onZoomChangeRef.current?.(factor),
+          });
 
           container!.appendChild(pageWrapper);
           pendingRenders.push({ contentCanvas, viewport, page });

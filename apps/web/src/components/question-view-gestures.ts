@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
-import type { DrawTool } from "@/components/pdf-canvas-viewer";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import {
+  attachDrawing,
+  redrawStrokes,
+  type DrawnStroke,
+  type DrawTool,
+} from "@/components/pdf-canvas-viewer";
 
 // CBT 문제별 풀기(SingleQuestionView)와 오답 다시 풀기(ReviewSolver)가 공유하는
 // "문항 한 장을 화면에 맞춰 보여주고 손가락으로 조작하는" 규칙. 두 화면은 붙어 있는
@@ -134,6 +139,149 @@ export function useFitContentWidth({
     contentWidth: Math.round((measuredBaseWidth ?? stableBaseWidth) * zoom),
     handleImageLoad,
   };
+}
+
+// 문제 위에 겹쳐둔 필기 캔버스를 관리한다. 그은 획은 캔버스에 그려진 픽셀로만 두지
+// 않고 문항별로 따로 기록해두고(strokesRef), 아래 세 경우에 그 문항의 획을 다시
+// 그린다 — 셋 다 예전에는 필기가 그냥 사라지던 자리다:
+//   1) 문항을 넘겼다가 되돌아왔을 때 (1번 풀다 2번 갔다 다시 1번)
+//   2) 확대/축소·화면 회전으로 캔버스 크기가 바뀌었을 때 (캔버스는 width/height를
+//      건드리는 순간 내용이 통째로 지워진다)
+//   3) "전체 지우기"로 지금 문항만 비웠을 때 (다른 문항 필기는 그대로 둔다)
+// 좌표는 캔버스 폭 대비 비율이라(DrawnStroke) 확대해도 문제 그림 위 같은 자리에 남는다.
+//
+// 기록은 메모리에만 둔다. 새로고침하면 사라지지만 그건 고른 답도 마찬가지라(CBT는
+// 채점 전까지 아무것도 저장하지 않는다) 필기만 남길 이유가 없다.
+export function useQuestionDrawing({
+  scrollAreaRef,
+  contentRef,
+  canvasRef,
+  itemKey,
+  tool,
+  penColor,
+  penWidth,
+  onPinchZoom,
+  enabled = true,
+}: {
+  scrollAreaRef: RefObject<HTMLDivElement | null>;
+  contentRef: RefObject<HTMLDivElement | null>;
+  canvasRef: RefObject<HTMLCanvasElement | null>;
+  // 지금 보고 있는 문항을 구분하는 키(문항 인덱스). 바뀌면 그 문항의 필기로 갈아 낀다.
+  itemKey: number;
+  tool: DrawTool;
+  penColor: string;
+  penWidth: number;
+  onPinchZoom?: (factor: number) => void;
+  // 채점이 끝나 캔버스가 사라지는 화면(오답 다시 풀기)에서 관찰을 멈추기 위한 값.
+  enabled?: boolean;
+}) {
+  // 캔버스 이벤트 핸들러는 마운트 시 한 번만 붙어 그때의 값을 가둬두므로, 매 렌더
+  // 바뀌는 값들은 ref로 감싸 항상 최신 것을 보게 한다.
+  const toolRef = useRef(tool);
+  const penColorRef = useRef(penColor);
+  const penWidthRef = useRef(penWidth);
+  const onPinchZoomRef = useRef(onPinchZoom);
+  // 문제별 보기의 확대/축소는 CSS zoom이 아니라 문제 영역의 실제 너비를 키우는
+  // 방식이라, 캔버스도 아래 리사이즈 옵저버로 같이 커진다. 즉 캔버스 좌표계와 화면
+  // 크기가 늘 1:1이므로 필기 좌표 보정 배율은 항상 1이다.
+  const zoomRef = useRef(1);
+  const strokesRef = useRef(new Map<number, DrawnStroke[]>());
+  const itemKeyRef = useRef(itemKey);
+
+  useEffect(() => {
+    onPinchZoomRef.current = onPinchZoom;
+  }, [onPinchZoom]);
+
+  useEffect(() => {
+    toolRef.current = tool;
+    if (canvasRef.current) {
+      canvasRef.current.style.pointerEvents = tool === "move" ? "none" : "auto";
+    }
+  }, [tool, canvasRef]);
+
+  useEffect(() => {
+    penColorRef.current = penColor;
+  }, [penColor]);
+
+  useEffect(() => {
+    penWidthRef.current = penWidth;
+  }, [penWidth]);
+
+  const redraw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    redrawStrokes(canvas, strokesRef.current.get(itemKeyRef.current) ?? []);
+  }, [canvasRef]);
+
+  // 문항이 바뀌면 화면을 그 문항의 필기로 갈아 낀다(없으면 빈 캔버스가 된다).
+  useEffect(() => {
+    itemKeyRef.current = itemKey;
+    redraw();
+  }, [itemKey, redraw]);
+
+  // 문제 이미지 아래 남는 빈 공간까지 필기 캔버스로 덮어서, 문제와 답 고르는 부분
+  // 사이를 오가며 자유롭게 메모할 수 있게 한다. 캔버스 크기는 문제 영역(이미지 높이
+  // 또는 화면에 보이는 높이 중 더 큰 값)에 맞춰 리사이즈 옵저버로 계속 맞춰준다.
+  useEffect(() => {
+    if (!enabled) return;
+    const scrollArea = scrollAreaRef.current;
+    const content = contentRef.current;
+    const canvas = canvasRef.current;
+    if (!scrollArea || !content || !canvas) return;
+
+    // 펜/지우개 모드에서는 캔버스가 포인터를 잡으므로 두 손가락 핀치도 여기서 받아
+    // 확대/축소로 넘긴다(이동 모드의 핀치는 useSwipeNavigation이 잡는다).
+    const detach = attachDrawing({
+      canvas,
+      toolRef,
+      penColorRef,
+      zoomRef,
+      penWidthRef,
+      onPinchZoom: (factor) => onPinchZoomRef.current?.(factor),
+      onStrokeEnd: (stroke) => {
+        const strokes = strokesRef.current.get(itemKeyRef.current);
+        if (strokes) strokes.push(stroke);
+        else strokesRef.current.set(itemKeyRef.current, [stroke]);
+      },
+    });
+
+    function syncSize() {
+      const width = content!.clientWidth;
+      const height = Math.max(content!.clientHeight, scrollArea!.clientHeight);
+      // 필기 캔버스 버퍼를 화면 배율(dpr)만큼 더 촘촘하게 만들어야 고해상도 화면에서
+      // 획이 흐릿하게 늘어나 보이지 않는다(attachDrawing이 좌표/선굵기에 같은 dpr을
+      // 곱해 그린다). CSS 크기는 그대로 두고 내부 픽셀 버퍼만 dpr배로 키운다.
+      const dpr = window.devicePixelRatio || 1;
+      const pixelWidth = Math.round(width * dpr);
+      const pixelHeight = Math.round(height * dpr);
+      if (canvas!.width === pixelWidth && canvas!.height === pixelHeight) return;
+      canvas!.width = pixelWidth;
+      canvas!.height = pixelHeight;
+      canvas!.style.width = `${width}px`;
+      canvas!.style.height = `${height}px`;
+      // 크기를 바꾸면 캔버스 내용이 통째로 지워지므로, 새 크기에 맞춰 지금 문항의
+      // 획을 곧바로 다시 그린다(확대/축소할 때 필기가 사라지지 않게).
+      redraw();
+    }
+
+    syncSize();
+    const observer = new ResizeObserver(syncSize);
+    observer.observe(scrollArea);
+    observer.observe(content);
+    return () => {
+      observer.disconnect();
+      detach();
+    };
+  }, [enabled, scrollAreaRef, contentRef, canvasRef, redraw]);
+
+  // "전체 지우기"는 지금 보고 있는 문항의 필기만 지운다. 앞서 푼 문항에 남긴 필기는
+  // 그 문항으로 돌아갔을 때 그대로 있어야 한다.
+  const clearCurrent = useCallback(() => {
+    strokesRef.current.delete(itemKeyRef.current);
+    redraw();
+  }, [redraw]);
+
+  return { clearCurrent };
 }
 
 // 문제지 영역을 좌우로 쓸어넘기면 이전/다음 문제로 이동한다. 펜·지우개가 켜져
