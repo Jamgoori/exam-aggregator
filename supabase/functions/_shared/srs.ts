@@ -103,6 +103,22 @@ function retainedProgress(
   return Math.max(0, Math.min(1, elapsed / prev.intervalDays));
 }
 
+// 실제로 버틴 일수(× ease)가 뒷받침하지 못하는 간격은 배정하지 않는다. 예정일 전
+// 정답이 반복될 때 성장이 복리로 쌓여 복습일이 계속 미래로 밀리는 걸 막는다.
+// 예정일에 맞힌 정상 복습에서는 지난 일수 = 간격이라 아무 일도 하지 않는다.
+function boundByElapsed(
+  prev: SrsState,
+  grown: number,
+  now: Date,
+  lastGradedAt?: Date | null,
+): number {
+  if (!lastGradedAt || prev.intervalDays <= 0) return grown;
+  const elapsed = srsDayIndex(now) - srsDayIndex(lastGradedAt);
+  if (elapsed <= 0) return grown;
+  const evidence = Math.round(elapsed * prev.ease);
+  return Math.max(prev.intervalDays, Math.min(grown, evidence));
+}
+
 // 간격 흔들기. rand 가 없으면 그대로 둔다(기본은 결정적).
 export function fuzzInterval(days: number, rand?: () => number): number {
   if (!rand || days < SRS_FUZZ_MIN_DAYS) return days;
@@ -179,17 +195,16 @@ export function nextSrs(
   const growth = 1 + (prev.ease - 1) * progress;
 
   const reps = prev.reps + 1;
+  const grown = Math.min(
+    SRS_MAX_INTERVAL_DAYS,
+    Math.max(1, Math.round(prev.intervalDays * growth)),
+  );
   const intervalDays = reps === 1
     ? SRS_FIRST_INTERVAL_DAYS
     : reps === 2
     ? SRS_SECOND_INTERVAL_DAYS
-    : fuzzInterval(
-      Math.min(
-        SRS_MAX_INTERVAL_DAYS,
-        Math.max(1, Math.round(prev.intervalDays * growth)),
-      ),
-      opts.fuzz,
-    );
+    // 흔들기는 상한을 씌운 뒤에 건다(순서가 반대면 fuzz 가 상한을 넘긴다).
+    : fuzzInterval(boundByElapsed(prev, grown, now, lastGradedAt), opts.fuzz);
 
   return {
     state: {

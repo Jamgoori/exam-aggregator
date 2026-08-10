@@ -24,6 +24,7 @@ export * from "./tiers";
 export * from "./subject-color";
 export * from "./dedup-papers";
 export * from "./srs";
+export * from "./srs-retention";
 export * from "./membership";
 export * from "./review-queue";
 export * from "./review-pick";
