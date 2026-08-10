@@ -57,7 +57,9 @@ jobs:
           esac
 
           # 3. 홈의 canonical 이 새 도메인을 가리키는가 (여기가 틀리면 색인이 갈린다)
-          if grep -qi 'rel="canonical" href="https://gongmoa.kr/"' /tmp/home.html 2>/dev/null; then
+          # Next 는 metadataBase + canonical "/" 를 끝 슬래시 없는 `https://gongmoa.kr` 로
+          # 내보낸다. 둘 다 같은 주소이므로 슬래시 유무는 따지지 않는다.
+          if grep -qiE 'rel="canonical" href="https://gongmoa\.kr/?"' /tmp/home.html 2>/dev/null; then
             ok "홈 canonical = \`$APEX/\`"
           else
             found=$(grep -oi 'rel="canonical" href="[^"]*"' /tmp/home.html 2>/dev/null | head -1)
