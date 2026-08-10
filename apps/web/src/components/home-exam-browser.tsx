@@ -2,11 +2,12 @@
 
 import { useMemo, useState, useEffect, useDeferredValue, useRef, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { FileStack, Download, Users, Star } from "lucide-react";
+import { FileStack, Download, Users, Star, Plus } from "lucide-react";
 import { ExamCard } from "@/components/exam-card";
 import { SearchInput } from "@/components/search-input";
 import { WrongNoteShortcut } from "@/components/wrong-note-shortcut";
 import { SubjectIndexTabs } from "@/components/subject-index-tabs";
+import { SubjectQuickAdd } from "@/components/subject-quick-add";
 import { levelColor } from "@/lib/level-colors";
 import {
   filterPapers,
@@ -180,6 +181,8 @@ export function HomeExamBrowser({
     if (fromUrl === "0") return false;
     return window.localStorage.getItem(FAV_ONLY_STORAGE_KEY) === "1";
   });
+  // + 버튼으로 여는 "과목 바로 추가" 패널. 기본은 접힌 상태.
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [page, setPage] = useState(() => {
     if (typeof window !== "undefined") {
       const fromUrl = Number(
@@ -191,10 +194,24 @@ export function HomeExamBrowser({
   });
 
   const bookmarkedSet = useMemo(() => new Set(bookmarkedIds), [bookmarkedIds]);
-  const bookmarkedSubjectSet = useMemo(
+  // 과목 즐겨찾기는 화면 안에서(+ 버튼 패널, 과목 인덱스) 바로 바뀌고, 그 즉시
+  // "즐겨찾기한 과목만 보기" 결과에도 반영돼야 해서 서버 값을 초기값 삼아
+  // 클라이언트 상태로 들고 있는다. 서버가 새 목록을 내려주면 그쪽으로 맞춘다.
+  const [bookmarkedSubjectSet, setBookmarkedSubjectSet] = useState(
     () => new Set(bookmarkedSubjectIds),
-    [bookmarkedSubjectIds],
   );
+  useEffect(() => {
+    setBookmarkedSubjectSet(new Set(bookmarkedSubjectIds));
+  }, [bookmarkedSubjectIds]);
+  function handleSubjectBookmarkToggled(subjectId: string, bookmarked: boolean) {
+    setBookmarkedSubjectSet((prev) => {
+      const next = new Set(prev);
+      if (bookmarked) next.add(subjectId);
+      else next.delete(subjectId);
+      return next;
+    });
+    setPage(1);
+  }
   const cbtAvailableSet = useMemo(() => {
     const set = new Set<string>();
     for (let i = 0; i < allPapers.length; i++) {
@@ -381,20 +398,50 @@ export function HomeExamBrowser({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleToggleFavOnly}
-          aria-pressed={effectiveFavOnly}
-          title={loggedIn ? undefined : "로그인 후 이용할 수 있어요"}
-          className={`mt-2 flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium ${
-            effectiveFavOnly
-              ? "border border-amber-300 bg-amber-50 text-amber-600 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400"
-              : "border border-zinc-200 text-zinc-600 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-amber-800 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
-          }`}
-        >
-          <Star size={14} fill={effectiveFavOnly ? "currentColor" : "none"} />
-          즐겨찾기한 과목만 보기
-        </button>
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleToggleFavOnly}
+            aria-pressed={effectiveFavOnly}
+            title={loggedIn ? undefined : "로그인 후 이용할 수 있어요"}
+            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium ${
+              effectiveFavOnly
+                ? "border border-amber-300 bg-amber-50 text-amber-600 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400"
+                : "border border-zinc-200 text-zinc-600 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-amber-800 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
+            }`}
+          >
+            <Star size={14} fill={effectiveFavOnly ? "currentColor" : "none"} />
+            즐겨찾기한 과목만 보기
+          </button>
+          {/* 급수·직렬별로 과목을 바로 즐겨찾기에 넣을 수 있는 패널을 여닫는다. */}
+          <button
+            type="button"
+            onClick={() => setQuickAddOpen((v) => !v)}
+            aria-expanded={quickAddOpen}
+            aria-label="즐겨찾기할 과목 추가"
+            title="즐겨찾기할 과목 추가"
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-medium ${
+              quickAddOpen
+                ? "border border-amber-300 bg-amber-50 text-amber-600 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400"
+                : "border border-zinc-200 text-zinc-600 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-amber-800 dark:hover:bg-amber-950/30 dark:hover:text-amber-400"
+            }`}
+          >
+            <Plus
+              size={16}
+              className={quickAddOpen ? "rotate-45 transition-transform" : "transition-transform"}
+            />
+          </button>
+        </div>
+
+        {quickAddOpen && (
+          <SubjectQuickAdd
+            subjects={subjects}
+            papers={allPapers}
+            bookmarkedSubjectIds={bookmarkedSubjectSet}
+            loggedIn={loggedIn}
+            onToggle={handleSubjectBookmarkToggled}
+          />
+        )}
       </section>
 
       <section ref={resultsSectionRef} className="flex flex-col gap-4">
@@ -430,6 +477,7 @@ export function HomeExamBrowser({
           subjects={subjects}
           bookmarkedSubjectIds={bookmarkedSubjectSet}
           loggedIn={loggedIn}
+          onToggle={handleSubjectBookmarkToggled}
         />
 
         <p className="text-sm text-zinc-500 dark:text-zinc-500">총 {filtered.length}개의 자료</p>

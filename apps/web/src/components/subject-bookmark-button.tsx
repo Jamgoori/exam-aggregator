@@ -10,12 +10,16 @@ export function SubjectBookmarkButton({
   initialBookmarked,
   loggedIn,
   size = "md",
+  onToggled,
 }: {
   subjectId: string;
   initialBookmarked: boolean;
   loggedIn: boolean;
   // 과목 인덱스 모달처럼 좁은 자리에 넣을 때는 "sm"으로 줄인다.
   size?: "sm" | "md";
+  // 즐겨찾기 상태가 바뀔 때마다(낙관적 반영·서버 확정·실패 되돌림 모두) 부모에
+  // 알린다. 홈처럼 이 상태로 목록을 거르는 화면이 서버 왕복 없이 따라가기 위한 것.
+  onToggled?: (bookmarked: boolean) => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -35,13 +39,16 @@ export function SubjectBookmarkButton({
     // 원래 상태로 되돌린다.
     const next = !bookmarked;
     setBookmarked(next);
+    onToggled?.(next);
     startTransition(async () => {
       const result = await toggleSubjectBookmark(subjectId);
       if (result.error) {
         setError(result.error);
         setBookmarked(!next);
+        onToggled?.(!next);
       } else if (typeof result.bookmarked === "boolean") {
         setBookmarked(result.bookmarked);
+        onToggled?.(result.bookmarked);
       }
     });
   }

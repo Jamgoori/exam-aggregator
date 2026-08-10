@@ -10,11 +10,14 @@ export function SubjectIndexTabs({
   subjects,
   bookmarkedSubjectIds = new Set(),
   loggedIn = false,
+  onToggle,
 }: {
   subjects: Subject[];
   // 로그인한 사용자가 즐겨찾기한 과목 id들 (별 아이콘 초기 상태 표시용)
   bookmarkedSubjectIds?: Set<string>;
   loggedIn?: boolean;
+  // 홈처럼 즐겨찾기 상태로 목록을 거르는 화면이 곧바로 따라가기 위한 알림.
+  onToggle?: (subjectId: string, bookmarked: boolean) => void;
 }) {
   const [active, setActive] = useState<string | null>(null);
 
@@ -82,6 +85,7 @@ export function SubjectIndexTabs({
                       initialBookmarked={bookmarkedSubjectIds.has(s.id)}
                       loggedIn={loggedIn}
                       size="sm"
+                      onToggled={(next) => onToggle?.(s.id, next)}
                     />
                   </div>
                 ))}
