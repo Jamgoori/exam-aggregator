@@ -11,6 +11,9 @@
 // 되므로, 채점 규칙을 고칠 때는 여기도 같이 본다.
 //
 // 결과는 simulate.test.ts가 임계로 고정한다. 지표의 뜻은 SimulationReport 참고.
+//
+// 배럴(index.ts)에는 싣지 않는다 — 앱이 쓰는 코드가 아니라 분석 도구다.
+// 가져다 쓸 때는 "@gongmoa/core/simulate".
 
 import {
   buildDueQueue,

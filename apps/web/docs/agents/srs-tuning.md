@@ -15,7 +15,11 @@ cd apps/web
 npm run retention-report                 # 전체 기간
 npm run retention-report -- --days 30    # 최근 30일
 npm run retention-report -- --user <uuid>
+npm run retention-report -- --simulate   # DB 없이 가상 학습자로 (표 모양 확인용)
 ```
+
+실데이터가 없는 개발 단계에서는 `--simulate` 로 표 읽는 법만 익혀 두면 된다.
+그 숫자로 상수를 정하면 안 된다 — 가상 학습자의 기억 모델은 가정이다.
 
 `srs_reviews`(채점마다 남는 로그)를 간격 구간별 유지율로 접어 준다. 표의 각 열:
 

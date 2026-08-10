@@ -1,6 +1,7 @@
 // 사용법: npm run retention-report            (전체 기간)
 //         npm run retention-report -- --days 30   (최근 30일 채점만)
 //         npm run retention-report -- --user <uuid>
+//         npm run retention-report -- --simulate  (DB 없이, 가상 학습자로)
 //
 // 복습 스케줄 실측 리포트 (읽기 전용, 소유자 전용 — service role 키 필요).
 //
@@ -20,8 +21,14 @@
 //    잘못된 결론이 나온다.
 //
 // 표본이 얇으면(구간당 30 미만) 판정하지 않는다. 며칠 더 쌓고 다시 돌릴 것.
+//
+// --simulate 는 DB를 보지 않고 가상 학습자(packages/core/simulate.ts)를 굴려 같은 표를
+// 찍는다. 실데이터가 아직 없는 단계에서 표 읽는 법을 익히거나, 상수를 바꿨을 때
+// 방향이 어느 쪽인지 보는 용도다. 여기 숫자로 상수를 정하면 안 된다 — 가상 학습자의
+// 기억 모델은 가정이고, 실측을 대신하지 못한다.
 
 import { createClient } from "@supabase/supabase-js";
+import { PROFILES, simulate } from "@gongmoa/core/simulate";
 import {
   formatRetentionTable,
   summarizeRetention,
@@ -32,18 +39,34 @@ import {
   TARGET_RETENTION,
 } from "@gongmoa/core";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!supabaseUrl || !serviceRoleKey) {
-  console.error("환경변수 필요: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY");
-  process.exit(1);
-}
-const supabase = createClient(supabaseUrl, serviceRoleKey);
-
 function argOf(name) {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : null;
 }
+
+const simulated = process.argv.includes("--simulate");
+
+if (simulated) {
+  console.log(
+    "\n가상 학습자 시뮬레이션 (DB 미조회). 실측이 아니므로 상수 결정의 근거로 쓰지 말 것.\n",
+  );
+  for (const profile of Object.values(PROFILES)) {
+    const report = simulate(profile, { days: 120, seed: 7 });
+    console.log(`── ${report.profile} · ${report.days}일`);
+    console.log(formatRetentionTable(report.retention));
+    console.log();
+  }
+  process.exit(0);
+}
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!supabaseUrl || !serviceRoleKey) {
+  console.error("환경변수 필요: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY");
+  console.error("DB 없이 표 모양만 보려면: npm run retention-report -- --simulate");
+  process.exit(1);
+}
+const supabase = createClient(supabaseUrl, serviceRoleKey);
 
 const days = argOf("days") ? Number(argOf("days")) : null;
 const userId = argOf("user");
