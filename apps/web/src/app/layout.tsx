@@ -30,7 +30,8 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     locale: "ko_KR",
   },
-  twitter: { card: "summary" },
+  // opengraph-image.tsx 가 만들어주는 1200×630 카드를 잘리지 않게 크게 보여준다.
+  twitter: { card: "summary_large_image" },
   robots: {
     index: true,
     follow: true,
@@ -43,10 +44,20 @@ export const metadata: Metadata = {
       "max-video-preview": -1,
     },
   },
-  // Search Console 소유권 확인용 메타 태그. env를 넣으면 자동으로 붙는다.
-  verification: process.env.GOOGLE_SITE_VERIFICATION
-    ? { google: process.env.GOOGLE_SITE_VERIFICATION }
-    : undefined,
+  // 검색엔진 소유권 확인용 메타 태그. 각 웹마스터 도구가 주는 content 값을 env 에
+  // 넣으면 자동으로 붙는다 (구글 Search Console / 네이버 서치어드바이저 / 빙 웹마스터).
+  // 네이버는 Next 메타데이터에 전용 필드가 없어서 other 로 직접 이름을 준다.
+  verification: {
+    google: process.env.GOOGLE_SITE_VERIFICATION,
+    other: {
+      ...(process.env.NAVER_SITE_VERIFICATION && {
+        "naver-site-verification": process.env.NAVER_SITE_VERIFICATION,
+      }),
+      ...(process.env.BING_SITE_VERIFICATION && {
+        "msvalidate.01": process.env.BING_SITE_VERIFICATION,
+      }),
+    },
+  },
 };
 
 // 기본값(resizes-content)은 모바일 키보드가 열고 닫힐 때 레이아웃 뷰포트 자체의
