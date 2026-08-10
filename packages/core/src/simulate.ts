@@ -45,6 +45,12 @@ export type LearnerProfile = {
   // 복습 세션을 실제로 여는 확률(하루 기준). 1이면 매일 빠짐없이.
   reviewOnDays: number;
   dailyLimit: number;
+  // 과목당 개념 수. 기출은 같은 개념을 해마다 다시 묻는다 — 문항 수보다 개념 수가
+  // 훨씬 적고, 그래서 한 개념을 모르면 여러 문항이 한꺼번에 오답이 된다.
+  conceptsPerSubject?: number;
+  // 개념 키를 알 수 있는 문항 비율(= 해설 커버리지). 해설 배치가 진행 중이라
+  // 전 문항에 keyword_title이 있지는 않다.
+  conceptCoverage?: number;
 };
 
 export const PROFILES: Record<string, LearnerProfile> = {
@@ -106,6 +112,12 @@ export const PROFILES: Record<string, LearnerProfile> = {
   },
 };
 
+// 과목당 개념 수 기본값. 20문항짜리 시험지 여러 장이 같은 개념 풀을 공유한다.
+const DEFAULT_CONCEPTS_PER_SUBJECT = 12;
+
+// 해설 커버리지 기본값. 전 문항에 개념이 붙어 있지는 않은 상태를 기본으로 둔다.
+const DEFAULT_CONCEPT_COVERAGE = 0.7;
+
 // 문항 하나에 대한 사용자의 실제 기억. SRS가 추정하려는 대상이고, 시뮬레이터만 안다.
 type Memory = {
   // 기억 안정도(일). 클수록 오래 간다. 0이면 아직 모른다.
@@ -118,8 +130,11 @@ type Memory = {
   known: boolean;
 };
 
-// 편중 지표를 재는 최소 큐 길이.
-const METRIC_MIN_QUEUE = 10;
+// 편중 지표를 재는 최소 큐 길이 = 하루 상한. 자리가 꽉 찬 날에만 잰다.
+//
+// 큐가 짧은 날은 비율이 무의미하고(2문항이면 같은 시험지라도 100%), 애초에 상한이
+// 걸릴 자리가 없다. 상한이 일해야 하는 건 후보가 자리보다 많은 날이다.
+const METRIC_MIN_QUEUE = 20;
 
 const CHOICE_COUNT = 4;
 const GUESS_RATE = 1 / CHOICE_COUNT;
@@ -164,6 +179,8 @@ type StatusRow = {
   paperId: string;
   questionNumber: number;
   subjectId: string;
+  // 해설에서 파생된 개념 키. 커버리지 밖 문항은 null.
+  conceptKey: string | null;
   wrongCount: number;
   lastAnsweredDay: number | null;
   // null이면 대기 풀(아직 SRS에 안 태움).
@@ -183,6 +200,7 @@ function applyGrading(
   paperId: string,
   questionNumber: number,
   subjectId: string,
+  conceptKey: string | null,
   isCorrect: boolean,
   day: number,
   atMs: number,
@@ -193,6 +211,7 @@ function applyGrading(
     paperId,
     questionNumber,
     subjectId,
+    conceptKey,
     wrongCount: 0,
     lastAnsweredDay: null,
     dueDay: null,
@@ -258,6 +277,10 @@ export type SimulationReport = {
   // 큐에서 같은 문제지가 연달아 나온 비율. 사용자가 실제로 체감하는 편중은
   // "오늘 큐의 몇 %가 그 시험지인가"보다 "연달아 같은 시험지가 나오는가"다.
   adjacentSamePaper: number;
+  // 하루 큐에서 한 개념이 차지한 최대 비율(개념을 아는 문항 기준).
+  maxSameConceptShare: number;
+  // 같은 개념이 큐에서 연달아 나온 비율.
+  adjacentSameConcept: number;
   // 3일 안에 같은 문항이 다시 큐에 뜬 비율(재확인 단계 제외분). 반복 노출 체감.
   repeatWithin3Days: number;
   // 복습을 연 날 중 큐가 비어 있던 날 수.
@@ -299,7 +322,9 @@ export function simulate(
   let repeatWithin3 = 0;
   let queuedTotal = 0;
   let adjacentSamePaper = 0;
+  let adjacentSameConcept = 0;
   let adjacentPairs = 0;
+  let maxSameConceptShare = 0;
   let maxSamePaperShare = 0;
   let maxSameSubjectShare = 0;
   let emptyQueueDays = 0;
@@ -310,16 +335,46 @@ export function simulate(
   let paperSeq = 0;
   let papersOwed = 0;
 
+  // 문항 → 개념. 같은 개념이 여러 시험지에 흩어져 나오게 배정한다(기출은 같은
+  // 개념을 해마다 다시 묻는다). 커버리지 밖 문항은 개념을 모르는 것으로 둔다.
+  const conceptsPerSubject = profile.conceptsPerSubject ?? DEFAULT_CONCEPTS_PER_SUBJECT;
+  const coverage = profile.conceptCoverage ?? DEFAULT_CONCEPT_COVERAGE;
+  const conceptIdByQuestion = new Map<QuestionKey, string>();
+  const conceptKeyByQuestion = new Map<QuestionKey, string | null>();
+  function assignConcepts(paperId: string, subjectId: string, paperIndex: number): void {
+    for (let q = 1; q <= profile.questionsPerPaper; q++) {
+      const k = key(paperId, q);
+      const conceptId = `${subjectId}-c${(q + paperIndex) % conceptsPerSubject}`;
+      conceptIdByQuestion.set(k, conceptId);
+      // 해설이 없는 문항은 개념 키가 없다 — 큐 편성이 상한을 못 건다.
+      conceptKeyByQuestion.set(k, rand() < coverage ? conceptId : null);
+    }
+  }
+
+  // 개념별 숙련도. 기억을 문항이 아니라 개념에 매달아야 "한 개념을 모르면 여러 해
+  // 기출을 다 틀린다"가 재현된다 — 개념축이 막으려는 상황이 바로 그것이다.
+  const conceptState = new Map<string, { known: boolean; difficulty: number }>();
+  function conceptOf(conceptId: string): { known: boolean; difficulty: number } {
+    const found = conceptState.get(conceptId);
+    if (found) return found;
+    const made = {
+      known: rand() < profile.baseKnowledge,
+      difficulty: 0.5 + rand() * 1.5,
+    };
+    conceptState.set(conceptId, made);
+    return made;
+  }
+
   function memoryOf(k: QuestionKey, day: number): Memory {
     const found = memory.get(k);
     if (found) return found;
-    const known = rand() < profile.baseKnowledge;
+    const concept = conceptOf(conceptIdByQuestion.get(k) ?? k);
     const m: Memory = {
-      // 원래 알던 문항은 안정도가 크게 시작한다(시험 범위 밖 개념이 아니다).
-      stability: known ? 30 + rand() * 60 : 0,
+      // 원래 알던 개념의 문항은 안정도가 크게 시작한다.
+      stability: concept.known ? 30 + rand() * 60 : 0,
       lastSeenDay: day,
-      difficulty: 0.5 + rand() * 1.5,
-      known,
+      difficulty: concept.difficulty,
+      known: concept.known,
     };
     memory.set(k, m);
     return m;
@@ -359,7 +414,16 @@ export function simulate(
       const k = key(paper.paperId, q);
       const correct = answer(k, day);
       record(
-        applyGrading(status, paper.paperId, q, paper.subjectId, correct, day, atMs),
+        applyGrading(
+          status,
+          paper.paperId,
+          q,
+          paper.subjectId,
+          conceptKeyByQuestion.get(k) ?? null,
+          correct,
+          day,
+          atMs,
+        ),
         correct,
       );
       studyGradings++;
@@ -377,9 +441,11 @@ export function simulate(
     papersOwed += profile.papersPerDay;
     while (papersOwed >= 1) {
       papersOwed -= 1;
-      const paperId = `p${paperSeq++}`;
+      const paperIndex = paperSeq++;
+      const paperId = `p${paperIndex}`;
       const subjectId = `s${paperSeq % profile.subjects}`;
       const paper = { paperId, subjectId };
+      assignConcepts(paperId, subjectId, paperIndex);
       solvedPapers.push(paper);
       gradePaper(paper, day, morning);
     }
@@ -403,6 +469,7 @@ export function simulate(
           paperId: row.paperId,
           questionNumber: row.questionNumber,
           subjectId: row.subjectId,
+          conceptKey: row.conceptKey,
           dueAt: srsDayStart(row.dueDay).toISOString(),
           lapses: row.srs.lapses,
         });
@@ -411,6 +478,7 @@ export function simulate(
           paperId: row.paperId,
           questionNumber: row.questionNumber,
           subjectId: row.subjectId,
+          conceptKey: row.conceptKey,
           wrongCount: row.wrongCount,
           lastAnsweredAt: new Date(
             srsDayStart(row.lastAnsweredDay ?? day).getTime(),
@@ -431,15 +499,21 @@ export function simulate(
     // 큐 구성 지표
     const byPaper = new Map<string, number>();
     const bySubject = new Map<string, number>();
+    const byConcept = new Map<string, number>();
     for (const it of queue) {
       byPaper.set(it.paperId, (byPaper.get(it.paperId) ?? 0) + 1);
       bySubject.set(it.subjectId ?? "", (bySubject.get(it.subjectId ?? "") ?? 0) + 1);
+      if (it.conceptKey) byConcept.set(it.conceptKey, (byConcept.get(it.conceptKey) ?? 0) + 1);
     }
     // 큐가 짧은 날은 비율이 무의미하다(2문항이면 같은 시험지라도 100%가 된다).
     // 편중은 "자리가 충분한 날"에만 잰다.
     for (let i = 1; i < queue.length; i++) {
       adjacentPairs++;
       if (queue[i].paperId === queue[i - 1].paperId) adjacentSamePaper++;
+      // 개념을 모르는 문항끼리는 "같은 개념"으로 세지 않는다.
+      const a = queue[i].conceptKey;
+      const b = queue[i - 1].conceptKey;
+      if (a != null && a === b) adjacentSameConcept++;
     }
 
     if (queue.length >= METRIC_MIN_QUEUE) {
@@ -451,6 +525,12 @@ export function simulate(
         maxSameSubjectShare,
         Math.max(...bySubject.values()) / queue.length,
       );
+      if (byConcept.size > 0) {
+        maxSameConceptShare = Math.max(
+          maxSameConceptShare,
+          Math.max(...byConcept.values()) / queue.length,
+        );
+      }
     }
 
     for (const item of queue) {
@@ -473,6 +553,7 @@ export function simulate(
           item.paperId,
           item.questionNumber,
           row.subjectId,
+          row.conceptKey,
           correct,
           day,
           evening,
@@ -506,6 +587,7 @@ export function simulate(
           row.paperId,
           row.questionNumber,
           row.subjectId,
+          row.conceptKey,
           correct,
           day,
           recheckAt,
@@ -550,6 +632,8 @@ export function simulate(
     maxSamePaperShare,
     maxSameSubjectShare,
     adjacentSamePaper: adjacentPairs === 0 ? 0 : adjacentSamePaper / adjacentPairs,
+    maxSameConceptShare,
+    adjacentSameConcept: adjacentPairs === 0 ? 0 : adjacentSameConcept / adjacentPairs,
     repeatWithin3Days: queuedTotal === 0 ? 0 : repeatWithin3 / queuedTotal,
     emptyQueueDays,
     finalPending: pendingLeft,
@@ -576,7 +660,8 @@ export function formatReport(r: SimulationReport): string {
     `── ${r.profile} · ${r.days}일`,
     `   응시 채점 ${r.studyGradings} · 복습 채점 ${r.reviewGradings}`,
     `   오답 → 첫 복습까지: 중앙값 ${r.daysToFirstReview.median}일 · p90 ${r.daysToFirstReview.p90}일 · 최대 ${r.daysToFirstReview.max}일 · 못 만난 문항 ${r.daysToFirstReview.never}개`,
-    `   하루 큐 최대 편중: 같은 문제지 ${(r.maxSamePaperShare * 100).toFixed(0)}% · 같은 과목 ${(r.maxSameSubjectShare * 100).toFixed(0)}% · 같은 문제지 연속 ${(r.adjacentSamePaper * 100).toFixed(0)}%`,
+    `   하루 큐 최대 편중: 같은 문제지 ${(r.maxSamePaperShare * 100).toFixed(0)}% · 같은 과목 ${(r.maxSameSubjectShare * 100).toFixed(0)}% · 같은 개념 ${(r.maxSameConceptShare * 100).toFixed(0)}%`,
+    `   연속 노출: 같은 문제지 ${(r.adjacentSamePaper * 100).toFixed(0)}% · 같은 개념 ${(r.adjacentSameConcept * 100).toFixed(0)}%`,
     `   3일 내 재노출 ${(r.repeatWithin3Days * 100).toFixed(0)}% · 빈 큐 ${r.emptyQueueDays}일`,
     `   대기 ${r.finalPending} · 스케줄 ${r.finalScheduled} · 접힘 ${r.suspended} · 성숙 간격 평균 ${r.matureAverageInterval.toFixed(1)}일`,
   ];

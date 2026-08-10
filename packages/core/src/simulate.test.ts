@@ -59,12 +59,40 @@ test("복습을 매일 여는 사용자의 큐가 비지 않는다", () => {
   }
 });
 
-test("정착기 사용자는 틀린 당일 복습에 들어온다", () => {
-  // 오답이 희소한 사람에게는 대기 풀이 쌓일 이유가 없다. 여기가 늘어지면 신규
+test("정착기 사용자의 오답은 오래 기다리지 않는다", () => {
+  // 오답이 희소한 사람에게는 대기 풀이 크게 쌓일 이유가 없다. 여기가 늘어지면 신규
   // 승격 몫이 잘못 잡힌 것이다.
+  //
+  // 예전에는 "당일 승격(중앙값 0일)"을 못으로 박아 뒀는데, 기억 모델을 문항 단위에서
+  // 개념 단위로 바꾸면서 90점짜리 사용자도 모르는 개념 하나에서 여러 문항을 한꺼번에
+  // 틀리게 됐다(그게 개념축이 겨냥하는 상황이다). 그래서 짧은 대기는 정상이고,
+  // 임계는 "몇 주씩 밀리지는 않는다"로 잡는다.
   const r = report("settling");
-  assert.equal(r.daysToFirstReview.median, 0, formatReport(r));
-  assert.equal(r.finalPending, 0);
+  assert.ok(r.daysToFirstReview.median <= 7, formatReport(r));
+  assert.ok(r.daysToFirstReview.p90 <= 30, formatReport(r));
+  assert.ok(r.finalPending < 200, `대기 ${r.finalPending}개`);
+});
+
+test("같은 개념이 큐에서 연달아 나오지 않는다", () => {
+  // 같은 개념을 모르면 여러 해 기출에서 각각 틀리고, 그 문항들이 같은 날 큐에
+  // 몰린다. 사용자에게는 "또 대칭키?"로 보인다. 과목 인터리빙이 아무 일도 못 하는
+  // 단일 과목 사용자에게서 제일 크게 드러난다(개념축을 끄면 10%).
+  for (const key of ["focused", "settling", "rereading"] as const) {
+    const r = report(key);
+    assert.ok(
+      r.adjacentSameConcept <= 0.05,
+      `${r.profile}: 같은 개념 연속 ${(r.adjacentSameConcept * 100).toFixed(0)}%`,
+    );
+  }
+});
+
+test("개념 상한이 큐를 짧게 만들지 않는다", () => {
+  // 상한은 대체 후보가 있을 때만 건다. 개념이 몰린 날 자리를 비워두면 밀린 복습이
+  // 그대로 다음 날로 넘어가고, 그건 편중보다 나쁘다.
+  for (const key of ["focused", "expanding", "rereading"] as const) {
+    const r = report(key);
+    assert.equal(r.emptyQueueDays, 0, `${r.profile}: 빈 큐 ${r.emptyQueueDays}일`);
+  }
 });
 
 test("회독을 해도 성숙 문항의 간격이 폭주하지 않는다", () => {

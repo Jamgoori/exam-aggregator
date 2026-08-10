@@ -28,6 +28,7 @@ export * from "./srs-retention";
 export * from "./membership";
 export * from "./review-queue";
 export * from "./review-pick";
+export * from "./concept-key";
 export * from "./review-resume";
 export * from "./study-phase";
 
