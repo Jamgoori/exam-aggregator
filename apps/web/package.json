@@ -13,6 +13,7 @@
     "upload-answer": "node --env-file=.env.local scripts/upload-answer-key.mjs",
     "extract-answers": "node --env-file=.env.local scripts/extract-answer-keys.mjs",
     "list-pending-answers": "node --env-file=.env.local scripts/list-pending-answer-keys.mjs",
+    "retention-report": "node --import tsx --env-file=.env.local scripts/srs-retention-report.mjs",
     "crop-questions": "node --env-file=.env.local scripts/crop-question-images.mjs",
     "batch-crop-questions": "node --env-file=.env.local scripts/batch-crop-questions.mjs",
     "regression-check-crop": "node --env-file=.env.local scripts/regression-check-crop.mjs",
@@ -21,7 +22,8 @@
     "migrate-pdfs": "node --env-file=.env.local scripts/migrate-pdfs-optimize.mjs",
     "split-combined-pdf": "node scripts/split-combined-pdf.mjs",
     "split-by-subject-header": "node scripts/split-by-subject-header.mjs",
-    "split-by-toc": "node scripts/split-by-toc.mjs"
+    "split-by-toc": "node scripts/split-by-toc.mjs",
+    "test": "TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --test src/lib/*.test.ts"
   },
   "dependencies": {
     "@gongmoa/core": "*",
@@ -50,6 +52,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "tsx": "^4.20.0"
   }
 }

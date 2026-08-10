@@ -6,6 +6,9 @@ import {
   forecastDueByDay,
   newItemsForLimit,
   normalizeDailyLimit,
+  conceptCapForLimit,
+  paperCapForLimit,
+  recentItemsForNew,
   DUE_QUEUE_LIMIT,
   NEW_QUEUE_LIMIT,
   SUBJECT_MIN_SLOTS,
@@ -239,6 +242,67 @@ test("신규 승격은 자주 틀린 것 먼저, 같으면 오래 안 본 것 �
   );
 });
 
+test("신규 몫의 일부는 최근에 틀린 문항이 가져간다", () => {
+  // 1회독 중인 사용자의 대기 풀은 거의 전부 wrong_count 1 동점이라, 우선순위만
+  // 따르면 "가장 오래된 것부터"가 되어 어제 오답이 영영 안 나온다. 조회 창까지
+  // 오래된 쪽에 고정돼 있어 후보에 들어오지도 못한다.
+  const pending = [
+    ...Array.from({ length: 30 }, (_, i) =>
+      pend({
+        paperId: "old",
+        questionNumber: i + 1,
+        lastAnsweredAt: "2025-09-01T00:00:00.000Z",
+      }),
+    ),
+    ...Array.from({ length: 30 }, (_, i) =>
+      pend({
+        paperId: "recent",
+        questionNumber: i + 1,
+        lastAnsweredAt: "2026-03-09T00:00:00.000Z",
+      }),
+    ),
+  ];
+
+  const queue = buildDueQueue([], pending, NOW, { total: 20, newItems: 10 });
+  assert.equal(queue.length, 10);
+  // 10 × 0.3 = 3자리는 최근분 몫. 나머지 7은 예전대로 오래된 쪽이 가져간다.
+  assert.equal(queue.filter((q) => q.paperId === "recent").length, 3);
+  assert.equal(queue.filter((q) => q.paperId === "old").length, 7);
+});
+
+test("최근분 몫이 자주 틀린 문항의 자리를 빼앗지는 않는다", () => {
+  // 최근분은 몫의 30%뿐이다. 반복해서 무너지는 문항이 우선이라는 판단은 그대로다.
+  const pending = [
+    ...Array.from({ length: 20 }, (_, i) =>
+      pend({
+        paperId: "repeat",
+        questionNumber: i + 1,
+        wrongCount: 4,
+        lastAnsweredAt: "2025-09-01T00:00:00.000Z",
+      }),
+    ),
+    ...Array.from({ length: 20 }, (_, i) =>
+      pend({
+        paperId: "recent",
+        questionNumber: i + 1,
+        wrongCount: 1,
+        lastAnsweredAt: "2026-03-09T00:00:00.000Z",
+      }),
+    ),
+  ];
+
+  const queue = buildDueQueue([], pending, NOW, { total: 20, newItems: 10 });
+  assert.equal(queue.filter((q) => q.paperId === "repeat").length, 7);
+});
+
+test("신규 몫이 3개 이하면 쪼개지 않는다", () => {
+  // 자리가 몇 개 없을 때 나누면 양쪽 다 제 몫을 못 한다(내림).
+  assert.equal(recentItemsForNew(3), 0);
+  assert.equal(recentItemsForNew(10), 3);
+  assert.equal(recentItemsForNew(20), 6);
+  assert.equal(recentItemsForNew(0), 0);
+});
+
 test("신규 몫을 0으로 주면 대기 풀은 전혀 안 건드린다", () => {
   const queue = buildDueQueue([], [pend()], NOW, { newItems: 0 });
   assert.deepEqual(queue, []);
@@ -265,9 +329,15 @@ test("승격된 신규도 과목 섞기에 함께 들어간다", () => {
 test("한 과목이 due를 독점해도 다른 과목이 최소 몫을 받는다", () => {
   // 인터리빙은 "뽑은 것의 순서"만 바꾼다. 뽑기가 점수순뿐이면 행정법 200개짜리
   // 사용자의 큐는 20자리 전부 행정법이고, 국어는 그게 다 빠질 때까지 안 나온다.
+  // 행정법 due 100개는 시험지 10장에 흩어져 있다(문제지 상한과 얽히지 않게).
   const items = [
     ...Array.from({ length: 100 }, (_, i) =>
-      cand({ paperId: "a", questionNumber: i + 1, subjectId: "admin", dueAt: dueDay(-1) }),
+      cand({
+        paperId: `a${Math.floor(i / 10)}`,
+        questionNumber: i + 1,
+        subjectId: "admin",
+        dueAt: dueDay(-1),
+      }),
     ),
     ...Array.from({ length: 5 }, (_, i) =>
       cand({ paperId: "k", questionNumber: i + 1, subjectId: "korean", dueAt: dueDay(-1) }),
@@ -284,10 +354,20 @@ test("한 과목이 due를 독점해도 다른 과목이 최소 몫을 받는다
 test("최소 몫은 하루 총량에 비례한다", () => {
   const items = [
     ...Array.from({ length: 100 }, (_, i) =>
-      cand({ paperId: "a", questionNumber: i + 1, subjectId: "admin", dueAt: dueDay(-1) }),
+      cand({
+        paperId: `a${Math.floor(i / 10)}`,
+        questionNumber: i + 1,
+        subjectId: "admin",
+        dueAt: dueDay(-1),
+      }),
     ),
     ...Array.from({ length: 20 }, (_, i) =>
-      cand({ paperId: "k", questionNumber: i + 1, subjectId: "korean", dueAt: dueDay(-1) }),
+      cand({
+        paperId: `k${Math.floor(i / 10)}`,
+        questionNumber: i + 1,
+        subjectId: "korean",
+        dueAt: dueDay(-1),
+      }),
     ),
   ];
 
@@ -462,4 +542,204 @@ test("과목별 분포는 많은 순, 이름 못 찾는 과목은 뺀다", () =>
     { subjectId: "korean", name: "국어", count: 2 },
     { subjectId: "history", name: "한국사", count: 1 },
   ]);
+});
+
+test("한 문제지가 하루 큐를 다 먹지 않는다", () => {
+  // 회독 직후에는 그 시험지 문항이 한꺼번에 due가 된다. 우선순위만 따르면 오늘
+  // 20문항이 전부 같은 시험지가 되고, 사용자는 그걸 "복습이 고장 났다"로 읽는다.
+  const items = [
+    ...Array.from({ length: 40 }, (_, i) =>
+      cand({ paperId: "hot", questionNumber: i + 1, subjectId: "korean", dueAt: dueDay(-3) }),
+    ),
+    ...Array.from({ length: 20 }, (_, i) =>
+      cand({
+        paperId: `other${i % 4}`,
+        questionNumber: i + 1,
+        subjectId: "korean",
+        dueAt: dueDay(-1),
+      }),
+    ),
+  ];
+
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  assert.equal(queue.length, 20);
+  // 20 × 0.25 = 5자리까지. 더 오래 밀렸어도 한 시험지가 큐를 독점하지는 못한다.
+  assert.equal(queue.filter((q) => q.paperId === "hot").length, paperCapForLimit(20));
+});
+
+test("다른 문제지가 없으면 상한을 풀고 자리를 채운다", () => {
+  // 상한 때문에 큐가 짧아지는 건 편중보다 나쁘다. 오늘 볼 게 20개인데 5개만 주면
+  // 나머지 15개는 그냥 밀린다.
+  const items = Array.from({ length: 30 }, (_, i) =>
+    cand({ paperId: "only", questionNumber: i + 1, dueAt: dueDay(-1) }),
+  );
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  assert.equal(queue.length, 20);
+});
+
+test("같은 과목 안에서도 문제지가 번갈아 나온다", () => {
+  // 과목만 섞으면 "국어 5문항"이 전부 같은 시험지에서 연달아 나온다. 사용자에게는
+  // 과목이 섞였다는 사실보다 같은 시험지가 이어진다는 사실이 먼저 보인다.
+  const items = [
+    ...Array.from({ length: 4 }, (_, i) =>
+      cand({ paperId: "k1", questionNumber: i + 1, subjectId: "korean", dueAt: dueDay(-1) }),
+    ),
+    ...Array.from({ length: 4 }, (_, i) =>
+      cand({ paperId: "k2", questionNumber: i + 1, subjectId: "korean", dueAt: dueDay(-1) }),
+    ),
+  ];
+
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  let samePaperNeighbors = 0;
+  for (let i = 1; i < queue.length; i++) {
+    if (queue[i].paperId === queue[i - 1].paperId) samePaperNeighbors++;
+  }
+  assert.equal(samePaperNeighbors, 0);
+});
+
+test("신규 승격도 한 문제지에 몰리지 않는다", () => {
+  const pending = [
+    ...Array.from({ length: 30 }, (_, i) =>
+      pend({ paperId: "hot", questionNumber: i + 1, subjectId: "korean", wrongCount: 2 }),
+    ),
+    ...Array.from({ length: 30 }, (_, i) =>
+      pend({
+        paperId: `other${i % 5}`,
+        questionNumber: i + 1,
+        subjectId: "korean",
+        wrongCount: 2,
+      }),
+    ),
+  ];
+
+  const queue = buildDueQueue([], pending, NOW, { total: 20, newItems: 10 });
+  assert.equal(queue.length, 10);
+  assert.ok(
+    queue.filter((q) => q.paperId === "hot").length <= paperCapForLimit(10),
+    "신규 몫도 문제지 상한을 지켜야 한다",
+  );
+});
+
+// ── 개념 축 ──────────────────────────────────────────────────────────────────
+
+function withConcept(c: DueCandidate, conceptKey: string | null): DueCandidate {
+  return { ...c, conceptKey };
+}
+
+test("같은 개념이 하루 큐를 도배하지 않는다", () => {
+  // 개념 하나를 모르면 여러 해 기출에서 각각 틀린다. 문제지 상한은 이걸 못 막는다 —
+  // 2015·2018·2021 문항은 서로 다른 시험지라 상한에 안 걸린다.
+  const items = [
+    ...Array.from({ length: 12 }, (_, i) =>
+      withConcept(
+        cand({
+          paperId: `y${i}`,
+          questionNumber: 1,
+          subjectId: "security",
+          dueAt: dueDay(-3),
+        }),
+        "대칭키",
+      ),
+    ),
+    // 상한은 "다른 후보가 있을 때"만 건다. 자리를 메울 다른 개념을 넉넉히 둔다.
+    ...Array.from({ length: 30 }, (_, i) =>
+      withConcept(
+        cand({
+          paperId: `y${i % 12}`,
+          questionNumber: 2 + Math.floor(i / 12),
+          subjectId: "security",
+          dueAt: dueDay(-1),
+        }),
+        `기타${i}`,
+      ),
+    ),
+  ];
+
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  assert.equal(queue.length, 20);
+  assert.equal(
+    queue.filter((q) => q.conceptKey === "대칭키").length,
+    conceptCapForLimit(20),
+  );
+});
+
+test("개념을 모르는 문항은 상한에 걸리지 않는다", () => {
+  // 해설이 아직 없는 문항은 conceptKey가 null이다. 모른다는 이유로 서로 묶이면
+  // 해설 없는 문항끼리 상한에 걸려 큐가 텅 빈다.
+  const items = Array.from({ length: 30 }, (_, i) =>
+    withConcept(
+      cand({ paperId: `p${i % 6}`, questionNumber: i + 1, dueAt: dueDay(-1) }),
+      null,
+    ),
+  );
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  assert.equal(queue.length, 20);
+});
+
+test("개념 후보가 그것뿐이면 상한을 풀고 채운다", () => {
+  const items = Array.from({ length: 30 }, (_, i) =>
+    withConcept(
+      cand({ paperId: `p${i % 6}`, questionNumber: i + 1, dueAt: dueDay(-1) }),
+      "대칭키",
+    ),
+  );
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  assert.equal(queue.length, 20, "상한 때문에 큐가 짧아지면 안 된다");
+});
+
+test("같은 개념이 연달아 나오지 않는다", () => {
+  const items = [
+    ...Array.from({ length: 3 }, (_, i) =>
+      withConcept(
+        cand({ paperId: `a${i}`, questionNumber: 1, subjectId: "s", dueAt: dueDay(-1) }),
+        "대칭키",
+      ),
+    ),
+    ...Array.from({ length: 3 }, (_, i) =>
+      withConcept(
+        cand({ paperId: `b${i}`, questionNumber: 1, subjectId: "s", dueAt: dueDay(-1) }),
+        "공개키",
+      ),
+    ),
+  ];
+
+  const queue = buildDueQueue(items, [], NOW, { total: 20, newItems: 0 });
+  let sameNeighbors = 0;
+  for (let i = 1; i < queue.length; i++) {
+    if (queue[i].conceptKey === queue[i - 1].conceptKey) sameNeighbors++;
+  }
+  assert.equal(sameNeighbors, 0);
+});
+
+test("승격된 신규도 개념 키를 들고 큐에 들어온다", () => {
+  // 여기서 잃으면 승격분에는 개념 상한이 안 걸린다.
+  const pending = Array.from({ length: 20 }, (_, i) => ({
+    ...pend({ paperId: `p${i}`, questionNumber: 1 }),
+    conceptKey: "대칭키",
+  }));
+
+  const queue = buildDueQueue([], pending, NOW, { total: 20, newItems: 10 });
+  assert.ok(queue.every((q) => q.conceptKey === "대칭키"));
+  // 대체 후보가 없으므로 상한은 풀린다 — 신규 몫을 비워두는 게 더 나쁘다.
+  assert.equal(queue.length, 10);
+});
+
+test("승격도 개념 상한을 지킨다(대체 후보가 있을 때)", () => {
+  const pending = [
+    ...Array.from({ length: 10 }, (_, i) => ({
+      ...pend({ paperId: `a${i}`, questionNumber: 1, wrongCount: 3 }),
+      conceptKey: "대칭키",
+    })),
+    ...Array.from({ length: 20 }, (_, i) => ({
+      ...pend({ paperId: `b${i}`, questionNumber: 1, wrongCount: 3 }),
+      conceptKey: `기타${i}`,
+    })),
+  ];
+
+  const queue = buildDueQueue([], pending, NOW, { total: 20, newItems: 10 });
+  assert.equal(queue.length, 10);
+  assert.equal(
+    queue.filter((q) => q.conceptKey === "대칭키").length,
+    conceptCapForLimit(10),
+  );
 });

@@ -190,6 +190,32 @@ function retainedProgress(
   return Math.max(0, Math.min(1, elapsed / prev.intervalDays));
 }
 
+// 실제로 버틴 일수가 뒷받침하지 못하는 간격은 배정하지 않는다.
+//
+// retainedProgress가 회차마다 성장을 깎아도 "예정일 전 정답"이 반복되면 그 성장이
+// 복리로 쌓인다. 간격 60일 문항을 매일 회독으로 맞히면 회차마다 1.025배씩 붙어
+// 20일이면 60 → 98이 되고, due는 늘 "오늘 + 간격"이라 그만큼 미래로 밀린다.
+// 회독을 성실히 할수록 복습 큐가 비는 역설이 여기서 나왔다.
+//
+// 그래서 상한을 하나 더 씌운다: 마지막 채점 이후 실제로 지난 일수 × ease.
+// 6일 만에 맞힌 건 6일치 증거이므로 15일까지가 한계고, 이미 60일을 배정받은
+// 문항이면 늘릴 근거가 없어 60 그대로다(줄이지도 않는다 — 맞힌 건 사실이다).
+//
+// 예정일에 맞힌 정상 복습은 지난 일수 = 간격이라 상한이 곱셈 결과보다 커서
+// 아무 일도 하지 않는다. 즉 이 규칙이 건드리는 건 조기 정답뿐이다.
+function boundByElapsed(
+  prev: SrsState,
+  grown: number,
+  now: Date,
+  lastGradedAt?: Date | null,
+): number {
+  if (!lastGradedAt || prev.intervalDays <= 0) return grown;
+  const elapsed = srsDayIndex(now) - srsDayIndex(lastGradedAt);
+  if (elapsed <= 0) return grown;
+  const evidence = Math.round(elapsed * prev.ease);
+  return Math.max(prev.intervalDays, Math.min(grown, evidence));
+}
+
 // 간격을 ±SRS_FUZZ_RATIO 만큼 흔든다. rand가 없으면 그대로 둔다 — 기본을 결정적으로
 // 두어야 테스트가 간격을 고정할 수 있고, 흔들지 말아야 할 자리(재확인·학습 단계)에
 // 실수로 새어 들어가지 않는다.
@@ -216,7 +242,8 @@ export type NextSrsOptions = {
 // 틀리면 간격을 1일로 되돌리고 ease를 깎는다(다음부터 더 촘촘히 나옴).
 // 맞히면 1일 → 3일 → 그 뒤로는 직전 간격 × ease 로 벌어진다. 간격 계산에는 갱신 전
 // ease를 쓴다 — 이번 정답의 보너스는 다음 회차부터 반영되게 해서 한 번 맞혔다고
-// 간격이 두 배로 튀지 않게 한다.
+// 간격이 두 배로 튀지 않게 한다. 그 위에 "지난 일수 × ease" 상한을 씌운다
+// (boundByElapsed) — 조기 정답이 반복될 때 성장이 복리로 쌓이는 걸 막는다.
 //
 // lastGradedAt(직전 채점 시각)을 주면 "하루 1회만 반영" 규칙이 걸린다. 섞어풀기는
 // 쿨다운이 없어 같은 문항을 하루에 몇 번이고 다시 풀 수 있는데, 그때마다 reps가
@@ -300,18 +327,17 @@ export function nextSrs(
   const growth = 1 + (prev.ease - 1) * progress;
 
   const reps = prev.reps + 1;
+  const grown = Math.min(
+    SRS_MAX_INTERVAL_DAYS,
+    Math.max(1, Math.round(prev.intervalDays * growth)),
+  );
   const intervalDays =
     reps === 1
       ? SRS_FIRST_INTERVAL_DAYS
       : reps === 2
         ? SRS_SECOND_INTERVAL_DAYS
-        : fuzzInterval(
-            Math.min(
-              SRS_MAX_INTERVAL_DAYS,
-              Math.max(1, Math.round(prev.intervalDays * growth)),
-            ),
-            opts.fuzz,
-          );
+        : // 흔들기(fuzz)는 상한을 씌운 뒤에 건다 — 순서가 반대면 fuzz가 상한을 넘긴다.
+          fuzzInterval(boundByElapsed(prev, grown, now, lastGradedAt), opts.fuzz);
 
   return {
     state: {
