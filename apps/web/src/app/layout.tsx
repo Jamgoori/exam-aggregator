@@ -12,6 +12,9 @@ import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site-url";
 import { JsonLd } from "@/components/json-ld";
 import "./globals.css";
 
+// 네이버 서치어드바이저(searchadvisor.naver.com)가 발급한 사이트 소유확인 값.
+const NAVER_SITE_VERIFICATION = "0c7170c9fa14f6a8d7dd7523de328de8e3e37062";
+
 // canonical(alternates)과 openGraph.url은 여기 두면 안 된다 — Next의 메타데이터는
 // 하위 라우트가 덮어쓰지 않는 필드를 그대로 물려받아서, 루트에 canonical을 박으면
 // 모든 문제지 상세페이지가 홈을 정본으로 가리키며 색인에서 통째로 사라진다.
@@ -44,15 +47,18 @@ export const metadata: Metadata = {
       "max-video-preview": -1,
     },
   },
-  // 검색엔진 소유권 확인용 메타 태그. 각 웹마스터 도구가 주는 content 값을 env 에
-  // 넣으면 자동으로 붙는다 (구글 Search Console / 네이버 서치어드바이저 / 빙 웹마스터).
-  // 네이버는 Next 메타데이터에 전용 필드가 없어서 other 로 직접 이름을 준다.
+  // 검색엔진 소유권 확인용 메타 태그 (구글 Search Console / 네이버 서치어드바이저 /
+  // 빙 웹마스터). 네이버는 Next 메타데이터에 전용 필드가 없어서 other 로 이름을 준다.
+  //
+  // 확인이 끝난 뒤에도 태그가 사라지면 소유권이 해제되므로, 값을 env 에만 두지
+  // 않는다 — 환경변수 하나가 빠지면 조용히 등록이 풀린다. 어차피 HTML 에 그대로
+  // 드러나는 공개 문자열이라 숨길 이유도 없어서 아래 상수를 기본값으로 쓰고,
+  // env 가 있으면(도메인 이전 등) 그쪽을 우선한다.
   verification: {
     google: process.env.GOOGLE_SITE_VERIFICATION,
     other: {
-      ...(process.env.NAVER_SITE_VERIFICATION && {
-        "naver-site-verification": process.env.NAVER_SITE_VERIFICATION,
-      }),
+      "naver-site-verification":
+        process.env.NAVER_SITE_VERIFICATION ?? NAVER_SITE_VERIFICATION,
       ...(process.env.BING_SITE_VERIFICATION && {
         "msvalidate.01": process.env.BING_SITE_VERIFICATION,
       }),
