@@ -24,7 +24,23 @@ import type { Subject } from "@gongmoa/core";
 import type { ExamPaper } from "@gongmoa/core";
 
 const PAGE_SIZE = 24;
-const LEVELS = ["9급", "7급"];
+// 과목 인덱스(ㄱㄴㄷ) 바로 윗줄의 묶음 버튼. 급수 넷은 exam_papers.level로,
+// 경찰·소방·계리직은 level이 비어 있어 시행처(exam_types.name)로 가른다.
+const GROUPS: { label: string; level?: string; examType?: string }[] = [
+  { label: "9급", level: "9급" },
+  { label: "8급", level: "8급" },
+  { label: "7급", level: "7급" },
+  { label: "5급", level: "5급" },
+  { label: "경찰", examType: "경찰" },
+  { label: "소방", examType: "소방" },
+  { label: "계리직", examType: "계리직" },
+];
+// 시행처 묶음은 급수 색(levelColor)에 해당하는 값이 없어 여기서 따로 정한다.
+const EXAM_TYPE_COLORS: Record<string, string> = {
+  경찰: "bg-sky-700 text-white",
+  소방: "bg-red-600 text-white",
+  계리직: "bg-emerald-600 text-white",
+};
 // 브라우저 히스토리 갱신(URL 공유용)은 타이핑 자체를 막지 않도록 아주 살짝만
 // 늦춘다 — 실제 필터링은 이 지연과 무관하게 매 입력마다 즉시 일어난다.
 const URL_SYNC_DEBOUNCE_MS = 200;
@@ -108,6 +124,7 @@ export function HomeExamBrowser({
   examTypes,
   initialQuery,
   initialLevel,
+  initialExamType,
   initialPage,
   bookmarkedIds,
   bookmarkedSubjectIds,
@@ -130,6 +147,7 @@ export function HomeExamBrowser({
   examTypes: ExamTypeRef[];
   initialQuery: string;
   initialLevel?: string;
+  initialExamType?: string;
   initialPage: number;
   bookmarkedIds: string[];
   bookmarkedSubjectIds: string[];
@@ -172,6 +190,15 @@ export function HomeExamBrowser({
       if (fromUrl) return fromUrl;
     }
     return initialLevel;
+  });
+  // 경찰·소방·계리직 묶음은 급수가 아니라 시행처로 거르므로 별도 상태로 둔다
+  // (둘 중 하나만 걸리도록 handleGroupChange에서 서로를 비운다).
+  const [examTypeFilter, setExamTypeFilter] = useState<string | undefined>(() => {
+    if (typeof window !== "undefined") {
+      const fromUrl = new URLSearchParams(window.location.search).get("type");
+      if (fromUrl) return fromUrl;
+    }
+    return initialExamType;
   });
   // URL(?fav=1)을 우선하고, 없으면 지난번에 저장해둔 로컬 설정을 따른다.
   const [favOnly, setFavOnly] = useState(() => {
@@ -243,6 +270,7 @@ export function HomeExamBrowser({
     [deferredQuery, examTypeNames],
   );
   const effectiveLevel = queryLevel ?? level;
+  const effectiveExamType = queryExamType ?? examTypeFilter;
   const isSearching = subjectQuery.trim().length > 0;
   const matchedSubjectIds = useMemo(
     () => matchSubjectIds(subjects, subjectQuery),
@@ -253,7 +281,7 @@ export function HomeExamBrowser({
       filterPapers(allPapers, {
         level: effectiveLevel,
         year: queryYear,
-        examType: queryExamType,
+        examType: effectiveExamType,
         matchedSubjectIds,
         isSearching,
         favOnly: effectiveFavOnly,
@@ -263,7 +291,7 @@ export function HomeExamBrowser({
       allPapers,
       effectiveLevel,
       queryYear,
-      queryExamType,
+      effectiveExamType,
       matchedSubjectIds,
       isSearching,
       effectiveFavOnly,
@@ -306,8 +334,12 @@ export function HomeExamBrowser({
     setQuery(next);
     setPage(1);
   }
-  function handleLevelChange(next: string | undefined) {
-    setLevel(next);
+  // 급수 묶음과 시행처 묶음은 한 줄에 나란히 있지만 서로 배타적이다 — 하나를
+  // 고르면 다른 쪽 필터는 비워야 "9급 + 경찰"처럼 결과가 0건이 되는 조합을
+  // 사용자가 모르게 만들지 않는다. 인자가 없으면 "전체"(둘 다 해제).
+  function handleGroupChange(next?: { level?: string; examType?: string }) {
+    setLevel(next?.level);
+    setExamTypeFilter(next?.examType);
     setPage(1);
   }
   function handleToggleFavOnly() {
@@ -349,13 +381,14 @@ export function HomeExamBrowser({
       const usp = new URLSearchParams();
       if (query) usp.set("q", query);
       if (level) usp.set("level", level);
+      if (examTypeFilter) usp.set("type", examTypeFilter);
       if (effectiveFavOnly) usp.set("fav", "1");
       if (safePage > 1) usp.set("page", String(safePage));
       const qs = usp.toString();
       window.history.replaceState(null, "", qs ? `/?${qs}` : "/");
     }, URL_SYNC_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
-  }, [query, level, effectiveFavOnly, safePage]);
+  }, [query, level, examTypeFilter, effectiveFavOnly, safePage]);
 
   return (
     <>
@@ -436,7 +469,6 @@ export function HomeExamBrowser({
         {quickAddOpen && (
           <SubjectQuickAdd
             subjects={subjects}
-            papers={allPapers}
             bookmarkedSubjectIds={bookmarkedSubjectSet}
             loggedIn={loggedIn}
             onToggle={handleSubjectBookmarkToggled}
@@ -448,29 +480,36 @@ export function HomeExamBrowser({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => handleLevelChange(undefined)}
+            onClick={() => handleGroupChange()}
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-              !effectiveLevel
+              !effectiveLevel && !effectiveExamType
                 ? "bg-zinc-800 text-white dark:bg-zinc-700"
                 : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
             }`}
           >
             전체
           </button>
-          {LEVELS.map((lv) => (
-            <button
-              key={lv}
-              type="button"
-              onClick={() => handleLevelChange(lv)}
-              className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-                effectiveLevel === lv
-                  ? levelColor(lv)
-                  : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
-              }`}
-            >
-              {lv}
-            </button>
-          ))}
+          {GROUPS.map((g) => {
+            const active = g.level
+              ? effectiveLevel === g.level && !effectiveExamType
+              : effectiveExamType === g.examType;
+            return (
+              <button
+                key={g.label}
+                type="button"
+                onClick={() => handleGroupChange(g)}
+                className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+                  active
+                    ? g.level
+                      ? levelColor(g.level)
+                      : EXAM_TYPE_COLORS[g.label]
+                    : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
+                }`}
+              >
+                {g.label}
+              </button>
+            );
+          })}
         </div>
 
         <SubjectIndexTabs

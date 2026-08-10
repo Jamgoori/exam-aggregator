@@ -1,10 +1,10 @@
-// 홈 진입이 항상 즉시(정적 셸) 이동되는지 빌드가 검증하게 한다. level·q·page는
-// 검색창·급수 탭·페이지네이션이 쓰는 검색 파라미터라 있음/없음 둘 다 선언해둔다.
+// 홈 진입이 항상 즉시(정적 셸) 이동되는지 빌드가 검증하게 한다. level·type·q·page는
+// 검색창·묶음 탭·페이지네이션이 쓰는 검색 파라미터라 있음/없음 둘 다 선언해둔다.
 export const unstable_instant = {
   prefetch: "static",
   samples: [
-    { searchParams: { level: null, q: null, page: null } },
-    { searchParams: { level: "9급", q: "국어", page: "2" } },
+    { searchParams: { level: null, type: null, q: null, page: null } },
+    { searchParams: { level: "9급", type: null, q: "국어", page: "2" } },
   ],
 };
 
@@ -33,11 +33,13 @@ export default async function Home({
 }: {
   searchParams: Promise<{
     level?: string;
+    // 경찰·소방·계리직 묶음(급수가 아닌 시행처 기준)
+    type?: string;
     q?: string;
     page?: string;
   }>;
 }) {
-  const { level, q, page } = await searchParams;
+  const { level, type, q, page } = await searchParams;
   const currentPage = Math.max(1, Number(page) || 1);
   const supabase = await createClient();
 
@@ -129,6 +131,7 @@ export default async function Home({
         examTypes={examTypes}
         initialQuery={q ?? ""}
         initialLevel={level}
+        initialExamType={type}
         initialPage={currentPage}
         bookmarkedIds={[...bookmarkedIds]}
         bookmarkedSubjectIds={[...bookmarkedSubjectIds]}

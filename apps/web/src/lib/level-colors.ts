@@ -4,6 +4,7 @@ export { compareLevels, LEVEL_ORDER } from "@gongmoa/core";
 
 const LEVEL_COLORS: Record<string, string> = {
   "9급": "bg-blue-600 text-white",
+  "8급": "bg-teal-600 text-white",
   "7급": "bg-orange-500 text-white",
   "5급": "bg-purple-600 text-white",
 };
