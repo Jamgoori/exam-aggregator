@@ -187,3 +187,12 @@ test("정본 목록 검증: 그룹 키를 나눠 가지면 경고한다", () => 
   assert.ok(report.warnings.some((w) => /그룹 키/.test(w.message)));
   assert.equal(report.errors.length, 0);
 });
+
+test("정본 목록 검증: 단원과 개념 이름이 같으면 오류다", () => {
+  // 단원도 concepts 행이라 (subject_id, lower(name)) 유일 인덱스에 걸린다. 등록할 때
+  // 둘 중 하나가 조용히 빠지고, 화면에는 아무 표시도 안 난다.
+  const report = validateConceptSpec({
+    영어: [{ name: "생활영어", unit: "생활영어", kind: "skill" }],
+  });
+  assert.ok(report.errors.some((e) => /단원과 개념 이름이 같다/.test(e.message)));
+});

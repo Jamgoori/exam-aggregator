@@ -319,6 +319,14 @@ export function validateConceptSpec(
       }
     }
 
+    // 단원도 concepts 행이라 이름이 겹치면 유일 인덱스에 걸린다. 등록할 때 둘 중
+    // 하나가 조용히 빠지고, 그러면 그 개념이 통째로 사라진 채 아무 표시도 안 난다.
+    for (const unit of units) {
+      if (names.has(unit)) {
+        errors.push({ subject, message: `단원과 개념 이름이 같다: ${unit}` });
+      }
+    }
+
     // 같은 그룹 키를 나눠 가지면 2차 그물이 꺼진다(새 표기가 전부 미매칭이 된다).
     for (const [key, owners] of keyOwners) {
       if (owners.length > 1) {
