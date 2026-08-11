@@ -180,7 +180,7 @@ npm run regression-check-crop -- --baseline <ref>  # 특정 커밋 대비
 조판이 어디쯤 나오는지 재본 뒤 조정할 것. 보정 전까지 **exit 코드에 넣지 말 것** —
 멀쩡한 문제지를 무더기로 막는다.
 
-**환경부터 확인할 것 — 세 세션 연속 여기서 막혔다(2026-08-11 기준).** 이 조사는 실측이
+**환경부터 확인할 것 — 네 세션 연속 여기서 막혔다(2026-08-11 기준).** 이 조사는 실측이
 전부인데 `regression-check-crop`은 Supabase DB(`exam_papers` 등 조회)와
 Storage(`exam-papers` 버킷에서 원본 PDF 다운로드)를 **둘 다** 쓴다. 웹 세션 컨테이너에서
 막힌 지점을 순서대로 적어둔다 — 앞의 둘은 세션 안에서 풀 수 있고, **세 번째는 못 푼다**:
@@ -194,12 +194,47 @@ Storage(`exam-papers` 버킷에서 원본 PDF 다운로드)를 **둘 다** 쓴�
    egress settings to allow access.` **이건 세션 안에서 우회할 방법이 없다** —
    환경 설정에서 그 호스트를 허용해 줘야 한다. 우회를 시도하지 말고 그대로 보고할 것.
 
+**3번은 컨테이너에 따라 에러 모양이 다르다 — 같은 차단인데 못 알아보고 헤매지 말 것.**
+2026-08-11 네 번째 세션에서는 위 `Host not in allowlist` 문구가 아니라 **에이전트
+프록시의 CONNECT 403**으로 나왔다(`curl: (56) CONNECT tunnel failed, response 403`,
+http_code `000`). 차단 주체가 Supabase 클라이언트가 아니라 프록시 게이트웨이라
+메시지가 완전히 다르지만 **원인과 해법은 같다**(그 호스트를 egress에 허용).
+확진은 프록시 상태로 한다 — 거부된 호스트가 그대로 찍힌다:
+
+```
+curl -sS "$HTTPS_PROXY/__agentproxy/status"   # recentRelayFailures[] 를 볼 것
+#   {"kind":"connect_rejected","host":"<project-ref>.supabase.co:443",
+#    "detail":"gateway answered 403 to CONNECT (policy denial or upstream failure)"}
+```
+
+**도달성 probe는 반드시 프로젝트 호스트로 쏠 것 — `supabase.com`으로 재지 말 것.**
+둘은 allowlist 항목이 별개라 서로의 상태를 대변하지 못한다(실측: 같은 세션에서
+`supabase.com`과 `<project-ref>.supabase.co`가 **각각** 403으로 거부돼 로그에 두 줄로
+남았다). 맞는 probe는 이것이다:
+
+```
+curl -sS -o /dev/null -w "%{http_code}\n" --max-time 15 \
+  "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/" -H "apikey: $SUPABASE_SERVICE_ROLE_KEY"
+```
+
+참고로 npm 레지스트리는 프록시 우회 목록에 있어 이 상태에서도 200이 뜬다 — **npm이
+된다고 해서 Supabase가 된다는 뜻이 아니다.** 1·2번(설치)은 진행되지만 3번은 그대로
+막혀 있으니, `npm install`이 성공했다고 실측이 가능해진 걸로 착각하지 말 것.
+
 **자격증명이 어디 있는지는 컨테이너마다 달랐다 — `.env.local` 존재 여부로 판단하지
 말 것.** 같은 날 두 세션의 실측이 갈렸다: 한쪽은 `apps/web/.env.local`이 **있지만
 값이 비어 있었고**(53바이트, 키 이름 두 줄뿐 — 두 값 모두 길이 0), 다른 쪽은 파일이
 **아예 없는 대신** `NEXT_PUBLIC_SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`가
 **프로세스 환경변수로 들어와 있었다.** 그래서 확인은 파일이 아니라 **값**으로 할 것
 (`env | grep SUPABASE`와 파일 내용 둘 다).
+
+네 번째 세션(2026-08-11)도 후자였다 — `apps/web/.env.local` **없음**, 대신
+`NEXT_PUBLIC_SUPABASE_URL`(40자)·`SUPABASE_SERVICE_ROLE_KEY`(41자, `sb_secret_…`)·
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`(46자)가 환경변수에 들어 있었다. 즉
+**`ls .env.local`만 보고 "자격증명 없음"으로 판단하면 오진이다** — 실제로 이
+세션은 그 오진을 유발하는 점검표를 받고 시작했다. 자격증명은 멀쩡했고 막힌 건
+위 3번 하나뿐이었다. (이 컨테이너는 `node_modules`도 루트·`apps/web` 양쪽 다
+비어 있어 1번부터 필요했다.)
 
 **빈 `.env.local` + 환경변수 조합은 그냥 돌아간다 — 파일을 지우거나 고칠 필요 없다.**
 Node의 `--env-file`은 **이미 설정된 환경변수를 덮어쓰지 않는다**(실측 확인: 값이 든
