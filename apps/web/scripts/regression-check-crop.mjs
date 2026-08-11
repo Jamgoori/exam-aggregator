@@ -119,10 +119,23 @@ console.log(`이미 크롭된 문제지 ${targets.length}개 검사 (scale ${SCA
 //   maxSkew     — 좌우 잉크 여백 차. 크면 내용이 한쪽으로 치우쳤다는 뜻
 //   edgeInkMax  — 이미지 좌우 맨 끝 열에 잉크가 닿은 비율. 높으면 칼럼 경계에서
 //                 잘렸거나 옆 칼럼을 물고 있다는 신호
+//   bottomInk   — 맨 아래 행에 잉크가 닿은 비율(잉크 폭 기준). "문항 아래쪽이
+//                 잘림"을 잡으려고 2026-08-11에 추가했다. 위 세 지표는 전부
+//                 좌우만 본다 — 아래쪽이 잘린 이미지는 개수·폭·치우침·좌우
+//                 가장자리 검사를 **전부 통과한다**.
+//
+// bottomInk가 왜 신호가 되나: finalizeQuestionImage가 세로 여백을 걷어내므로
+// 맨 아래 행에는 어느 이미지든 잉크가 있다. 다만 정상 종료라면 그 행은 마지막
+// 글줄의 **디센더**(ㅇ 받침, 괄호 꼬리 등)뿐이라 드문드문하고, 자르는 선이 글줄을
+// 관통했다면 글자 몸통을 가로로 자른 단면이라 촘촘하다. 그래서 비율로 갈린다.
+//
+// 분모는 전체 폭이 아니라 **잉크가 걸친 폭**이다 — normalizeWidths가 좁은 쪽에
+// 흰 여백을 덧대므로 전체 폭으로 나누면 덧댄 만큼 값이 희석돼 잘림을 놓친다.
 async function measureGeometry(images) {
   let widths = new Set();
   let maxSkew = 0;
   let edgeInkMax = 0;
+  let bottomInkMax = 0;
   for (const buf of images) {
     const { data, info } = await sharp(buf).greyscale().raw().toBuffer({ resolveWithObject: true });
     const { width, height } = info;
@@ -145,8 +158,17 @@ async function measureGeometry(images) {
     if (r < 0) continue;
     maxSkew = Math.max(maxSkew, Math.abs(l - (width - 1 - r)));
     edgeInkMax = Math.max(edgeInkMax, edgeL / height, edgeR / height);
+    const lastRow = (height - 1) * width;
+    let bottomInk = 0;
+    for (let x = l; x <= r; x++) if (data[lastRow + x] < 245) bottomInk++;
+    bottomInkMax = Math.max(bottomInkMax, bottomInk / (r - l + 1));
   }
-  return { widthCount: widths.size, maxSkew, edgeInk: Number(edgeInkMax.toFixed(3)) };
+  return {
+    widthCount: widths.size,
+    maxSkew,
+    edgeInk: Number(edgeInkMax.toFixed(3)),
+    bottomInk: Number(bottomInkMax.toFixed(3)),
+  };
 }
 
 async function run(extract, buf, expectedCount, withGeometry) {
@@ -219,9 +241,15 @@ console.log(`검사 실패: ${fatals.length}건`);
 // 개수가 맞아도 이미지가 반쪽일 수 있어 기하도 본다(measureGeometry 주석 참고).
 const SKEW_LIMIT_PX = 12; // scale 0.4 기준
 const EDGE_INK_LIMIT = 0.05; // 가장자리 열의 5% 넘게 잉크가 닿으면 잘림/침범 의심
+// 맨 아래 행 잉크 비율 임계값. **아직 실측 보정 전이다** — 합성 이미지로 방향성만
+// (정상 디센더 < 임계값 < 글줄 관통 단면) 확인했다. 실제 문제지에서 정상 조판이
+// 얼마나 걸리는지 재본 뒤 조정할 것. 그래서 지금은 경고만 하고 exit 코드에 넣지
+// 않는다 — 보정 없이 게이트로 쓰면 멀쩡한 문제지를 무더기로 막는다.
+const BOTTOM_INK_LIMIT = 0.35;
 const mixedWidth = results.filter((r) => (r.geom?.widthCount ?? 1) > 1);
 const skewed = results.filter((r) => (r.geom?.maxSkew ?? 0) > SKEW_LIMIT_PX);
 const edgeCut = results.filter((r) => (r.geom?.edgeInk ?? 0) > EDGE_INK_LIMIT);
+const bottomCut = results.filter((r) => (r.geom?.bottomInk ?? 0) > BOTTOM_INK_LIMIT);
 console.log(`\n--- 이미지 기하 (개수만으로 못 잡는 것들) ---`);
 console.log(`문제지 안에서 폭이 갈림: ${mixedWidth.length}건  ← 0이어야 정상`);
 for (const r of mixedWidth.slice(0, 10)) console.log(`  ${r.year} ${r.title} (폭 ${r.geom.widthCount}종) id=${r.id}`);
@@ -229,6 +257,10 @@ console.log(`좌우 치우침 > ${SKEW_LIMIT_PX}px: ${skewed.length}건`);
 for (const r of skewed.slice(0, 10)) console.log(`  ${r.year} ${r.title} (${r.geom.maxSkew}px) id=${r.id}`);
 console.log(`가장자리 잉크 > ${EDGE_INK_LIMIT * 100}%(잘림/옆칼럼 침범 의심): ${edgeCut.length}건`);
 for (const r of edgeCut.slice(0, 15)) console.log(`  ${r.year} ${r.title} (${(r.geom.edgeInk * 100).toFixed(1)}%) id=${r.id}`);
+console.log(
+  `아래쪽 잉크 > ${BOTTOM_INK_LIMIT * 100}%(문항 아래쪽 잘림 의심, 임계값 보정 전): ${bottomCut.length}건`,
+);
+for (const r of bottomCut.slice(0, 15)) console.log(`  ${r.year} ${r.title} (${(r.geom.bottomInk * 100).toFixed(1)}%) id=${r.id}`);
 
 console.log(`\n리포트: ${outPath}`);
 process.exit(regressions.length > 0 || setDown.length > 0 || mixedWidth.length > 0 ? 1 : 0);
