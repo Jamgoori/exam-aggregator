@@ -5,6 +5,7 @@ import { corsHeaders, json, sanitizeSelectedChoice } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
 import { fetchQuestionMedia } from "../_shared/media.ts";
 import { recordQuestionResults } from "../_shared/status.ts";
+import { resolveStatusTargets, statusTargetKey } from "../_shared/status-targets.ts";
 
 type ItemRow = {
   id: string;
@@ -97,11 +98,29 @@ Deno.serve(async (req) => {
     .eq("id", sessionId);
 
   // 극복 판정(문제지별). 실패해도 채점은 유효.
+  //
+  // 세션 문항의 paper_id 는 dedup 대표 id라, 중복 시험지를 응시한 사용자는 상태·복습
+  // 스케줄이 원본 id 쪽에 있다. 기록 대상을 실제 행이 있는 문제지로 되짚는다.
+  let targets = new Map<string, string[]>();
+  try {
+    targets = await resolveStatusTargets(
+      admin,
+      userId,
+      graded.map((r) => ({ paperId: r.paper_id, questionNumber: r.question_number })),
+    );
+  } catch {
+    // 무시: 되짚기 실패해도 넘어온 id 로 기록한다(예전 동작).
+  }
+
   const byPaper = new Map<string, { question_number: number; is_correct: boolean }[]>();
   for (const r of graded) {
-    const list = byPaper.get(r.paper_id) ?? [];
-    list.push({ question_number: r.question_number, is_correct: r.is_correct });
-    byPaper.set(r.paper_id, list);
+    const paperIds =
+      targets.get(statusTargetKey(r.paper_id, r.question_number)) ?? [r.paper_id];
+    for (const paperId of paperIds) {
+      const list = byPaper.get(paperId) ?? [];
+      list.push({ question_number: r.question_number, is_correct: r.is_correct });
+      byPaper.set(paperId, list);
+    }
   }
   try {
     for (const [paperId, results] of byPaper) {
