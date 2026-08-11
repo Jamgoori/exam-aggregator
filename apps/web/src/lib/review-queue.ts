@@ -19,6 +19,7 @@ import {
 import { representativePaperIds } from "@/lib/dedup-papers";
 import { fetchQuestionMedia, fetchWrongNoteMarks } from "@/lib/wrong-notes";
 import { getReviewPrefs } from "@/lib/review-preferences";
+import { resolveStatusTargets, statusTargetKey } from "@/lib/status-targets";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -553,8 +554,27 @@ export async function getSessionSchedule(
 
   const paperIds = [...new Set(sessionItems.map((r) => r.paper_id))];
 
+  // 세션 문항은 dedup 대표 문제지 id로 저장되지만, 스케줄(srs_due_at)은 사용자가 실제
+  // 응시한 문제지 행에 붙어 있다. 대표 id로만 찾으면 중복 시험지를 응시한 사용자에게는
+  // 이 화면의 "다음 복습" 목록이 통째로 비어 보인다(채점 쪽과 같은 되짚기를 쓴다).
+  let targets = new Map<string, string[]>();
+  try {
+    targets = await resolveStatusTargets(
+      supabase,
+      userId,
+      sessionItems.map((it) => ({
+        paperId: it.paper_id,
+        questionNumber: it.question_number,
+      })),
+    );
+  } catch {
+    // 무시: 되짚기 실패하면 대표 id로만 찾는다(예전 동작).
+  }
+  const lookupIds = new Set(paperIds);
+  for (const ids of targets.values()) for (const id of ids) lookupIds.add(id);
+
   const dueByKey = new Map<string, string>();
-  for (const ids of chunk(paperIds, 100)) {
+  for (const ids of chunk([...lookupIds], 100)) {
     const { data } = await supabase
       .from("user_question_status")
       .select("paper_id, question_number, srs_due_at")
@@ -580,7 +600,15 @@ export async function getSessionSchedule(
 
   const today = srsDayIndex(now);
   const items: SessionScheduleItem[] = sessionItems.map((it) => {
-    const due = dueByKey.get(`${it.paper_id}#${it.question_number}`);
+    // 되짚은 문제지가 여러 장이면 가장 이른 예정일을 쓴다 — 그때 실제로 다시 나온다.
+    let due: string | undefined;
+    const candidates = targets.get(statusTargetKey(it.paper_id, it.question_number)) ?? [
+      it.paper_id,
+    ];
+    for (const paperId of [...candidates, it.paper_id]) {
+      const found = dueByKey.get(`${paperId}#${it.question_number}`);
+      if (found && (due == null || found < due)) due = found;
+    }
     return {
       position: it.position,
       paperTitle: titleById.get(it.paper_id) ?? null,

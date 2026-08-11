@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { getSessionUser } from "@/lib/supabase/session";
 import {
   createReviewSessionForUser,
@@ -415,5 +416,15 @@ export async function submitReviewSession(input: {
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
   const answers = Array.isArray(input.answers) ? input.answers : [];
-  return submitReviewSessionForUser(supabase, user.id, sessionId, answers);
+  const result = await submitReviewSessionForUser(supabase, user.id, sessionId, answers);
+
+  // 채점으로 극복 여부·남은 오답 수가 바뀐다. CBT 채점(papers/actions.ts)은 이미
+  // /mypage 를 다시 그리게 하는데 여기만 빠져 있어서, 결과 화면에서 오답노트로
+  // 돌아가면 채점 전 숫자가 그대로 보였다. 과목 오답노트는 [slug] 아래로 갈리므로
+  // layout 단위로 걸어 하위 경로까지 함께 무효화한다.
+  if (!result.error) {
+    revalidatePath("/mypage");
+    revalidatePath("/mypage/wrong-notes", "layout");
+  }
+  return result;
 }

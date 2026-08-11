@@ -9,6 +9,7 @@ import {
 } from "@/lib/wrong-notes";
 import { representativePaperIds } from "@/lib/dedup-papers";
 import { recordQuestionResults } from "@/lib/question-status";
+import { resolveStatusTargets, statusTargetKey } from "@/lib/status-targets";
 import { sanitizeSelectedChoice } from "@/lib/cbt-attempt";
 import {
   pickReviewCandidates,
@@ -781,11 +782,33 @@ export async function submitReviewSessionForUser(
     .eq("id", sessionId);
 
   // 문항 통합 상태 갱신(극복 판정). 문제지별로 묶어 한 번씩. 실패해도 채점은 유효.
+  //
+  // 세션 문항의 paper_id 는 dedup 대표 id다. 중복 시험지를 응시한 사용자는 상태·복습
+  // 스케줄이 원본 id 쪽에 있으므로, 기록 대상을 실제 행이 있는 문제지로 되짚는다
+  // (status-targets.ts). 되짚기가 실패하면 넘어온 id 그대로 — 예전 동작이다.
+  let targets = new Map<string, string[]>();
+  try {
+    targets = await resolveStatusTargets(
+      supabase,
+      userId,
+      gradedRows.map((r) => ({
+        paperId: r.paper_id,
+        questionNumber: r.question_number,
+      })),
+    );
+  } catch {
+    // 무시: 되짚기 실패가 채점을 막지 않는다.
+  }
+
   const byPaper = new Map<string, { question_number: number; is_correct: boolean }[]>();
   for (const r of gradedRows) {
-    const list = byPaper.get(r.paper_id) ?? [];
-    list.push({ question_number: r.question_number, is_correct: r.is_correct });
-    byPaper.set(r.paper_id, list);
+    const paperIds =
+      targets.get(statusTargetKey(r.paper_id, r.question_number)) ?? [r.paper_id];
+    for (const paperId of paperIds) {
+      const list = byPaper.get(paperId) ?? [];
+      list.push({ question_number: r.question_number, is_correct: r.is_correct });
+      byPaper.set(paperId, list);
+    }
   }
   try {
     for (const [paperId, results] of byPaper) {
