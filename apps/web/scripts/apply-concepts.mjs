@@ -17,6 +17,9 @@
 //
 //   - name   : 정본 이름(화면에 보이는 값). 나중에 바꿔도 되지만 id 는 유지된다
 //   - unit   : 단원(대분류). 없으면 이 개념 자체가 단원이 된다
+//   - kind   : "knowledge"(기본) | "skill". 독해처럼 지문이 재출제되지 않는 영역은
+//              지식이 아니라 묻는 능력으로 묶는다("빈칸추론", "세부내용 일치").
+//              진단 문구와 검진 기준이 이 값으로 갈린다
 //   - aliases: keyword_title 로 실제 등장하는 표기들. 초안의 {title,count} 형태도 받는다
 //
 // 재실행해도 안전하다(idempotent). 이름으로 개념을 찾아 없으면 만들고, 별칭은
@@ -119,7 +122,8 @@ for (const subjectName of targets) {
 
   for (const name of [...unitNames, ...entries.map((e) => e.name)]) {
     if (conceptIdByName.has(name)) continue;
-    const id = await ensureConcept(subjectId, name, null);
+    const entry = entries.find((e) => e.name === name);
+    const id = await ensureConcept(subjectId, name, null, entry?.kind);
     if (id) conceptIdByName.set(name, id);
   }
 
@@ -207,7 +211,7 @@ console.log(
     : "끝. 검진: npm run concept-inventory -- --verify\n",
 );
 
-async function ensureConcept(subjectId, name, parentId) {
+async function ensureConcept(subjectId, name, parentId, kind) {
   const { data: found } = await supabase
     .from("concepts")
     .select("id")
@@ -217,11 +221,9 @@ async function ensureConcept(subjectId, name, parentId) {
   if (found) return found.id;
   if (dryRun) return `dry:${name}`;
 
-  const { data, error } = await supabase
-    .from("concepts")
-    .insert({ subject_id: subjectId, name, parent_id: parentId })
-    .select("id")
-    .maybeSingle();
+  const row = { subject_id: subjectId, name, parent_id: parentId };
+  if (kind) row.kind = kind;
+  const { data, error } = await supabase.from("concepts").insert(row).select("id").maybeSingle();
   if (error) {
     console.error(`   개념 등록 실패 (${name}): ${error.message}`);
     process.exitCode = 1;

@@ -20,6 +20,9 @@
    붙여(`?새 개념 이름`) 미매칭으로 표시한다 — 사람이 목록에 넣을지 판단한다.
    지어내면 표기가 다시 표류하고, 약점 진단의 개념별 분포가 조용히 어긋난다
    (`docs/agents/concept-dictionary.md`).
+   독해 문항(국어 비문학·영어 독해)은 지문 주제가 아니라 **묻는 능력**을 고른다
+   ("빈칸추론", "세부내용 일치"). 지문은 재출제되지 않아 주제를 개념으로 세우면
+   쓸모가 없다. 지문 주제는 `keyword_explanation` 에 쓰면 된다.
 2. **✅ 문제 및 정답** — `question_text`(문제 발문 한 줄 재구성) + `correct_choice_number`
    (정답 번호) + `correct_choice_summary`(정답 선지 한 줄 요약).
 3. **📝 선지별 상세 해설** — `choice_explanations` 배열. 각 선지마다

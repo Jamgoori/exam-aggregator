@@ -6,6 +6,7 @@ import {
   matchConcept,
   normalizeConceptAlias,
   summarizeConceptHealth,
+  CONCEPT_MAX_SHARE_BY_KIND,
   CONCEPT_MIN_QUESTIONS,
 } from "./concept-dictionary";
 
@@ -117,4 +118,26 @@ test("검증: 커버리지·얇은 개념·편중을 함께 낸다", () => {
   assert.equal(health.thinConcepts, 1);
   assert.equal(health.maxConceptShare, 0.75);
   assert.ok(CONCEPT_MIN_QUESTIONS >= 3);
+});
+
+test("기능형 개념은 비중이 커도 정상이다", () => {
+  // 영어 빈칸추론은 실제로 시험지의 큰 비중을 차지한다. 지식형 기준(20%)을 그대로
+  // 들이대면 "쪼개라"는 잘못된 신호가 나온다 — 쪼갤 수 없는 축이다.
+  // 12문항 중 빈칸추론 4개 = 33%. 지식형 상한(20%)은 넘지만 기능형 상한(50%)은 넘지
+  // 않는 — 두 기준이 갈리는 구간이다.
+  const matches = [
+    ...Array.from({ length: 4 }, () => ({ conceptId: "빈칸추론", via: "alias" as const })),
+    ...Array.from({ length: 8 }, (_, i) => ({ conceptId: `기타${i % 4}`, via: "alias" as const })),
+  ];
+  assert.ok(CONCEPT_MAX_SHARE_BY_KIND.skill > CONCEPT_MAX_SHARE_BY_KIND.knowledge);
+
+  const asSkill = summarizeConceptHealth(matches, 5, 3, (id) =>
+    id === "빈칸추론" ? "skill" : "knowledge",
+  );
+  assert.equal(asSkill.overSizedConcepts.length, 0);
+
+  // 같은 분포라도 지식형이면 입도가 거친 것이다.
+  const asKnowledge = summarizeConceptHealth(matches, 5, 3);
+  assert.equal(asKnowledge.overSizedConcepts.length, 1);
+  assert.equal(asKnowledge.overSizedConcepts[0].conceptId, "빈칸추론");
 });
