@@ -14,6 +14,8 @@
     "extract-answers": "node --env-file=.env.local scripts/extract-answer-keys.mjs",
     "list-pending-answers": "node --env-file=.env.local scripts/list-pending-answer-keys.mjs",
     "retention-report": "node --import tsx --env-file=.env.local scripts/srs-retention-report.mjs",
+    "concept-inventory": "node --import tsx --env-file=.env.local scripts/concept-inventory.mjs",
+    "apply-concepts": "node --import tsx --env-file=.env.local scripts/apply-concepts.mjs",
     "crop-questions": "node --env-file=.env.local scripts/crop-question-images.mjs",
     "batch-crop-questions": "node --env-file=.env.local scripts/batch-crop-questions.mjs",
     "regression-check-crop": "node --env-file=.env.local scripts/regression-check-crop.mjs",

@@ -432,3 +432,60 @@ test("표기가 흔들린 개념도 한 묶음으로 본다", async () => {
   const symmetric = items.filter((it) => it.paperId.startsWith("t")).length;
   assert.ok(symmetric <= 3, `표기만 다른 같은 개념이 ${symmetric}개 들어왔다`);
 });
+
+test("정본 개념(concept_id)이 있으면 그걸 축으로 쓴다", async () => {
+  // 사전이 채워지면 임시 키(keyword_title 파생) 대신 사람이 정리한 축으로 옮겨
+  // 가야 한다. 표기가 완전히 달라도 같은 정본이면 한 묶음이다.
+  const statuses: Row[] = [];
+  const questions: Row[] = [];
+  const papers: Row[] = [];
+  const explanations: Row[] = [];
+
+  // 표기가 서로 전혀 다르지만 정본은 하나(c-sym)인 문항들.
+  ["블록 암호 운용 모드", "스트림 암호", "AES 라운드 구조", "DES 취약점"].forEach((title, i) => {
+    papers.push(paper(`s${i}`, "security", 2010 + i));
+    statuses.push(status({ paper: `s${i}`, q: 1, dueAt: daysFromNow(-5) }));
+    questions.push(question(`s${i}`, 1));
+    explanations.push({ ...explanation(`s${i}`, 1, title), concept_id: "c-sym" });
+  });
+  // 자리를 메울 다른 정본들.
+  for (let q = 1; q <= 20; q++) {
+    papers.push(paper(`o${q}`, "security", 2100 + q));
+    statuses.push(status({ paper: `o${q}`, q: 1, dueAt: daysFromNow(-1) }));
+    questions.push(question(`o${q}`, 1));
+    explanations.push({ ...explanation(`o${q}`, 1, `개념${q}`), concept_id: `c-${q}` });
+  }
+
+  const fake = db({ statuses, questions, papers, explanations });
+  const items = await collectDueQueueItems(asSupabase(fake), USER, NOW, adminOf(fake));
+
+  const symmetric = items.filter((it) => it.paperId.startsWith("s")).length;
+  assert.ok(symmetric <= 3, `같은 정본 문항이 ${symmetric}개 들어왔다`);
+});
+
+test("정본이 없는 문항은 keyword_title 임시 키로 떨어진다", async () => {
+  // 사전이 아직 없거나 그 문항이 미매칭일 때도 큐 다양성은 돌아가야 한다.
+  const statuses: Row[] = [];
+  const questions: Row[] = [];
+  const papers: Row[] = [];
+  const explanations: Row[] = [];
+
+  for (let i = 0; i < 6; i++) {
+    papers.push(paper(`t${i}`, "security", 2010 + i));
+    statuses.push(status({ paper: `t${i}`, q: 1, dueAt: daysFromNow(-5) }));
+    questions.push(question(`t${i}`, 1));
+    // concept_id 없음 — keyword_title 만 있다.
+    explanations.push(explanation(`t${i}`, 1, "대칭키 암호"));
+  }
+  for (let q = 1; q <= 20; q++) {
+    papers.push(paper(`u${q}`, "security", 2100 + q));
+    statuses.push(status({ paper: `u${q}`, q: 1, dueAt: daysFromNow(-1) }));
+    questions.push(question(`u${q}`, 1));
+    explanations.push(explanation(`u${q}`, 1, `다른개념${q}`));
+  }
+
+  const fake = db({ statuses, questions, papers, explanations });
+  const items = await collectDueQueueItems(asSupabase(fake), USER, NOW, adminOf(fake));
+  const symmetric = items.filter((it) => it.paperId.startsWith("t")).length;
+  assert.ok(symmetric <= 3, `임시 키가 안 걸렸다 (${symmetric}개)`);
+});
