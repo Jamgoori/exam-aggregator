@@ -70,6 +70,21 @@
 | 진단 문구 | "이 개념을 모릅니다 — 개념 학습부터" | "이 유형에 약합니다 — 풀이 전략" |
 | 최대 점유 상한 | 20% 초과면 입도가 거칠다 | 50%까지 정상 (영어 빈칸추론이 실제로 그렇다) |
 
+## 뼈대는 이미 있다
+
+`scripts/data/concepts-seed.json` — 공통 3과목(국어·영어·한국사)의 단원·개념 골격을
+시험 범위에서 top-down 으로 세워 뒀다(국어 40 · 영어 30 · 한국사 41개념).
+
+**코퍼스 표기는 아직 안 붙어 있다.** 별칭이 얇은 건 그래서고, 다음 순서로 채운다:
+
+1. `concept-inventory --draft` 로 실제 `keyword_title` 을 뽑는다
+2. 그 표기를 seed 의 `aliases` 에 합친다 (미매칭 목록이 곧 할 일 목록)
+3. 코퍼스에 문항이 3개 미만인 개념은 상위(unit)로 흡수, 20%를 넘는 지식형은 쪼갠다
+
+나머지 과목(행정법·행정학·전공과목 100여 종)은 코퍼스 초안에서 bottom-up 으로
+만드는 편이 낫다 — 문항이 실제로 몇 개나 있는지 모르는 상태에서 골격만 세우면
+얇은 개념만 잔뜩 나온다.
+
 ## 절차
 
 ```
@@ -85,6 +100,8 @@ npm run concept-inventory -- --subject 정보보호론 --draft concepts.json
 # 3. concepts.json 을 손으로 쪼개고 합친다 (아래 형식)
 
 # 4. 등록·매핑 — 반드시 과목 하나씩, dry-run 먼저
+#    (등록 전에 목록 검증이 먼저 돈다. 오류가 있으면 DB 를 건드리지 않고 멈춘다)
+npm run apply-concepts -- --file scripts/data/concepts-seed.json --subject 국어 --dry-run
 npm run apply-concepts -- --file concepts.json --subject 정보보호론 --dry-run
 npm run apply-concepts -- --file concepts.json --subject 정보보호론
 
@@ -144,6 +161,8 @@ npm run concept-inventory -- --verify
 - **전 과목 일괄 매핑 금지.** 과목 하나로 검증한 뒤 넘어간다.
 - **미매칭을 "기타"로 뭉치지 말 것.** 뭉치는 순간 진단이 죽는다. 별칭으로 넣을지 새
   개념으로 세울지 사람이 판단한다.
+- **별칭은 과목 안에서만 유일하다.** 국어 "내용 일치"와 영어 "내용 일치"는 서로 다른
+  개념이고 둘 다 있어야 한다. 이름에 과목 접두를 붙여 피하지 말 것.
 - **별칭을 개념 사이로 옮기지 말 것.** `apply-concepts` 가 충돌을 보고하고 건너뛰게
   돼 있다. 강제로 옮기면 분포가 소리 없이 흔들리고 화면에는 아무 표시도 안 난다.
 - **`concepts`/`concept_aliases` 에 클라이언트 쓰기 정책을 열지 말 것.** 진단의 근거가

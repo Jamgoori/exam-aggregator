@@ -223,3 +223,128 @@ export function summarizeConceptHealth(
     distribution,
   };
 }
+
+// ── 정본 목록 검증 ───────────────────────────────────────────────────────────
+
+export type ConceptSpecEntry = {
+  name: string;
+  unit?: string;
+  kind?: string;
+  aliases?: (string | TitleCount)[];
+};
+
+export type ConceptSpecIssue = { subject: string; message: string };
+
+export type ConceptSpecReport = {
+  // 고치지 않으면 등록 자체가 실패하거나 데이터가 어긋나는 것들.
+  errors: ConceptSpecIssue[];
+  // 등록은 되지만 사람이 봐야 하는 것들.
+  warnings: ConceptSpecIssue[];
+  stats: { subject: string; concepts: number; units: number; skills: number }[];
+};
+
+// 목록을 DB에 넣기 전에 본다. 별칭 유일 제약(concept_aliases_subject_normalized_uidx)에
+// 걸리면 등록이 중간에 멈추고, 그 상태로 백필하면 일부 문항만 붙은 채로 남는다.
+//
+// 별칭은 과목 안에서만 유일하다. 독해 기능형은 과목마다 같은 이름을 쓴다("빈칸 추론"이
+// 국어에도 영어에도 있다) — 그건 정상이고, 막으면 이름에 과목 접두를 붙이게 된다.
+export function validateConceptSpec(
+  spec: Record<string, ConceptSpecEntry[]>,
+  minQuestions: number = CONCEPT_MIN_QUESTIONS,
+): ConceptSpecReport {
+  const errors: ConceptSpecIssue[] = [];
+  const warnings: ConceptSpecIssue[] = [];
+  const stats: ConceptSpecReport["stats"] = [];
+
+  // 별칭은 과목 안에서 유일하다(DB 제약이 그렇다). 과목이 다르면 같은 별칭이 있어도
+  // 된다 — 국어 "내용 일치"와 영어 "내용 일치"는 서로 다른 개념이다.
+  const aliasOwner = new Map<string, string>();
+
+  for (const [subject, entries] of Object.entries(spec)) {
+    if (!Array.isArray(entries)) continue;
+
+    const names = new Set<string>();
+    const keyOwners = new Map<string, string[]>();
+    const units = new Set<string>();
+    let skills = 0;
+
+    for (const entry of entries) {
+      if (!entry?.name?.trim()) {
+        errors.push({ subject, message: "이름이 빈 항목이 있다" });
+        continue;
+      }
+      const name = entry.name.trim();
+
+      if (names.has(name)) {
+        errors.push({ subject, message: `이름이 중복된다: ${name}` });
+      }
+      names.add(name);
+
+      if (entry.kind && entry.kind !== "knowledge" && entry.kind !== "skill") {
+        errors.push({ subject, message: `kind 값이 이상하다: ${name} → ${entry.kind}` });
+      }
+      if (entry.kind === "skill") skills++;
+      if (entry.unit) units.add(entry.unit);
+
+      const aliases = [name, ...(entry.aliases ?? [])].map((a) =>
+        typeof a === "string" ? a : a.title,
+      );
+      if (aliases.length === 1) {
+        warnings.push({
+          subject,
+          message: `별칭이 없다: ${name} (코퍼스 표기를 합치기 전이라면 정상)`,
+        });
+      }
+
+      for (const alias of aliases) {
+        const normalized = normalizeConceptAlias(alias);
+        if (!normalized) continue;
+        const scoped = `${subject}\u0000${normalized}`;
+        const owner = aliasOwner.get(scoped);
+        if (owner && owner !== name) {
+          errors.push({
+            subject,
+            message: `같은 과목 안에서 별칭이 겹친다: "${alias}" → ${name} / ${owner}`,
+          });
+          continue;
+        }
+        aliasOwner.set(scoped, name);
+      }
+
+      const key = conceptKeyOf(name);
+      if (key) {
+        const owners = keyOwners.get(key) ?? [];
+        owners.push(name);
+        keyOwners.set(key, owners);
+      }
+    }
+
+    // 같은 그룹 키를 나눠 가지면 2차 그물이 꺼진다(새 표기가 전부 미매칭이 된다).
+    for (const [key, owners] of keyOwners) {
+      if (owners.length > 1) {
+        warnings.push({
+          subject,
+          message: `그룹 키 "${key}" 를 ${owners.join(", ")} 가 나눠 갖는다 — 새 표기는 별칭으로만 붙는다`,
+        });
+      }
+    }
+
+    // 입도 목표. 진단이 성립하는 최소 표본에서 역산한 값이다.
+    if (entries.length > 0 && entries.length < 5) {
+      warnings.push({ subject, message: `개념이 ${entries.length}개뿐 — 너무 거칠다` });
+    }
+    if (entries.length > 40) {
+      warnings.push({
+        subject,
+        message: `개념이 ${entries.length}개 — 개념당 문항 ${minQuestions}개를 못 채울 수 있다`,
+      });
+    }
+    if (units.size > 12) {
+      warnings.push({ subject, message: `단원이 ${units.size}개 — 5~10개가 적당하다` });
+    }
+
+    stats.push({ subject, concepts: entries.length, units: units.size, skills });
+  }
+
+  return { errors, warnings, stats };
+}

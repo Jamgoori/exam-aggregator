@@ -56,8 +56,12 @@ create table if not exists concept_aliases (
   primary key (concept_id, normalized)
 );
 
--- 한 별칭이 두 개념에 붙지 못하게 한다. 과목 경계는 여기서 못 걸므로(별칭 테이블에
--- subject_id 가 없다) 앱이 과목별로 조회한다 — 대신 전역 중복은 DB가 막는다.
+-- 한 별칭이 두 개념에 붙지 못하게 한다.
+--
+-- ※ 이 전역 유일 제약은 2026-08-11-concept-aliases-subject.sql 에서 (subject_id,
+--    normalized) 로 좁혀진다. 독해 기능형은 과목마다 같은 이름을 쓰는 게 정상이라
+--    ("빈칸 추론"이 국어에도 영어에도 있다) 전역으로 막으면 안 된다. 그 파일을 함께
+--    적용할 것.
 create unique index if not exists concept_aliases_normalized_uidx on concept_aliases(normalized);
 
 alter table question_explanations
