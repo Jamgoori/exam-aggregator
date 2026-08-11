@@ -143,6 +143,9 @@ export type ConceptHealth = {
   thinRatio: number;
   // 한 개념이 차지한 최대 비율. 너무 크면 입도가 거칠다.
   maxConceptShare: number;
+  // 자기 종류의 상한을 넘긴 개념들. 기능형은 상한이 느슨하다(빈칸추론이 시험지의
+  // 절반을 차지해도 그건 시험이 그런 것이지 사전이 잘못된 게 아니다).
+  overSizedConcepts: { conceptId: string; kind: ConceptKind; share: number }[];
   // 개념별 문항 수(많은 순).
   distribution: { conceptId: string; count: number }[];
 };
@@ -152,10 +155,34 @@ export type ConceptHealth = {
 // 있다. 코퍼스 기준으로 이보다 얇은 개념은 상위로 흡수하는 게 맞다.
 export const CONCEPT_MIN_QUESTIONS = 3;
 
+// 개념 종류.
+//
+//   knowledge — 지식형. 모르면 틀리고 배우면 맞는다(대칭키 암호, 사동·피동)
+//   skill     — 기능형. 묻는 능력이다(빈칸추론, 세부내용 일치)
+//
+// 국어 비문학·영어 독해는 지문이 재출제되지 않아 지식 개념이 성립하지 않는다.
+// "조선 후기 상업의 발달"을 개념으로 세우면 문항이 한둘뿐이고, 사용자에게
+// "그 지문이 약합니다"라고 말해봐야 쓸모가 없다. 그래서 묻는 능력으로 묶는다.
+//
+// 과목이 아니라 문항 성격으로 갈린다 — 국어에도 지식형(음운변동)이 많고, 영어
+// 어법도 지식형이다.
+export type ConceptKind = "knowledge" | "skill";
+
+// 한 개념이 과목에서 차지해도 되는 최대 비율.
+//
+// 지식형이 20%를 넘으면 입도가 거친 것이다(쪼개야 한다). 기능형은 그게 정상이다 —
+// 영어 빈칸추론은 실제로 시험지의 그 비중을 차지한다.
+export const CONCEPT_MAX_SHARE_BY_KIND: Record<ConceptKind, number> = {
+  knowledge: 0.2,
+  skill: 0.5,
+};
+
 export function summarizeConceptHealth(
   matches: ConceptMatch[],
   conceptCount: number,
   minQuestions: number = CONCEPT_MIN_QUESTIONS,
+  // 개념 종류. 안 주면 전부 지식형으로 본다.
+  kindOf: (conceptId: string) => ConceptKind = () => "knowledge",
 ): ConceptHealth {
   const perConcept = new Map<string, number>();
   let viaAlias = 0;
@@ -174,6 +201,13 @@ export function summarizeConceptHealth(
     .sort((a, b) => b.count - a.count);
   const thinConcepts = distribution.filter((d) => d.count < minQuestions).length;
 
+  const overSizedConcepts = distribution
+    .map((d) => {
+      const kind = kindOf(d.conceptId);
+      return { conceptId: d.conceptId, kind, share: matched === 0 ? 0 : d.count / matched };
+    })
+    .filter((d) => d.share > CONCEPT_MAX_SHARE_BY_KIND[d.kind]);
+
   return {
     concepts: conceptCount,
     questions: matches.length,
@@ -185,6 +219,7 @@ export function summarizeConceptHealth(
     thinConcepts,
     thinRatio: distribution.length === 0 ? 0 : thinConcepts / distribution.length,
     maxConceptShare: matched === 0 ? 0 : (distribution[0]?.count ?? 0) / matched,
+    overSizedConcepts,
     distribution,
   };
 }

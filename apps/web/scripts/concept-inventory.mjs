@@ -30,6 +30,7 @@ import {
   buildConceptLookup,
   matchConcept,
   summarizeConceptHealth,
+  CONCEPT_MAX_SHARE_BY_KIND,
   CONCEPT_MIN_QUESTIONS,
 } from "@gongmoa/core";
 
@@ -166,7 +167,13 @@ function runInventory() {
 }
 
 async function runVerify() {
-  const concepts = await pageAll("concepts", "id, subject_id, name, parent_id, merged_into");
+  // kind 컬럼이 아직 없는 환경(마이그레이션 전)에서는 없이 읽는다.
+  let concepts = [];
+  try {
+    concepts = await pageAll("concepts", "id, subject_id, name, parent_id, merged_into, kind");
+  } catch {
+    concepts = await pageAll("concepts", "id, subject_id, name, parent_id, merged_into");
+  }
   const aliases = await pageAll("concept_aliases", "concept_id, alias");
   if (concepts.length === 0) {
     console.log("concepts 테이블이 비어 있다. 먼저 apply-concepts.mjs 로 등록할 것.");
@@ -195,7 +202,10 @@ async function runVerify() {
     const subjectConcepts = concepts.filter(
       (c) => c.subject_id === subjectId && !c.merged_into,
     );
-    const health = summarizeConceptHealth(matches, subjectConcepts.length);
+    const kindById = new Map(concepts.map((c) => [c.id, c.kind ?? "knowledge"]));
+    const health = summarizeConceptHealth(matches, subjectConcepts.length, CONCEPT_MIN_QUESTIONS, (id) =>
+      kindById.get(id) === "skill" ? "skill" : "knowledge",
+    );
 
     // 실제 DB 에 붙어 있는 값과 규칙이 말하는 값이 어긋나면 백필이 밀린 것이다.
     const storedMatched = titled.filter((r) => r.concept_id).length;
@@ -220,8 +230,20 @@ async function runVerify() {
     if (health.coverage < 0.95) problems.push("커버리지 95% 미만 — 별칭 보강 필요");
     if (health.thinRatio > 0.2)
       problems.push("얇은 개념이 20% 초과 — 입도가 잘다, 상위로 흡수할 것");
-    if (health.maxConceptShare > 0.2)
-      problems.push("한 개념이 20% 초과 — 입도가 거칠다, 쪼갤 것");
+    // 상한은 개념 종류마다 다르다. 독해 기능형(빈칸추론 등)은 시험지에서 원래 큰
+    // 비중을 차지하고, 그건 쪼갤 수 있는 축이 아니다.
+    if (health.overSizedConcepts.length > 0) {
+      const names = health.overSizedConcepts
+        .map((o) => {
+          const name = conceptById.get(o.conceptId)?.name ?? o.conceptId;
+          return `${name} ${(o.share * 100).toFixed(0)}%(${o.kind})`;
+        })
+        .join(" / ");
+      problems.push(
+        `종류별 상한 초과 — 지식형 ${CONCEPT_MAX_SHARE_BY_KIND.knowledge * 100}% ·` +
+          ` 기능형 ${CONCEPT_MAX_SHARE_BY_KIND.skill * 100}%: ${names}`,
+      );
+    }
     if (storedMatched < health.matched)
       problems.push("DB 백필이 규칙보다 뒤처져 있다 — apply-concepts 재실행");
 
