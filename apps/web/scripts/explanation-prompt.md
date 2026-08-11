@@ -15,6 +15,11 @@
 
 1. **🔑 핵심 키워드** — `keyword_title`(제목 한 줄) + `keyword_explanation`(설명 문단).
    문제가 요구하는 핵심 개념/주제를 먼저 짚어준다.
+   **그 과목의 정본 개념 목록(`concepts`)이 주어졌다면 반드시 그 안에서 고를 것.**
+   목록에 없는 개념이 필요하면 새 이름을 지어내지 말고 `keyword_title` 앞에 `?` 를
+   붙여(`?새 개념 이름`) 미매칭으로 표시한다 — 사람이 목록에 넣을지 판단한다.
+   지어내면 표기가 다시 표류하고, 약점 진단의 개념별 분포가 조용히 어긋난다
+   (`docs/agents/concept-dictionary.md`).
 2. **✅ 문제 및 정답** — `question_text`(문제 발문 한 줄 재구성) + `correct_choice_number`
    (정답 번호) + `correct_choice_summary`(정답 선지 한 줄 요약).
 3. **📝 선지별 상세 해설** — `choice_explanations` 배열. 각 선지마다

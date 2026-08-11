@@ -29,6 +29,7 @@ export * from "./membership";
 export * from "./review-queue";
 export * from "./review-pick";
 export * from "./concept-key";
+export * from "./concept-dictionary";
 export * from "./review-resume";
 export * from "./study-phase";
 

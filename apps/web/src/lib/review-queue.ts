@@ -99,6 +99,10 @@ function forecastWindowEnd(now: Date): string {
 // admin 클라이언트로 조회한다. 해설이 아직 없는 문항은 맵에 없고, 호출부는 그런
 // 문항의 conceptKey 를 null 로 둔다.
 //
+// 정본 개념(concept_id)이 붙어 있으면 그걸 쓰고, 없으면 keyword_title 에서 뽑은
+// 임시 키로 떨어진다. 사전이 아직 없거나 그 문항이 미매칭일 때도 큐 다양성은
+// 돌아가야 하기 때문이다. 사전이 채워질수록 정확한 축으로 자연히 옮겨 간다.
+//
 // 실패해도 삼킨다. 개념은 큐를 더 고르게 만드는 부가 정보라, 조회가 안 된다고 복습
 // 자체를 막을 이유가 없다(마이그레이션 전이라 컬럼이 없을 수도 있다).
 async function fetchConceptKeys(
@@ -108,20 +112,42 @@ async function fetchConceptKeys(
   const out = new Map<string, string>();
   if (questionIds.length === 0) return out;
 
+  let admin: ReturnType<AdminFactory>;
   try {
-    const admin = adminFactory();
-    for (const ids of chunk(questionIds, 200)) {
-      const { data } = await admin
-        .from("question_explanations")
-        .select("question_id, keyword_title")
-        .in("question_id", ids);
-      for (const row of (data ?? []) as { question_id: string; keyword_title: string | null }[]) {
-        const key = conceptKeyOf(row.keyword_title);
-        if (key) out.set(row.question_id, key);
-      }
-    }
+    admin = adminFactory();
   } catch {
-    // 무시: 개념 없이도 큐는 정상으로 짜인다.
+    // service_role 키가 없는 환경. 개념 없이도 큐는 정상으로 짜인다.
+    return out;
+  }
+
+  // concept_id 컬럼이 아직 없는 환경에서는 이 select 자체가 거절된다. 그때는
+  // keyword_title 만 읽는 예전 모양으로 한 번 더 시도한다.
+  for (const columns of ["question_id, keyword_title, concept_id", "question_id, keyword_title"]) {
+    try {
+      let failed = false;
+      const found = new Map<string, string>();
+      for (const ids of chunk(questionIds, 200)) {
+        const { data, error } = await admin
+          .from("question_explanations")
+          .select(columns)
+          .in("question_id", ids);
+        if (error) {
+          failed = true;
+          break;
+        }
+        for (const row of (data ?? []) as unknown as {
+          question_id: string;
+          keyword_title: string | null;
+          concept_id?: string | null;
+        }[]) {
+          const key = row.concept_id ?? conceptKeyOf(row.keyword_title);
+          if (key) found.set(row.question_id, key);
+        }
+      }
+      if (!failed) return found;
+    } catch {
+      // 다음 모양으로 넘어간다.
+    }
   }
   return out;
 }
