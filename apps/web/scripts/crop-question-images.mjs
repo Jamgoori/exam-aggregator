@@ -665,7 +665,7 @@ function filterMarginMarkers(columnMarkers) {
 // columnSplitX는 computeColumnSplitX가 실측한 진짜 칼럼 경계다(있으면). 페이지
 // 폭 절반이 경계와 어긋나는 조판(국회직 등)에서도 정확히 좌/우를 가르기 위해
 // pageWidthPt/2 대신 이 값을 우선한다.
-function splitIntoColumns(markers, pageWidthPt, columnMode, columnSplitX) {
+export function splitIntoColumns(markers, pageWidthPt, columnMode, columnSplitX) {
   const half = columnSplitX ?? pageWidthPt / 2;
   if (columnMode === "single") {
     const left = filterMarginMarkers(markers).sort((a, b) => b.y - a.y);
@@ -1322,7 +1322,7 @@ async function dropRunningHeader(rawPng, headerBandPx, scale) {
   return sharp(rawPng).extract({ left: 0, top: y, width, height: height - y }).png().toBuffer();
 }
 
-function planCrossPageSets(pageDataList, columnMode) {
+export function planCrossPageSets(pageDataList, columnMode) {
   const colKeys = columnMode === "single" ? ["L"] : ["L", "R"];
   // 읽기 순서 슬롯: [{ pageIdx, col }]
   const slots = [];
@@ -1470,7 +1470,12 @@ async function normalizeWidths(cropped) {
   }
 }
 
-async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
+// 마커 인식부터 정리(구멍 메우기·중복 제거·순서 정리)까지, **렌더링 없이 텍스트만
+// 보고** 끝나는 앞단을 한 덩어리로 묶는다. extractWithStrategy가 이걸 그대로 쓰고,
+// scripts/audit-crop-orphans.mjs 같은 검사 도구도 같은 결과를 렌더링 비용 없이
+// 재현할 수 있다 — 검사 도구가 이 순서를 따로 베껴 쓰면 크롭 로직이 바뀔 때 조용히
+// 어긋나므로 반드시 이 함수를 공유할 것.
+export async function buildMarkerPlan(pdf, useColumnSplitOverride) {
   // 1차 패스: 렌더링 없이 텍스트만 뽑아 페이지 폭 절반 기준으로 findQuestionMarkers를
   // 한 번 돌려본다.
   const roughMarkerData = [];
@@ -1530,6 +1535,16 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     columnSplitX,
   );
 
+  for (const d of pageMarkerData) d.data._columnSplitX = columnSplitX;
+  return { pageMarkerData, columnSplitX, columnCropX, columnMode };
+}
+
+async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
+  const { pageMarkerData, columnSplitX, columnCropX, columnMode } = await buildMarkerPlan(
+    pdf,
+    useColumnSplitOverride,
+  );
+
   const footerInkTopByPage = computeFooterInkTopByPage(pageMarkerData.map((d) => d.data));
   const headerInkBottomByPage = computeHeaderInkBottomByPage(pageMarkerData.map((d) => d.data));
 
@@ -1537,7 +1552,6 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
 
   // 페이지/칼럼을 넘는 공통지문 세트를 먼저 문서 단위로 처리한다(planCrossPageSets
   // 주석 참고). 여기서 처리한 번호는 아래 페이지 단위 크롭에서 제외한다.
-  for (const d of pageMarkerData) d.data._columnSplitX = columnSplitX;
   const crossPagePlans = planCrossPageSets(pageMarkerData.map((d) => d.data), columnMode);
   const handledNumbers = new Set();
   const pageCtxCache = new Map();
