@@ -199,10 +199,15 @@ Storage(`exam-papers` 버킷에서 원본 PDF 다운로드)를 **둘 다** 쓴�
 값이 비어 있었고**(53바이트, 키 이름 두 줄뿐 — 두 값 모두 길이 0), 다른 쪽은 파일이
 **아예 없는 대신** `NEXT_PUBLIC_SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`가
 **프로세스 환경변수로 들어와 있었다.** 그래서 확인은 파일이 아니라 **값**으로 할 것
-(`env | grep SUPABASE`와 파일 내용 둘 다). 값이 환경변수에만 있으면
-`--env-file=.env.local`을 붙이는 npm 스크립트는 파일이 없어 실패하므로
-`node scripts/regression-check-crop.mjs …`로 직접 부르면 된다 — 위 3번만 풀리면
-그대로 돌아간다. (자격증명을 `.env.local`로 떨어뜨렸다면 **절대 커밋하지 말 것.**)
+(`env | grep SUPABASE`와 파일 내용 둘 다).
+
+**빈 `.env.local` + 환경변수 조합은 그냥 돌아간다 — 파일을 지우거나 고칠 필요 없다.**
+Node의 `--env-file`은 **이미 설정된 환경변수를 덮어쓰지 않는다**(실측 확인: 값이 든
+환경변수 + 빈 값이 든 env 파일 → 환경변수 값이 남는다). 그래서 파일이 있고 값이
+비어 있어도 `npm run regression-check-crop`이 그대로 동작한다. 파일이 **아예 없을**
+때만 `--env-file`이 실패하고, 그때는 `node scripts/regression-check-crop.mjs …`로
+직접 부르면 된다. 어느 쪽이든 위 3번만 풀리면 그대로 돌아간다.
+(자격증명을 `.env.local`로 떨어뜨렸다면 **절대 커밋하지 말 것.**)
 
 **다음 세션이 할 일**(자격증명이 있어야 전부 가능하다):
 1. `npm run regression-check-crop`로 전수 실행 → `아래쪽 잉크` 경고 목록 확보.
