@@ -979,6 +979,8 @@ async function cropQuestionsFromPage(
   columnCropX = null,
   headerInkBottomY = null,
   excludeNumbers = new Set(),
+  // 번호 → 다음 슬롯으로 넘어간 그 문항의 꼬리 이미지(planOverflowTails).
+  tailByNumber = new Map(),
 ) {
   const { markers, groups, lines = [], pageWidthPt, pageHeightPt } = markerData;
   if (markers.length === 0) return { results: [], pendingStrips: carriedStrips };
@@ -1154,6 +1156,13 @@ async function cropQuestionsFromPage(
       if (strip) {
         raw = await stackVertically([strip, raw]);
         consumedNumbers.add(marker.number);
+      }
+      // 다음 슬롯으로 넘어간 꼬리가 있으면 이어붙인다. 본문 쪽 세로 여백을 먼저
+      // 걷어내야 두 조각 사이에 칼럼 아래쪽 빈 공간이 흰 띠로 남지 않는다.
+      const tail = tailByNumber.get(marker.number);
+      if (tail) {
+        const base = (await trimVerticalWhitespace(raw)) ?? raw;
+        raw = (await stackVertically([base, tail], Math.round(SEGMENT_GAP_PT * scale))) ?? raw;
       }
       results.push({ number: marker.number, image: await finalizeQuestionImage(raw, scale) });
     }
@@ -1385,6 +1394,135 @@ export function planCrossPageSets(pageDataList, columnMode) {
   return plans;
 }
 
+// 안내문이 안 붙은 **낱개 문항**이 칼럼/페이지를 넘어가는 경우 (2026-08-11)
+//
+// 크롭은 언제나 "마커 → 같은 칼럼의 다음 마커(없으면 칼럼 끝)"까지만 담는다.
+// 문항 내용이 슬롯(페이지×칼럼) 경계를 넘어 다음 슬롯 맨 위로 이어지면, 다음
+// 슬롯의 크롭은 그 슬롯 첫 마커에서 시작하므로 **넘어간 뒷부분이 어떤 이미지에도
+// 안 들어간다**(실측 신고: 자료해석 보고서형 문항에서 선택지 ①②만 남고 ③④⑤가
+// 통째로 없음). 지금까지 슬롯 넘김 처리는 안내문 세트에만 있었다(planCrossPageSets).
+//
+// 여기서는 지면의 읽기 순서를 따라가며 "슬롯 첫 마커 위에 남은 텍스트 줄"을 찾아
+// 직전 문항의 꼬리로 본다. 찾은 꼬리는 그 문항 이미지 아래에 이어붙인다.
+// **꼬리가 감지되지 않은 문제지의 결과는 한 바이트도 안 바뀐다** — 이 경로 자체가
+// 안 돌기 때문이다.
+//
+// 보수적으로 잡는다. 애매하면 손대지 않고 예전 동작 그대로 둔다(skip 사유를 같이
+// 돌려줘 scripts/audit-crop-orphans.mjs가 "감지했지만 병합 안 함"을 보고한다):
+//   - 안내문 그룹에 속한 번호는 제외 — 세트의 지문 조각을 엉뚱한 주인에게 붙일 수
+//     있고, 그쪽은 스트립/세트 병합이 이미 자기 방식으로 담당한다.
+//   - 꼬리가 세 슬롯 이상 이어지면 제외 — 그 정도면 문항 하나의 꼬리가 아니라
+//     마커 인식이 무너진 것으로 본다.
+//   - 줄 하나짜리 아주 작은 잔해는 제외(경계 계산 오차로 남는 것과 구분이 안 된다).
+const TAIL_MAX_SLOTS = 2;
+// 꼬리 조각에서 머리글을 걷어낼 때 인정하는 최대 띠 높이(지면 맨 위 기준, pt).
+const TAIL_HEADER_BAND_MAX_PT = 60;
+const TAIL_MIN_LINES = 2;
+const TAIL_MIN_EXTENT_PT = 24;
+
+// 되풀이 머리글/꼬리말은 꼬리가 아니다. 좌표가 아니라 글자 내용으로 가른다 —
+// 매 페이지 같은 자리에 오는 본문 첫 줄을 머리글로 오인하지 않기 위해서다
+// (computeHeaderInkBottomByPage와 같은 이유).
+function findRunningTextKeys(pageDataList) {
+  const pagesByKey = new Map();
+  for (let i = 0; i < pageDataList.length; i++) {
+    for (const l of pageDataList[i].lines ?? []) {
+      const key = normalizeRunningText(l.text ?? "");
+      if (!key) continue;
+      if (!pagesByKey.has(key)) pagesByKey.set(key, new Set());
+      pagesByKey.get(key).add(i);
+    }
+  }
+  const minPages = Math.max(2, Math.ceil(pageDataList.length / 2));
+  const keys = new Set();
+  for (const [key, pages] of pagesByKey) if (pages.size >= minPages) keys.add(key);
+  return keys;
+}
+
+// 슬롯 맨 위에서 "그 슬롯의 첫 마커(또는 첫 안내문)" 사이에 남은 본문 줄.
+// 안내문이 마커보다 위에 있으면 거기부터 아래는 세트/스트립 처리가 담당하므로
+// 안내문 위쪽만 센다. 마커도 안내문도 없는 슬롯은 통째로 후보다.
+function slotOrphanLines(slot, runningKeys) {
+  const data = slot.data;
+  const marker = slot.markers[0] ?? null; // splitIntoColumns가 y 내림차순 정렬
+  let thresholdY = marker ? marker.y + (marker.height ?? 0) : -Infinity;
+  for (const g of data.groups ?? []) {
+    if (g.col !== slot.col) continue;
+    const gTop = g.y + (g.height ?? 0);
+    if (g.y > thresholdY && gTop > thresholdY) thresholdY = gTop;
+  }
+  const lines = (data.lines ?? []).filter(
+    (l) =>
+      l.col === slot.col &&
+      l.y > thresholdY &&
+      !runningKeys.has(normalizeRunningText(l.text ?? "")),
+  );
+  if (lines.length === 0) return null;
+  const top = Math.max(...lines.map((l) => l.y + (l.height ?? 0)));
+  const bottom = Math.min(...lines.map((l) => l.y));
+  return { lines: lines.length, extentPt: Number((top - bottom).toFixed(1)) };
+}
+
+export function planOverflowTails(pageDataList, columnMode) {
+  const colKeys = columnMode === "single" ? ["L"] : ["L", "R"];
+  const slots = [];
+  for (let p = 0; p < pageDataList.length; p++) {
+    const d = pageDataList[p];
+    const { left, right } = splitIntoColumns(d.markers, d.pageWidthPt, columnMode, d._columnSplitX);
+    for (const col of colKeys) {
+      slots.push({ pageIdx: p, col, data: d, markers: col === "L" ? left : right });
+    }
+  }
+  const firstMarkerSlot = slots.findIndex((s) => s.markers.length > 0);
+  if (firstMarkerSlot < 0) return [];
+
+  const runningKeys = findRunningTextKeys(pageDataList);
+  // 페이지/칼럼을 넘는 세트는 두 번째 조각부터 칼럼 맨 위를 이미 담아간다 —
+  // 그 자리를 또 꼬리로 붙이면 같은 내용이 두 번 나온다.
+  const covered = new Set();
+  for (const plan of planCrossPageSets(pageDataList, columnMode)) {
+    for (const s of plan.slots.slice(1)) covered.add(`${s.pageIdx}|${s.col}`);
+  }
+  const groupNumbers = new Set();
+  for (const d of pageDataList) {
+    for (const g of d.groups ?? []) for (let n = g.start; n <= g.end; n++) groupNumbers.add(n);
+  }
+
+  const chains = [];
+  let cur = null;
+  for (let i = firstMarkerSlot; i < slots.length; i++) {
+    const slot = slots[i];
+    if (i > firstMarkerSlot && cur) {
+      if (covered.has(`${slot.pageIdx}|${slot.col}`)) {
+        cur = null;
+      } else {
+        const orphan = slotOrphanLines(slot, runningKeys);
+        if (orphan) cur.tail.push({ pageIdx: slot.pageIdx, col: slot.col, ...orphan });
+        else cur = null;
+      }
+    }
+    if (slot.markers.length > 0) {
+      // 이 슬롯에 마커가 있으면 앞 문항의 꼬리는 여기서 끝나고, 이 슬롯의 마지막
+      // 문항이 다음 슬롯으로 이어질 수 있는 새 주인이 된다.
+      cur = { number: slot.markers[slot.markers.length - 1].number, tail: [] };
+      chains.push(cur);
+    }
+  }
+
+  const plans = [];
+  for (const c of chains) {
+    if (c.tail.length === 0) continue;
+    const lines = c.tail.reduce((a, t) => a + t.lines, 0);
+    const extentPt = Number(c.tail.reduce((a, t) => a + t.extentPt, 0).toFixed(1));
+    let skip = null;
+    if (groupNumbers.has(c.number)) skip = "안내문 세트 소속";
+    else if (c.tail.length > TAIL_MAX_SLOTS) skip = `꼬리가 ${c.tail.length}슬롯`;
+    else if (lines < TAIL_MIN_LINES && extentPt < TAIL_MIN_EXTENT_PT) skip = "너무 작음";
+    plans.push({ number: c.number, tail: c.tail, lines, extentPt, skip });
+  }
+  return plans;
+}
+
 // 꼬리말 감지의 대칭 — 페이지마다 되풀이되는 **머리글**의 잉크 아래선을 구한다.
 // 세트 조각이 칼럼 맨 위에서 시작할 때 이게 없으면 쪽 머리글이 지문 사이에 끼어
 // 들어온다(실측: 2026 법원직 9급 국어 — 1쪽 우측 칼럼 맨 위의 "1교시 ①책형"이
@@ -1608,6 +1746,45 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     }
   }
 
+  // 안내문 없는 낱개 문항이 다음 슬롯으로 넘어간 꼬리를 미리 잘라둔다
+  // (planOverflowTails 주석 참고). 꼬리가 없으면 이 map은 비고, 아래 페이지 단위
+  // 크롭은 예전과 완전히 같은 경로를 탄다.
+  const tailByNumber = new Map();
+  for (const plan of planOverflowTails(pageMarkerData.map((d) => d.data), columnMode)) {
+    if (plan.skip || handledNumbers.has(plan.number)) continue;
+    const pieces = [];
+    for (const t of plan.tail) {
+      const ctx = await ctxFor(t.pageIdx);
+      const colDef = ctx.columnDefs.find((c) => c.key === t.col);
+      if (!colDef) continue;
+      // 칼럼 맨 위에서 "그 칼럼 첫 마커(또는 첫 안내문) 바로 위"까지가 꼬리다 —
+      // findBottomBoundary에 지면 꼭대기를 주면 그 경계를 그대로 돌려준다.
+      const raw = await ctx.extractRegion(
+        colDef,
+        ctx.columnTopPt,
+        ctx.findBottomBoundary(colDef, ctx.pageHeightPt),
+      );
+      if (!raw) continue;
+      // 조각이 칼럼 맨 위에서 시작하므로 쪽 머리글을 픽셀로 걷어낸다. 단 머리글
+      // 띠는 지면 맨 위 TAIL_HEADER_BAND_MAX_PT 안쪽으로 제한한다 —
+      // headerInkBottomY는 "페이지마다 똑같은 문구"만 보고 정하는데, 선택지 문구가
+      // 매 페이지 같은 조판에서는 그 값이 지면 한복판을 가리킬 수 있고, 그대로
+      // 믿고 걷어내면 **살리려던 꼬리가 통째로 날아간다**(실측: 합성 조판 검증에서
+      // 꼬리 3줄이 전부 머리글로 오인돼 병합이 조용히 취소됐다). 그래도 다
+      // 걷어내면(null) 머리글이 한 줄 붙는 편이 내용을 잃는 것보다 낫다.
+      const headerBandPx =
+        ctx.headerBandPx === null
+          ? null
+          : Math.min(ctx.headerBandPx, Math.round(TAIL_HEADER_BAND_MAX_PT * scale));
+      const deheaded = (await dropRunningHeader(raw, headerBandPx, scale)) ?? raw;
+      const trimmed = await trimVerticalWhitespace(deheaded);
+      if (trimmed) pieces.push(trimmed);
+    }
+    if (pieces.length === 0) continue;
+    const stacked = await stackVertically(pieces, Math.round(SEGMENT_GAP_PT * scale));
+    if (stacked) tailByNumber.set(plan.number, stacked);
+  }
+
   let carriedStrips = new Map();
   for (let p = 1; p <= pageMarkerData.length; p++) {
     const { page, data } = pageMarkerData[p - 1];
@@ -1622,6 +1799,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
       columnCropX,
       headerInkBottomByPage[p - 1],
       handledNumbers,
+      tailByNumber,
     );
     carriedStrips = pendingStrips;
     cropped.push(...pageResults);

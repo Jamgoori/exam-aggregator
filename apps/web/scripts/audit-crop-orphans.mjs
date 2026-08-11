@@ -14,6 +14,12 @@
 // **지면 쪽에서** 검사한다 — 슬롯 맨 위에서 그 슬롯 첫 마커 사이에 남는 텍스트
 // 줄(= 앞 문항의 꼬리)을 센다.
 //
+// 판정은 크롭 스크립트의 `planOverflowTails`를 **그대로 공유한다** — 검사가 따로
+// 베껴 쓰면 크롭이 바뀔 때 조용히 어긋난다. 그래서 리포트는 두 갈래다:
+//   [병합됨]      — 재크롭하면 이 꼬리가 문항 이미지에 이어붙는다(= 재크롭 대상)
+//   [손대지 않음] — 꼬리는 감지했지만 안전장치에 걸려 크롭이 건드리지 않는다
+//                   (안내문 세트 소속 / 꼬리가 세 슬롯 이상 / 너무 작음) = 수동 확인
+//
 // 크롭은 하지 않는다(렌더링 없음). 문서당 텍스트 레이어만 읽으므로 전수 검사가
 // 몇 분이면 끝난다. 업로드·DB 쓰기도 일절 하지 않는다.
 //
@@ -25,11 +31,7 @@ import fs from "node:fs";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { pathToFileURL } from "node:url";
 
-import {
-  buildMarkerPlan,
-  planCrossPageSets,
-  splitIntoColumns,
-} from "./crop-question-images.mjs";
+import { buildMarkerPlan, planOverflowTails, splitIntoColumns } from "./crop-question-images.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -44,35 +46,6 @@ function parseArgs(argv) {
     }
   }
   return args;
-}
-
-// 꼬리로 인정할 최소 크기. 한 줄짜리 잔해(경계 계산 오차로 남는 얇은 조각)까지
-// 보고하면 노이즈가 커지므로, "줄 두 개 이상" 또는 "세로로 이만큼 이상"만 센다.
-const MIN_ORPHAN_LINES = 2;
-const DEFAULT_MIN_EXTENT_PT = 24;
-
-// 머리글/꼬리말 판정: 글자 내용이 문서 절반 이상의 페이지에서 되풀이되면 본문이
-// 아니다. 좌표(y)로 판정하면 매 페이지 같은 자리에 오는 본문 첫 줄을 머리글로
-// 오인한다 — crop-question-images.mjs의 computeHeaderInkBottomByPage와 같은 이유로
-// 내용 비교를 쓴다(숫자는 #으로 뭉개 쪽번호도 같이 잡는다).
-function normalizeRunningText(text) {
-  return text.replace(/\s+/g, "").replace(/\d+/g, "#");
-}
-
-function findRunningTextKeys(pageDataList) {
-  const pagesByKey = new Map();
-  for (let i = 0; i < pageDataList.length; i++) {
-    for (const l of pageDataList[i].lines ?? []) {
-      const key = normalizeRunningText(l.text ?? "");
-      if (!key) continue;
-      if (!pagesByKey.has(key)) pagesByKey.set(key, new Set());
-      pagesByKey.get(key).add(i);
-    }
-  }
-  const minPages = Math.max(2, Math.ceil(pageDataList.length / 2));
-  const keys = new Set();
-  for (const [key, pages] of pagesByKey) if (pages.size >= minPages) keys.add(key);
-  return keys;
 }
 
 // 마커 개수만으로 두 전략 중 하나를 고른다. extractQuestionsFromPdf가 크롭까지
@@ -111,108 +84,38 @@ async function planFor(pdf, expectedCount) {
   return { ...legacy, count: legacyCount };
 }
 
-export async function auditPdf(pdfBuffer, { expectedCount, minExtentPt = DEFAULT_MIN_EXTENT_PT } = {}) {
+export async function auditPdf(pdfBuffer, { expectedCount } = {}) {
   const pdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
-  const { pageMarkerData, columnSplitX, columnMode, count } = await planFor(pdf, expectedCount);
-  const pageDataList = pageMarkerData.map((d) => d.data);
+  const { pageMarkerData, columnMode, count } = await planFor(pdf, expectedCount);
+  const plans = planOverflowTails(pageMarkerData.map((d) => d.data), columnMode);
+  return {
+    columnMode,
+    markerCount: count,
+    // 크롭이 이어붙이는 것(skip=null)과, 감지는 했지만 안전장치에 걸려 손대지 않은
+    // 것(skip 사유)을 모두 돌려준다 — 후자가 수동 확인 대상이다.
+    merged: plans.filter((p) => !p.skip),
+    skipped: plans.filter((p) => p.skip),
+  };
+}
 
-  const colKeys = columnMode === "single" ? ["L"] : ["L", "R"];
-  const slots = [];
-  for (let p = 0; p < pageDataList.length; p++) {
-    for (const col of colKeys) {
-      const d = pageDataList[p];
-      const { left, right } = splitIntoColumns(d.markers, d.pageWidthPt, columnMode, columnSplitX);
-      slots.push({ pageIdx: p, col, markers: col === "L" ? left : right });
-    }
-  }
-
-  // 페이지/칼럼을 넘는 공통지문 세트는 두 번째 조각부터 칼럼 맨 위에서 잘라
-  // 이어붙이므로, 그 슬롯 맨 위의 잉크는 이미 이미지에 들어가 있다 — 꼬리로
-  // 세면 안 된다.
-  const covered = new Set();
-  for (const plan of planCrossPageSets(pageDataList, columnMode)) {
-    for (const s of plan.slots.slice(1)) covered.add(`${s.pageIdx}|${s.col}`);
-  }
-
-  const runningKeys = findRunningTextKeys(pageDataList);
-  const firstMarkerSlot = slots.findIndex((s) => s.markers.length > 0);
-
-  const findings = [];
-  let lastNumber = null;
-  for (let i = 0; i < slots.length; i++) {
-    const slot = slots[i];
-    const data = pageDataList[slot.pageIdx];
-    const marker = slot.markers[0] ?? null; // splitIntoColumns가 y 내림차순 = 맨 위
-    const prevNumber = lastNumber;
-    if (slot.markers.length > 0) lastNumber = slot.markers[slot.markers.length - 1].number;
-
-    // 문서의 첫 마커보다 앞선 슬롯(표지·과목 안내 등)은 애초에 어떤 문항의
-    // 꼬리도 아니다. 첫 마커가 있는 슬롯 자체도 그 위는 문제지 머리(과목명·안내)라
-    // 건드리지 않는다.
-    if (i <= firstMarkerSlot) continue;
-    if (covered.has(`${slot.pageIdx}|${slot.col}`)) continue;
-
-    // 마커 위쪽 경계: 마커가 있으면 그 잉크 윗선, 없으면 슬롯 전체가 후보다.
-    let thresholdY = marker ? marker.y + (marker.height ?? 0) : -Infinity;
-    // 안내문이 마커보다 위에 있으면 그 안내문부터 아래는 세트/스트립 처리가
-    // 담당한다 — 안내문 위쪽만 꼬리로 본다.
-    for (const g of data.groups ?? []) {
-      if (g.col !== slot.col) continue;
-      if (g.y <= thresholdY) continue;
-      const gTop = g.y + (g.height ?? 0);
-      if (gTop > thresholdY) thresholdY = gTop;
-    }
-
-    const orphanLines = (data.lines ?? []).filter(
-      (l) =>
-        l.col === slot.col &&
-        l.y > thresholdY &&
-        !runningKeys.has(normalizeRunningText(l.text ?? "")),
-    );
-    if (orphanLines.length === 0) continue;
-
-    const top = Math.max(...orphanLines.map((l) => l.y + (l.height ?? 0)));
-    const bottom = Math.min(...orphanLines.map((l) => l.y));
-    const extentPt = Number((top - bottom).toFixed(1));
-    if (orphanLines.length < MIN_ORPHAN_LINES && extentPt < minExtentPt) continue;
-
-    findings.push({
-      page: slot.pageIdx + 1,
-      col: slot.col,
-      afterNumber: prevNumber,
-      nextNumber: marker?.number ?? null,
-      lines: orphanLines.length,
-      extentPt,
-      sample: orphanLines
-        .sort((a, b) => b.y - a.y)
-        .slice(0, 3)
-        .map((l) => l.text.slice(0, 40)),
-    });
-  }
-
-  findings.sort((a, b) => b.extentPt - a.extentPt);
-  return { columnMode, markerCount: count, findings };
+function describe(plan) {
+  const where = plan.tail.map((t) => `${t.pageIdx + 1}쪽 ${t.col}`).join(" + ");
+  return `${plan.number}번 꼬리 ${plan.lines}줄(${plan.extentPt}pt) @ ${where}`;
 }
 
 async function runLocalFile(args) {
   const buf = fs.readFileSync(args.file);
   const result = await auditPdf(buf, {
     expectedCount: args.expected ? Number(args.expected) : undefined,
-    minExtentPt: args["min-extent"] ? Number(args["min-extent"]) : undefined,
   });
   console.log(`${args.file}: ${result.columnMode}, 마커 ${result.markerCount}개`);
-  if (result.findings.length === 0) {
-    console.log("꼬리 소실 의심 없음");
+  if (result.merged.length === 0 && result.skipped.length === 0) {
+    console.log("꼬리 소실 없음");
     return 0;
   }
-  for (const f of result.findings) {
-    console.log(
-      `  ${f.page}쪽 ${f.col}칼럼 맨 위에 ${f.lines}줄(${f.extentPt}pt) 남음` +
-        ` — ${f.afterNumber ?? "?"}번의 꼬리로 보임 (다음 마커 ${f.nextNumber ?? "없음"})` +
-        `\n    ${f.sample.join(" / ")}`,
-    );
-  }
-  return 1;
+  for (const plan of result.merged) console.log(`  [병합됨] ${describe(plan)}`);
+  for (const plan of result.skipped) console.log(`  [손대지 않음: ${plan.skip}] ${describe(plan)}`);
+  return result.skipped.length > 0 ? 1 : 0;
 }
 
 async function runAll(args) {
@@ -226,7 +129,6 @@ async function runAll(args) {
   const concurrency = args.concurrency ? Number(args.concurrency) : 8;
   const limit = args.limit ? Number(args.limit) : undefined;
   const outPath = typeof args.out === "string" ? args.out : "crop-orphan-report.json";
-  const minExtentPt = args["min-extent"] ? Number(args["min-extent"]) : DEFAULT_MIN_EXTENT_PT;
 
   async function fetchAllRows(table, columns) {
     const rows = [];
@@ -267,7 +169,7 @@ async function runAll(args) {
         const { data: blob, error } = await supabase.storage.from("exam-papers").download(p.file_path);
         if (error) throw new Error(`download: ${error.message}`);
         const buf = Buffer.from(await blob.arrayBuffer());
-        const audit = await auditPdf(buf, { expectedCount: p.question_count, minExtentPt });
+        const audit = await auditPdf(buf, { expectedCount: p.question_count });
         results.push({
           id: p.id,
           title: p.title,
@@ -277,7 +179,8 @@ async function runAll(args) {
           qc: p.question_count,
           markerCount: audit.markerCount,
           columnMode: audit.columnMode,
-          findings: audit.findings,
+          merged: audit.merged,
+          skipped: audit.skipped,
         });
       } catch (err) {
         results.push({ id: p.id, title: p.title, year: p.year, fatal: err.message });
@@ -288,27 +191,30 @@ async function runAll(args) {
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
 
-  const hit = results.filter((r) => (r.findings?.length ?? 0) > 0);
+  const merged = results.filter((r) => (r.merged?.length ?? 0) > 0);
+  const skipped = results.filter((r) => (r.skipped?.length ?? 0) > 0);
   const fatals = results.filter((r) => r.fatal);
-  hit.sort(
-    (a, b) => Math.max(...b.findings.map((f) => f.extentPt)) - Math.max(...a.findings.map((f) => f.extentPt)),
-  );
-  fs.writeFileSync(outPath, JSON.stringify({ minExtentPt, results }, null, 2));
+  const worstOf = (r) => Math.max(...[...(r.merged ?? []), ...(r.skipped ?? [])].map((p) => p.extentPt));
+  merged.sort((a, b) => worstOf(b) - worstOf(a));
+  skipped.sort((a, b) => worstOf(b) - worstOf(a));
+  fs.writeFileSync(outPath, JSON.stringify({ results }, null, 2));
 
   console.log(`\n===== 결과 (${results.length}개 중) =====`);
-  console.log(`꼬리 소실 의심 문제지: ${hit.length}건`);
-  for (const r of hit.slice(0, 40)) {
-    const worst = r.findings.reduce((a, b) => (b.extentPt > a.extentPt ? b : a));
+  console.log(`꼬리가 발견돼 이제 이어붙는 문제지: ${merged.length}건  ← 재크롭 대상`);
+  for (const r of merged.slice(0, 40)) {
+    console.log(`  ${r.year} ${r.title} — ${r.merged.map(describe).join(", ")} id=${r.id}`);
+  }
+  if (merged.length > 40) console.log(`  ... 나머지 ${merged.length - 40}건은 ${outPath} 참고`);
+  console.log(`\n감지했지만 안전장치로 손대지 않음: ${skipped.length}건  ← 수동 확인 대상`);
+  for (const r of skipped.slice(0, 20)) {
     console.log(
-      `  ${r.year} ${r.title} — ${r.findings.length}곳, 최대 ${worst.extentPt}pt` +
-        ` (${worst.page}쪽 ${worst.col}, ${worst.afterNumber ?? "?"}번 꼬리) id=${r.id}`,
+      `  ${r.year} ${r.title} — ${r.skipped.map((p) => `${describe(p)} [${p.skip}]`).join(", ")} id=${r.id}`,
     );
   }
-  if (hit.length > 40) console.log(`  ... 나머지 ${hit.length - 40}건은 ${outPath} 참고`);
-  console.log(`검사 실패: ${fatals.length}건`);
+  console.log(`\n검사 실패: ${fatals.length}건`);
   for (const r of fatals.slice(0, 10)) console.log(`  ${r.year} ${r.title}: ${r.fatal}`);
   console.log(`\n리포트: ${outPath}`);
-  return hit.length > 0 ? 1 : 0;
+  return merged.length + skipped.length > 0 ? 1 : 0;
 }
 
 async function main() {
