@@ -174,7 +174,7 @@ async function runVerify() {
   } catch {
     concepts = await pageAll("concepts", "id, subject_id, name, parent_id, merged_into");
   }
-  const aliases = await pageAll("concept_aliases", "concept_id, alias");
+  const aliases = await pageAll("concept_aliases", "concept_id, subject_id, alias");
   if (concepts.length === 0) {
     console.log("concepts 테이블이 비어 있다. 먼저 apply-concepts.mjs 로 등록할 것.");
     process.exit(0);
@@ -183,11 +183,11 @@ async function runVerify() {
   const conceptById = new Map(concepts.map((c) => [c.id, c]));
   const aliasesBySubject = new Map();
   for (const a of aliases) {
-    const concept = conceptById.get(a.concept_id);
-    if (!concept) continue;
-    const list = aliasesBySubject.get(concept.subject_id) ?? [];
+    const subjectId = a.subject_id ?? conceptById.get(a.concept_id)?.subject_id;
+    if (!subjectId) continue;
+    const list = aliasesBySubject.get(subjectId) ?? [];
     list.push({ conceptId: a.concept_id, alias: a.alias });
-    aliasesBySubject.set(concept.subject_id, list);
+    aliasesBySubject.set(subjectId, list);
   }
 
   console.log("\n개념 사전 건강 검진\n");

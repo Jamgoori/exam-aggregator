@@ -36,7 +36,12 @@
 
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
-import { buildConceptLookup, matchConcept, normalizeConceptAlias } from "@gongmoa/core";
+import {
+  buildConceptLookup,
+  matchConcept,
+  normalizeConceptAlias,
+  validateConceptSpec,
+} from "@gongmoa/core";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -60,6 +65,26 @@ if (!filePath) {
 }
 
 const spec = JSON.parse(readFileSync(filePath, "utf8"));
+// 설명용 키(_로 시작)는 목록이 아니다.
+for (const key of Object.keys(spec)) if (key.startsWith("_")) delete spec[key];
+
+// 넣기 전에 본다. 별칭이 겹치면 DB 가 중간에 거절하고, 그 상태로 백필하면 일부
+// 문항만 붙은 채로 남는다.
+{
+  const report = validateConceptSpec(spec);
+  for (const w of report.warnings) console.log(`  · [${w.subject}] ${w.message}`);
+  if (report.errors.length > 0) {
+    console.error("\n정본 목록에 오류가 있다. 고친 뒤 다시 돌릴 것:\n");
+    for (const e of report.errors) console.error(`  ✗ [${e.subject}] ${e.message}`);
+    process.exit(1);
+  }
+  console.log(
+    report.stats
+      .map((s) => `${s.subject}: 개념 ${s.concepts} · 단원 ${s.units} · 기능형 ${s.skills}`)
+      .join("\n"),
+  );
+}
+
 const PAGE = 1000;
 
 async function pageAll(table, select) {
@@ -144,7 +169,7 @@ for (const subjectName of targets) {
     if (!conceptId) continue;
     const list = [entry.name, ...(entry.aliases ?? []).map((a) => (typeof a === "string" ? a : a.title))];
     for (const alias of [...new Set(list)]) {
-      const result = await ensureAlias(conceptId, alias);
+      const result = await ensureAlias(conceptId, subjectId, alias);
       if (result === "added") aliasAdded++;
       if (result === "conflict") aliasConflict++;
     }
@@ -152,12 +177,10 @@ for (const subjectName of targets) {
   console.log(`   별칭 추가 ${aliasAdded}${aliasConflict > 0 ? ` · 충돌 ${aliasConflict}` : ""}`);
 
   // 4) 백필. 이 과목 해설에 concept_id 를 붙인다.
-  const aliasRows = await pageAll("concept_aliases", "concept_id, alias");
-  const conceptRows = await pageAll("concepts", "id, subject_id");
-  const conceptSubject = new Map(conceptRows.map((c) => [c.id, c.subject_id]));
+  const aliasRows = await pageAll("concept_aliases", "concept_id, subject_id, alias");
   const lookup = buildConceptLookup(
     aliasRows
-      .filter((a) => conceptSubject.get(a.concept_id) === subjectId)
+      .filter((a) => a.subject_id === subjectId)
       .map((a) => ({ conceptId: a.concept_id, alias: a.alias })),
   );
 
@@ -239,13 +262,17 @@ async function setParent(childId, parentId) {
 
 // 이미 다른 개념에 붙은 별칭은 옮기지 않는다. 별칭이 개념 사이를 오가면 진단
 // 분포가 소리 없이 흔들리고, 그건 화면에 아무 표시도 안 난다.
-async function ensureAlias(conceptId, alias) {
+//
+// 별칭은 과목 안에서만 유일하다. 국어 "내용 일치"와 영어 "내용 일치"는 서로 다른
+// 개념이고, 그건 정상이다.
+async function ensureAlias(conceptId, subjectId, alias) {
   const normalized = normalizeConceptAlias(alias);
   if (!normalized) return "skipped";
 
   const { data: existing } = await supabase
     .from("concept_aliases")
     .select("concept_id")
+    .eq("subject_id", subjectId)
     .eq("normalized", normalized)
     .maybeSingle();
 
@@ -258,7 +285,7 @@ async function ensureAlias(conceptId, alias) {
 
   const { error } = await supabase
     .from("concept_aliases")
-    .insert({ concept_id: conceptId, alias, normalized });
+    .insert({ concept_id: conceptId, subject_id: subjectId, alias, normalized });
   if (error) {
     console.error(`   별칭 등록 실패 (${alias}): ${error.message}`);
     process.exitCode = 1;
