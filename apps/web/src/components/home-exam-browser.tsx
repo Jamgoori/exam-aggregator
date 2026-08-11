@@ -477,11 +477,14 @@ export function HomeExamBrowser({
       </section>
 
       <section ref={resultsSectionRef} className="flex flex-col gap-4">
-        <div className="flex flex-wrap gap-2">
+        {/* 모바일에서는 급수·시행처 버튼 8개가 두 줄로 접히며 첫 화면에서 카드
+            목록을 밀어내서, 아래 과목 인덱스(ㄱㄴㄷ)와 같이 옆으로 스와이프하는
+            한 줄로 압축한다(스크롤바는 숨김). sm 이상에서는 기존처럼 전부 펼친다. */}
+        <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-visible sm:pb-0">
           <button
             type="button"
             onClick={() => handleGroupChange()}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+            className={`shrink-0 whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium ${
               !effectiveLevel && !effectiveExamType
                 ? "bg-zinc-800 text-white dark:bg-zinc-700"
                 : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
@@ -498,7 +501,7 @@ export function HomeExamBrowser({
                 key={g.label}
                 type="button"
                 onClick={() => handleGroupChange(g)}
-                className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+                className={`shrink-0 whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium ${
                   active
                     ? g.level
                       ? levelColor(g.level)
