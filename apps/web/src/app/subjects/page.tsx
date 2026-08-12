@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CONSONANTS, initialConsonant } from "@gongmoa/core";
 import { JsonLd } from "@/components/json-ld";
 import { getSubjectIndex, type SubjectIndexEntry } from "@/lib/subject-index";
-import { compareLevels } from "@/lib/level-colors";
+import { getExamIndex, examHref } from "@/lib/exam-index";
 import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 import type { Metadata } from "next";
 
@@ -52,7 +52,10 @@ function yearRange(entry: SubjectIndexEntry) {
 }
 
 export default async function SubjectsIndexPage() {
-  const { entries, totalCount } = await getSubjectIndex();
+  const [{ entries, totalCount }, { combos }] = await Promise.all([
+    getSubjectIndex(),
+    getExamIndex(),
+  ]);
   const groups = groupByConsonant(entries);
 
   return (
@@ -126,32 +129,30 @@ export default async function SubjectsIndexPage() {
         </section>
       ))}
 
-      {/* 급수 묶음으로도 한 번 더 들어갈 수 있게 해준다. 홈의 묶음 탭과 같은 곳으로
-          가지만, 그쪽은 클라이언트 상태 버튼이라 크롤러가 따라갈 <a>가 없다. */}
+      {/* 과목축의 짝인 시험축(시행처+급수)으로 건너가는 자리. 홈의 급수 버튼으로
+          보내지 않는 이유는 그쪽이 클라이언트 필터라 크롤러가 따라갈 <a>가 없고,
+          같은 URL(/)에 머무르므로 검색 결과에 오를 페이지도 아니기 때문이다. */}
       <section className="flex flex-col gap-3 border-t border-zinc-100 pt-6 dark:border-zinc-800">
-        <h2 className="text-lg font-semibold">급수·시행처로 찾기</h2>
+        <h2 className="text-lg font-semibold">시험으로 찾기</h2>
         <div className="flex flex-wrap gap-2">
-          {[
-            ...[
-              ...new Set(entries.flatMap((e) => e.levels)),
-            ].sort(compareLevels).map((level) => ({
-              label: `${level} 기출문제`,
-              href: `/?level=${encodeURIComponent(level)}`,
-            })),
-            ...["경찰", "소방", "계리직"].map((type) => ({
-              label: `${type} 기출문제`,
-              href: `/?type=${encodeURIComponent(type)}`,
-            })),
-          ].map((item) => (
+          {combos.map((combo) => (
             <Link
-              key={item.href}
-              href={item.href}
+              key={combo.slug}
+              href={examHref(combo.slug)}
               className="rounded-full border border-zinc-200 px-4 py-1.5 text-sm font-medium text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-800 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
             >
-              {item.label}
+              {combo.label} 기출문제
             </Link>
           ))}
         </div>
+        <p className="text-sm text-zinc-500 dark:text-zinc-500">
+          <Link
+            href="/exams"
+            className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+          >
+            시험별 기출문제 전체보기
+          </Link>
+        </p>
       </section>
     </div>
   );

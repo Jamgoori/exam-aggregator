@@ -11,8 +11,6 @@ export type SubjectIndexEntry = {
   count: number;
   minYear: number;
   maxYear: number;
-  /** 이 과목에 실제로 존재하는 급수(9급·7급 …). 급수가 없는 직렬(경찰 등)은 빠진다. */
-  levels: string[];
 };
 
 // 과목 인덱스(/subjects)가 쓰는 집계. 문제지 전체를 한 번 훑어야 하므로 홈 데이터와
@@ -37,23 +35,17 @@ export async function getSubjectIndex(): Promise<{
 
   const stats = new Map<
     string,
-    { count: number; minYear: number; maxYear: number; levels: Set<string> }
+    { count: number; minYear: number; maxYear: number }
   >();
   for (const p of papers) {
     let s = stats.get(p.subject_id);
     if (!s) {
-      s = {
-        count: 0,
-        minYear: p.year,
-        maxYear: p.year,
-        levels: new Set<string>(),
-      };
+      s = { count: 0, minYear: p.year, maxYear: p.year };
       stats.set(p.subject_id, s);
     }
     s.count += 1;
     if (p.year < s.minYear) s.minYear = p.year;
     if (p.year > s.maxYear) s.maxYear = p.year;
-    if (p.level) s.levels.add(p.level);
   }
 
   const entries = subjects.flatMap<SubjectIndexEntry>((subject) => {
@@ -66,7 +58,6 @@ export async function getSubjectIndex(): Promise<{
         count: s.count,
         minYear: s.minYear,
         maxYear: s.maxYear,
-        levels: [...s.levels],
       },
     ];
   });

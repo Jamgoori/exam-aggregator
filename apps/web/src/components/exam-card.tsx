@@ -6,7 +6,15 @@ import { examTypeFilledColor } from "@/lib/exam-type-colors";
 import { getRoundTier } from "@/lib/round-tier";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
-import type { ExamPaper } from "@gongmoa/core";
+import type { ExamPaper, ExamType } from "@gongmoa/core";
+
+// 카드가 실제로 읽는 필드만 요구한다 — 목록 화면마다 조회 범위가 달라서(시험별
+// 목록은 파일 경로·조회수 같은 걸 받아오지 않는다), 전체 ExamPaper를 요구하면
+// 쓰지도 않을 필드를 가짜로 채워 넘기게 된다. ExamPaper는 이 타입의 상위집합이라
+// 기존 호출부는 그대로 통과한다.
+export type ExamCardPaper = Pick<ExamPaper, "id" | "title" | "track" | "level"> & {
+  exam_types?: ExamType | null;
+};
 
 export function ExamCard({
   paper,
@@ -17,7 +25,7 @@ export function ExamCard({
   loggedIn = false,
   hasCbtAnswers = false,
 }: {
-  paper: ExamPaper;
+  paper: ExamCardPaper;
   isCurrent?: boolean;
   // 상세페이지 하단 "같은 과목 목록"의 급수 탭 상태를 이어서 넘겨주기 위한 값
   linkLevel?: string;
