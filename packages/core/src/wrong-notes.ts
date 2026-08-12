@@ -12,6 +12,9 @@ export type WrongNotePaperInfo = {
   id: string;
   title: string;
   level: string | null;
+  // 화면에 쓰지는 않지만 문제지 주소(slug)를 만드는 데 필요하다 (paper-slug.ts).
+  round: number;
+  track: string | null;
   choice_count: number;
   subjects: Subject | null;
   exam_types: ExamType | null;

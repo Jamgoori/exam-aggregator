@@ -9,6 +9,7 @@ import {
   examHref,
 } from "@/lib/exam-index";
 import { absoluteUrl } from "@/lib/site-url";
+import { paperHref } from "@/lib/paper-href";
 import {
   examBreadcrumbLd,
   ExamCrumbs,
@@ -95,7 +96,7 @@ export default async function ExamYearPage({
               "@type": "ListItem",
               position: i + 1,
               name: `${year} ${combo.label} ${paper.subjectName ?? ""}`.trim(),
-              url: absoluteUrl(`/papers/${paper.id}`),
+              url: absoluteUrl(paperHref(paper)),
             })),
           },
         }}

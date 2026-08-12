@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { resolvePaperId } from "@/lib/paper-slug-map";
 import { compareLevels } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
@@ -24,8 +25,14 @@ const RELATED_PAPERS_LIMIT = 12;
 // 경로라 과목 전체를 받지는 않고, 미리보기에 충분한 만큼만 여유 있게 받는다.
 const RELATED_FETCH_LIMIT = RELATED_PAPERS_LIMIT * 5;
 
-// generateMetadata와 페이지 본문이 같은 id로 중복 조회하지 않도록 캐싱
-export const getPaper = cache(async (id: string) => {
+// generateMetadata와 페이지 본문이 같은 주소로 중복 조회하지 않도록 캐싱.
+//
+// 인자는 주소 조각이다 — 새 주소(slug, "2021-국회직-8급-국어")도 옛 주소(UUID)도
+// 받는다. 옛 주소는 색인·북마크·외부 링크에 남아 있어서 계속 열려야 하고,
+// 새 주소로의 301은 proxy.ts가 렌더링 전에 보낸다.
+export const getPaper = cache(async (param: string) => {
+  const id = await resolvePaperId(param);
+  if (!id) return null;
   const supabase = await createClient();
   const { data } = await supabase
     .from("exam_papers")

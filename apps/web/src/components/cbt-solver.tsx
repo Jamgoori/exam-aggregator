@@ -259,6 +259,7 @@ function useExamZoom(pdfWrapperRef: RefObject<HTMLDivElement | null>) {
 
 export function CbtSolver({
   paperId,
+  paperHref,
   paperTitle,
   fileUrl,
   totalQuestions,
@@ -268,6 +269,8 @@ export function CbtSolver({
   defaultViewMode = null,
 }: {
   paperId: string;
+  // 문제지 상세 주소. paperId는 서버 액션용 UUID라 링크로 쓸 수 없다.
+  paperHref: string;
   paperTitle: string;
   fileUrl: string;
   totalQuestions: number;
@@ -475,7 +478,7 @@ export function CbtSolver({
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2">
             <div className="flex min-w-0 items-center gap-2">
               <Link
-                href={`/papers/${paperId}`}
+                href={paperHref}
                 aria-label="문제지로 돌아가기"
                 className="flex shrink-0 items-center justify-center rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
               >
@@ -791,7 +794,11 @@ export function CbtSolver({
       )}
 
       {result && (
-        <CbtResultModal result={result} paperId={paperId} onRetry={handleRetry} />
+        <CbtResultModal
+          result={result}
+          paperHref={paperHref}
+          onRetry={handleRetry}
+        />
       )}
     </div>
   );

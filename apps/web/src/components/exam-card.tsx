@@ -6,13 +6,18 @@ import { examTypeFilledColor } from "@/lib/exam-type-colors";
 import { getRoundTier } from "@/lib/round-tier";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
+import { paperHref, paperCbtHref } from "@/lib/paper-href";
 import type { ExamPaper, ExamType } from "@gongmoa/core";
 
 // 카드가 실제로 읽는 필드만 요구한다 — 목록 화면마다 조회 범위가 달라서(시험별
 // 목록은 파일 경로·조회수 같은 걸 받아오지 않는다), 전체 ExamPaper를 요구하면
 // 쓰지도 않을 필드를 가짜로 채워 넘기게 된다. ExamPaper는 이 타입의 상위집합이라
 // 기존 호출부는 그대로 통과한다.
-export type ExamCardPaper = Pick<ExamPaper, "id" | "title" | "track" | "level"> & {
+// round는 화면에 쓰지 않지만 주소를 만드는 데 필요하다 (paper-href.ts).
+export type ExamCardPaper = Pick<
+  ExamPaper,
+  "id" | "title" | "track" | "level" | "round"
+> & {
   exam_types?: ExamType | null;
 };
 
@@ -40,9 +45,10 @@ export function ExamCard({
   const examType = paper.exam_types;
   const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
   const roundTier = myRoundCount ? getRoundTier(myRoundCount) : null;
+  const detailHref = paperHref(paper);
   const href = linkLevel
-    ? `/papers/${paper.id}?level=${encodeURIComponent(linkLevel)}`
-    : `/papers/${paper.id}`;
+    ? `${detailHref}?level=${encodeURIComponent(linkLevel)}`
+    : detailHref;
 
   const className = `relative flex flex-col gap-3 rounded-xl border p-4 transition-colors ${
     isCurrent
@@ -123,7 +129,7 @@ export function ExamCard({
             // 위에서 따로 클릭되게 한다. "자세히 보기"는 목적지가 같으므로
             // 그대로 아래 카드 전체 링크에 맡긴다.
             <Link
-              href={`/papers/${paper.id}/cbt`}
+              href={paperCbtHref(paper)}
               className="relative z-10 flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"
             >
               <Monitor size={12} />

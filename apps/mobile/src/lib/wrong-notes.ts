@@ -21,7 +21,7 @@ import { publicUrl } from "./storage";
 // 내가 고른 답·극복 여부까지만 보여주고, 채점은 CBT/섞어풀기에서 서버가 한다.
 
 const ATTEMPT_SELECT =
-  "id, created_at, score, total_questions, exam_papers(id, title, track, level, choice_count, subjects(*), exam_types(*))";
+  "id, created_at, score, total_questions, exam_papers(id, title, track, level, round, choice_count, subjects(*), exam_types(*))";
 
 // PostgREST 는 range() 없이 한 번에 1000행까지만 준다(웹 wrong-notes.ts 와 같은 이유).
 const BATCH_SIZE = 1000;

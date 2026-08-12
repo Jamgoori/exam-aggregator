@@ -8,6 +8,7 @@ import {
   type PaperViewQuestion,
 } from "@/components/wrong-note-paper-view";
 import { levelColor } from "@/lib/level-colors";
+import { paperCbtHref } from "@/lib/paper-href";
 import { subjectColor } from "@/lib/subject-colors";
 
 // 문제지 하나의 오답노트: 회독별 점수 기록(스트립)과 틀린 문제·해설을 한 화면에서
@@ -75,7 +76,7 @@ export default async function PaperWrongNotePage({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold leading-snug">{paper.title}</h1>
           <Link
-            href={`/papers/${paper.id}/cbt`}
+            href={paperCbtHref(paper)}
             className="flex shrink-0 items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"
           >
             <Monitor size={12} />

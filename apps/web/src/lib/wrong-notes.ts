@@ -131,7 +131,7 @@ export async function fetchWrongAnswerRows(
 }
 
 const ATTEMPT_SELECT =
-  "id, created_at, score, total_questions, exam_papers(id, title, level, choice_count, subjects(*), exam_types(*))";
+  "id, created_at, score, total_questions, exam_papers(id, title, level, round, track, choice_count, subjects(*), exam_types(*))";
 
 export async function getWrongNoteGroups(
   supabase: Supabase,
@@ -1260,7 +1260,7 @@ export async function getAttemptWrongNote(
   const { data: attemptRow } = await supabase
     .from("cbt_attempts")
     .select(
-      "id, paper_id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, level, choice_count, subjects(*), exam_types(*))",
+      "id, paper_id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, level, round, track, choice_count, subjects(*), exam_types(*))",
     )
     .eq("id", attemptId)
     .eq("user_id", userId)

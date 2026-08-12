@@ -133,6 +133,8 @@ export type ExamComboPaper = {
   track: string | null;
   level: string | null;
   year: number;
+  // 화면에 쓰지는 않지만 문제지 주소(slug)를 만드는 데 필요하다 (paper-href.ts).
+  round: number;
   subjectName: string | null;
   exam_types?: ExamType;
 };
@@ -151,6 +153,7 @@ async function collectComboPapers(slug: string): Promise<ExamComboPaper[]> {
         track: p.track,
         level: p.level,
         year: p.year,
+        round: p.round,
         subjectName: subjectById.get(p.subject_id)?.name ?? null,
         exam_types: examType,
       },
