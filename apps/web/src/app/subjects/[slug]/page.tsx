@@ -11,6 +11,8 @@ import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { SubjectBookmarkButton } from "@/components/subject-bookmark-button";
+import { JsonLd } from "@/components/json-ld";
+import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 import {
   collapseDuplicatePapers,
   collidingPaperIds,
@@ -30,23 +32,36 @@ const getSubject = cache(async (slug: string) => {
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ level?: string; examTypes?: string; page?: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
+  const { page } = await searchParams;
   const subject = await getSubject(slug);
   if (!subject) return {};
 
-  const title = `${subject.name} 기출문제 모음`;
+  // 급수·직렬 탭(?level=·?examTypes=)은 같은 목록을 걸러 보여줄 뿐이라 정본을
+  // 파라미터 없는 주소로 모은다. 반면 ?page= 는 내용이 실제로 다른 페이지다 —
+  // 2페이지 이후까지 1페이지를 정본으로 가리키면 크롤러가 그 페이지들을 중복으로
+  // 보고 덜 방문하게 되고, 거기서만 링크되는 문제지가 발견되지 않는다.
+  // 그래서 페이지 번호만 정본에 남긴다.
+  const pageNum = Math.max(1, Number(page) || 1);
+  const canonical =
+    pageNum > 1 ? `/subjects/${slug}?page=${pageNum}` : `/subjects/${slug}`;
+
+  const title =
+    pageNum > 1
+      ? `${subject.name} 기출문제 모음 (${pageNum}페이지)`
+      : `${subject.name} 기출문제 모음`;
   const description = `${subject.name} 과목의 공무원 기출문제를 국가직·지방직 등 시행처별, 연도별·급수별로 모아 정답과 함께 무료로 제공합니다.`;
 
   return {
     title,
     description,
-    // 급수·직렬 탭과 페이지네이션(?level=·?examTypes=·?page=)이 같은 목록의 변형
-    // URL을 잔뜩 만들어내므로, 정본을 파라미터 없는 주소로 고정한다.
-    alternates: { canonical: `/subjects/${slug}` },
-    openGraph: { url: `/subjects/${slug}`, title, description },
+    alternates: { canonical },
+    openGraph: { url: canonical, title, description },
   };
 }
 
@@ -159,6 +174,17 @@ export default async function SubjectPage({
     (a, b) => a.display_order - b.display_order,
   );
 
+  // 목록 소개 문장에 쓰는 연도 범위. 목록은 연도 내림차순이라 양 끝이 곧 최신/최고다.
+  const years = dedupedPapers.map((p) => p.year);
+  const newestYear = years.length > 0 ? Math.max(...years) : null;
+  const oldestYear = years.length > 0 ? Math.min(...years) : null;
+  const yearRangeLabel =
+    newestYear === null || oldestYear === null
+      ? null
+      : newestYear === oldestYear
+        ? `${newestYear}년`
+        : `${oldestYear}~${newestYear}년`;
+
   const filteredPapers = dedupedPapers.slice(pageStart, pageStart + PAGE_SIZE);
 
   // 급수 탭·직렬 탭이 서로의 선택 상태를 지우지 않도록, 두 탭 모두 이 헬퍼로
@@ -187,18 +213,62 @@ export default async function SubjectPage({
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-12">
+      {/* 검색 결과에 "공모아 > 과목별 기출문제 > 국어" 경로가 URL 대신 표시되게 한다.
+          화면의 "← 홈으로 / 과목별 기출문제" 링크와 같은 계층이라 구조상 정직하다. */}
+      <JsonLd
+        data={{
+          "@context": "https://schema.org",
+          "@type": "BreadcrumbList",
+          itemListElement: [
+            { "@type": "ListItem", position: 1, name: "홈", item: SITE_URL },
+            {
+              "@type": "ListItem",
+              position: 2,
+              name: "과목별 기출문제",
+              item: absoluteUrl("/subjects"),
+            },
+            { "@type": "ListItem", position: 3, name: `${subject.name} 기출문제` },
+          ],
+        }}
+      />
       <div>
-        <Link href="/" className="text-sm text-zinc-500 underline dark:text-zinc-500">
-          ← 홈으로
-        </Link>
+        <div className="flex flex-wrap items-center gap-x-2 text-sm text-zinc-500 dark:text-zinc-500">
+          <Link href="/" className="underline">
+            ← 홈으로
+          </Link>
+          <span aria-hidden>·</span>
+          <Link href="/subjects" className="underline">
+            과목별 기출문제
+          </Link>
+        </div>
         <div className="mt-2 flex items-center gap-2">
-          <h1 className="text-3xl font-semibold">{subject.name}</h1>
+          {/* 제목에 "기출문제"까지 넣어 <title>과 h1이 같은 말을 하게 한다 —
+              과목명 한 단어짜리 제목은 이 페이지가 무엇의 목록인지 알려주지 못한다. */}
+          <h1 className="text-3xl font-semibold">{subject.name} 기출문제</h1>
           <SubjectBookmarkButton
             subjectId={subject.id}
             initialBookmarked={bookmarkedSubjectIds.has(subject.id)}
             loggedIn={!!userId}
           />
         </div>
+        {/* 카드 그리드만 있으면 크롤러에게는 링크 뭉치일 뿐이라, 이 목록이 무엇을
+            담고 있는지 한 문장으로 밝혀준다. 숫자는 실제 목록에서 계산한 값이다. */}
+        {dedupedPapers.length > 0 && (
+          <p className="mt-3 text-zinc-600 dark:text-zinc-400">
+            {subject.name} 과목의 공무원 기출문제{" "}
+            <strong className="font-semibold text-zinc-800 dark:text-zinc-200">
+              {dedupedPapers.length.toLocaleString()}건
+            </strong>
+            을 모았어요.
+            {yearRangeLabel && ` ${yearRangeLabel} 시행 기출문제를`}
+            {availableExamTypes.length > 0 &&
+              ` ${availableExamTypes
+                .slice(0, 4)
+                .map((t) => t.name)
+                .join("·")} 등 시행처별로`}{" "}
+            연도순으로 정리했으며, 정답과 함께 무료로 열람·다운로드할 수 있습니다.
+          </p>
+        )}
       </div>
 
       {availableLevels.length > 1 && (

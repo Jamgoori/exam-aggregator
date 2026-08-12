@@ -16,6 +16,12 @@ export function SiteFooter() {
     <footer className="mt-6 border-t border-zinc-100 print:hidden dark:border-zinc-800">
       <div className="mx-auto flex max-w-5xl flex-col gap-2 px-4 py-6 text-xs text-zinc-400 dark:text-zinc-500">
         <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {/* 과목 목록은 사이트 전체의 크롤 진입점이다 — 모든 화면에 붙는 이 링크가
+              홈 → 과목 목록 → 과목 → 문제지 로 이어지는 유일한 서버 렌더 경로다.
+              (홈의 ㄱㄴㄷ 탭은 눌러야 열리는 모달이라 HTML에 <a>가 없다.) */}
+          <Link href="/subjects" className="hover:text-zinc-600 dark:hover:text-zinc-300">
+            과목별 기출문제
+          </Link>
           <Link href="/terms" className="hover:text-zinc-600 dark:hover:text-zinc-300">
             이용약관
           </Link>

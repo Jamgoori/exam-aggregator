@@ -31,6 +31,12 @@ export async function generateMetadata({
     description: `${displayTitle} 전체 문항 해설을 문제 이미지·정답과 함께 열람하세요.`,
     // ?download=1로 열면 인쇄창만 뜰 뿐 내용이 같으므로 정본은 파라미터 없는 주소다.
     alternates: { canonical: `/papers/${id}/explanations` },
+    // 비로그인(=크롤러)에게는 아래 ANON_PREVIEW_CARDS만큼만 렌더링되는 미리보기라,
+    // 색인되면 내용이 거의 없는 페이지가 문제지 수만큼 늘어나 사이트 전체 평가를
+    // 끌어내린다. 사이트맵에서 빼는 것만으로는 막히지 않는다 — 문제지 상세의
+    // "해설 열기" 링크를 타고 크롤러가 들어오기 때문에 여기서 못 박아야 한다.
+    // follow는 남겨서 이 페이지의 링크(문제지 상세)는 계속 따라가게 한다.
+    robots: { index: false, follow: true },
   };
 }
 

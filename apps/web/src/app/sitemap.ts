@@ -56,6 +56,14 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "daily",
       priority: 1,
     },
+    // 과목 목록 허브(app/subjects/page.tsx). 개별 과목 페이지로 가는 링크를 전부
+    // 담고 있어서, 크롤러가 여기 한 장만 읽어도 과목 수백 장을 발견한다.
+    {
+      url: absoluteUrl("/subjects"),
+      lastModified: newest,
+      changeFrequency: "weekly",
+      priority: 0.9,
+    },
     ...((subjectRows ?? []) as { slug: string }[]).map((s) => ({
       url: absoluteUrl(`/subjects/${s.slug}`),
       lastModified: newest,
