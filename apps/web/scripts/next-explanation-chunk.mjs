@@ -25,6 +25,12 @@
 // 플래그는 공백 구분 값만 지원한다 (--chunks 3). --chunks=3 같은 = 문법이나 알 수 없는
 // 플래그, 값이 붙은 --reverse는 조용히 오동작하는 대신 즉시 에러로 종료한다.
 //
+// 청크에는 그 문제지 과목의 정본 개념 목록(concepts)이 함께 실린다. 해설 배치가
+// 개념 이름을 자유 문자열로 쓰면 표기가 표류해서 — 실측으로 keyword_title의 표기
+// 유일도가 96~99%였다, 즉 사실상 문항마다 다른 문자열이다 — 약점 진단의 개념별
+// 분포를 만들 수 없다. 그래서 "고르게" 한다. 목록이 아직 없는 과목은 빈 배열이고,
+// 그때는 프롬프트가 개념을 비워 두게 돼 있다.
+//
 // EXPLANATION_BOT_EMAIL/EXPLANATION_BOT_PASSWORD로 로그인해서 실행하므로, 이 스크립트가
 // 쓸 수 있는 권한은 공개 읽기 + explanation_batch_priority 조회(봇 전용)뿐이다. 정답
 // 자체는 이 스크립트에서 전혀 다루지 않는다(정답 대조는 save-explanations.mjs에서
@@ -47,6 +53,30 @@ function parseArgs(argv) {
     }
   }
   return args;
+}
+
+// concepts 행들에서 "고를 수 있는 개념 목록"을 만든다.
+//
+// 단원도 concepts 행이라 컬럼으로는 안 갈린다. 자식이 달린 최상위 행이 단원이고,
+// 자식이 없는 최상위 행은 "단원 없는 개념"이다 — 후자는 고를 수 있어야 한다.
+// 합쳐진 개념(merged_into)은 더 이상 고를 대상이 아니다.
+function shapeConceptList(rows) {
+  const live = (rows ?? []).filter((r) => !r.merged_into);
+  const nameById = new Map(live.map((r) => [r.id, r.name]));
+  const hasChild = new Set(live.map((r) => r.parent_id).filter(Boolean));
+  return live
+    .filter((r) => !(r.parent_id === null && hasChild.has(r.id)))
+    .map((r) => ({
+      name: r.name,
+      unit: r.parent_id ? (nameById.get(r.parent_id) ?? null) : null,
+      // knowledge = 지식형, skill = 기능형(독해처럼 묻는 능력). 독해 문항이 지문
+      // 주제 대신 기능을 고르게 하려면 이 값이 보여야 한다.
+      kind: r.kind ?? "knowledge",
+    }))
+    .sort(
+      (a, b) =>
+        (a.unit ?? "").localeCompare(b.unit ?? "", "ko") || a.name.localeCompare(b.name, "ko"),
+    );
 }
 
 // pending 목록을 세트 경계를 지키며 청크들로 자른다. 각 청크는 targetSize를 채우되,
@@ -166,7 +196,43 @@ async function main() {
   }
   const excludedSubjectIds = new Set((excluded ?? []).map((e) => e.subject_id));
 
-  const collected = []; // { paper, questions } 단위로 최대 maxChunks개 수집
+  // 과목별 정본 개념 목록. 청크마다 같은 과목을 다시 묻지 않도록 캐시한다.
+  //
+  // 이 조회가 실패해도 배치를 멈추지 않는다. 개념은 나중에 백필로 붙일 수 있지만
+  // 해설은 이 세션에서만 만들 수 있다 — 개념 때문에 해설 생성을 통째로 날리는 건
+  // 손해가 훨씬 크다. 실패하면 stderr에 남기고 빈 목록으로 진행한다.
+  const conceptCache = new Map();
+  async function conceptListFor(subjectId) {
+    if (!subjectId) return { subject: null, concepts: [] };
+    const cached = conceptCache.get(subjectId);
+    if (cached) return cached;
+
+    let subject = null;
+    const { data: subjectRow, error: subjectError } = await supabase
+      .from("subjects")
+      .select("id, name")
+      .eq("id", subjectId)
+      .maybeSingle();
+    if (subjectError) console.error(`과목 조회 실패 (${subjectId}): ${subjectError.message}`);
+    else if (subjectRow) subject = { id: subjectRow.id, name: subjectRow.name };
+
+    let concepts = [];
+    const { data: rows, error } = await supabase
+      .from("concepts")
+      .select("id, name, parent_id, kind, merged_into")
+      .eq("subject_id", subjectId);
+    if (error) {
+      console.error(`개념 목록 조회 실패 (${subjectId}): ${error.message} — 개념 없이 진행`);
+    } else {
+      concepts = shapeConceptList(rows);
+    }
+
+    const result = { subject, concepts };
+    conceptCache.set(subjectId, result);
+    return result;
+  }
+
+  const collected = []; // { paper, subject, concepts, questions } 단위로 최대 maxChunks개 수집
   let truncatedBy = null; // 수집 도중 조회 오류가 나도 이미 수집한 청크는 살려서 출력
 
   outer: for (const { exam_type_id, level } of priorities) {
@@ -245,10 +311,16 @@ async function main() {
       const paperChunks = cutChunks(pending, targetSize);
       if (reverse) paperChunks.reverse();
 
+      // 서브에이전트는 스냅샷 전체가 아니라 청크 하나만 받는다. 그래서 개념 목록도
+      // 청크마다 실어야 한다(같은 과목이면 내용은 같다).
+      const { subject, concepts } = await conceptListFor(paper.subject_id);
+
       const bucket = supabase.storage.from("exam-papers");
       for (const chunk of paperChunks) {
         collected.push({
           paper: { id: paper.id, title: paper.title, year: paper.year, level: paper.level },
+          subject,
+          concepts,
           questions: chunk.map((q) => ({
             question_id: q.question_id,
             question_number: q.question_number,
@@ -272,9 +344,19 @@ async function main() {
   if (multi) {
     console.log(JSON.stringify({ done: false, chunks: collected }, null, 2));
   } else {
-    // 기존 단일 청크 형식 (구버전 호출부 호환)
+    // 기존 단일 청크 형식 (구버전 호출부 호환). 키가 늘어나는 건 호환을 깨지 않는다.
     console.log(
-      JSON.stringify({ done: false, paper: collected[0].paper, questions: collected[0].questions }, null, 2),
+      JSON.stringify(
+        {
+          done: false,
+          paper: collected[0].paper,
+          subject: collected[0].subject,
+          concepts: collected[0].concepts,
+          questions: collected[0].questions,
+        },
+        null,
+        2,
+      ),
     );
   }
 }

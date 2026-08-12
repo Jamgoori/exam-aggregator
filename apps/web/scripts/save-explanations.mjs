@@ -14,6 +14,7 @@
 //   {
 //     "question_id": "uuid",
 //     "keyword_title": "기능 점수(Function Point) 산정 방법",
+//     "concept": "소프트웨어 규모 산정",   // 청크의 concepts 목록에서 고른 이름 (없으면 생략)
 //     "keyword_explanation": "핵심 개념 설명 문단...",
 //     "question_text": "문제 발문 한 줄 재구성",
 //     "correct_choice_number": 4,
@@ -40,9 +41,128 @@
 // 다른 원칙). 대조에 실패한(불일치) 항목도 저장은 하되 verified=false로 남기고,
 // stdout에 mismatched로 모아 보고한다 — RLS가 verified=false 행을 일반 사용자에게
 // 숨기므로, 호출한 쪽(에이전트)이 그 문항만 재검토/재생성할 때까지는 비공개로 남는다.
+//
+// concept: next-explanation-chunk가 청크에 실어 보낸 그 과목 정본 개념 목록에서 고른
+// 이름이다. 여기서 concept_id로 바꿔 단다(약점 진단이 쓸 축). 목록에 없어서
+// "?새 이름" 형태로 제안한 것과, 목록에 있다고 썼는데 안 붙는 것은 나눠서 보고한다 —
+// 앞은 사람이 목록에 넣을지 판단할 거리이고, 뒤는 배치가 이름을 잘못 베낀 것이다.
+// 어느 쪽도 "기타"로 뭉치지 않는다(docs/agents/concept-dictionary.md).
 
 import { createClient } from "@supabase/supabase-js";
 import { readFile } from "node:fs/promises";
+
+// packages/core/src/concept-dictionary.ts 의 normalizeConceptAlias 와 같은 규칙이다.
+//
+// 사본을 두는 이유: 이 스크립트는 배치 루틴 환경에서 plain node로 돌고,
+// @gongmoa/core 는 빌드 산출물이 없는 TypeScript 소스라 import 할 수 없다.
+// 한쪽만 고치면 배치가 붙이는 개념과 apply-concepts 백필이 붙이는 개념이 조용히
+// 달라진다 — srs.ts 사본 규칙과 같이, 반드시 둘을 함께 고칠 것.
+function normalizeConceptAlias(title) {
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/[\s·,、/()[\]{}<>"'“”‘’:;~\-–—.]/g, "");
+}
+
+// PostgREST의 .in() 은 URL 길이 제한이 있어 나눠 던진다.
+async function selectIn(supabase, table, columns, column, values) {
+  const rows = [];
+  for (let i = 0; i < values.length; i += 200) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .in(column, values.slice(i, i + 200));
+    if (error) throw new Error(`${table} 조회 실패: ${error.message}`);
+    rows.push(...(data ?? []));
+  }
+  return rows;
+}
+
+// concept 이름 → concept_id. 문항이 속한 과목 안에서만 찾는다 — 별칭은 과목 안에서만
+// 유일하고, 국어 "내용 일치"와 영어 "내용 일치"는 서로 다른 개념이다.
+//
+// 실패해도 저장은 계속한다. 개념은 나중에 백필로 붙일 수 있지만 해설 본문은 이
+// 세션에서만 만들 수 있다.
+async function resolveConcepts(supabase, items) {
+  const report = { attached: 0, proposed: [], unmatched: [], subjects_without_dictionary: [] };
+  const byQuestion = new Map();
+
+  const wanted = items.filter((i) => typeof i.concept === "string" && i.concept.trim());
+  if (wanted.length === 0) return { byQuestion, report };
+
+  const questionRows = await selectIn(
+    supabase,
+    "questions",
+    "id, paper_id",
+    "id",
+    wanted.map((i) => i.question_id),
+  );
+  const paperIds = [...new Set(questionRows.map((q) => q.paper_id))];
+  const paperRows = await selectIn(supabase, "exam_papers", "id, subject_id", "id", paperIds);
+  const subjectOfPaper = new Map(paperRows.map((p) => [p.id, p.subject_id]));
+  const subjectOfQuestion = new Map(
+    questionRows.map((q) => [q.id, subjectOfPaper.get(q.paper_id) ?? null]),
+  );
+
+  const subjectIds = [...new Set([...subjectOfQuestion.values()].filter(Boolean))];
+  const aliasRows = await selectIn(
+    supabase,
+    "concept_aliases",
+    "concept_id, subject_id, normalized",
+    "subject_id",
+    subjectIds,
+  );
+  const conceptByAlias = new Map();
+  const subjectsWithDictionary = new Set();
+  for (const a of aliasRows) {
+    conceptByAlias.set(`${a.subject_id}\u0000${a.normalized}`, a.concept_id);
+    subjectsWithDictionary.add(a.subject_id);
+  }
+
+  // 사전이 아직 없는 과목은 문항마다 미매칭으로 쏟아지는 게 정상이다. 그건 배치가
+  // 틀린 게 아니라 사람이 아직 목록을 안 만든 것이라 따로 센다.
+  const noDictionary = new Map();
+  const proposed = new Map();
+  const unmatched = new Map();
+
+  for (const item of wanted) {
+    const subjectId = subjectOfQuestion.get(item.question_id) ?? null;
+    const raw = item.concept.trim();
+    // "?" 접두는 "목록에 없어서 새로 제안한다"는 배치 쪽 표시다.
+    const isProposal = raw.startsWith("?");
+    const name = raw.replace(/^\?+\s*/, "").trim();
+    if (!name) continue;
+
+    const conceptId = subjectId
+      ? conceptByAlias.get(`${subjectId}\u0000${normalizeConceptAlias(name)}`)
+      : undefined;
+
+    // "?"를 붙였어도 실제로 목록에 있으면 붙인다 — 이름이 맞으면 진단 분포는
+    // 틀어지지 않는다. 접두는 배치의 판단일 뿐 사전보다 우선하지 않는다.
+    if (conceptId) {
+      byQuestion.set(item.question_id, conceptId);
+      report.attached++;
+      continue;
+    }
+
+    const bucket = isProposal
+      ? proposed
+      : subjectId && !subjectsWithDictionary.has(subjectId)
+        ? noDictionary
+        : unmatched;
+    const key = `${subjectId ?? "?"}\u0000${name}`;
+    const entry = bucket.get(key) ?? { concept: name, subject_id: subjectId, count: 0 };
+    entry.count++;
+    entry.example_question_id ??= item.question_id;
+    bucket.set(key, entry);
+  }
+
+  const toList = (m) => [...m.values()].sort((a, b) => b.count - a.count);
+  report.proposed = toList(proposed);
+  report.unmatched = toList(unmatched);
+  report.subjects_without_dictionary = toList(noDictionary);
+  return { byQuestion, report };
+}
 
 async function main() {
   const inputPaths = process.argv.slice(2);
@@ -103,6 +223,16 @@ async function main() {
     process.exit(1);
   }
 
+  let conceptByQuestion = new Map();
+  let conceptReport = null;
+  try {
+    const resolved = await resolveConcepts(supabase, uniqueItems);
+    conceptByQuestion = resolved.byQuestion;
+    conceptReport = resolved.report;
+  } catch (e) {
+    console.error(`개념 매칭 실패 — 개념 없이 저장을 계속한다: ${e?.message ?? e}`);
+  }
+
   const mismatched = [];
   const saved = [];
 
@@ -116,10 +246,16 @@ async function main() {
       continue;
     }
 
+    // concept_id는 붙었을 때만 payload에 넣는다. null로 넣으면 upsert의 SET 목록에
+    // 들어가서, 이미 백필로 붙어 있던 개념을 덮어 지운다(재저장·재생성 때).
+    const conceptId = conceptByQuestion.get(item.question_id) ?? null;
+    const conceptField = conceptId ? { concept_id: conceptId } : {};
+
     const { error: upsertError } = await supabase.from("question_explanations").upsert(
       {
         question_id: item.question_id,
         keyword_title: item.keyword_title,
+        ...conceptField,
         keyword_explanation: item.keyword_explanation,
         question_text: item.question_text,
         correct_choice_number: item.correct_choice_number,
@@ -146,7 +282,17 @@ async function main() {
   }
 
   console.log(
-    JSON.stringify({ saved_count: saved.length, mismatched, skipped_files: skippedFiles, deduplicated }, null, 2),
+    JSON.stringify(
+      {
+        saved_count: saved.length,
+        mismatched,
+        skipped_files: skippedFiles,
+        deduplicated,
+        concepts: conceptReport,
+      },
+      null,
+      2,
+    ),
   );
 }
 

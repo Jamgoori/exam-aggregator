@@ -142,6 +142,25 @@ npm run concept-inventory -- --verify
 숫자가 다 통과해도 **개념당 문항 3개씩은 눈으로 확인할 것.** 개수만 맞다고 성공으로
 판단하는 건 이 레포에서 이미 사고가 난 방식이다(AGENTS.md 크롭 항목).
 
+## 새 해설은 처음부터 개념을 달고 온다
+
+기존 해설에 개념을 붙이는 건 사후 정리(`apply-concepts`)지만, **앞으로 생성될 해설은
+배치가 직접 정본에서 고른다.** 표기가 표류한 뒤에 접는 것보다 애초에 안 표류하게 하는
+쪽이 훨씬 싸다 — 실측으로 `keyword_title` 의 표기 유일도가 96~99%였다.
+
+- `next-explanation-chunk.mjs` 가 청크마다 그 과목 정본 목록을 `{name, unit, kind}` 로
+  실어 보낸다. 목록이 없는 과목은 빈 배열이고, 그러면 배치는 개념을 비워 둔다
+- 배치는 `concept` 필드에 목록의 이름을 **글자 그대로** 적는다.
+  `keyword_title` 은 지금처럼 문항별 자유 제목으로 남는다 — 두 축을 분리해 둔 이유가
+  여기서 값을 한다(독해 지문 주제가 제목에 남고, 개념은 기능형으로 붙는다)
+- `save-explanations.mjs` 가 그 이름을 과목 안에서 `concept_id` 로 바꾼다. 안 붙는 건
+  셋으로 갈라 보고한다: `proposed`(`?` 접두 — 사람이 목록에 넣을지 판단),
+  `unmatched`(배치가 이름을 잘못 베낌 — 그 문항만 재저장),
+  `subjects_without_dictionary`(아직 목록이 없는 과목 — 정상)
+
+지시문(`explanation-prompt.md`)의 원본은 Supabase Storage에 있어서, **소유자가 재배포
+하기 전까지는 배치가 `concept` 을 안 보낸다.** 스크립트는 그 상태에서도 정상 동작한다.
+
 ## 코드가 이걸 어떻게 쓰나
 
 - 복습 큐: `collectDueCandidates` 가 후보에 `conceptKey` 를 붙인다.
