@@ -34,27 +34,69 @@ async function importWithoutMain(fileName: string, exportsLine: string) {
   }
 }
 
-test("normalizeConceptAlias 사본이 core 와 같은 규칙이다", async () => {
-  // save-explanations.mjs 는 루틴 환경에서 plain node 로 돌아 TypeScript 패키지를
-  // import 할 수 없어 사본을 갖고 있다. 사본이 어긋나면 배치가 붙이는 개념과
-  // apply-concepts 백필이 붙이는 개념이 조용히 달라진다.
-  const mod = await importWithoutMain(
+const NORMALIZE_CASES = [
+  "대칭키 암호",
+  "  대칭키·암호  ",
+  "대칭키 암호(블록)",
+  "PKI/공개키 기반구조",
+  "글의 순서·삽입",
+  "Function Point 산정",
+  "행정행위의 하자 — 무효",
+  "빈칸 추론 [고난도]",
+  "IPSec의 두 동작 모드 — 전송모드와 터널모드",
+];
+
+test("normalizeConceptAlias 사본 둘이 core 와 같은 규칙이다", async () => {
+  // 이 규칙은 세 곳에 있다: packages/core, save-explanations.mjs(해설 배치),
+  // scripts/lib/concept-alias.mjs(재분류 배치). 배치 스크립트는 루틴 환경에서
+  // plain node 로 돌아 TypeScript 패키지를 import 할 수 없어서다.
+  //
+  // 하나만 어긋나면 해설 배치가 붙이는 개념과 재분류가 붙이는 개념이 조용히
+  // 달라진다 — 같은 문항이 어느 경로로 왔느냐에 따라 다른 개념이 된다.
+  const explanationSide = await importWithoutMain(
     "save-explanations.mjs",
     "export { resolveConcepts, normalizeConceptAlias };\n",
   );
+  const reclassifySide = await import(
+    path.join(SCRIPTS, "lib/concept-alias.mjs")
+  );
 
-  for (const s of [
-    "대칭키 암호",
-    "  대칭키·암호  ",
-    "대칭키 암호(블록)",
-    "PKI/공개키 기반구조",
-    "글의 순서·삽입",
-    "Function Point 산정",
-    "행정행위의 하자 — 무효",
-    "빈칸 추론 [고난도]",
-  ]) {
-    assert.equal(mod.normalizeConceptAlias(s), coreNormalize(s), `정규화 불일치: ${s}`);
+  for (const s of NORMALIZE_CASES) {
+    assert.equal(explanationSide.normalizeConceptAlias(s), coreNormalize(s), `해설 배치 불일치: ${s}`);
+    assert.equal(reclassifySide.normalizeConceptAlias(s), coreNormalize(s), `재분류 배치 불일치: ${s}`);
   }
+});
+
+// ── 재분류 배치: 이름 → concept_id ──────────────────────────────────────────
+
+test("재분류: '?' 제안과 실제 미매칭을 가른다", async () => {
+  const { resolveConceptName } = await import(path.join(SCRIPTS, "lib/concept-alias.mjs"));
+  const index = new Map([
+    ["vpn과ipsec", "c-ipsec"],
+    ["스푸핑공격", "c-spoof"],
+  ]);
+
+  assert.deepEqual(resolveConceptName("VPN과 IPSec", index), {
+    conceptId: "c-ipsec",
+    name: "VPN과 IPSec",
+    proposal: false,
+  });
+  // 목록에 없다고 제안한 것 — 붙이지 않고 사람이 볼 몫으로 남긴다.
+  assert.deepEqual(resolveConceptName("?침해사고 대응", index), {
+    conceptId: null,
+    name: "침해사고 대응",
+    proposal: true,
+  });
+  // "?"를 붙였어도 목록에 있으면 붙인다. 접두는 배치의 판단일 뿐 사전보다 앞서지 않는다.
+  assert.equal(resolveConceptName("?스푸핑 공격", index).conceptId, "c-spoof");
+  // 이름을 잘못 베낀 것 — 제안이 아니라 미매칭이다.
+  assert.deepEqual(resolveConceptName("IPSec 터널", index), {
+    conceptId: null,
+    name: "IPSec 터널",
+    proposal: false,
+  });
+  assert.equal(resolveConceptName(null, index).conceptId, null);
+  assert.equal(resolveConceptName("   ", index).conceptId, null);
 });
 
 // ── save-explanations: 이름 → concept_id ────────────────────────────────────
@@ -175,6 +217,32 @@ test("concept 없는 입력은 조회 자체를 안 한다", async () => {
 });
 
 // ── next-explanation-chunk: 고를 수 있는 개념 목록 ──────────────────────────
+
+const CONCEPT_ROWS = [
+  { id: "u1", name: "독해", parent_id: null, kind: "knowledge", merged_into: null },
+  { id: "u2", name: "문법", parent_id: null, kind: "knowledge", merged_into: null },
+  { id: "c1", name: "빈칸추론", parent_id: "u1", kind: "skill", merged_into: null },
+  { id: "c2", name: "내용 일치", parent_id: "u1", kind: "skill", merged_into: null },
+  { id: "c3", name: "음운 변동", parent_id: "u2", kind: "knowledge", merged_into: null },
+  // 최상위지만 자식이 없다 = 단원이 아니라 "단원 없는 개념". 고를 수 있어야 한다.
+  { id: "c4", name: "한자성어", parent_id: null, kind: "knowledge", merged_into: null },
+  // 합쳐진 개념은 더 이상 고를 대상이 아니다.
+  { id: "c5", name: "옛이름", parent_id: "u2", kind: "knowledge", merged_into: "c3" },
+];
+
+test("shapeConceptList 사본 둘이 같은 목록을 낸다", async () => {
+  // 해설 배치(next-explanation-chunk.mjs)와 재분류 배치(lib/concept-alias.mjs)가
+  // 각자 갖고 있다. 어긋나면 생성 때 고를 수 있던 개념을 재분류 때는 못 고른다.
+  const chunkSide = await importWithoutMain(
+    "next-explanation-chunk.mjs",
+    "export { shapeConceptList };\n",
+  );
+  const reclassifySide = await import(path.join(SCRIPTS, "lib/concept-alias.mjs"));
+  assert.deepEqual(
+    chunkSide.shapeConceptList(CONCEPT_ROWS),
+    reclassifySide.shapeConceptList(CONCEPT_ROWS),
+  );
+});
 
 test("단원은 빼고 개념만 내려보낸다", async () => {
   const mod = await importWithoutMain(
