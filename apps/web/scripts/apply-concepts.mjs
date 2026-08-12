@@ -87,14 +87,14 @@ for (const key of Object.keys(spec)) if (key.startsWith("_")) delete spec[key];
 
 const PAGE = 1000;
 
-async function pageAll(table, select) {
+// orderBy 는 페이징이 흔들리지 않게 유일한 컬럼 조합이어야 한다. 대부분의 테이블은
+// id 하나로 되지만 concept_aliases 는 id 가 없다 — PK 가 (concept_id, normalized) 다.
+async function pageAll(table, select, orderBy = ["id"]) {
   const rows = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from(table)
-      .select(select)
-      .order("id")
-      .range(from, from + PAGE - 1);
+    let query = supabase.from(table).select(select);
+    for (const column of orderBy) query = query.order(column);
+    const { data, error } = await query.range(from, from + PAGE - 1);
     if (error) {
       console.error(`${table} 조회 실패: ${error.message}`);
       process.exit(1);
@@ -107,15 +107,6 @@ async function pageAll(table, select) {
 
 const subjects = await pageAll("subjects", "id, name");
 const subjectIdByName = new Map(subjects.map((s) => [s.name, s.id]));
-
-const papers = await pageAll("exam_papers", "id, subject_id");
-const subjectOfPaper = new Map(papers.map((p) => [p.id, p.subject_id]));
-const questions = await pageAll("questions", "id, paper_id");
-const subjectOfQuestion = new Map();
-for (const q of questions) {
-  const subjectId = subjectOfPaper.get(q.paper_id);
-  if (subjectId) subjectOfQuestion.set(q.id, subjectId);
-}
 
 const targets = Object.keys(spec).filter((name) => !subjectFilter || name === subjectFilter);
 if (targets.length === 0) {
@@ -177,20 +168,40 @@ for (const subjectName of targets) {
   console.log(`   별칭 추가 ${aliasAdded}${aliasConflict > 0 ? ` · 충돌 ${aliasConflict}` : ""}`);
 
   // 4) 백필. 이 과목 해설에 concept_id 를 붙인다.
-  const aliasRows = await pageAll("concept_aliases", "concept_id, subject_id, alias");
+  const aliasRows = await pageAll("concept_aliases", "concept_id, subject_id, alias", [
+    "concept_id",
+    "normalized",
+  ]);
   const lookup = buildConceptLookup(
     aliasRows
       .filter((a) => a.subject_id === subjectId)
       .map((a) => ({ conceptId: a.concept_id, alias: a.alias })),
   );
 
-  const explanations = await pageAll(
-    "question_explanations",
-    "id, question_id, keyword_title, concept_id",
-  );
-  const mine = explanations.filter(
-    (e) => subjectOfQuestion.get(e.question_id) === subjectId && e.keyword_title,
-  );
+  // 해설 전량(5만 행)을 받아 와서 JS 로 거르면 statement timeout 이 난다. 과목은
+  // 임베디드 조인으로 서버에서 거른다 (next-concept-chunk.mjs 와 같은 방식).
+  // 이 조인은 1000행이면 statement timeout 경계에 걸린다(실측 3.0초). 200행이면 0.8초다.
+  const EXPL_PAGE = 200;
+  const mine = [];
+  for (let from = 0; ; from += EXPL_PAGE) {
+    const { data, error } = await supabase
+      .from("question_explanations")
+      .select(
+        "id, question_id, keyword_title, concept_id, questions!inner(exam_papers!inner(subject_id))",
+      )
+      .eq("questions.exam_papers.subject_id", subjectId)
+      .not("keyword_title", "is", null)
+      // id 로 정렬하면 5만 행 조인에서 statement timeout 이 난다(실측). question_id 는
+      // question_explanations_question_uidx 가 있어 빠르고, 유일해서 페이징도 안전하다.
+      .order("question_id")
+      .range(from, from + EXPL_PAGE - 1);
+    if (error) {
+      console.error(`question_explanations 조회 실패: ${error.message}`);
+      process.exit(1);
+    }
+    mine.push(...data);
+    if (data.length < EXPL_PAGE) break;
+  }
 
   let updated = 0;
   let unmatched = 0;
