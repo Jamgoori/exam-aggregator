@@ -3,6 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CbtSolver } from "@/components/cbt-solver";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
+import { paperHref } from "@/lib/paper-href";
+import { resolvePaperId } from "@/lib/paper-slug-map";
 import type { ExamPaper } from "@gongmoa/core";
 
 export default async function CbtPage({
@@ -10,7 +12,12 @@ export default async function CbtPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = await params;
+  const { id: param } = await params;
+  // 주소 조각은 제목 기반 slug다(옛 UUID 주소도 아직 들어온다). 아래 조회들은 전부
+  // 진짜 id를 요구하므로 여기서 한 번 바꿔둔다.
+  const id = await resolvePaperId(param);
+  if (!id) notFound();
+
   const supabase = await createClient();
 
   const {
@@ -26,7 +33,7 @@ export default async function CbtPage({
     process.env.NODE_ENV !== "production" && process.env.DEV_SKIP_CBT_AUTH === "1";
 
   if (!user && !devSkipAuth) {
-    redirect(`/login?next=${encodeURIComponent(`/papers/${id}/cbt`)}`);
+    redirect(`/login?next=${encodeURIComponent(`/papers/${param}/cbt`)}`);
   }
 
   const [{ data: paper }, { data: hasAnswers }, { data: questionRows }] =
@@ -54,7 +61,7 @@ export default async function CbtPage({
           정답이 등록되면 CBT로 풀 수 있어요. 우선 원본 PDF로 풀어보세요.
         </p>
         <Link
-          href={`/papers/${typedPaper.id}`}
+          href={paperHref(typedPaper)}
           className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
         >
           문제지로 돌아가기
@@ -97,6 +104,7 @@ export default async function CbtPage({
   return (
     <CbtSolver
       paperId={typedPaper.id}
+      paperHref={paperHref(typedPaper)}
       paperTitle={getPaperDisplayTitle(typedPaper.title, typedPaper.track)}
       fileUrl={paperFileUrl.publicUrl}
       totalQuestions={typedPaper.question_count}

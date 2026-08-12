@@ -6,6 +6,7 @@ import {
 } from "@gongmoa/core";
 import { createPublicClient } from "@/lib/supabase/public";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site-url";
+import { paperHref } from "@/lib/paper-href";
 
 // 네이버 서치어드바이저는 사이트맵과 별개로 RSS 를 받아 "새로 올라온 것"을 빨리
 // 수집한다. 사이트맵은 3천여 장 전체 목록이라 무엇이 새 글인지 알려주지 못하므로,
@@ -57,7 +58,7 @@ async function buildFeed(): Promise<string> {
 
   const items = papers.map((paper) => {
     const title = `${getPaperDisplayTitle(paper.title, paper.track)} 기출문제`;
-    const url = absoluteUrl(`/papers/${paper.id}`);
+    const url = absoluteUrl(paperHref(paper));
     const description =
       `${paper.exam_types?.name ?? ""} ${paper.level ?? ""} ${paper.year}년 ${paper.subjects?.name ?? ""} 기출문제를 정답과 함께 무료로 열람·다운로드하세요.`
         .replace(/\s+/g, " ")

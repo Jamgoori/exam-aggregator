@@ -10,6 +10,7 @@ import {
 } from "@/components/wrong-note-question-card";
 import { formatDuration } from "@gongmoa/core";
 import { levelColor } from "@/lib/level-colors";
+import { paperHref, paperCbtHref } from "@/lib/paper-href";
 import { examTypeColor } from "@/lib/exam-type-colors";
 import { subjectColor } from "@/lib/subject-colors";
 
@@ -85,7 +86,7 @@ export default async function AttemptWrongNotePage({
 
         {paper ? (
           <h1 className="text-2xl font-semibold leading-snug">
-            <Link href={`/papers/${paper.id}`} className="hover:text-blue-600 dark:hover:text-blue-400">
+            <Link href={paperHref(paper)} className="hover:text-blue-600 dark:hover:text-blue-400">
               {paper.title}
             </Link>
           </h1>
@@ -147,14 +148,14 @@ export default async function AttemptWrongNotePage({
       {paper && (
         <div className="flex gap-2">
           <Link
-            href={`/papers/${paper.id}/cbt`}
+            href={paperCbtHref(paper)}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
           >
             <Monitor size={15} />
             다시 풀기
           </Link>
           <Link
-            href={`/papers/${paper.id}`}
+            href={paperHref(paper)}
             className="flex flex-1 items-center justify-center rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
           >
             문제지 상세

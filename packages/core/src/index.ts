@@ -19,6 +19,7 @@ export * from "./nickname";
 export * from "./search";
 export * from "./streak";
 export * from "./paper-title";
+export * from "./paper-slug";
 export * from "./levels";
 export * from "./tiers";
 export * from "./subject-color";

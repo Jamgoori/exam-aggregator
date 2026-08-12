@@ -116,7 +116,7 @@ export default async function MyPage({
     supabase
       .from("cbt_attempts")
       .select(
-        "id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, level, choice_count, subjects(*), exam_types(*))",
+        "id, score, total_questions, duration_seconds, created_at, exam_papers(id, title, level, round, track, choice_count, subjects(*), exam_types(*))",
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false }),

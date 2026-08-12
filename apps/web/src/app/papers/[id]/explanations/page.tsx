@@ -15,6 +15,7 @@ import { levelColor } from "@/lib/level-colors";
 import { examTypeColor } from "@/lib/exam-type-colors";
 import { subjectColor } from "@/lib/subject-colors";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
+import { paperHref, paperCbtHref, paperExplanationsHref } from "@/lib/paper-href";
 import type { Metadata } from "next";
 
 export async function generateMetadata({
@@ -30,7 +31,7 @@ export async function generateMetadata({
     title: `${displayTitle} 해설`,
     description: `${displayTitle} 전체 문항 해설을 문제 이미지·정답과 함께 열람하세요.`,
     // ?download=1로 열면 인쇄창만 뜰 뿐 내용이 같으므로 정본은 파라미터 없는 주소다.
-    alternates: { canonical: `/papers/${id}/explanations` },
+    alternates: { canonical: paperExplanationsHref(paper) },
     // 비로그인(=크롤러)에게는 아래 ANON_PREVIEW_CARDS만큼만 렌더링되는 미리보기라,
     // 색인되면 내용이 거의 없는 페이지가 문제지 수만큼 늘어나 사이트 전체 평가를
     // 끌어내린다. 사이트맵에서 빼는 것만으로는 막히지 않는다 — 문제지 상세의
@@ -85,7 +86,7 @@ export default async function PaperExplanationsPage({
           해설이 준비되면 이곳에서 문항별 해설을 볼 수 있어요.
         </p>
         <Link
-          href={`/papers/${paper.id}`}
+          href={paperHref(paper)}
           className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
         >
           문제지로 돌아가기
@@ -113,7 +114,7 @@ export default async function PaperExplanationsPage({
 
       <div className="flex flex-col gap-3">
         <Link
-          href={`/papers/${paper.id}`}
+          href={paperHref(paper)}
           className="text-sm text-zinc-500 hover:text-blue-600 print:hidden dark:text-zinc-500 dark:hover:text-blue-400"
         >
           ← 문제지로
@@ -211,7 +212,7 @@ export default async function PaperExplanationsPage({
                 무료로 가입하고 전체 해설과 오답노트까지 이용해보세요.
               </p>
               <Link
-                href={`/login?next=${encodeURIComponent(`/papers/${paper.id}/explanations`)}`}
+                href={`/login?next=${encodeURIComponent(paperExplanationsHref(paper))}`}
                 className="mt-1 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
               >
                 로그인하고 전체 해설 보기
@@ -223,14 +224,14 @@ export default async function PaperExplanationsPage({
 
       <div className="flex gap-2 print:hidden">
         <Link
-          href={`/papers/${paper.id}/cbt`}
+          href={paperCbtHref(paper)}
           className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
         >
           <Monitor size={15} />
           온라인에서 풀기
         </Link>
         <Link
-          href={`/papers/${paper.id}`}
+          href={paperHref(paper)}
           className="flex flex-1 items-center justify-center rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
         >
           문제지로

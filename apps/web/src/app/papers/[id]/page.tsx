@@ -22,6 +22,11 @@ import { ExamCard } from "@/components/exam-card";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { MyCbtRecordModal } from "@/components/my-cbt-record-modal";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
+import {
+  paperHref,
+  paperCbtHref,
+  paperExplanationsHref,
+} from "@/lib/paper-href";
 import { JsonLd } from "@/components/json-ld";
 import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 import {
@@ -49,15 +54,18 @@ export async function generateMetadata({
     .replace(/\s+/g, " ")
     .trim();
 
+  // 정본은 언제나 제목 기반 주소다. 옛 UUID 주소로 들어와도(프록시 301이 먼저
+  // 잡지만) 여기서 새 주소를 가리켜, 두 주소가 각자 색인되는 일이 없게 한다.
+  // 하단 목록 탭이 ?level=·?examTypes= 를 붙여 만들어내는 변형 URL들도 같이 접힌다.
+  const canonical = paperHref(paper);
+
   return {
     title,
     description,
-    // 하단 목록 탭이 ?level=·?examTypes= 를 붙여 같은 문제지로 가는 URL을 수십 개
-    // 만들어낸다. 정본을 파라미터 없는 주소로 못 박아 색인이 흩어지지 않게 한다.
-    alternates: { canonical: `/papers/${id}` },
+    alternates: { canonical },
     openGraph: {
       type: "article",
-      url: `/papers/${id}`,
+      url: canonical,
       title,
       description,
     },
@@ -138,7 +146,7 @@ export default async function PaperDetailPage({
             {
               "@type": "LearningResource",
               name: `${displayTitle} 기출문제`,
-              url: absoluteUrl(`/papers/${paper.id}`),
+              url: absoluteUrl(paperHref(paper)),
               inLanguage: "ko-KR",
               learningResourceType: "기출문제",
               educationalLevel: paper.level ?? undefined,
@@ -254,7 +262,7 @@ export default async function PaperDetailPage({
             primary 자리가 비므로 문제 열기가 단색을 물려받는다. */}
         {hasCbtAnswers && (
           <Link
-            href={`/papers/${paper.id}/cbt`}
+            href={paperCbtHref(paper)}
             className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-4 text-lg font-medium text-white hover:bg-blue-700"
           >
             <Monitor size={20} />
@@ -316,14 +324,14 @@ export default async function PaperDetailPage({
         {hasFullExplanations && (
           <div className="flex items-stretch gap-2">
             <Link
-              href={`/papers/${paper.id}/explanations`}
+              href={paperExplanationsHref(paper)}
               className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-lg font-medium text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400 dark:hover:bg-emerald-900/40"
             >
               <BookOpenCheck size={20} />
               해설 열기
             </Link>
             <Link
-              href={`/papers/${paper.id}/explanations?download=1`}
+              href={`${paperExplanationsHref(paper)}?download=1`}
               aria-label="해설 다운로드"
               title="해설 다운로드"
               className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
@@ -398,6 +406,7 @@ async function RelatedPapers({
       availableExamTypes={related.availableExamTypes}
       selectedExamTypeIds={selectedExamTypeIds}
       currentPaperId={paper.id}
+      currentPaperHref={paperHref(paper)}
       myRoundCounts={related.myRoundCounts}
       bookmarkedIds={related.subjectBookmarkedIds}
       cbtAvailability={related.subjectCbtAvailability}
@@ -456,6 +465,7 @@ function RelatedPapersSection({
   availableExamTypes,
   selectedExamTypeIds,
   currentPaperId,
+  currentPaperHref,
   myRoundCounts,
   bookmarkedIds,
   cbtAvailability,
@@ -467,7 +477,10 @@ function RelatedPapersSection({
   level?: string;
   availableExamTypes: { id: string; name: string; display_order: number }[];
   selectedExamTypeIds: Set<string>;
+  // 지금 보고 있는 카드를 표시하기 위한 id 비교용.
   currentPaperId: string;
+  // 필터 탭이 되돌아올 자기 주소. id가 아니라 제목 기반 slug라 따로 받는다.
+  currentPaperHref: string;
   myRoundCounts: Map<string, number>;
   bookmarkedIds: Set<string>;
   cbtAvailability: Set<string>;
@@ -484,7 +497,7 @@ function RelatedPapersSection({
     if (nextExamTypeIds.size > 0)
       usp.set("examTypes", [...nextExamTypeIds].join(","));
     const qs = usp.toString();
-    return qs ? `/papers/${currentPaperId}?${qs}` : `/papers/${currentPaperId}`;
+    return qs ? `${currentPaperHref}?${qs}` : currentPaperHref;
   }
 
   return (

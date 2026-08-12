@@ -8,11 +8,12 @@ import { formatDuration } from "@gongmoa/core";
 // 채점이 끝나면 화면 전체를 덮고 점수/정답률/풀이시간을 보여주는 결과 모달.
 export function CbtResultModal({
   result,
-  paperId,
+  paperHref,
   onRetry,
 }: {
   result: CbtSubmitResult;
-  paperId: string;
+  // 문제지 상세 주소. 서버 액션이 쓰는 UUID(paperId)는 링크로 쓸 수 없다.
+  paperHref: string;
   onRetry: () => void;
 }) {
   return (
@@ -54,7 +55,7 @@ export function CbtResultModal({
           )}
         <div className="flex w-full gap-2">
           <Link
-            href={`/papers/${paperId}`}
+            href={paperHref}
             className="flex-1 rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800/50"
           >
             문제지로

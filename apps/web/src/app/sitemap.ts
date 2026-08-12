@@ -4,6 +4,7 @@ import { createPublicClient } from "@/lib/supabase/public";
 import { fetchAllExamPapers } from "@/lib/all-papers";
 import { fetchAllPages } from "@/lib/fetch-paged";
 import { getExamIndex, examHref } from "@/lib/exam-index";
+import { paperHref } from "@/lib/paper-href";
 import { absoluteUrl } from "@/lib/site-url";
 
 // 자료가 이보다 적은 연도 페이지는 사이트맵에서 뺀다 — 해당 페이지가 스스로
@@ -103,7 +104,7 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
         })),
     ),
     ...papers.map((p) => ({
-      url: absoluteUrl(`/papers/${p.id}`),
+      url: absoluteUrl(paperHref(p)),
       lastModified: uploadedAt.get(p.id),
       changeFrequency: "monthly" as const,
       priority: 0.7,

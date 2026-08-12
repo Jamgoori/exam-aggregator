@@ -16,8 +16,25 @@ import {
   COMMENT_CONTENT_MAX,
   COMMENT_PW_MIN,
   COMMENT_PW_MAX,
+  getPaperSlug,
 } from "@gongmoa/core";
 import { MIN_ATTEMPT_SECONDS, sanitizeSelectedChoice } from "@/lib/cbt-attempt";
+
+// 문제지 상세 경로를 다시 만들게 한다.
+//
+// 주소가 UUID 에서 제목 기반 slug 로 바뀌었으므로 `/papers/<uuid>` 를 무효화하면
+// 아무 페이지도 안 지워진다 — 댓글을 달아도 화면에 안 나타나게 된다. 실제 렌더링
+// 경로를 만들려면 제목·회차가 필요해서 여기서 한 번 조회한다(인덱스 조회 1회).
+async function revalidatePaperPath(paperId: string) {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("exam_papers")
+    .select("title, round, track")
+    .eq("id", paperId)
+    .single();
+  if (!data) return;
+  revalidatePath(`/papers/${getPaperSlug(data.title as string, data.round as number, data.track as string | null)}`);
+}
 
 export type CommentResult = { error?: string; success?: boolean };
 
@@ -167,7 +184,7 @@ export async function postComment(input: {
     if (error) return { error: "댓글 등록에 실패했어요." };
   }
 
-  revalidatePath(`/papers/${paperId}`);
+  await revalidatePaperPath(paperId);
   return { success: true };
 }
 
@@ -229,7 +246,7 @@ export async function updateComment(input: {
     .eq("id", input.commentId);
   if (error) return { error: "수정에 실패했어요." };
 
-  revalidatePath(`/papers/${auth.paperId}`);
+  await revalidatePaperPath(auth.paperId);
   return { success: true };
 }
 
@@ -246,7 +263,7 @@ export async function deleteComment(input: {
     .eq("id", input.commentId);
   if (error) return { error: "삭제에 실패했어요." };
 
-  revalidatePath(`/papers/${auth.paperId}`);
+  await revalidatePaperPath(auth.paperId);
   return { success: true };
 }
 
@@ -289,7 +306,7 @@ export async function postRating(
   const averageScore =
     scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
 
-  revalidatePath(`/papers/${paperId}`);
+  await revalidatePaperPath(paperId);
   return { success: true, averageScore, voteCount: scores.length };
 }
 
@@ -484,7 +501,7 @@ export async function toggleBookmark(paperId: string): Promise<BookmarkResult> {
       .eq("id", existing.id);
     if (error) return { error: "즐겨찾기 해제에 실패했어요." };
 
-    revalidatePath(`/papers/${paperId}`);
+    await revalidatePaperPath(paperId);
     revalidatePath("/mypage");
     return { success: true, bookmarked: false };
   }
@@ -494,7 +511,7 @@ export async function toggleBookmark(paperId: string): Promise<BookmarkResult> {
     .insert({ user_id: user.id, paper_id: paperId });
   if (error) return { error: "즐겨찾기에 실패했어요." };
 
-  revalidatePath(`/papers/${paperId}`);
+  await revalidatePaperPath(paperId);
   revalidatePath("/mypage");
   return { success: true, bookmarked: true };
 }
