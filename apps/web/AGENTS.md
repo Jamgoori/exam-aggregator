@@ -19,7 +19,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | 정답 등록·검수 (`extract-answer-keys.mjs`, `list-pending-answer-keys.mjs`, `paper_answers` 직접 조작) | `docs/agents/answer-keys-tracks.md` |
 | 통합본 PDF 과목별 분리 (`split-by-toc.mjs`/`split-combined-pdf.mjs`/`split-by-subject-header.mjs`) | `docs/agents/split-combined-pdfs.md` |
 | 복습 스케줄(SRS) 상수 조정 (`packages/core/src/srs.ts`, 학습 단계·ease·leech·연체 점수) | `docs/agents/srs-tuning.md` |
-| 개념 사전 정리 (`keyword_title` 정본화, `concepts`/`concept_aliases`, 약점 진단 축) | `docs/agents/concept-dictionary.md` |
+| 개념 사전 정리 (`keyword_title` 정본화, `concepts`/`concept_aliases`, 약점 진단 축, 재분류 배치 `next-concept-chunk.mjs`/`save-concepts.mjs`) | `docs/agents/concept-dictionary.md` |
 
 # 금지선 (문서 안 읽었어도 이것만은 절대)
 
@@ -42,10 +42,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - **개념 사전**: `keyword_title` 원본을 UPDATE 하지 말 것 (화면에 그대로 보여주는
   값 — 정리 결과는 `concept_id` 축으로만). 개념 id 재발급 금지, 삭제 대신
   `merged_into`. 미매칭을 "기타"로 뭉치지 말 것.
-  `normalizeConceptAlias` 는 `packages/core/src/concept-dictionary.ts` 와
-  `apps/web/scripts/save-explanations.mjs` 두 곳에 있다 (루틴 환경은 plain node라
-  TypeScript 패키지를 import 못 한다) — **반드시 함께 고칠 것**. 한쪽만 고치면 배치가
-  붙이는 개념과 백필이 붙이는 개념이 조용히 달라진다.
+  `normalizeConceptAlias` 는 세 곳에 있다 (루틴 환경은 plain node라 TypeScript
+  패키지를 import 못 한다): `packages/core/src/concept-dictionary.ts`(원본),
+  `apps/web/scripts/save-explanations.mjs`(해설 배치),
+  `apps/web/scripts/lib/concept-alias.mjs`(재분류 배치) — **반드시 함께 고칠 것**.
+  하나만 고치면 경로에 따라 같은 문항에 다른 개념이 붙는다.
+  재분류 배치는 이미 붙은 `concept_id`를 덮어쓰지 말 것 (재실행 시 개념이 흔들리면
+  진단 이력이 깨진다).
 - **정답 등록**: `question_count`와 길이가 다른 정답 배열을 덮어쓰지 말 것.
   공통과목이라고 정답을 다른 직류(track) 문제지에 수동 복사하지 말 것 (법원직
   서기보는 국어·한국사 15문항/영어 20문항 별도 문제지 — 실측 사고 있음).

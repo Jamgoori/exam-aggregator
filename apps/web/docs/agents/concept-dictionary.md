@@ -187,6 +187,45 @@ npm run concept-inventory -- --verify
 지시문(`explanation-prompt.md`)의 원본은 Supabase Storage에 있어서, **소유자가 재배포
 하기 전까지는 배치가 `concept` 을 안 보낸다.** 스크립트는 그 상태에서도 정상 동작한다.
 
+## 기존 해설은 재분류 배치로 붙인다
+
+위 실측이 말하는 건 하나다 — **이미 쓰인 해설에는 문자열 매칭이 안 통한다.** 그래서
+모델이 읽고 정본 목록에서 고르게 한다.
+
+```
+node scripts/next-concept-chunk.mjs --limit 60     # 목록 있는 과목의 미분류 해설
+  → 모델이 concepts 목록에서 이름을 고른다
+node scripts/save-concepts.mjs result.json          # 이름 → concept_id
+```
+
+지시문은 `scripts/concept-reclassify-prompt.md`(원본이 이 레포다 — 해설 생성
+지시문과 달리 Storage 배포 절차가 없다).
+
+- **문항 이미지를 안 읽는다.** `keyword_title` + `question_text` 만으로 결정된다.
+  해설 생성 배치보다 훨씬 싸다
+- **이미 붙은 `concept_id` 는 덮어쓰지 않는다.** 재실행해도 첫 판단이 남는다 — 같은
+  문항이 실행할 때마다 다른 개념이 되면 진단 이력이 깨진다
+- **배치가 사전을 못 고친다.** 해설봇은 `concepts`/`concept_aliases` 쓰기 권한이
+  없다. 목록에 없는 건 `proposed` 로 보고만 하고, **3회 이상 나온 것만** 소유자가
+  SQL 로 추가한다. 그보다 적으면 상위(단원)로 흡수 — 과목당 20~40개를 유지한다
+- 목록이 아직 없는 과목은 `--mine --limit 200` 으로 표기 표본을 뽑아 초안을 만든다.
+  **표기 하나마다 개념을 만들지 말 것** — 표기는 문항마다 다르므로 그러면 300개가
+  된다. 표본은 무작위 위치 블록 5개로 뽑는다(앞에서부터 자르면 같은 시험지가 몰린다)
+
+### 정규화 규칙이 사는 곳 셋
+
+`normalizeConceptAlias` 는 세 군데에 있다. 배치 스크립트는 루틴 환경에서 plain node
+로 돌아 빌드 산출물이 없는 TypeScript 패키지를 import 할 수 없기 때문이다.
+
+| 위치 | 쓰는 곳 |
+|---|---|
+| `packages/core/src/concept-dictionary.ts` | 원본. 웹·`apply-concepts` |
+| `apps/web/scripts/save-explanations.mjs` | 해설 생성 배치 |
+| `apps/web/scripts/lib/concept-alias.mjs` | 재분류 배치 |
+
+**하나만 고치면 안 된다.** `src/lib/explanation-concepts.test.ts` 가 셋이 어긋나면
+실패한다(`shapeConceptList` 사본 둘도 함께 본다).
+
 ## 코드가 이걸 어떻게 쓰나
 
 - 복습 큐: `collectDueCandidates` 가 후보에 `conceptKey` 를 붙인다.
