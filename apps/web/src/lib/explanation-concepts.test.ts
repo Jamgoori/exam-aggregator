@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { normalizeConceptAlias as coreNormalize } from "@gongmoa/core";
 
 // 해설 배치 스크립트 2개(next-explanation-chunk.mjs / save-explanations.mjs)의 개념
@@ -20,6 +21,10 @@ import { normalizeConceptAlias as coreNormalize } from "@gongmoa/core";
 const SCRIPTS = path.resolve(import.meta.dirname, "../../scripts");
 const TMP = path.resolve(import.meta.dirname, "../../node_modules/.batch-script-test");
 
+function importScript(relative: string) {
+  return import(pathToFileURL(path.join(SCRIPTS, relative)).href);
+}
+
 async function importWithoutMain(fileName: string, exportsLine: string) {
   const src = await readFile(path.join(SCRIPTS, fileName), "utf8");
   const stripped = src.replace(/main\(\)\.catch[\s\S]*$/, exportsLine);
@@ -28,7 +33,9 @@ async function importWithoutMain(fileName: string, exportsLine: string) {
   const target = path.join(TMP, `${fileName}`);
   await writeFile(target, stripped);
   try {
-    return await import(target);
+    // Windows 에서는 절대 경로 문자열을 import() 에 못 넘긴다 (드라이브 문자를
+    // 프로토콜로 읽는다). file:// URL 로 바꿔야 세 OS 에서 같이 돈다.
+    return await import(pathToFileURL(target).href);
   } finally {
     await rm(target, { force: true });
   }
@@ -57,9 +64,7 @@ test("normalizeConceptAlias 사본 둘이 core 와 같은 규칙이다", async (
     "save-explanations.mjs",
     "export { resolveConcepts, normalizeConceptAlias };\n",
   );
-  const reclassifySide = await import(
-    path.join(SCRIPTS, "lib/concept-alias.mjs")
-  );
+  const reclassifySide = await importScript("lib/concept-alias.mjs");
 
   for (const s of NORMALIZE_CASES) {
     assert.equal(explanationSide.normalizeConceptAlias(s), coreNormalize(s), `해설 배치 불일치: ${s}`);
@@ -70,7 +75,7 @@ test("normalizeConceptAlias 사본 둘이 core 와 같은 규칙이다", async (
 // ── 재분류 배치: 이름 → concept_id ──────────────────────────────────────────
 
 test("재분류: '?' 제안과 실제 미매칭을 가른다", async () => {
-  const { resolveConceptName } = await import(path.join(SCRIPTS, "lib/concept-alias.mjs"));
+  const { resolveConceptName } = await importScript("lib/concept-alias.mjs");
   const index = new Map([
     ["vpn과ipsec", "c-ipsec"],
     ["스푸핑공격", "c-spoof"],
@@ -237,7 +242,7 @@ test("shapeConceptList 사본 둘이 같은 목록을 낸다", async () => {
     "next-explanation-chunk.mjs",
     "export { shapeConceptList };\n",
   );
-  const reclassifySide = await import(path.join(SCRIPTS, "lib/concept-alias.mjs"));
+  const reclassifySide = await importScript("lib/concept-alias.mjs");
   assert.deepEqual(
     chunkSide.shapeConceptList(CONCEPT_ROWS),
     reclassifySide.shapeConceptList(CONCEPT_ROWS),
