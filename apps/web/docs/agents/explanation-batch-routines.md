@@ -89,6 +89,34 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
   부수 효과 하나: 제외 과목(`explanation_excluded_subjects`) 반영 granularity가
   "다음 청크 요청"에서 "다음 배치(청크 3개) 요청"으로 커졌다 — 등록 직후 최대
   청크 3개 분량은 이미 배정돼 생성될 수 있다.
+- **정본 개념 주입 (2026-08-12)**: `next-explanation-chunk.mjs`가 청크마다 그 과목의
+  정본 개념 목록(`concepts` 테이블)을 `{name, unit, kind}` 배열로 함께 내려주고,
+  `save-explanations.mjs`가 해설 JSON의 `concept`(이름)을 `concept_id`로 바꿔 단다.
+  이유는 실측이다 — `keyword_title`의 표기 유일도가 과목별 96~99%였다. 사실상 문항마다
+  다른 문자열이라 그걸로는 약점 진단의 개념별 분포를 만들 수 없다. 알아둘 것:
+  - **`keyword_title`은 그대로 자유 문자열이다.** 오답노트에서 문항을 알아보는 제목이라
+    바꾸지 않는다. 정본 개념은 `concept`이라는 **별도 필드**로 받는다. 둘을 한 필드로
+    겸하게 하면(초기 초안이 그랬다) 독해 지문 주제가 사라진다.
+  - **개념 조회가 실패해도 배치는 안 멈춘다.** 목록 조회 실패는 stderr 경고 + 빈 목록,
+    매칭 실패는 `concept_id` null로 저장하고 보고만 한다. 개념은 나중에
+    `apply-concepts`로 백필할 수 있지만 해설 본문은 그 세션에서만 만들 수 있다.
+  - **`concept_id`는 붙었을 때만 upsert payload에 넣는다.** null로 넣으면 PostgREST가
+    `ON CONFLICT DO UPDATE SET`에 그 컬럼을 포함시켜, 이미 백필로 붙어 있던 개념을
+    재저장 한 번에 지운다.
+  - **`save-explanations.mjs`의 `normalizeConceptAlias`는 사본이다.** 원본은
+    `packages/core/src/concept-dictionary.ts`. 루틴 환경은 plain node라 빌드 산출물이
+    없는 TypeScript 패키지를 import 할 수 없어서 복사해 뒀다 — `srs.ts` 사본 규칙과
+    같이 **한쪽만 고치지 말 것**(배치가 붙이는 개념과 백필이 붙이는 개념이 조용히
+    달라진다). `apps/web/src/lib/explanation-concepts.test.ts`가 두 구현이 어긋나면
+    실패한다.
+  - **프롬프트 쪽 반영은 아직 안 됐다.** `concept` 필드를 쓰라고 지시하는 건
+    `explanation-prompt.md`인데 그 원본은 Storage에 있다(아래 항목). 레포 사본만
+    고쳐 둔 상태라, **소유자가 Storage에 재배포하기 전까지 배치는 `concept`을 안
+    써 보낸다** — 스크립트는 그 상태에서도 정상 동작한다(그냥 안 붙을 뿐).
+  - 그 테스트는 스크립트를 직접 import 하지 않고 **`main()` 호출만 떼어낸 사본**을
+    만들어 검사한다. 실행 가드(`import.meta.url === argv[1]`)를 넣는 편이 짧지만,
+    그 가드가 어긋나면 루틴이 조용히 0건 저장으로 끝난다 — 그래서 스크립트 쪽은
+    손대지 않았다.
 - **스케줄은 2시간 간격, UTC 기준.** 순방향은 짝수 UTC시(=KST 홀수시), 역방향은
   홀수 UTC시(=KST 짝수시) 59분에 발동해서 매시간 한쪽이 새로 뜬다. 루틴 화면의
   "반복" 목록 UI는 시간대 변환 없이 UTC 숫자를 그대로 표시하는 버그가 있다 —
