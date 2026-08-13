@@ -6,6 +6,7 @@ import { SiteHeaderGate } from "@/components/site-header-gate";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { ReviewFab } from "@/components/review-fab";
+import { BetaNoticeModal } from "@/components/beta-notice-modal";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
 import { createClient } from "@/lib/supabase/server";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site-url";
@@ -170,6 +171,12 @@ export default function RootLayout({
             페이지 맨 아래라 잠깐 비어 있어도 눈에 띄지 않는다. */}
         <Suspense fallback={null}>
           <SiteFooter />
+        </Suspense>
+        {/* 테스트 기간 안내. 어느 화면으로 들어오든 한 번은 보여야 해서 레이아웃에
+            둔다(홈으로 들어오지 않는 방문자가 검색 유입에 더 많다). 푸터와 같은
+            이유로 usePathname을 쓰므로 Suspense 뒤에 둔다. */}
+        <Suspense fallback={null}>
+          <BetaNoticeModal />
         </Suspense>
         <Analytics />
         {process.env.NEXT_PUBLIC_GA_ID && (
