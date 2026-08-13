@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getPaperSlug, isPaperUuid } from "./paper-slug";
+import {
+  getPaperSlug,
+  isPaperUuid,
+  normalizePaperSlugParam,
+} from "./paper-slug";
 
 // 이 규칙이 만드는 주소는 검색엔진에 색인되고 사람들이 링크로 주고받는 값이라,
 // 한 번 정한 뒤에는 바뀌면 안 된다. 아래는 "이렇게 나와야 한다"를 못박아둔 것이다 —
@@ -80,6 +84,27 @@ test("제목이 이미 회차를 말하고 있으면 또 붙이지 않는다", (
     getPaperSlug("2017 경찰 공채 1차 수사", 2),
     "2017-경찰-공채-1차-수사-2회",
   );
+});
+
+test("퍼센트 인코딩된 채로 들어온 주소 조각도 표에서 찾을 수 있는 모양으로 되돌린다", () => {
+  // 실측 사고(2026-08-13): 한 요청 안에서도 generateMetadata 는 디코딩된 조각을,
+  // 페이지 컴포넌트는 인코딩된 조각을 받았다. 그래서 <title>은 멀쩡한데 본문만
+  // notFound() 로 빠져 문제지 상세페이지 전체가 사라졌다.
+  assert.equal(
+    normalizePaperSlugParam("2018-%EB%B2%95%EC%9B%90%EC%A7%81-9%EA%B8%89-%ED%97%8C%EB%B2%95"),
+    "2018-법원직-9급-헌법",
+  );
+  // 이미 디코딩된 조각은 그대로 (두 번 디코딩되지 않는다).
+  assert.equal(
+    normalizePaperSlugParam("2018-법원직-9급-헌법"),
+    "2018-법원직-9급-헌법",
+  );
+  assert.equal(
+    normalizePaperSlugParam("56b5235d-58d2-43a9-acac-80a29810f9d4"),
+    "56b5235d-58d2-43a9-acac-80a29810f9d4",
+  );
+  // 잘못 만들어진 주소는 던지지 않고 그대로 흘려보낸다 (없는 주소 → 404).
+  assert.equal(normalizePaperSlugParam("2018-%zz"), "2018-%zz");
 });
 
 test("옛 UUID 주소를 알아본다 (새 주소는 연도로 시작해 겹치지 않는다)", () => {

@@ -27,6 +27,10 @@ function attempt(
       id: paperId,
       title: `${paperId} 문제지`,
       level: "9급",
+      // 오답노트 카드의 링크 주소를 제목에서 계산하느라 함께 실어 보내는 값
+      // (paper-slug.ts). 화면에는 쓰지 않지만 타입상 빠질 수 없다.
+      round: 1,
+      track: null,
       choice_count: 4,
       subjects: subject,
       exam_types: null,

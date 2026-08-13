@@ -58,6 +58,32 @@ export function getPaperSlug(
   return slug;
 }
 
+/**
+ * 주소에서 받은 조각을 slug 표에서 찾을 수 있는 모양(한글 그대로)으로 되돌린다.
+ *
+ * slug 가 한글이라 링크에는 언제나 퍼센트 인코딩된 모양으로 실린다
+ * (`/papers/2018-%EB%B2%95%EC%9B%90%EC%A7%81-9%EA%B8%89-%ED%97%8C%EB%B2%95`).
+ * 그런데 Next 가 넘겨주는 `params.id` 는 진입점에 따라 디코딩된 것도 있고 안 된 것도
+ * 있다 — 실측(2026-08-13, Next 16.2.9): 같은 요청 안에서도 `generateMetadata` 는
+ * "2018-법원직-9급-헌법" 을 받는데 페이지 컴포넌트는 "2018-%EB%B2%95..." 를 받는다.
+ * 그래서 페이지 본문만 표에서 못 찾고 `notFound()` 로 빠져, 제목(<title>)은 멀쩡한데
+ * 본문만 404 인 화면이 문제지 전체에서 나왔다. 주소가 UUID 이던 시절에는 인코딩할
+ * 문자가 없어서 이 차이가 드러나지 않았다.
+ *
+ * 표의 열쇠는 언제나 디코딩된 한글이므로, 찾기 전에 여기로 한 번 통과시킨다.
+ * 디코딩된 slug 에는 `%` 가 남지 않으므로 두 번 디코딩될 걱정은 없다.
+ */
+export function normalizePaperSlugParam(param: string): string {
+  if (!param.includes("%")) return param;
+  try {
+    return decodeURIComponent(param);
+  } catch {
+    // 잘못 만들어진 주소(`%zz` 등)는 디코딩이 실패한다. 그대로 돌려주면 표에서
+    // 못 찾아 404 가 되는데, 없는 주소라는 뜻이므로 그게 맞는 결과다.
+    return param;
+  }
+}
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

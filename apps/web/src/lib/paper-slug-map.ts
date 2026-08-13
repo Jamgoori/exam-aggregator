@@ -1,6 +1,6 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
-import { getPaperSlug, isPaperUuid } from "@gongmoa/core";
+import { getPaperSlug, isPaperUuid, normalizePaperSlugParam } from "@gongmoa/core";
 import { createPublicClient } from "@/lib/supabase/public";
 import { fetchAllPages } from "@/lib/fetch-paged";
 
@@ -43,7 +43,10 @@ async function getSlugMap(): Promise<Record<string, string>> {
  * 어차피 호출한 쪽에서 새 주소로 301 을 보낼 것이다.
  */
 export async function resolvePaperId(param: string): Promise<string | null> {
-  if (isPaperUuid(param)) return param;
+  // 주소 조각은 진입점에 따라 퍼센트 인코딩된 채로 오기도 한다
+  // (normalizePaperSlugParam 주석에 실측 사례). 표의 열쇠는 한글이므로 먼저 되돌린다.
+  const slug = normalizePaperSlugParam(param);
+  if (isPaperUuid(slug)) return slug;
   const map = await getSlugMap();
-  return map[param] ?? null;
+  return map[slug] ?? null;
 }
