@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { BUSINESS_EMAIL, BUSINESS_INFO, hasBusinessInfo } from "@/lib/business";
 
 export function SiteFooter() {
   const pathname = usePathname();
@@ -46,8 +47,36 @@ export function SiteFooter() {
             문의
           </a>
         </div>
+        <BusinessInfo />
+
         <p>© 2026 공모아 — 공무원 기출문제 자료실</p>
       </div>
     </footer>
+  );
+}
+
+// 전자상거래법 제10조가 요구하는 사업자 표기. 값은 lib/business.ts 한 곳에 있고,
+// 아직 사업자등록 전이라 비어 있으면 아무것도 그리지 않는다 — 반쪽짜리 표기는
+// 없는 것보다 나쁘다. PG 심사 전에 반드시 채울 것(가장 흔한 반려 사유다).
+function BusinessInfo() {
+  if (!hasBusinessInfo) return null;
+
+  const items = [
+    `상호 ${BUSINESS_INFO.name}`,
+    BUSINESS_INFO.representative && `대표 ${BUSINESS_INFO.representative}`,
+    `사업자등록번호 ${BUSINESS_INFO.registrationNumber}`,
+    BUSINESS_INFO.mailOrderNumber && `통신판매업신고 ${BUSINESS_INFO.mailOrderNumber}`,
+    BUSINESS_INFO.address,
+    BUSINESS_INFO.phone && `전화 ${BUSINESS_INFO.phone}`,
+    `이메일 ${BUSINESS_EMAIL}`,
+    BUSINESS_INFO.privacyOfficer && `개인정보 보호책임자 ${BUSINESS_INFO.privacyOfficer}`,
+  ].filter((v): v is string => !!v);
+
+  return (
+    <address className="flex flex-wrap gap-x-3 gap-y-1 not-italic leading-5 text-zinc-400 dark:text-zinc-600">
+      {items.map((item) => (
+        <span key={item}>{item}</span>
+      ))}
+    </address>
   );
 }

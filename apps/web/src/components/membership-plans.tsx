@@ -1,31 +1,87 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Info } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Check, Info, Loader2 } from "lucide-react";
 import {
   allPlanPricing,
   formatWon,
   RECOMMENDED_PLAN_ID,
   type PlanId,
 } from "@gongmoa/core";
+import { startMembershipCheckout } from "@/app/membership/actions";
+import { isUserCanceled, loadTossPayments } from "@/lib/toss-browser";
 
 // 요금제 선택 + 결제 버튼. 가격·할인율은 전부 @gongmoa/core 의 요금제 정의에서
 // 계산해 온다 — 이 파일에 숫자를 적지 말 것.
 //
-// 결제 수단(PG) 연동 전이라 버튼은 "준비 중"을 정직하게 말한다. 결제창이 뜰 것처럼
-// 만들어 두고 아무 일도 일어나지 않으면, 결제가 실패한 줄 알고 카드를 다시 확인하는
-// 사람이 생긴다. 연동할 때 이 컴포넌트의 startCheckout 안만 바꾸면 된다.
+// paymentEnabled 가 false 면(= PG 키 미설정) 예전처럼 "준비 중"을 정직하게 말한다.
+// 결제창이 뜰 것처럼 만들어 두고 아무 일도 일어나지 않으면, 결제가 실패한 줄 알고
+// 카드를 다시 확인하는 사람이 생긴다.
+//
+// 결제 수단은 지금 카드(간편결제 포함 카드창)만 연다. 카카오페이·네이버페이를 따로
+// 고르게 하려면 토스 "결제위젯"으로 바꿔야 하는데, 그건 결제 수단 UI 를 페이지에
+// 직접 렌더링하는 방식이라 이 카드 레이아웃과 별개 화면이 필요하다.
 
 const PLANS = allPlanPricing();
 
-export function MembershipPlans({ alreadyPremium }: { alreadyPremium: boolean }) {
+export function MembershipPlans({
+  alreadyPremium,
+  paymentEnabled,
+}: {
+  alreadyPremium: boolean;
+  paymentEnabled: boolean;
+}) {
+  const router = useRouter();
   const [selected, setSelected] = useState<PlanId>(RECOMMENDED_PLAN_ID);
   const [notice, setNotice] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
   const current = PLANS.find((p) => p.plan.id === selected)!;
 
-  function startCheckout() {
-    // TODO: PG 연동 시 여기서 결제창을 띄운다(선택한 plan.id 를 그대로 넘기면 된다).
-    setNotice(true);
+  async function startCheckout() {
+    if (!paymentEnabled) {
+      setNotice(true);
+      return;
+    }
+    // 이중 클릭 방지. 막지 않으면 주문이 두 건 만들어지고, 사용자는 자기가 뭘 결제한
+    // 건지 모르는 채 결제창을 두 번 보게 된다.
+    if (pending) return;
+
+    setPending(true);
+    setError(null);
+    try {
+      const result = await startMembershipCheckout(selected);
+      if (!result.ok) {
+        if (result.needsLogin) {
+          router.push(`/login?next=${encodeURIComponent("/membership")}`);
+          return;
+        }
+        setError(result.error);
+        return;
+      }
+
+      const TossPayments = await loadTossPayments();
+      await TossPayments(result.clientKey)
+        .payment({ customerKey: result.customerKey })
+        .requestPayment({
+          method: "CARD",
+          amount: { currency: "KRW", value: result.amount },
+          orderId: result.orderId,
+          orderName: result.orderName,
+          successUrl: result.successUrl,
+          failUrl: result.failUrl,
+          card: { useEscrow: false, flowMode: "DEFAULT" },
+        });
+      // 여기까지 오면 결제창이 리다이렉트를 맡는다(성공/실패 주소로 브라우저가 이동).
+    } catch (e) {
+      // 사용자가 스스로 창을 닫은 것은 오류가 아니다 — 아무 말도 하지 않는 게 맞다.
+      if (!isUserCanceled(e)) {
+        setError("결제창을 열지 못했어요. 잠시 후 다시 시도해주세요.");
+      }
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -119,10 +175,25 @@ export function MembershipPlans({ alreadyPremium }: { alreadyPremium: boolean })
         <button
           type="button"
           onClick={startCheckout}
-          className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700"
+          disabled={pending}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400 dark:disabled:bg-blue-900"
         >
-          {alreadyPremium ? "멤버십 연장하기" : "멤버십 시작하기"}
+          {pending && <Loader2 size={15} className="animate-spin" aria-hidden />}
+          {pending
+            ? "결제창을 여는 중…"
+            : alreadyPremium
+              ? "멤버십 연장하기"
+              : "멤버십 시작하기"}
         </button>
+
+        {error && (
+          <p
+            role="alert"
+            className="rounded-xl bg-red-50 px-3 py-2.5 text-xs leading-5 text-red-700 dark:bg-red-950/30 dark:text-red-300"
+          >
+            {error}
+          </p>
+        )}
 
         {notice && (
           <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">

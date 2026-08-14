@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { isTossConfigured } from "@/lib/toss";
 
 export const metadata: Metadata = {
   title: "개인정보처리방침",
@@ -85,8 +86,16 @@ export default function PrivacyPage() {
           <li>CBT 응시·오답노트·복습·AI 약점 진단 등 학습 기능 제공</li>
           <li>댓글 등 커뮤니티 기능 제공 및 작성자 확인</li>
           <li>도배·부정 이용 방지 등 서비스 안정성 확보</li>
+          <li>유료 멤버십 결제·환불 처리와 거래 기록 보존</li>
           <li>서비스 이용 통계 분석과 품질 개선</li>
         </ul>
+        {/* 카드번호를 우리가 안 갖는다는 사실은 명시할 가치가 있다. 결제 화면에서
+            사람들이 실제로 걱정하는 지점이고, 실제로도 PG 가 직접 받아 처리한다. */}
+        <p className="mt-1">
+          결제 시 카드번호·계좌번호 등 결제 수단 정보는 결제대행사가 직접 수집·처리하며,
+          서비스는 이를 저장하지 않습니다. 서비스가 보관하는 것은 주문번호, 결제 금액,
+          결제 수단 종류(예: 카드), 결제·취소 일시입니다.
+        </p>
       </Section>
 
       <Section title="3. 보유 및 이용 기간">
@@ -101,6 +110,12 @@ export default function PrivacyPage() {
             삭제하거나 운영자가 삭제할 때까지 보유합니다.
           </li>
           <li>비회원 댓글의 IP 주소: 해당 댓글이 보관되는 동안 함께 보관됩니다.</li>
+          {/* 전자상거래법 제6조·시행령 제6조. 탈퇴해도 지울 수 없는 기록이라
+              "탈퇴 시 모두 삭제"만 적어두면 사실과 다르다. */}
+          <li>
+            결제·환불 등 대금 결제 기록: <strong>전자상거래법에 따라 5년간 보관</strong>합니다.
+            회원 탈퇴 시에도 이 기간 동안은 보존되며, 기간이 지나면 파기합니다.
+          </li>
           <li>관련 법령에 따라 보존 의무가 있는 경우 그 기간 동안 보관 후 파기합니다.</li>
         </ul>
       </Section>
@@ -154,11 +169,20 @@ export default function PrivacyPage() {
                 <td className="py-2 pr-4">이용 행태 분석(Microsoft Clarity)</td>
                 <td className="py-2">설정된 경우에만 동작</td>
               </tr>
-              <tr>
+              <tr className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
                 <td className="py-2 pr-4">주식회사 카카오 (국내)</td>
                 <td className="py-2 pr-4">카카오 로그인</td>
                 <td className="py-2">&nbsp;</td>
               </tr>
+              {/* 결제가 실제로 열린 환경에서만 적는다. 계약 전에 미리 적어두면 하지도
+                  않는 위탁을 고지하는 것이 되어 방침이 사실과 어긋난다. */}
+              {isTossConfigured() && (
+                <tr>
+                  <td className="py-2 pr-4">토스페이먼츠 주식회사 (국내)</td>
+                  <td className="py-2 pr-4">유료 멤버십 결제·환불 처리</td>
+                  <td className="py-2">결제 수단 정보는 수탁자가 직접 수집·보관</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
