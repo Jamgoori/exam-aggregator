@@ -2,7 +2,8 @@
 // 판정 규칙의 정본은 core 쪽이다 — TRIAL_DAYS를 바꿀 때는 양쪽을 함께 고칠 것.
 // deno-lint-ignore-file no-explicit-any
 
-export const TRIAL_DAYS = 14;
+// 출시 이벤트: 2달(60일) 무료. packages/core/src/membership.ts 와 반드시 같은 값.
+export const TRIAL_DAYS = 60;
 
 // 아직 체험을 안 쓴 사용자의 체험을 켠다. 첫 CBT 채점에서만 부른다 — 가입 직후엔
 // 오답이 0개라 복습 큐가 비어 있어서, 가입일 기준으로 재면 체험 앞부분을 오답 쌓는
