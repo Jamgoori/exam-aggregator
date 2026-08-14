@@ -26,3 +26,79 @@ export async function startTrialIfEligible(admin: any, userId: string): Promise<
     .eq("source", "trial")
     .is("started_at", null);
 }
+
+// 무료 회원이 하루에 해설을 열어볼 수 있는 문제지 수.
+// 정본은 packages/core/src/membership.ts 의 FREE_EXPLANATION_DAILY_PAPERS —
+// 바꿀 때는 반드시 양쪽을 함께 고칠 것(한쪽만 고치면 웹과 앱의 한도가 어긋난다).
+export const FREE_EXPLANATION_DAILY_PAPERS = 3;
+
+// 멤버십 판정. packages/core/src/membership.ts 의 isPremiumMembership + 웹
+// src/lib/membership.ts 의 isPremium(관리자 우대 포함)을 합친 Deno 포팅본이다.
+//
+// 이게 없으면 웹에서만 페이월이 걸리고, 같은 계정으로 Edge Function 을 직접 부르면
+// 오답노트·복습·진단·해설이 전부 열린다 — 화면을 막는 것과 API 를 막는 것은 다르다.
+export async function isPremiumUser(
+  admin: any,
+  userId: string,
+  email: string | null,
+): Promise<boolean> {
+  // 관리자는 멤버십과 무관하게 유료 기능을 쓴다(검수·문의 대응). admins 는 email 이
+  // 기본키인 화이트리스트라(웹의 is_admin() 과 같은 기준) service_role 로만 확인한다.
+  if (email) {
+    const { data: adminRow } = await admin
+      .from("admins")
+      .select("email")
+      .eq("email", email)
+      .maybeSingle();
+    if (adminRow) return true;
+  }
+
+  const { data } = await admin
+    .from("memberships")
+    .select("tier, expires_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!data || data.tier !== "premium") return false;
+  // expires_at 이 null 이면 만료 없음(정기결제 중).
+  if (data.expires_at === null) return true;
+  return new Date(data.expires_at).getTime() > Date.now();
+}
+
+// KST 달력 날짜(YYYY-MM-DD). 무료 일일 한도의 날짜 키 — 웹 lib/ai-diagnosis.ts 의
+// kstToday() 와 같은 기준.
+export function kstToday(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+}
+
+// 무료 회원의 오늘 몫을 확인하고, 새 문제지면 오늘 목록에 올린다.
+// 웹 lib/explanation-rate-limit.ts 의 consumeFreeDailyQuota 포팅본 — 같은 테이블
+// (explanation_daily_views)을 쓰므로 웹에서 셋을 채웠으면 앱에서도 막힌다.
+//
+// 조회가 실패하면(스키마 미적용 등) 막지 않는다: 결제 유도 장치가 인프라 문제로
+// 정상 사용자의 해설을 잠그는 쪽이 더 나쁘다.
+export async function consumeFreeExplanationQuota(
+  admin: any,
+  userId: string,
+  paperId: string,
+): Promise<boolean> {
+  const viewDate = kstToday();
+  const { data, error } = await admin
+    .from("explanation_daily_views")
+    .select("paper_id")
+    .eq("user_id", userId)
+    .eq("view_date", viewDate);
+  if (error) return true;
+
+  const seen = data ?? [];
+  // 오늘 이미 연 문제지는 한도를 깎지 않는다.
+  if (seen.some((r: { paper_id: string }) => r.paper_id === paperId)) return true;
+  if (seen.length >= FREE_EXPLANATION_DAILY_PAPERS) return false;
+
+  await admin
+    .from("explanation_daily_views")
+    .upsert(
+      { user_id: userId, view_date: viewDate, paper_id: paperId },
+      { onConflict: "user_id,view_date,paper_id" },
+    );
+  return true;
+}

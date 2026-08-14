@@ -10,6 +10,8 @@ import {
 import { levelColor } from "@/lib/level-colors";
 import { paperCbtHref } from "@/lib/paper-href";
 import { subjectColor } from "@/lib/subject-colors";
+import { isPremium } from "@/lib/membership";
+import { MembershipLockedPage } from "@/components/membership-upsell";
 
 // 문제지 하나의 오답노트: 회독별 점수 기록(스트립)과 틀린 문제·해설을 한 화면에서
 // 본다. 기본은 모든 회독을 합친 "통합" 보기, 회독 칩을 누르면 그 회독만 필터된다.
@@ -28,6 +30,19 @@ export default async function PaperWrongNotePage({
   if (!user) {
     redirect(
       `/login?next=${encodeURIComponent(`/mypage/wrong-notes/${slug}/${paperId}`)}&error=${encodeURIComponent("로그인이 필요해요")}`,
+    );
+  }
+
+  // 오답노트는 멤버십 기능. 주소로 직접 들어오는 경로도 여기서 막는다.
+  if (!(await isPremium(supabase, user.id))) {
+    return (
+      <MembershipLockedPage
+        title="문제지 오답노트는 멤버십 기능이에요"
+        description="회독별 점수 기록과 틀린 문항·해설을 한 화면에서 볼 수 있어요. 지금까지 쌓인 오답은 그대로 남아 있어요."
+        backHref={`/mypage/wrong-notes/${slug}`}
+        backLabel="오답노트로"
+        next={`/mypage/wrong-notes/${slug}/${paperId}`}
+      />
     );
   }
 

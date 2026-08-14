@@ -20,6 +20,7 @@ import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { ScrollToHash } from "@/components/scroll-to-hash";
 import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
 import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-card";
+import { MembershipUpsell } from "@/components/membership-upsell";
 import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { getDueReviewSummary } from "@/lib/review-queue";
@@ -143,30 +144,47 @@ export default async function MyPage({
   const myAttempts = (attemptRows ?? []) as unknown as MyAttempt[];
   const { attemptsByPaper, roundNumberByAttemptId } = computeAttemptRounds(myAttempts);
 
-  // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고,
-  // 문항별 오답 행만 추가로 조회한다.
-  const myAttemptPaperIds = [
-    ...new Set(
-      myAttempts.map((a) => a.exam_papers?.id).filter((id): id is string => !!id),
-    ),
-  ];
-  const [wrongRows, wrongNoteMarks, wrongNoteStatusOverrides] = await Promise.all([
-    fetchWrongAnswerRows(
-      supabase,
-      myAttempts.map((a) => a.id),
-    ),
-    fetchWrongNoteMarks(supabase, user.id),
-    fetchQuestionStatusMap(supabase, user.id, myAttemptPaperIds),
+  // 멤버십 판정을 오답노트 집계보다 먼저 한다. 오답노트·복습·진단이 전부 멤버십
+  // 기능이라, 무료 회원에게는 아래의 무거운 집계(문항별 오답 행 + 문항 상태 맵)를
+  // 아예 돌리지 않는다. 관리자는 멤버십과 무관하게 프리미엄으로 본다 — 검수·문의
+  // 대응을 하려면 사용자와 같은 화면을 볼 수 있어야 한다.
+  const [membership, admin] = await Promise.all([
+    getMembership(supabase, user.id),
+    isAdminUser(supabase),
   ]);
-  const wrongNoteGroups = buildWrongNoteGroups(
-    myAttempts as unknown as WrongNoteAttemptRow[],
-    wrongRows,
-    wrongNoteMarks.deleted,
-    wrongNoteStatusOverrides,
-  );
+  const premium = admin || isPremiumMembership(membership);
+
+  // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고,
+  // 문항별 오답 행만 추가로 조회한다. 무료 회원은 목록 자체가 잠기므로 조회하지
+  // 않는다 — 못 볼 화면을 위해 응시 전체의 문항 행을 긁어올 이유가 없다.
+  let wrongNoteGroups: WrongNoteSubjectGroup[] = [];
+  if (premium) {
+    const myAttemptPaperIds = [
+      ...new Set(
+        myAttempts.map((a) => a.exam_papers?.id).filter((id): id is string => !!id),
+      ),
+    ];
+    const [wrongRows, wrongNoteMarks, wrongNoteStatusOverrides] = await Promise.all([
+      fetchWrongAnswerRows(
+        supabase,
+        myAttempts.map((a) => a.id),
+      ),
+      fetchWrongNoteMarks(supabase, user.id),
+      fetchQuestionStatusMap(supabase, user.id, myAttemptPaperIds),
+    ]);
+    wrongNoteGroups = buildWrongNoteGroups(
+      myAttempts as unknown as WrongNoteAttemptRow[],
+      wrongRows,
+      wrongNoteMarks.deleted,
+      wrongNoteStatusOverrides,
+    );
+  }
   // 미극복 수는 user_question_status(CBT+섞어풀기 통합) 기준으로 센다 — 섞어풀기로
   // 극복한 게 헤드라인·과목·오늘 카드에 즉시 반영되고, 섞어풀기 후보 수와 일치한다.
   // 표가 비어 있으면(백필 전 등) 응시 기준(buildWrongNoteGroups)으로 폴백.
+  //
+  // 무료 회원에게도 이 값은 계산한다. 상단 "남은 오답"은 자기 데이터의 요약일 뿐이고,
+  // 잠긴 화면에서 "그동안 쌓인 오답은 그대로 있다"를 보여주는 근거이기도 하다.
   const unresolvedBySubject = await getUnresolvedCountBySubject(supabase, user.id);
   const totalUnresolved =
     unresolvedBySubject.size > 0
@@ -177,10 +195,10 @@ export default async function MyPage({
   const tier = streakTier(streakDays);
 
   // AI 약점 진단 배너 상태. 오늘 진단이 있으면 그 상태, 없으면 자격 판정으로 결정.
-  const todayDiag = await getTodayDiagnosis(supabase, user.id);
-  const diagEligibility = todayDiag
-    ? null
-    : await getDiagnosisEligibility(supabase, user.id);
+  // 진단도 멤버십 전용이라 무료 회원에게는 조회조차 하지 않는다.
+  const todayDiag = premium ? await getTodayDiagnosis(supabase, user.id) : null;
+  const diagEligibility =
+    !premium || todayDiag ? null : await getDiagnosisEligibility(supabase, user.id);
   const diagnosisState: DiagnosisBannerState =
     todayDiag?.status === "ready"
       ? "ready"
@@ -193,14 +211,8 @@ export default async function MyPage({
 
   // 오늘의 복습(멤버십 전용). 무료 사용자에게는 요약을 조회하지도 않는다 — 못 누르는
   // 숫자는 압박만 되고, 후보 수집이 이미지 조회까지 도는 무거운 작업이라 값이다.
-  // 관리자는 멤버십과 무관하게 프리미엄으로 본다. 관리자 여부를 따로 들고 있는 건
-  // 체험 만료 안내("체험 N일 남음") 때문이다 — 관리자는 체험이 끝나도 계속 쓸 수
-  // 있으니 그 문구를 보여주면 거짓말이 된다.
-  const [membership, admin] = await Promise.all([
-    getMembership(supabase, user.id),
-    isAdminUser(supabase),
-  ]);
-  const premium = admin || isPremiumMembership(membership);
+  // 체험 남은 일수는 관리자에게 보여주지 않는다 — 관리자는 체험이 끝나도 계속 쓸 수
+  // 있으니 그 문구가 거짓말이 된다.
   const [dueSummary, subjectChoices, resumable] = premium
     ? await Promise.all([
         getDueReviewSummary(supabase, user.id),
@@ -290,6 +302,8 @@ export default async function MyPage({
         }
         wrongNotes={
           <WrongNotesTab
+            premium={premium}
+            totalUnresolved={totalUnresolved}
             groups={wrongNoteGroups}
             unresolvedBySubject={unresolvedBySubject}
             diagnosisState={diagnosisState}
@@ -457,18 +471,47 @@ function HowItWorksStrip() {
 // "오답노트" 탭: 과목별로 틀린 문제 수를 요약해서 보여주고, 과목을 누르면
 // 문제 이미지까지 모아둔 과목 오답노트 페이지로 이어준다.
 function WrongNotesTab({
+  premium,
+  totalUnresolved,
   groups,
   unresolvedBySubject,
   diagnosisState,
   diagnosisHint,
   reviewDue,
 }: {
+  premium: boolean;
+  totalUnresolved: number;
   groups: WrongNoteSubjectGroup[];
   unresolvedBySubject: Map<string, { name: string; slug: string; unresolved: number; due: number }>;
   diagnosisState: DiagnosisBannerState;
   diagnosisHint: string | null;
   reviewDue: ReviewDueCardProps;
 }) {
+  // 무료 회원: 오답노트·복습·진단이 모두 멤버십 기능이라 탭 전체를 안내로 바꾼다.
+  // 카드를 늘어놓고 누를 때마다 막는 것보다, 한 번에 무엇이 잠겼는지 보여주는 쪽이
+  // 덜 불쾌하다. 쌓인 오답 수를 같이 보여주는 건 "기록이 사라진 게 아니다"를
+  // 분명히 하기 위해서다 — 실제로 데이터는 그대로 남아 있고 결제하면 그대로 열린다.
+  if (!premium) {
+    return (
+      <section id="wrong-notes" className="flex scroll-mt-4 flex-col gap-4">
+        <h2 className="flex items-center gap-2 text-lg font-semibold">
+          <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
+          오답노트
+        </h2>
+        <MembershipUpsell
+          title="오답노트는 멤버십 기능이에요"
+          description={
+            totalUnresolved > 0
+              ? `지금까지 쌓인 오답 ${totalUnresolved}문항은 그대로 남아 있어요. 멤버십을 시작하면 과목별 정리·복습 일정·AI 약점 진단까지 이어서 쓸 수 있어요.`
+              : "틀린 문제가 과목별로 자동 정리되고, 언제 다시 볼지 계산된 복습 일정과 AI 약점 진단까지 이어져요."
+          }
+          next="/mypage?tab=wrong-notes"
+        />
+        <HowItWorksStrip />
+      </section>
+    );
+  }
+
   return (
     // 홈 오답노트 배너(#wrong-notes)가 페이지 최상단이 아닌 이 섹션으로 바로
     // 스크롤되도록 앵커를 건다. scroll-mt는 스크롤 정지 위치에 약간의 여백.

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getSessionUser } from "@/lib/supabase/session";
 import { requestTodayDiagnosis, kstToday } from "@/lib/ai-diagnosis";
 import { runDiagnosisForUser } from "@/lib/diagnosis-generate";
+import { isPremium } from "@/lib/membership";
 
 export type RequestDiagnosisResult = {
   error?: string;
@@ -16,6 +17,12 @@ export type RequestDiagnosisResult = {
 export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  // 진단은 멤버십 기능이다. 배너를 숨기는 것과 별개로 여기서도 막는다 — 생성은
+  // AI 호출이 실제로 도는 경로라, 화면을 우회해 부르면 그대로 비용이 나간다.
+  if (!(await isPremium(supabase, user.id))) {
+    return { error: "AI 약점 진단은 멤버십 기능이에요." };
+  }
 
   const res = await requestTodayDiagnosis(supabase, user.id);
   if (res.error) return res;

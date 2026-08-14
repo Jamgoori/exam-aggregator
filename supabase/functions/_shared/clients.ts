@@ -29,20 +29,26 @@ export function adminClient(): SupabaseClient {
 }
 
 // 공통: 로그인 사용자 확인. 없으면 401 응답을 반환한다(호출부에서 early return).
+//
+// email 을 같이 돌려주는 이유는 관리자 판정 때문이다 — admins 테이블은 user_id 가
+// 아니라 email 이 기본키라(웹의 is_admin() 도 JWT 의 email 로 검사한다), 이걸 안 실어
+// 주면 멤버십을 확인할 때마다 auth.admin.getUserById 를 한 번 더 부르게 된다.
 export async function requireUser(
   req: Request,
-): Promise<{ userId: string } | { error: Response }> {
+): Promise<{ userId: string; email: string | null } | { error: Response }> {
   const {
     data: { user },
   } = await userClientFrom(req).auth.getUser();
   if (!user) return { error: json({ error: "로그인 후 이용할 수 있어요." }, 401) };
-  return { userId: user.id };
+  return { userId: user.id, email: user.email ?? null };
 }
 
 // 비로그인도 허용하는 엔드포인트(해설 미리보기 등)용 — 없으면 null, 에러로 막지 않는다.
-export async function getOptionalUser(req: Request): Promise<string | null> {
+export async function getOptionalUser(
+  req: Request,
+): Promise<{ userId: string; email: string | null } | null> {
   const {
     data: { user },
   } = await userClientFrom(req).auth.getUser();
-  return user?.id ?? null;
+  return user ? { userId: user.id, email: user.email ?? null } : null;
 }

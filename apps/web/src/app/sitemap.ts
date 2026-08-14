@@ -65,6 +65,13 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "daily",
       priority: 1,
     },
+    // 요금제 안내(app/membership/page.tsx). 로그인 없이 서버 렌더되는 정적 문서라
+    // 색인해도 문제가 없고, "공모아 요금제/가격"으로 찾는 사람의 착지 지점이다.
+    {
+      url: absoluteUrl("/membership"),
+      changeFrequency: "monthly",
+      priority: 0.6,
+    },
     // 과목 목록 허브(app/subjects/page.tsx). 개별 과목 페이지로 가는 링크를 전부
     // 담고 있어서, 크롤러가 여기 한 장만 읽어도 과목 수백 장을 발견한다.
     {

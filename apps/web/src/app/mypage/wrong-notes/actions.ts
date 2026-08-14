@@ -33,6 +33,11 @@ import type { SessionSchedule, ReviewPickStrategy } from "@gongmoa/core";
 
 export type CreateReviewResult = { error?: string; sessionId?: string };
 
+// 오답노트·복습·진단은 전부 멤버십 기능이다. 화면에서 버튼을 숨기는 건 표시일 뿐이고,
+// 서버 액션은 이름만 알면 직접 부를 수 있으므로 각 경로에서 다시 확인한다.
+const WRONG_NOTE_LOCKED = "오답노트는 멤버십 기능이에요.";
+const REVIEW_LOCKED = "복습은 멤버십 기능이에요.";
+
 // 클라이언트가 보내는 값이라 문자열을 그대로 믿지 않는다. 모르는 값은 기본값
 // ("약한 문제 우선")으로 떨어뜨린다.
 function pickStrategy(value: unknown): ReviewPickStrategy {
@@ -53,6 +58,7 @@ export async function createReviewSession(input: {
 
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) return { error: REVIEW_LOCKED };
 
   return createReviewSessionForUser(supabase, user.id, {
     subjectSlug: slug,
@@ -75,6 +81,7 @@ export async function createReviewFromConcept(input: {
 
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) return { error: REVIEW_LOCKED };
 
   return createConceptReviewSessionForUser(supabase, user.id, {
     concept,
@@ -100,6 +107,7 @@ export async function saveQuestionMemo(input: {
 
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) return { error: WRONG_NOTE_LOCKED };
 
   const memo = String(input.memo ?? "").trim().slice(0, 2000);
 
@@ -142,6 +150,7 @@ export async function setQuestionPinned(input: {
   }
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) return { error: WRONG_NOTE_LOCKED };
 
   const { error } = await supabase.from("wrong_note_marks").upsert(
     {
@@ -170,6 +179,7 @@ export async function deleteWrongNoteQuestion(input: {
   }
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) return { error: WRONG_NOTE_LOCKED };
 
   const { error } = await supabase.from("wrong_note_marks").upsert(
     {
@@ -197,6 +207,7 @@ export async function restoreWrongNoteQuestion(input: {
   }
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) return { error: WRONG_NOTE_LOCKED };
 
   const { error } = await supabase.from("wrong_note_marks").upsert(
     {
@@ -222,6 +233,7 @@ export async function createReviewFromPapers(input: {
   if (paperIds.length === 0) return { error: "시험지를 선택해주세요." };
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) return { error: REVIEW_LOCKED };
   return createPaperReviewSessionForUser(supabase, user.id, paperIds);
 }
 
@@ -233,6 +245,7 @@ export async function createReviewAll(input: {
 }): Promise<CreateReviewResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) return { error: REVIEW_LOCKED };
   return createAllReviewSessionForUser(supabase, user.id, {
     onlyDue: input?.onlyDue ?? false,
     includeResolved: input?.includeResolved ?? false,
@@ -250,7 +263,7 @@ export async function createDueReviewSession(): Promise<CreateReviewResult> {
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
   if (!(await isPremium(supabase, user.id))) {
-    return { error: "복습은 멤버십 기능이에요." };
+    return { error: REVIEW_LOCKED };
   }
 
   // 두고 나온 세션이 있으면 새로 만들지 않고 그리로 보낸다. 새로 만들면 기기에
@@ -288,7 +301,7 @@ export async function createExtraReviewSession(): Promise<CreateReviewResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
   if (!(await isPremium(supabase, user.id))) {
-    return { error: "복습은 멤버십 기능이에요." };
+    return { error: REVIEW_LOCKED };
   }
 
   const { items, error } = await collectExtraQueueItems(supabase, user.id);
@@ -304,7 +317,7 @@ export async function restoreSuspendedReview(): Promise<RestoreSuspendedActionRe
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
   if (!(await isPremium(supabase, user.id))) {
-    return { error: "복습은 멤버십 기능이에요." };
+    return { error: REVIEW_LOCKED };
   }
   return restoreSuspendedQuestions(supabase, user.id);
 }
@@ -323,7 +336,7 @@ export async function toggleReviewSubjectPaused(input: {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
   if (!(await isPremium(supabase, user.id))) {
-    return { error: "복습은 멤버십 기능이에요." };
+    return { error: REVIEW_LOCKED };
   }
 
   return setSubjectPaused(supabase, user.id, subjectId, input.paused === true);
@@ -336,7 +349,7 @@ export async function setReviewDailyLimit(input: {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
   if (!(await isPremium(supabase, user.id))) {
-    return { error: "복습은 멤버십 기능이에요." };
+    return { error: REVIEW_LOCKED };
   }
   return setDailyLimit(supabase, user.id, Number(input?.limit));
 }
@@ -347,7 +360,7 @@ export async function spreadReviewBacklog(): Promise<SpreadBacklogResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
   if (!(await isPremium(supabase, user.id))) {
-    return { error: "복습은 멤버십 기능이에요." };
+    return { error: REVIEW_LOCKED };
   }
   return spreadOverdueBacklog(supabase, user.id);
 }
@@ -400,11 +413,16 @@ export async function createReviewFromWrong(input: {
   const items = Array.isArray(input?.items) ? input.items : [];
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!(await isPremium(supabase, user.id))) return { error: REVIEW_LOCKED };
   return createReviewSessionFromItems(supabase, user.id, items);
 }
 
 export type SubmitReviewResult = { error?: string; view?: ReviewSessionView };
 
+// 채점은 멤버십으로 막지 않는다. 세션을 만드는 경로가 전부 막혀 있으므로 무료 회원이
+// 새로 풀기 시작할 수는 없고, 여기서 막으면 풀던 도중 체험이 끝난 사람의 답안이
+// 통째로 날아간다 — 이미 한 일을 마무리하는 것까지 뺏을 이유가 없다("찍었어요"를
+// 열어둔 것과 같은 이유).
 export async function submitReviewSession(input: {
   sessionId: string;
   answers: (number | null)[];

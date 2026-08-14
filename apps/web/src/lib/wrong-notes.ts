@@ -1252,10 +1252,14 @@ export type AttemptWrongNote = {
   }[];
 };
 
+// includeExplanations=false 면 해설을 아예 조회하지 않고 null로 채운다. 응시 기록
+// 상세는 무료 회원도 보는 화면이라(점수·틀린 문항 확인은 CBT의 일부다) 화면 자체는
+// 남기되, 해설만 빼서 "무료는 하루 문제지 3개"라는 한도가 이 경로로 새지 않게 한다.
 export async function getAttemptWrongNote(
   supabase: Supabase,
   userId: string,
   attemptId: string,
+  includeExplanations = true,
 ): Promise<AttemptWrongNote | null> {
   const { data: attemptRow } = await supabase
     .from("cbt_attempts")
@@ -1304,7 +1308,9 @@ export async function getAttemptWrongNote(
       ? await Promise.all([
           fetchQuestionMedia(supabase, [paper.id]),
           fetchCorrectAnswers([paper.id]),
-          fetchExplanations([paper.id]),
+          includeExplanations
+            ? fetchExplanations([paper.id])
+            : new Map<string, Map<number, QuestionExplanationContent>>(),
         ])
       : [
           new Map<string, Map<number, QuestionMediaEntry>>(),

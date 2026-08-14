@@ -1403,3 +1403,30 @@ create policy "update own review preferences" on review_preferences
   for update to authenticated
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- ── 무료 회원 해설 일일 한도 ─────────────────────────────────────────────────
+-- 무료 회원은 하루에 문제지 3개까지 해설을 열어볼 수 있다(FREE_EXPLANATION_DAILY_PAPERS).
+-- 세는 단위가 "열람 횟수"가 아니라 "문제지"인 게 핵심이다 — 오늘 이미 연 문제지를
+-- 다시 여는 건 한도를 깎지 않는다. 보던 해설을 다시 보려다 한도가 줄면 아껴 쓰려고
+-- 탭을 못 닫는 이상한 사용법을 강요하게 된다.
+--
+-- 그래서 "몇 번 열었나"를 담는 explanation_access_log(수집 방지용 시간당 한도)와
+-- 따로 둔다. 이쪽은 (사용자, 날짜, 문제지)가 기본키라 같은 문제지를 몇 번 열어도
+-- 행이 하나뿐이고, 하루치 조회가 최대 세 행으로 끝난다. 로그를 distinct 로 세면
+-- 하루 수천 행을 훑어야 하는 것과 대비된다.
+--
+-- view_date 는 KST 달력 날짜(YYYY-MM-DD)다. AI 진단의 "일 1회"(ai_diagnoses.
+-- diagnosis_date)와 같은 기준을 써서, 사용자가 기억해야 할 하루 경계를 하나로 둔다.
+--
+-- 클라이언트가 직접 읽거나 쓸 일이 없는 내부 집계 전용 테이블이라 RLS만 켜두고
+-- 정책은 두지 않는다(explanation_access_log 와 동일). 쓰기를 열면 자기 기록을
+-- 지워 한도를 무한히 늘릴 수 있다.
+create table if not exists explanation_daily_views (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  view_date date not null,
+  paper_id uuid not null references exam_papers(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, view_date, paper_id)
+);
+
+alter table explanation_daily_views enable row level security;
