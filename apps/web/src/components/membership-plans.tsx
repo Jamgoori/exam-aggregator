@@ -65,30 +65,28 @@ export function MembershipPlans({ alreadyPremium }: { alreadyPremium: boolean })
                 )}
               </div>
 
-              {/* 월 환산가를 가장 크게 둔다. 사람이 요금제를 비교할 때 실제로 쓰는
-                  숫자가 이것이고, 총액만 크게 보이면 1년권이 제일 비싸 보인다. */}
+              {/* 실제로 결제할 금액(총액)을 가장 크게 둔다. 월 환산가를 크게 두면
+                  결제 버튼에 찍히는 숫자와 카드에서 본 숫자가 달라 놀라게 된다.
+                  월 환산가는 바로 아래에서 요금제끼리 비교할 수 있게 받쳐 준다. */}
               <div className="flex items-baseline gap-1">
                 <span className="text-2xl font-extrabold text-zinc-900 dark:text-zinc-100">
-                  월 {monthlyPrice.toLocaleString("ko-KR")}
+                  {plan.price.toLocaleString("ko-KR")}
                 </span>
                 <span className="text-sm text-zinc-500 dark:text-zinc-500">원</span>
               </div>
 
               <div className="flex flex-col gap-0.5 text-xs">
-                <span className="text-zinc-600 dark:text-zinc-400">
-                  {discountPercent > 0 && (
+                <span className="font-bold text-zinc-700 dark:text-zinc-300">
+                  월 {formatWon(monthlyPrice)} 꼴
+                </span>
+                {savedAmount > 0 ? (
+                  <span className="text-zinc-500 dark:text-zinc-500">
                     <span className="mr-1 text-zinc-400 line-through dark:text-zinc-600">
                       {formatWon(baselinePrice)}
                     </span>
-                  )}
-                  <span className="font-bold text-zinc-900 dark:text-zinc-100">
-                    {formatWon(plan.price)}
-                  </span>
-                  <span className="text-zinc-500 dark:text-zinc-500"> / {plan.label}</span>
-                </span>
-                {savedAmount > 0 ? (
-                  <span className="font-bold text-red-600 dark:text-red-400">
-                    {formatWon(savedAmount)} 아껴요
+                    <span className="font-bold text-red-600 dark:text-red-400">
+                      {formatWon(savedAmount)} 아껴요
+                    </span>
                   </span>
                 ) : (
                   <span className="text-zinc-400 dark:text-zinc-600">기준 요금</span>

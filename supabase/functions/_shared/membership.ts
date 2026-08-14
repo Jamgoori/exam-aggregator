@@ -1,21 +1,24 @@
-// packages/core/src/membership.ts + 웹 src/lib/membership.ts 포팅(체험 시작 부분만).
+// packages/core/src/membership.ts + 웹 src/lib/membership.ts 의 Deno 포팅본.
 // 판정 규칙의 정본은 core 쪽이다 — TRIAL_DAYS를 바꿀 때는 양쪽을 함께 고칠 것.
 // deno-lint-ignore-file no-explicit-any
 
 // 출시 이벤트: 2달(60일) 무료. packages/core/src/membership.ts 와 반드시 같은 값.
 export const TRIAL_DAYS = 60;
 
-// 아직 체험을 안 쓴 사용자의 체험을 켠다. 첫 CBT 채점에서만 부른다 — 가입 직후엔
-// 오답이 0개라 복습 큐가 비어 있어서, 가입일 기준으로 재면 체험 앞부분을 오답 쌓는
-// 데 다 쓰게 된다.
+// 아직 무료 기간을 안 쓴 계정의 무료 기간을 켠다. 이벤트 안내가 "가입하는 순간부터"
+// 라서, 무언가를 하기 전에 이미 켜져 있어야 한다 — 아래 isPremiumUser 와 채점 경로
+// (status.ts)가 부른다.
 //
-// started_at is null 을 조건에 건 단일 UPDATE라 동시 채점이 겹쳐도 체험이 두 번
-// 시작되지 않는다(두 번째 UPDATE는 0행 갱신). 실패해도 채점은 막지 않는다.
-export async function startTrialIfEligible(admin: any, userId: string): Promise<void> {
+// started_at is null 을 조건에 건 단일 UPDATE라 요청이 겹쳐도 두 번 시작되지 않는다
+// (두 번째 UPDATE는 0행 갱신). 그래서 기간이 슬금슬금 연장되지 않는다.
+//
+// 갱신된 행을 돌려준다(이미 켜져 있었거나 실패했으면 null). 호출부가 "정말 켜졌는지"를
+// 지어내지 않고 DB 가 돌려준 값으로 판단할 수 있게 하려는 것.
+export async function startTrialIfEligible(admin: any, userId: string): Promise<any> {
   const now = new Date();
   const expires = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
 
-  await admin
+  const { data } = await admin
     .from("memberships")
     .update({
       tier: "premium",
@@ -25,7 +28,10 @@ export async function startTrialIfEligible(admin: any, userId: string): Promise<
     })
     .eq("user_id", userId)
     .eq("source", "trial")
-    .is("started_at", null);
+    .is("started_at", null)
+    .select("tier, source, started_at, expires_at")
+    .maybeSingle();
+  return data ?? null;
 }
 
 // 무료 회원이 하루에 해설을 열어볼 수 있는 문제지 수.
@@ -56,10 +62,23 @@ export async function isPremiumUser(
 
   const { data } = await admin
     .from("memberships")
-    .select("tier, expires_at")
+    .select("tier, source, started_at, expires_at")
     .eq("user_id", userId)
     .maybeSingle();
-  if (!data || data.tier !== "premium") return false;
+  if (!data) return false;
+
+  // 무료 기간은 가입 순간부터다. 앱에서 가입한 사람은 웹 로그인 콜백을 타지 않으므로
+  // 아직 안 켜져 있으면 여기서 켠다 — 안 그러면 앱 사용자만 첫 채점 전까지 잠긴다.
+  // 처음 한 번뿐이고(started_at 이 채워지면 이 분기를 지나가지 않는다), 켠 직후에는
+  // 방금 부여한 기간이 유효하므로 그대로 프리미엄이다.
+  if (data.source === "trial" && data.started_at === null) {
+    // 켠 결과를 DB 가 돌려준 행으로 확인한다. 무조건 true 를 돌려주면 쓰기가 실패했을
+    // 때 매 요청마다 유료 기능이 열린다.
+    const started = await startTrialIfEligible(admin, userId);
+    return !!started;
+  }
+
+  if (data.tier !== "premium") return false;
   // expires_at 이 null 이면 만료 없음(정기결제 중).
   if (data.expires_at === null) return true;
   return new Date(data.expires_at).getTime() > Date.now();

@@ -1,27 +1,25 @@
 // 멤버십 판정 — 웹·모바일 공유(순수 계산).
 //
-// 복습(간격 반복)은 유료 전용이고, 무료 사용자는 기존 섞어풀기를 그대로 쓴다.
-// 신규·기존 사용자 모두 체험을 한 번 받는데, 체험 시작은 "가입일"이 아니라 "첫 CBT
-// 채점일"이다 — 가입 직후엔 오답이 0개라 복습 큐가 비어 있어서, 가입일 기준으로 재면
-// 체험 앞부분을 오답 쌓는 데 다 쓰게 된다.
+// 오답노트·복습(간격 반복)·AI 약점 진단은 유료 전용이고, 해설은 무료 회원에게 하루
+// 한도가 있다. 무료 기간은 계정당 한 번 주어지며 가입(첫 로그인) 순간부터 흐른다.
 //
 // 만료는 읽는 시점에 계산한다(크론 없음). expires_at이 지났으면 그 순간부터 free.
 
 // 출시 이벤트: 2달(60일) 무료. 이벤트가 끝나면 이 값을 되돌리면 되고, 그 시점에
-// 이미 시작된 체험은 memberships.expires_at 에 날짜가 박혀 있어 영향받지 않는다
+// 이미 시작된 무료 기간은 memberships.expires_at 에 날짜가 박혀 있어 영향받지 않는다
 // (만료는 읽는 시점에 expires_at 으로만 판정한다).
 //
 // 바꿀 때는 supabase/functions/_shared/membership.ts 의 TRIAL_DAYS 도 반드시 함께
-// 고칠 것 — 한쪽만 고치면 웹으로 채점했을 때와 앱으로 채점했을 때 체험 길이가
-// 달라진다(체험을 켜는 UPDATE 가 양쪽에 하나씩 있다).
+// 고칠 것 — 한쪽만 고치면 웹으로 접속했을 때와 앱으로 접속했을 때 무료 기간이
+// 달라진다(무료 기간을 켜는 UPDATE 가 양쪽에 하나씩 있다).
 export const TRIAL_DAYS = 60;
 
 // 무료 회원이 하루에 해설을 열어볼 수 있는 문제지 수. "문제지 3개"지 "3번"이 아니다 —
 // 오늘 이미 연 문제지를 다시 여는 건 카운트하지 않는다. 보던 해설을 다시 보려다
 // 한도가 깎이면, 아껴 쓰려고 탭을 못 닫는 이상한 사용법을 강요하게 된다.
 //
-// 하루의 경계는 복습과 같은 KST 04:00(srsDayIndex)을 쓴다. 자정으로 잡으면 새벽에
-// 공부하는 사람의 "오늘"이 공부 도중에 바뀐다.
+// 하루의 경계는 AI 진단의 "일 1회"와 같은 KST 달력 날짜다. 사용자가 기억해야 할
+// 하루 경계를 하나로 두려는 것.
 export const FREE_EXPLANATION_DAILY_PAPERS = 3;
 
 export type MembershipTier = "free" | "premium";
@@ -30,7 +28,7 @@ export type MembershipSource = "trial" | "paid";
 export type Membership = {
   tier: MembershipTier;
   source: MembershipSource;
-  // null이면 아직 체험이 시작되지 않았다(첫 CBT 채점 때 채워진다).
+  // null이면 아직 무료 기간이 시작되지 않았다(가입 후 첫 조회 때 채워진다).
   startedAt: string | null;
   // null이면 만료 없음(정기결제 중).
   expiresAt: string | null;
@@ -65,7 +63,7 @@ export function trialDaysLeft(
   return Math.ceil(ms / (24 * 60 * 60 * 1000));
 }
 
-// 아직 체험을 쓰지 않은 사용자인지(= 첫 CBT 채점 때 체험을 켜줄 대상).
+// 아직 무료 기간을 쓰지 않은 사용자인지(= 지금 켜줄 대상).
 export function isTrialUnstarted(membership: Membership | null | undefined): boolean {
   return membership?.source === "trial" && membership.startedAt === null;
 }
