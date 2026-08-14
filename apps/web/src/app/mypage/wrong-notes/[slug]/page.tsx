@@ -11,6 +11,8 @@ import { SubjectWrongNoteQuestions } from "@/components/subject-wrong-note-quest
 import { SubjectPaperList } from "@/components/subject-paper-list";
 import { WrongNoteViewTabs } from "@/components/wrong-note-view-tabs";
 import { subjectColor } from "@/lib/subject-colors";
+import { isPremium } from "@/lib/membership";
+import { MembershipLockedPage } from "@/components/membership-upsell";
 
 type ViewKey = "papers" | "questions";
 
@@ -53,6 +55,21 @@ export default async function SubjectWrongNotePage({
 
   const subject = await getSubjectBySlug(supabase, slug);
   if (!subject) notFound();
+
+  // 오답노트는 멤버십 기능이다. 화면에서 링크를 숨기는 것과 별개로 주소로 직접
+  // 들어올 수 있으므로 여기서도 막는다 — 아래의 집계는 회독이 쌓인 계정에서 꽤
+  // 무거워서, 못 볼 화면을 위해 돌리고 버릴 이유도 없다.
+  if (!(await isPremium(supabase, user.id))) {
+    return (
+      <MembershipLockedPage
+        title={`${subject.name} 오답노트는 멤버십 기능이에요`}
+        description="틀린 문제가 문제지별·문항별로 정리되고, 해설과 메모를 붙여 다시 풀 수 있어요. 지금까지 쌓인 오답은 그대로 남아 있어요."
+        backHref="/mypage?tab=wrong-notes"
+        backLabel="마이페이지로"
+        next={`/mypage/wrong-notes/${slug}`}
+      />
+    );
+  }
 
   return (
     <SubjectWrongNoteShell

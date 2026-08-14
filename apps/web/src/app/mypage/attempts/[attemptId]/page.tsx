@@ -13,6 +13,8 @@ import { levelColor } from "@/lib/level-colors";
 import { paperHref, paperCbtHref } from "@/lib/paper-href";
 import { examTypeColor } from "@/lib/exam-type-colors";
 import { subjectColor } from "@/lib/subject-colors";
+import { isPremium } from "@/lib/membership";
+import { MembershipUpsell } from "@/components/membership-upsell";
 
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
@@ -39,7 +41,11 @@ export default async function AttemptWrongNotePage({
     );
   }
 
-  const note = await getAttemptWrongNote(supabase, user.id, attemptId);
+  // 점수·틀린 문항 확인은 CBT의 일부라 무료 회원에게도 그대로 열어둔다. 해설만
+  // 멤버십 기준을 따른다 — 여기서 전부 내주면 "무료는 하루 문제지 3개"라는 한도가
+  // 이 화면으로 통째로 새고, 해설 페이지의 한도만 지키는 셈이 된다.
+  const premium = await isPremium(supabase, user.id);
+  const note = await getAttemptWrongNote(supabase, user.id, attemptId, premium);
   if (!note) notFound();
 
   const { attempt, paper, questions } = note;
@@ -142,6 +148,13 @@ export default async function AttemptWrongNotePage({
               />
             ))}
           </div>
+          {!premium && (
+            <MembershipUpsell
+              title="이 문항들의 해설이 궁금하다면"
+              description="멤버십은 해설을 제한 없이 볼 수 있고, 틀린 문제가 과목별 오답노트로 정리돼 복습 일정까지 이어져요."
+              next={`/mypage/attempts/${attemptId}`}
+            />
+          )}
         </section>
       )}
 

@@ -10,7 +10,10 @@ import {
 } from "@/components/wrong-note-question-card";
 import { PrintButton } from "@/components/print-button";
 import { ExplanationAutoPrint } from "@/components/explanation-auto-print";
-import { checkExplanationAccess } from "@/lib/explanation-rate-limit";
+import { resolveExplanationAccess } from "@/lib/explanation-rate-limit";
+import { isPremium } from "@/lib/membership";
+import { MembershipUpsell } from "@/components/membership-upsell";
+import { FREE_EXPLANATION_DAILY_PAPERS } from "@gongmoa/core";
 import { levelColor } from "@/lib/level-colors";
 import { examTypeColor } from "@/lib/exam-type-colors";
 import { subjectColor } from "@/lib/subject-colors";
@@ -68,13 +71,20 @@ export default async function PaperExplanationsPage({
   } = await supabase.auth.getUser();
   const loggedIn = !!user;
 
-  // 로그인 사용자만 레이트리밋 대상이다 — 비로그인은 어차피 미리보기만 보이므로
+  // 로그인 사용자만 한도 판정 대상이다 — 비로그인은 어차피 미리보기만 보이므로
   // 별도로 셀 필요가 없다. 상세페이지의 "해설 열기"/"다운로드" 아이콘이 각각
-  // view/download로 들어오므로, 같은 사람이라도 두 한도가 독립적으로 소진된다.
-  const withinRateLimit = loggedIn
-    ? await checkExplanationAccess(user!.id, paper.id, isDownload ? "download" : "view")
-    : true;
-  const hasFullAccess = loggedIn && withinRateLimit;
+  // view/download로 들어오므로, 같은 사람이라도 시간당 한도는 독립적으로 소진된다.
+  // 무료 회원의 하루 몫은 반대로 둘을 합쳐 문제지 단위로 센다 — "이 문제지 해설을
+  // 오늘 봤는가"가 기준이라, 같은 문제지를 열람했다가 내려받는 건 한 개다.
+  const access = loggedIn
+    ? await resolveExplanationAccess({
+        userId: user!.id,
+        paperId: paper.id,
+        action: isDownload ? "download" : "view",
+        premium: await isPremium(supabase, user!.id),
+      })
+    : null;
+  const hasFullAccess = loggedIn && access!.full;
 
   const questions = await getPaperExplanations(supabase, paper);
 
@@ -162,6 +172,27 @@ export default async function PaperExplanationsPage({
           )}
         </div>
 
+        {/* 무료 회원에게만 오늘 남은 몫을 알린다. 다 쓴 뒤에 처음 알게 되면
+            "왜 갑자기 막혔지"가 되므로, 열람에 성공한 화면에서 미리 보여준다.
+            유료·관리자는 remainingToday가 null이라 이 줄이 아예 없다. */}
+        {hasFullAccess && access?.remainingToday != null && (
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-500 print:hidden dark:bg-zinc-800/50 dark:text-zinc-400">
+            <span>
+              오늘 남은 무료 해설{" "}
+              <span className="font-bold text-zinc-700 dark:text-zinc-200">
+                {access.remainingToday}개
+              </span>{" "}
+              · 오늘 열어본 문제지는 다시 봐도 차감되지 않아요
+            </span>
+            <Link
+              href="/membership"
+              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              제한 없이 보기 →
+            </Link>
+          </p>
+        )}
+
         {paper.question_count != null && questions.length < paper.question_count && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
             일부 문항({paper.question_count - questions.length}개)의 해설은 아직 준비
@@ -190,12 +221,22 @@ export default async function PaperExplanationsPage({
         ))}
       </div>
 
-      {!hasFullAccess && hiddenQuestionCount > 0 && (
+      {!hasFullAccess && hiddenQuestionCount > 0 && access?.reason === "free-quota" && (
+        <MembershipUpsell
+          title="오늘 무료로 볼 수 있는 해설을 다 봤어요"
+          description={`무료 회원은 하루에 문제지 ${FREE_EXPLANATION_DAILY_PAPERS}개까지 해설을 볼 수 있어요. 오늘 이미 열어본 문제지는 계속 다시 볼 수 있고, 매일 자정(한국 시간)에 다시 ${FREE_EXPLANATION_DAILY_PAPERS}개가 열려요. 멤버십은 해설을 제한 없이 볼 수 있어요.`}
+          next={paperExplanationsHref(paper)}
+        />
+      )}
+
+      {!hasFullAccess && hiddenQuestionCount > 0 && access?.reason !== "free-quota" && (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-6 py-10 text-center dark:border-blue-900 dark:bg-blue-950/30">
           {loggedIn ? (
             <>
               {/* 시간당 한도 초과: 로그인은 돼 있으니 로그인 유도 대신 "잠시 후"로만
-                  완만하게 안내한다 — 정상 사용자는 이 문구 자체를 볼 일이 없다. */}
+                  완만하게 안내한다 — 정상 사용자는 이 문구 자체를 볼 일이 없다.
+                  무료 한도(위 분기)와 절대 섞지 않는다: 수집 시도를 "결제하면 됩니다"로
+                  안내하게 되고, 반대로 정상 사용자에게는 결제하면 풀린다는 거짓말이 된다. */}
               <Hourglass size={28} className="text-blue-600 dark:text-blue-400" />
               <p className="font-semibold">잠시 후 다시 시도해주세요</p>
               <p className="text-sm text-zinc-500 dark:text-zinc-500">

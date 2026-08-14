@@ -9,6 +9,14 @@
 
 export const TRIAL_DAYS = 14;
 
+// 무료 회원이 하루에 해설을 열어볼 수 있는 문제지 수. "문제지 3개"지 "3번"이 아니다 —
+// 오늘 이미 연 문제지를 다시 여는 건 카운트하지 않는다. 보던 해설을 다시 보려다
+// 한도가 깎이면, 아껴 쓰려고 탭을 못 닫는 이상한 사용법을 강요하게 된다.
+//
+// 하루의 경계는 복습과 같은 KST 04:00(srsDayIndex)을 쓴다. 자정으로 잡으면 새벽에
+// 공부하는 사람의 "오늘"이 공부 도중에 바뀐다.
+export const FREE_EXPLANATION_DAILY_PAPERS = 3;
+
 export type MembershipTier = "free" | "premium";
 export type MembershipSource = "trial" | "paid";
 

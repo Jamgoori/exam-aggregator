@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CalendarCheck, HelpCircle, Lock, Settings, X } from "lucide-react";
 import { ReviewGuideModal } from "@/components/review-guide-modal";
@@ -294,7 +295,13 @@ export function ReviewDueCard({
 
       {trialDaysLeft != null && trialDaysLeft <= 3 && (
         <p className="text-xs font-medium text-blue-800 dark:text-blue-200">
-          체험 {trialDaysLeft}일 남음 · 끝나면 예약된 복습이 사라져요
+          체험 {trialDaysLeft}일 남음 · 끝나면 예약된 복습이 사라져요{" "}
+          <Link
+            href="/membership?next=%2Fmypage%3Ftab%3Dwrong-notes"
+            className="font-bold underline underline-offset-2"
+          >
+            요금제 보기
+          </Link>
         </p>
       )}
     </div>
@@ -385,17 +392,25 @@ export function ForecastStrip({ forecast }: { forecast: DueForecastDay[] }) {
   );
 }
 
+// 무료 회원이 보는 자리. 잠겼다는 사실만 알리고 끝내면 어디로 가야 풀리는지 알 수
+// 없어서, 카드 전체를 요금제 페이지 링크로 둔다.
 function LockedCard() {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3.5 dark:border-zinc-700 dark:bg-zinc-800/50">
+    <Link
+      href="/membership?next=%2Fmypage%3Ftab%3Dwrong-notes"
+      className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3.5 transition-colors hover:border-blue-300 hover:bg-blue-50/50 dark:border-zinc-700 dark:bg-zinc-800/50 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+    >
       <Lock size={16} className="shrink-0 text-zinc-400 dark:text-zinc-500" />
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="text-sm font-bold text-zinc-700 dark:text-zinc-300">오늘의 복습</p>
         <p className="text-xs text-zinc-500 dark:text-zinc-500">
           틀린 문제를 언제 다시 볼지 문항마다 계산해서 그날 것만 보여줘요 · 멤버십
         </p>
       </div>
-    </div>
+      <span className="shrink-0 text-xs font-bold text-blue-600 dark:text-blue-400">
+        요금제 보기 ›
+      </span>
+    </Link>
   );
 }
 

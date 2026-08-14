@@ -27,6 +27,9 @@ export function SiteFooter() {
           <Link href="/subjects" className="hover:text-zinc-600 dark:hover:text-zinc-300">
             과목별 기출문제
           </Link>
+          <Link href="/membership" className="hover:text-zinc-600 dark:hover:text-zinc-300">
+            멤버십 요금제
+          </Link>
           <Link href="/terms" className="hover:text-zinc-600 dark:hover:text-zinc-300">
             이용약관
           </Link>

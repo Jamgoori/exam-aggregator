@@ -2,14 +2,21 @@
 // question_explanations 는 둘 다 admin 전용 RLS(일반 select 완전 차단)라 service_role
 // 로만 읽는다 — CBT 채점과 같은 이유(정답 유출 방지).
 //
-// 접근 규칙(웹과 동일):
+// 접근 규칙(웹 papers/[id]/explanations/page.tsx 와 동일):
 //  - 비로그인: 미리보기 ANON_PREVIEW_CARDS 문항만.
 //  - 로그인: 시간당 조회 40회 넘으면(explanation_access_log, admin 전용) 마찬가지로
 //    미리보기만 — 계정 만들어 문제지 ID 순회 크롤링을 늦추는 목적, 정상 사용자는
 //    걸릴 일 없음. 조회 자체는 막지 않고 "잠시 후" 로만 안내.
+//  - 무료 회원: 위를 통과해도 하루 문제지 3개까지만(FREE_EXPLANATION_DAILY_PAPERS).
+//    오늘 이미 연 문제지를 다시 여는 건 한도를 깎지 않는다.
+//
+// 막힌 이유(reason)를 응답에 실어 준다 — 앱이 "잠시 후 다시"와 결제 유도를 구분해서
+// 보여줘야 하기 때문이다. 둘을 섞으면 수집 시도에 결제를 권하거나, 정상 사용자에게
+// 결제하면 풀린다는 거짓말을 하게 된다.
 import { corsHeaders, isUuid, json } from "../_shared/cbt.ts";
 import { adminClient, getOptionalUser, storagePublicUrl } from "../_shared/clients.ts";
 import { toExplanationContent } from "../_shared/explanations.ts";
+import { consumeFreeExplanationQuota, isPremiumUser } from "../_shared/membership.ts";
 
 const ANON_PREVIEW_CARDS = 2;
 const VIEW_HOURLY_LIMIT = 40;
@@ -27,8 +34,9 @@ Deno.serve(async (req) => {
   if (!isUuid(paperId)) return json({ error: "잘못된 접근입니다." }, 400);
 
   const admin = adminClient();
-  const userId = await getOptionalUser(req);
-  const loggedIn = !!userId;
+  const user = await getOptionalUser(req);
+  const userId = user?.userId ?? null;
+  const loggedIn = !!user;
 
   let withinRateLimit = true;
   if (loggedIn) {
@@ -46,7 +54,18 @@ Deno.serve(async (req) => {
         .insert({ user_id: userId, paper_id: paperId, action: "view" });
     }
   }
-  const hasFullAccess = loggedIn && withinRateLimit;
+
+  // 시간당 한도를 먼저 본다. 한도에 걸린 요청 때문에 그날 무료 몫이 깎이면 안 된다.
+  let lockReason: "rate-limit" | "free-quota" | null = withinRateLimit
+    ? null
+    : "rate-limit";
+  if (loggedIn && withinRateLimit) {
+    const premium = await isPremiumUser(admin, user!.userId, user!.email);
+    if (!premium && !(await consumeFreeExplanationQuota(admin, user!.userId, paperId))) {
+      lockReason = "free-quota";
+    }
+  }
+  const hasFullAccess = loggedIn && lockReason === null;
 
   // 정답.
   const { data: paperAnswers } = await admin
@@ -129,5 +148,7 @@ Deno.serve(async (req) => {
     hiddenCount,
     hasFullAccess,
     loggedIn,
+    // null | "rate-limit" | "free-quota" — 앱이 안내 문구를 고르는 데 쓴다.
+    lockReason,
   });
 });
