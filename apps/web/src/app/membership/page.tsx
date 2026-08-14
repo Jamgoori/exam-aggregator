@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { MembershipPlans } from "@/components/membership-plans";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
+import { isTossConfigured } from "@/lib/toss";
 import {
   BASE_MONTHLY_PRICE,
   FREE_EXPLANATION_DAILY_PAPERS,
@@ -47,6 +48,9 @@ export default async function MembershipPage({
     : [null, false];
   const premium = admin || isPremiumMembership(membership);
   const daysLeft = admin ? null : trialDaysLeft(membership);
+  // PG 키가 설정된 환경에서만 결제창이 열린다. 키가 없으면 버튼도 안내도 예전처럼
+  // "준비 중"으로 남는다 — 계약이 끝나기 전에 이 코드가 배포돼도 안전하게 하려는 것.
+  const paymentEnabled = isTossConfigured();
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 pb-16 pt-6 sm:pt-10">
@@ -74,7 +78,7 @@ export default async function MembershipPage({
       {/* 요금제 */}
       <section className="flex flex-col gap-4">
         <SectionTitle>요금제</SectionTitle>
-        <MembershipPlans alreadyPremium={premium} />
+        <MembershipPlans alreadyPremium={premium} paymentEnabled={paymentEnabled} />
       </section>
 
       {/* 무료 vs 멤버십 */}
@@ -103,8 +107,19 @@ export default async function MembershipPage({
       {/* 자주 묻는 질문 */}
       <section className="flex flex-col gap-4">
         <SectionTitle>자주 묻는 질문</SectionTitle>
-        <Faq />
+        <Faq paymentEnabled={paymentEnabled} />
       </section>
+
+      {user && (
+        <p className="-mt-4 text-center text-xs text-zinc-500 dark:text-zinc-500">
+          <Link
+            href="/mypage/payments"
+            className="underline underline-offset-2 hover:text-blue-600 dark:hover:text-blue-400"
+          >
+            내 결제 내역 보기
+          </Link>
+        </p>
+      )}
 
       <p className="text-center text-xs leading-5 text-zinc-400 dark:text-zinc-600">
         표시된 금액은 부가세 포함 금액입니다. 결제·환불 조건은{" "}
@@ -273,12 +288,22 @@ function Cell({ value, highlight }: { value: string | boolean; highlight?: boole
   );
 }
 
-// 결제가 열리기 전이라, 답을 쓸 수 있는 것만 쓴다. "언제든 해지 가능" 같은 문장은
-// 해지 화면이 실제로 생긴 뒤에 넣을 것 — 지금 적으면 지킬 수 없는 약속이 된다.
-const FAQ: { q: string; a: React.ReactNode }[] = [
+// 답을 쓸 수 있는 것만 쓴다. "언제든 해지 가능" 같은 문장은 해지 화면이 실제로 생긴
+// 뒤에 넣을 것 — 지금 적으면 지킬 수 없는 약속이 된다.
+//
+// 첫 문답은 결제가 실제로 열렸는지에 따라 달라진다. 열린 뒤에도 "준비 중"이 남아
+// 있으면 결제한 사람이 자기 결제를 의심하게 된다.
+function faqItems(paymentEnabled: boolean): { q: string; a: React.ReactNode }[] {
+  return [
   {
     q: "결제하면 바로 쓸 수 있나요?",
-    a: (
+    a: paymentEnabled ? (
+      <>
+        네, 결제가 끝나면 바로 열려요. 남은 무료 기간이 있으면 <b>그 기간에 이어서</b>{" "}
+        더해 드리니, 일찍 결제한다고 손해 보지 않아요. 정기결제가 아니라 기간이 끝나면
+        자동으로 다시 결제되지 않습니다.
+      </>
+    ) : (
       <>
         결제 기능은 아직 준비 중이에요. 요금제와 가격은 이 페이지 내용대로 확정됐고,
         결제가 열리면 서비스 안에서 안내해 드릴게요.
@@ -321,12 +346,13 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
       </>
     ),
   },
-];
+  ];
+}
 
-function Faq() {
+function Faq({ paymentEnabled }: { paymentEnabled: boolean }) {
   return (
     <div className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
-      {FAQ.map((item) => (
+      {faqItems(paymentEnabled).map((item) => (
         <details key={item.q} className="group py-3">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-bold text-zinc-800 dark:text-zinc-200">
             {item.q}
