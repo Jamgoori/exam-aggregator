@@ -6,9 +6,11 @@ import { getMembership, isAdminUser } from "@/lib/membership";
 import { MembershipPlans } from "@/components/membership-plans";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
 import {
+  BASE_MONTHLY_PRICE,
   FREE_EXPLANATION_DAILY_PAPERS,
   TRIAL_DAYS,
   allPlanPricing,
+  formatWon,
   isPremiumMembership,
   trialDaysLeft,
 } from "@gongmoa/core";
@@ -59,9 +61,12 @@ export default async function MembershipPage({
 
       {/* 헤드라인 */}
       <header className="flex flex-col items-center gap-3 text-center">
-        <h1 className="break-keep text-3xl font-extrabold text-zinc-900 dark:text-zinc-100">
-          틀린 문제를 끝까지 <span className="text-blue-600 dark:text-blue-400">붙잡아 주는</span>{" "}
-          멤버십
+        {/* 좁은 화면에서 두 줄로 딱 떨어지게 줄바꿈을 직접 넣는다. 브라우저에 맡기면
+            "두 번은 안" / "틀리게" 처럼 어정쩡한 데서 접힌다. sm 이상은 한 줄. */}
+        <h1 className="break-keep text-3xl font-extrabold leading-tight text-zinc-900 dark:text-zinc-100">
+          한 번 틀린 문제,{" "}
+          <br className="sm:hidden" />
+          <span className="text-blue-600 dark:text-blue-400">두 번은 안 틀리게</span>
         </h1>
         <CurrentStatus premium={premium} admin={admin} daysLeft={daysLeft} loggedIn={!!user} />
       </header>
@@ -74,7 +79,7 @@ export default async function MembershipPage({
 
       {/* 무료 vs 멤버십 */}
       <section className="flex flex-col gap-4">
-        <SectionTitle>무료와 뭐가 다른가요</SectionTitle>
+        <SectionTitle>무료와 어떤 점이 다른가요</SectionTitle>
         <FeatureTable />
       </section>
 
@@ -88,11 +93,10 @@ export default async function MembershipPage({
           </span>
           지금 시작하면 {Math.round(TRIAL_DAYS / 30)}달 무료
         </p>
-        {/* 세 가지만 남긴다: 언제부터 세는지, 카드 안 받는다, 자동결제 안 된다.
-            "왜 가입일이 아니라 첫 채점일인가"는 읽는 사람이 궁금해할 얘기가 아니다
-            (가입 직후엔 오답이 없어 체험할 거리가 없다는 사정) — 코드 주석으로 족하다. */}
         <p className="break-keep text-sm leading-6 text-emerald-800/90 dark:text-emerald-300/80">
-          첫 CBT 채점일부터 {TRIAL_DAYS}일 · 카드 등록 없음 · 자동 결제 없음
+          이벤트 기간에 가입하시면 멤버십 전체를 {TRIAL_DAYS}일 동안 무료로 드려요.
+          가입하는 순간부터 바로 적용돼요 &mdash; 카드 등록 없고, 기간이 끝나도 자동으로
+          결제되지 않아요.
         </p>
       </section>
 
@@ -186,7 +190,7 @@ const FEATURE_ROWS: { label: string; free: string | boolean; premium: string | b
   { label: "댓글·난이도 평가·북마크", free: true, premium: true },
   {
     label: "문항 해설",
-    free: `하루 문제지 ${FREE_EXPLANATION_DAILY_PAPERS}개`,
+    free: `하루 ${FREE_EXPLANATION_DAILY_PAPERS}개`,
     premium: "제한 없음",
   },
   { label: "오답노트 전체 기능", free: false, premium: true },
@@ -305,10 +309,15 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
     q: "환불은 어떻게 하나요?",
     a: (
       <>
-        전자상거래법에 따라 결제일로부터 7일 이내에 멤버십 기능을 이용하지 않았다면
-        전액 환불해 드려요. 이미 이용한 경우에는 남은 기간만큼 계산해 돌려드립니다.
-        자세한 조건은 <Link href="/terms" className="underline underline-offset-2">이용약관</Link>에
-        있어요.
+        결제일로부터 7일 이내이고 멤버십 기능을 한 번도 쓰지 않았다면 전액 환불해
+        드려요. 이미 쓰기 시작한 뒤 해지하시면 남은 기간에 해당하는 금액에서 위약금
+        10%를 뺀 금액을 환불해 드립니다. 이때 이미 쓰신 기간은 할인 전 정상가(월{" "}
+        {formatWon(BASE_MONTHLY_PRICE)}) 기준으로 계산해요 &mdash; 장기 요금제 할인은
+        그 기간을 다 쓰는 것을 전제로 드린 것이라서요. 자세한 조건은{" "}
+        <Link href="/terms" className="underline underline-offset-2">
+          이용약관
+        </Link>
+        에 있어요.
       </>
     ),
   },

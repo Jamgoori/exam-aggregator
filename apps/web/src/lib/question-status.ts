@@ -179,13 +179,14 @@ export async function recordQuestionResults(
     }
   }
 
-  // 체험은 첫 CBT 채점에 켠다(가입일 기준이 아니라). 섞어풀기 채점은 이미 오답이
-  // 있다는 뜻이라 시작점으로 삼지 않는다.
+  // 무료 기간은 가입 순간에 켜지지만(로그인 콜백·getMembership), 그 두 경로를 모두
+  // 비껴간 계정이 남을 수 있어 채점 때도 한 번 확인한다. 이미 켠 계정은 안에서
+  // 0행 갱신으로 끝나므로 채점할 때마다 기간이 늘어나지 않는다.
   if (source === "cbt") {
     try {
       await startTrialIfEligible(userId);
     } catch {
-      // 무시: 체험 시작 실패가 채점을 막지 않는다.
+      // 무시: 무료 기간 시작 실패가 채점을 막지 않는다.
     }
   }
 }
