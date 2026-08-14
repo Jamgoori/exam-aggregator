@@ -88,12 +88,11 @@ export default async function MembershipPage({
           </span>
           지금 시작하면 {Math.round(TRIAL_DAYS / 30)}달 무료
         </p>
+        {/* 세 가지만 남긴다: 언제부터 세는지, 카드 안 받는다, 자동결제 안 된다.
+            "왜 가입일이 아니라 첫 채점일인가"는 읽는 사람이 궁금해할 얘기가 아니다
+            (가입 직후엔 오답이 없어 체험할 거리가 없다는 사정) — 코드 주석으로 족하다. */}
         <p className="break-keep text-sm leading-6 text-emerald-800/90 dark:text-emerald-300/80">
-          이벤트 기간에 처음 오신 분께는 멤버십 전체를 {TRIAL_DAYS}일 동안 무료로 열어
-          드려요. 무료 기간은 가입한 날이 아니라 <b>CBT로 문제를 처음 채점한 날</b>부터
-          시작해요 &mdash; 가입 직후엔 틀린 문제가 없어 복습할 거리도 없는데, 그 기간까지
-          세면 정작 써볼 게 없는 채로 며칠이 지나가거든요. 카드 정보는 받지 않고, 기간이
-          끝나도 자동으로 결제되지 않아요.
+          첫 CBT 채점일부터 {TRIAL_DAYS}일 · 카드 등록 없음 · 자동 결제 없음
         </p>
       </section>
 
