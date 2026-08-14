@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Check, Minus, Sparkles } from "lucide-react";
+import { Check, Minus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { MembershipPlans } from "@/components/membership-plans";
@@ -9,7 +9,6 @@ import {
   FREE_EXPLANATION_DAILY_PAPERS,
   TRIAL_DAYS,
   allPlanPricing,
-  formatWon,
   isPremiumMembership,
   trialDaysLeft,
 } from "@gongmoa/core";
@@ -60,18 +59,10 @@ export default async function MembershipPage({
 
       {/* 헤드라인 */}
       <header className="flex flex-col items-center gap-3 text-center">
-        <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white">
-          <Sparkles size={24} />
-        </span>
         <h1 className="break-keep text-3xl font-extrabold text-zinc-900 dark:text-zinc-100">
           틀린 문제를 끝까지 <span className="text-blue-600 dark:text-blue-400">붙잡아 주는</span>{" "}
           멤버십
         </h1>
-        <p className="max-w-lg break-keep text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-          기출을 푸는 건 무료입니다. 멤버십은 그다음 &mdash; 틀린 문제를 과목별로 모으고,
-          언제 다시 볼지 문항마다 계산해 그날 볼 것만 내주고, 어떤 개념이 약한지
-          짚어주는 기능이에요.
-        </p>
         <CurrentStatus premium={premium} admin={admin} daysLeft={daysLeft} loggedIn={!!user} />
       </header>
 
@@ -87,15 +78,21 @@ export default async function MembershipPage({
         <FeatureTable />
       </section>
 
-      {/* 체험 안내 */}
+      {/* 체험 안내 — 기간은 core 의 TRIAL_DAYS 하나에서 온다. 이벤트가 끝나 상수를
+          되돌리면 이 문구도 같이 바뀐다(개월 수를 여기 적어두면 상수만 바뀌고 화면은
+          옛 기간을 계속 광고하게 된다). */}
       <section className="flex flex-col gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-5 py-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
-        <p className="text-sm font-bold text-emerald-900 dark:text-emerald-200">
-          처음 오신 분께는 {TRIAL_DAYS}일 무료 체험이 있어요
+        <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-emerald-900 dark:text-emerald-200">
+          <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-extrabold text-white">
+            이벤트
+          </span>
+          지금 시작하면 {Math.round(TRIAL_DAYS / 30)}달 무료
         </p>
         <p className="break-keep text-sm leading-6 text-emerald-800/90 dark:text-emerald-300/80">
-          체험은 가입한 날이 아니라 <b>CBT로 문제를 처음 채점한 날</b>부터 시작해요.
-          가입 직후엔 틀린 문제가 없어 복습할 거리도 없는데, 그 기간을 체험으로 세면
-          정작 써볼 게 없는 채로 며칠이 지나가거든요. 카드 정보는 받지 않고, 체험이
+          이벤트 기간에 처음 오신 분께는 멤버십 전체를 {TRIAL_DAYS}일 동안 무료로 열어
+          드려요. 무료 기간은 가입한 날이 아니라 <b>CBT로 문제를 처음 채점한 날</b>부터
+          시작해요 &mdash; 가입 직후엔 틀린 문제가 없어 복습할 거리도 없는데, 그 기간까지
+          세면 정작 써볼 게 없는 채로 며칠이 지나가거든요. 카드 정보는 받지 않고, 기간이
           끝나도 자동으로 결제되지 않아요.
         </p>
       </section>
@@ -194,23 +191,32 @@ const FEATURE_ROWS: { label: string; free: string | boolean; premium: string | b
     premium: "제한 없음",
   },
   { label: "오답노트 전체 기능", free: false, premium: true },
-  { label: "복습 (간격 반복 스케줄)", free: false, premium: true },
+  { label: "복습 (간격 반복)", free: false, premium: true },
   { label: "AI 약점 진단", free: false, premium: true },
 ];
 
+// 좁은 화면에서 가로 스크롤이 생기지 않게 폭을 짠다. min-width 를 걸어두면 375px
+// 기기에서 표가 통째로 옆으로 밀려, 정작 비교하려는 두 칸이 화면 밖으로 나간다.
+// 값 칸만 고정폭(무료 4.5rem / 멤버십 5rem)으로 잡고 기능 이름은 남는 폭을 쓰며
+// break-keep 으로 접는다. overflow-x-auto 는 글자 크기를 키운 사용자를 위한 안전망.
 function FeatureTable() {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[26rem] border-collapse text-sm">
+      <table className="w-full table-fixed border-collapse text-sm">
+        <colgroup>
+          <col />
+          <col className="w-[4.5rem] sm:w-28" />
+          <col className="w-[5rem] sm:w-32" />
+        </colgroup>
         <thead>
           <tr className="border-b border-zinc-200 dark:border-zinc-700">
-            <th className="py-3 text-left font-medium text-zinc-500 dark:text-zinc-500">
+            <th className="py-3 text-left text-xs font-medium text-zinc-500 sm:text-sm dark:text-zinc-500">
               기능
             </th>
-            <th className="w-28 py-3 text-center font-medium text-zinc-500 dark:text-zinc-500">
+            <th className="py-3 text-center text-xs font-medium text-zinc-500 sm:text-sm dark:text-zinc-500">
               무료
             </th>
-            <th className="w-32 py-3 text-center font-bold text-blue-600 dark:text-blue-400">
+            <th className="py-3 text-center text-xs font-bold text-blue-600 sm:text-sm dark:text-blue-400">
               멤버십
             </th>
           </tr>
@@ -221,11 +227,13 @@ function FeatureTable() {
               key={row.label}
               className="border-b border-zinc-100 last:border-0 dark:border-zinc-800"
             >
-              <td className="py-3 pr-3 text-zinc-700 dark:text-zinc-300">{row.label}</td>
-              <td className="py-3 text-center">
+              <td className="break-keep py-3 pr-2 text-xs text-zinc-700 sm:pr-3 sm:text-sm dark:text-zinc-300">
+                {row.label}
+              </td>
+              <td className="px-1 py-3 text-center">
                 <Cell value={row.free} />
               </td>
-              <td className="bg-blue-50/40 py-3 text-center dark:bg-blue-950/20">
+              <td className="bg-blue-50/40 px-1 py-3 text-center dark:bg-blue-950/20">
                 <Cell value={row.premium} highlight />
               </td>
             </tr>
@@ -253,7 +261,7 @@ function Cell({ value, highlight }: { value: string | boolean; highlight?: boole
   }
   return (
     <span
-      className={`text-xs font-medium ${
+      className={`block break-keep text-[11px] font-medium leading-4 sm:text-xs ${
         highlight ? "text-blue-700 dark:text-blue-300" : "text-zinc-600 dark:text-zinc-400"
       }`}
     >
@@ -293,20 +301,6 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
         시작하면 쌓여 있던 그대로 이어서 쓸 수 있어요.
       </>
     ),
-  },
-  {
-    q: "기간이 긴 요금제가 왜 더 싼가요?",
-    a: (
-      <>
-        시험 준비는 몇 달 단위로 하는 일이라, 오래 쓰는 분에게 그만큼 돌려드리는 게
-        맞다고 봤어요. 1년 요금제는 1개월 요금제를 열두 번 결제할 때보다{" "}
-        <b>{formatWon(allPlanPricing()[2].savedAmount)}</b> 저렴합니다.
-      </>
-    ),
-  },
-  {
-    q: "웹에서 결제하면 앱에서도 되나요?",
-    a: <>네. 멤버십은 계정에 붙어서, 같은 계정으로 로그인하면 웹·앱 어디서나 적용돼요.</>,
   },
   {
     q: "환불은 어떻게 하나요?",
