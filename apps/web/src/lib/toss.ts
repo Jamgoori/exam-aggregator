@@ -20,10 +20,64 @@ function tossSecretKey(): string | null {
   return process.env.TOSS_SECRET_KEY || null;
 }
 
-// 결제 기능을 열지 말지의 유일한 판정. 두 키가 다 있어야 결제창부터 승인까지 완주할
-// 수 있다 — 하나만 있으면 결제창은 뜨는데 승인이 실패하는, 최악의 반쪽 상태가 된다.
+// 토스 키는 "종류"와 "모드"가 접두사에 박혀 있다.
+//   test_gck_ / test_gsk_ — 주문서형·결제창형 연동 키 (v2 SDK 가 쓰는 것)
+//   test_ck_  / test_sk_  — API 개별 연동 키 (기존 결제창·빌링·정산 API 용)
+// 앞의 test/live 가 모드, 뒤의 g 유무가 종류다.
+function parseTossKey(
+  key: string,
+): { mode: string; family: string; role: "client" | "secret" } | null {
+  const m = /^(test|live)_(g?)(ck|sk)_/.exec(key);
+  if (!m) return null;
+  return {
+    mode: m[1],
+    family: m[2] === "g" ? "general" : "api",
+    role: m[3] === "ck" ? "client" : "secret",
+  };
+}
+
+// 클라이언트 키와 시크릿 키가 같은 쌍인지 검사한다.
+//
+// 이게 왜 필요한가: 토스 대시보드는 서로 다른 두 쌍(주문서형용 gck/gsk, API 개별
+// 연동용 ck/sk)을 한 화면에 나란히 보여준다. 복사하다 한 줄씩 어긋나게 집기 쉽고,
+// 어긋나면 **결제창은 정상으로 뜨는데 승인 단계에서만 실패한다** — 사용자가 카드
+// 정보를 다 넣고 인증까지 마친 다음에야 깨지는, 가장 나쁜 자리에서 터진다.
+//
+// 더 위험한 건 모드가 섞이는 경우다. live 클라이언트 키 + test 시크릿 키면 사용자는
+// 실제 카드로 결제하는데 우리는 테스트 환경에 승인을 요청하게 된다.
+//
+// 어긋나면 결제를 아예 열지 않는다(화면은 "준비 중"으로 남는다). 반쪽으로 열어두는
+// 것보다 닫아두는 쪽이 낫다.
+export function keysMatch(clientKey: string, secretKey: string): boolean {
+  const client = parseTossKey(clientKey);
+  const secret = parseTossKey(secretKey);
+  if (!client || !secret) return false;
+
+  // 각자 제 역할의 키인지부터 본다. 시크릿 키가 NEXT_PUBLIC_ 자리에 들어가는 것은
+  // 단순 오설정이 아니라 시크릿 유출이다 — NEXT_PUBLIC_ 값은 브라우저 번들에 그대로
+  // 박혀서 모든 방문자에게 배포된다. 여기서 막아 결제 자체를 열지 않는다.
+  if (client.role !== "client" || secret.role !== "secret") return false;
+
+  return client.mode === secret.mode && client.family === secret.family;
+}
+
+// 결제 기능을 열지 말지의 유일한 판정. 두 키가 다 있고 서로 같은 쌍이어야 결제창부터
+// 승인까지 완주할 수 있다.
 export function isTossConfigured(): boolean {
-  return !!tossClientKey() && !!tossSecretKey();
+  const clientKey = tossClientKey();
+  const secretKey = tossSecretKey();
+  if (!clientKey || !secretKey) return false;
+
+  if (!keysMatch(clientKey, secretKey)) {
+    // 설정 실수는 조용히 넘어가면 안 된다. 화면만 보면 "아직 연동 안 했나 보다"로
+    // 보여서, 키를 넣어놓고 왜 안 열리는지 한참 헤매게 된다.
+    console.error(
+      "[toss] 클라이언트 키와 시크릿 키가 같은 쌍이 아닙니다. 결제를 열지 않습니다. " +
+        "(주문서형은 gck/gsk 끼리, API 개별 연동은 ck/sk 끼리, test/live 모드도 일치해야 합니다)",
+    );
+    return false;
+  }
+  return true;
 }
 
 // 토스 인증 헤더. 시크릿 키를 아이디로 쓰는 HTTP Basic (비밀번호는 빈 문자열).
