@@ -15,7 +15,13 @@ export type TossRequestPaymentParams = {
   failUrl: string;
   card?: {
     useEscrow?: boolean;
-    flowMode?: "DEFAULT";
+    // DEFAULT — 카드/간편결제 통합결제창(사용자가 창 안에서 수단을 고른다).
+    // DIRECT  — easyPay 에 적은 간편결제가 곧장 열린다(자체창). 우리 화면에서 이미
+    //           "카카오페이"를 고른 사람에게 수단 선택을 한 번 더 시키지 않으려는 것.
+    flowMode?: "DEFAULT" | "DIRECT";
+    // 간편결제사 코드(KAKAOPAY·NAVERPAY 등). flowMode 가 DIRECT 일 때만 의미가 있다 —
+    // DEFAULT 에서는 이 값과 상관없이 통합결제창이 열린다.
+    easyPay?: string;
     useCardPoint?: boolean;
     useAppCardOnly?: boolean;
   };

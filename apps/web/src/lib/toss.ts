@@ -1,4 +1,5 @@
 import "server-only";
+import { parseEasyPayMethods, type EasyPayCode } from "./easy-pay";
 
 // 토스페이먼츠 API 클라이언트(서버 전용).
 //
@@ -78,6 +79,21 @@ export function isTossConfigured(): boolean {
     return false;
   }
   return true;
+}
+
+// 요금제 페이지에 따로 버튼을 둘 간편결제 목록(카카오페이·네이버페이 등).
+//
+// 계약이 끝난 수단만 적는다 — 자세한 이유와 값 형식은 easy-pay.ts 주석 참고.
+// 설정하지 않으면 빈 배열이고, 결제 버튼은 지금까지처럼 카드/간편결제 통합결제창
+// 하나만 연다. 즉 이 변수를 모르는 환경은 아무것도 달라지지 않는다.
+//
+// NEXT_PUBLIC_ 을 붙이지 않았다. 붙이면 값이 빌드 시점에 번들로 굳어서, 계약이 끝나
+// 수단을 켤 때 재배포가 필요해진다. 서버에서 읽어 화면으로 내려보내면 환경변수만
+// 바꿔도 다음 요청부터 반영된다.
+export function enabledEasyPayMethods(): EasyPayCode[] {
+  // 결제 자체가 닫혀 있으면(키 미설정·키 쌍 불일치) 결제수단도 고르게 하지 않는다.
+  if (!isTossConfigured()) return [];
+  return parseEasyPayMethods(process.env.TOSS_EASY_PAY_METHODS);
 }
 
 // 토스 인증 헤더. 시크릿 키를 아이디로 쓰는 HTTP Basic (비밀번호는 빈 문자열).

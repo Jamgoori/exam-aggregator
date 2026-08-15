@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { MembershipPlans } from "@/components/membership-plans";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
-import { isTossConfigured } from "@/lib/toss";
+import { enabledEasyPayMethods, isTossConfigured } from "@/lib/toss";
 import {
   BASE_MONTHLY_PRICE,
   FREE_EXPLANATION_DAILY_PAPERS,
@@ -51,6 +51,10 @@ export default async function MembershipPage({
   // PG 키가 설정된 환경에서만 결제창이 열린다. 키가 없으면 버튼도 안내도 예전처럼
   // "준비 중"으로 남는다 — 계약이 끝나기 전에 이 코드가 배포돼도 안전하게 하려는 것.
   const paymentEnabled = isTossConfigured();
+  // 요금제 아래에 따로 버튼을 둘 간편결제(카카오페이·네이버페이 등). 계약이 끝난 수단만
+  // 환경변수에 적혀 있고, 비어 있으면 결제수단 줄이 아예 그려지지 않는다 — 지금까지처럼
+  // 결제 버튼 하나가 카드/간편결제 통합결제창을 연다.
+  const easyPayMethods = paymentEnabled ? enabledEasyPayMethods() : [];
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 pb-16 pt-6 sm:pt-10">
@@ -78,7 +82,11 @@ export default async function MembershipPage({
       {/* 요금제 */}
       <section className="flex flex-col gap-4">
         <SectionTitle>요금제</SectionTitle>
-        <MembershipPlans alreadyPremium={premium} paymentEnabled={paymentEnabled} />
+        <MembershipPlans
+          alreadyPremium={premium}
+          paymentEnabled={paymentEnabled}
+          easyPayMethods={easyPayMethods}
+        />
       </section>
 
       {/* 무료 vs 멤버십 */}
