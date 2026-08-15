@@ -1,6 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getPaperSlug } from "@gongmoa/core";
+import {
+  BYPASS_COOKIE,
+  BYPASS_HEADER,
+  BYPASS_QUERY,
+  COUNTRY_HEADERS,
+  decideGeoBlock,
+  geoBlockHtml,
+  readGeoBlockConfig,
+} from "@/lib/geo-block";
 
 // 옛 주소 /papers/<UUID>[/cbt|/explanations] 를 알아보는 패턴. 새 주소(slug)는 항상
 // 연도 네 자리로 시작하므로 여기 걸리지 않는다.
@@ -41,7 +50,74 @@ async function redirectLegacyPaperUrl(
   return NextResponse.redirect(url, 301);
 }
 
+// 해외 접속 차단 설정. 모듈 최상단에서 한 번만 읽는다 — Edge 런타임은
+// process.env 를 빌드 시점에 인라인하므로 요청마다 다시 읽어봐야 값이 바뀌지 않는다
+// (값을 바꾸려면 Vercel 에서 환경변수를 고치고 재배포한다).
+const GEO = readGeoBlockConfig({
+  GEO_BLOCK: process.env.GEO_BLOCK,
+  GEO_BLOCK_COUNTRIES: process.env.GEO_BLOCK_COUNTRIES,
+  GEO_BLOCK_BYPASS_TOKEN: process.env.GEO_BLOCK_BYPASS_TOKEN,
+});
+
+/**
+ * 해외(한국·일본 외) 접속 차단. 판정 규칙과 근거는 lib/geo-block.ts 에 있다.
+ *
+ * 세션 갱신보다 **먼저** 부른다. 어차피 돌려보낼 요청에 Supabase 쿠키 검증까지 붙일
+ * 이유가 없고, 차단 응답에 로그인 쿠키가 섞여 나가지도 않는다.
+ *
+ * 프리뷰 배포에서는 켜지 않는다. 프리뷰는 사람과 도구가 밖에서 열어 확인하는
+ * 자리라(코드 리뷰·에이전트·모바일 확인), 여기까지 막으면 확인할 방법이 없어진다.
+ */
+function geoBlock(request: NextRequest): NextResponse | null {
+  if (!GEO.enabled) return null;
+  if (process.env.VERCEL_ENV === "preview") return null;
+
+  const country =
+    COUNTRY_HEADERS.map((h) => request.headers.get(h)).find((v) => v) ?? null;
+
+  const decision = decideGeoBlock(GEO, {
+    pathname: request.nextUrl.pathname,
+    country,
+    userAgent: request.headers.get("user-agent"),
+    bypassHeader: request.headers.get(BYPASS_HEADER),
+    bypassQuery: request.nextUrl.searchParams.get(BYPASS_QUERY),
+    bypassCookie: request.cookies.get(BYPASS_COOKIE)?.value ?? null,
+  });
+
+  if (decision.action === "allow") {
+    if (!decision.setBypassCookie) return null;
+    // 링크를 한 번 연 뒤에는 주소에 토큰을 달고 다니지 않아도 되게 쿠키로 옮긴다.
+    // 토큰이 Referer 로 새는 것도 이쪽이 낫다.
+    const url = request.nextUrl.clone();
+    url.searchParams.delete(BYPASS_QUERY);
+    const redirect = NextResponse.redirect(url);
+    redirect.cookies.set(BYPASS_COOKIE, GEO.bypassToken!, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30,
+    });
+    return redirect;
+  }
+
+  return new NextResponse(geoBlockHtml(decision.country), {
+    status: 403,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      // 차단 화면이 색인되면 검색 결과에 이 문구가 뜬다.
+      "x-robots-tag": "noindex, nofollow",
+      // 국가별로 다른 응답이라 어디에도 캐시되면 안 된다 — 한 번 캐시되면 국내
+      // 사용자에게도 차단 화면이 나간다.
+      "cache-control": "no-store, must-revalidate",
+    },
+  });
+}
+
 export async function proxy(request: NextRequest) {
+  const blocked = geoBlock(request);
+  if (blocked) return blocked;
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(

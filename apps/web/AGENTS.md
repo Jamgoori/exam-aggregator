@@ -20,6 +20,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | 통합본 PDF 과목별 분리 (`split-by-toc.mjs`/`split-combined-pdf.mjs`/`split-by-subject-header.mjs`) | `docs/agents/split-combined-pdfs.md` |
 | 복습 스케줄(SRS) 상수 조정 (`packages/core/src/srs.ts`, 학습 단계·ease·leech·연체 점수) | `docs/agents/srs-tuning.md` |
 | 개념 사전 정리 (`keyword_title` 정본화, `concepts`/`concept_aliases`, 약점 진단 축, 재분류 배치 `next-concept-chunk.mjs`/`save-concepts.mjs`) | `docs/agents/concept-dictionary.md` |
+| 해외 IP 차단 (`geo-block.ts`, `proxy.ts`, `GEO_BLOCK*` 환경변수, 크롤러 예외) | `docs/agents/geo-block.md` |
 
 # 금지선 (문서 안 읽었어도 이것만은 절대)
 
@@ -49,6 +50,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
   하나만 고치면 경로에 따라 같은 문항에 다른 개념이 붙는다.
   재분류 배치는 이미 붙은 `concept_id`를 덮어쓰지 말 것 (재실행 시 개념이 흔들리면
   진단 이력이 깨진다).
+- **무료 체험 시작**: `memberships` 를 직접 UPDATE 해서 체험을 켜지 말 것 — 반드시
+  `start_trial_if_eligible` RPC 하나만 쓸 것(웹·앱 양쪽). 그 함수가 탈퇴 후 재가입인지를
+  `trial_consumptions` 원장으로 함께 보는데, 예전처럼 각자 UPDATE 를 날리면 한쪽에서만
+  체험이 다시 켜진다. `trial_consumptions` 에 `auth.users` FK 를 걸지 말 것 (탈퇴 때
+  같이 지워져 원장이 무의미해진다). 이메일 정규화는 소문자·공백까지만 (그 이상 묶으면
+  남남인 신규 가입자의 체험을 뺏는다).
+- **해외 IP 차단**: 크롤러 예외(`CRAWLER_UA`)를 좁히지 말 것 — Googlebot·Bingbot 은
+  미국 IP 에서 오므로, 예외가 빠지면 403 이 계속 나가 색인이 통째로 사라진다.
+  `/payments/**`·`/auth/**`·`/api/**` 를 차단 대상에 넣지 말 것 (결제 승인
+  리다이렉트를 막으면 돈만 빠진 주문이 남는다). 국가를 모를 때는 언제나 통과시킬 것.
 - **정답 등록**: `question_count`와 길이가 다른 정답 배열을 덮어쓰지 말 것.
   공통과목이라고 정답을 다른 직류(track) 문제지에 수동 복사하지 말 것 (법원직
   서기보는 국어·한국사 15문항/영어 20문항 별도 문제지 — 실측 사고 있음).

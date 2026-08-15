@@ -16,17 +16,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 점검
+        env:
+          # 해외 IP 차단(GEO_BLOCK)을 켜면 이 점검은 GitHub 러너(미국 IP)에서 도는
+          # 탓에 전부 403 이 된다. 저장소 Secrets 에 GEO_BYPASS_TOKEN 을 넣어 두면
+          # (Vercel 환경변수 GEO_BLOCK_BYPASS_TOKEN 과 같은 값) 통과한다.
+          # 차단을 안 켰다면 비워 둬도 그대로 동작한다.
+          GEO_BYPASS_TOKEN: ${{ secrets.GEO_BYPASS_TOKEN }}
         run: |
           APEX=https://gongmoa.kr
           fail=0
           out=""
+
+          # 우회 헤더. 토큰이 없으면 빈 배열이라 curl 에 아무것도 안 붙는다.
+          hdr=()
+          if [ -n "$GEO_BYPASS_TOKEN" ]; then
+            hdr=(-H "x-geo-bypass: $GEO_BYPASS_TOKEN")
+          fi
 
           note() { out="${out}$1"$'\n'; }
           ok()   { note "- ✅ $1"; }
           bad()  { note "- ❌ $1"; fail=1; }
 
           # 1. apex 가 200 을 주는가 (인증서가 유효해야 curl 이 통과한다)
-          code=$(curl -sS -o /tmp/home.html -w '%{http_code}' --max-time 20 "$APEX/" || echo 000)
+          code=$(curl -sS "${hdr[@]}" -o /tmp/home.html -w '%{http_code}' --max-time 20 "$APEX/" || echo 000)
           if [ "$code" = "200" ]; then
             ok "apex \`$APEX\` → HTTP 200 (TLS 인증서 유효)"
           else
@@ -34,7 +46,7 @@ jobs:
           fi
 
           # 2. www 는 apex 로 넘겨야 한다 (둘 다 200 이면 같은 문서가 두 주소로 색인된다)
-          loc=$(curl -sS -o /dev/null -w '%{redirect_url}' --max-time 20 https://www.gongmoa.kr/ || true)
+          loc=$(curl -sS "${hdr[@]}" -o /dev/null -w '%{redirect_url}' --max-time 20 https://www.gongmoa.kr/ || true)
           case "$loc" in
             "$APEX"/*|"$APEX") ok "www → \`$loc\` 리다이렉트" ;;
             "") bad "www 가 리다이렉트하지 않는다(또는 응답 없음). Vercel Domains 에서 www 를 apex 로 redirect 설정." ;;
@@ -50,7 +62,7 @@ jobs:
           fi
 
           # 4. robots.txt 의 Host·Sitemap 줄
-          robots=$(curl -sS --max-time 20 "$APEX/robots.txt" || true)
+          robots=$(curl -sS "${hdr[@]}" --max-time 20 "$APEX/robots.txt" || true)
           if printf '%s' "$robots" | grep -qi "^Host: $APEX"; then
             ok "robots.txt Host 줄 정상"
           else
@@ -63,7 +75,7 @@ jobs:
           fi
 
           # 5. 사이트맵이 열리고 새 도메인 URL 을 담고 있는가
-          code=$(curl -sS -o /tmp/sitemap.xml -w '%{http_code}' --max-time 60 "$APEX/sitemap.xml" || echo 000)
+          code=$(curl -sS "${hdr[@]}" -o /tmp/sitemap.xml -w '%{http_code}' --max-time 60 "$APEX/sitemap.xml" || echo 000)
           # grep -c 는 0건일 때 종료코드 1이라 `|| echo 0` 을 붙이면 출력이 두 줄이 된다.
           urls=$(grep -o '<loc>https://gongmoa.kr' /tmp/sitemap.xml 2>/dev/null | wc -l)
           if [ "$code" = "200" ] && [ "$urls" -gt 0 ]; then
