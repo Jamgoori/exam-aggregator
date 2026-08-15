@@ -7,6 +7,13 @@
 // memberships 는 쓰기 정책이 없는 테이블이라(결제 없이 프리미엄이 되는 걸 막기 위해)
 // service_role 로만 바꿀 수 있다 — 그래서 화면이 아니라 이 스크립트로 한다.
 //
+// ⚠️ 이건 운영자가 손으로 상태를 바꾸는 도구지 "무료 체험을 켜는" 경로가 아니다.
+// 체험 시작은 언제나 start_trial_if_eligible RPC 하나만 쓴다(AGENTS.md 금지선) —
+// 그 함수가 탈퇴 후 재가입인지를 trial_consumptions 원장으로 함께 보기 때문이다.
+// 그래서 여기서 premium 을 부여할 때는 source 를 'paid'(=결제·수동 부여)로 적는다.
+// 'trial' 로 두면 체험 원장을 거치지 않은 기간이 체험처럼 남고, 화면에도
+// "무료 체험 중 · N일 남음"으로 잘못 표시된다(trialDaysLeft 는 source='trial' 만 본다).
+//
 // free 로 내릴 때 started_at 을 반드시 남겨둔다: null 이면 getMembership 이
 // "아직 체험을 안 쓴 계정"으로 보고 다음 접속 때 60일 체험을 다시 켜버린다
 // (lib/membership.ts 의 isTrialUnstarted). 비어 있으면 지금 시각으로 채운다.
@@ -94,6 +101,11 @@ const patch = {
 if (tierArg === "free") {
   // 체험이 다시 켜지지 않도록 started_at 을 반드시 채워 둔다(위 주석 참고).
   patch.started_at = before?.started_at ?? now.toISOString();
+  if (!before?.started_at) {
+    console.log(
+      "ℹ️  started_at 이 비어 있어 지금 시각으로 채웁니다 — 이 계정은 앞으로 무료 체험을 받지 못합니다(체험을 쓴 것으로 남습니다).",
+    );
+  }
   // 만료 시각도 과거로 맞춘다 — 남겨두면 "체험 N일 남음" 안내가 계속 뜬다.
   patch.expires_at = now.toISOString();
 } else {
@@ -102,6 +114,8 @@ if (tierArg === "free") {
     console.error(`일수가 이상해요: ${daysArg}`);
     process.exit(1);
   }
+  // 수동 부여는 체험이 아니다(위 주석) — 체험 원장을 거치지 않았으므로 'paid' 로 적는다.
+  patch.source = "paid";
   patch.started_at = before?.started_at ?? now.toISOString();
   patch.expires_at = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
 }
