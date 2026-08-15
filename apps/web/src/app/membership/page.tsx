@@ -213,6 +213,7 @@ const FEATURE_ROWS: { label: string; free: string | boolean; premium: string | b
   },
   { label: "오답노트 (모아보기·메모·다시 풀기)", free: true, premium: true },
   { label: "오답노트 안에서 문항 해설 보기", free: false, premium: true },
+  { label: "회독별 다른 회원 평균 점수", free: false, premium: true },
   { label: "오늘의 복습 (간격 반복 일정)", free: false, premium: true },
   { label: "AI 약점 진단", free: false, premium: true },
 ];

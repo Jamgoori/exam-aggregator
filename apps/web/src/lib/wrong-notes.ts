@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { Subject } from "@gongmoa/core";
 import {
   buildWrongNoteGroups,
+  othersRoundAveragePct,
   WRONGRATE_MIN_SAMPLE,
   type WrongAnswerRow,
   type WrongNoteAttemptRow,
@@ -1131,6 +1132,82 @@ export async function getMyUnresolvedTotal(
   let total = 0;
   for (const v of bySubject.values()) total += v.unresolved;
   return total;
+}
+
+// ── 회독별 "다른 회원 평균 점수" (멤버십 전용 표시) ─────────────────────────
+//
+// 문제지 오답노트의 회독 스트립 옆에 "내 3회독 82점 · 다른 회원 평균 71점"을 붙이는
+// 데 쓴다. 내 점수만 보면 그게 잘한 건지 알 수 없다 — 같은 문제지를 같은 회독만큼
+// 푼 사람들과 견줘야 의미가 생긴다.
+
+export type PaperRoundComparison = {
+  round: number;
+  myPct: number;
+  // 나를 뺀 다른 회원 평균(%). 표본이 모자란 회독은 null(화면에서 비교를 숨긴다).
+  othersAvgPct: number | null;
+  // 평균을 낸 사람 수(나 제외). 표본이 몇인지 안 보여주면 숫자를 믿을 근거가 없다.
+  othersCount: number;
+};
+
+// 문제지의 회독별 (응시 수, 점수 백분율 합). 로그인 사용자와 무관한 전체 통계라
+// 문제지 단위로 캐싱하면 같은 문제지를 보는 모든 사용자가 재사용한다
+// (fetchPaperWrongRates 와 같은 판단 — 응시가 쌓여도 평균은 천천히 움직인다).
+// 조회에 실패하면(함수 미적용 등) 빈 배열이 아니라 null을 돌려준다. 빈 배열로
+// 뭉개면 화면이 "아직 응시가 적어 평균을 낼 수 없어요"라고 단언해 버리는데, 실제
+// 원인은 표본이 아니라 함수가 없는 것이라 거짓 안내가 된다(해설 조회 실패를
+// "해설 없음"으로 뭉개 사고가 났던 것과 같은 함정). null이면 화면은 비교 영역을
+// 통째로 그리지 않는다.
+async function fetchPaperRoundScoreStats(
+  paperId: string,
+): Promise<{ roundNumber: number; attempts: number; pctSum: number }[] | null> {
+  "use cache";
+  cacheLife({ revalidate: 600 });
+
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("paper_round_score_stats", {
+    p_paper_id: paperId,
+  });
+  if (error) {
+    console.error("paper_round_score_stats 실패", { paperId, error });
+    return null;
+  }
+  return ((data ?? []) as { round_number: number; attempts: number; pct_sum: number }[]).map(
+    (r) => ({
+      roundNumber: Number(r.round_number),
+      // PostgREST 는 bigint/numeric 을 문자열로 줄 수 있어 항상 숫자로 세운다.
+      attempts: Number(r.attempts),
+      pctSum: Number(r.pct_sum),
+    }),
+  );
+}
+
+// 내 회독 기록에 "그 회독을 푼 다른 회원들의 평균"을 붙여 돌려준다. 멤버십 전용
+// 표시라 호출부(문제지 오답노트 페이지)가 프리미엄일 때만 부른다.
+export async function getPaperRoundComparisons(
+  paperId: string,
+  rounds: { round: number; score: number; totalQuestions: number }[],
+): Promise<PaperRoundComparison[]> {
+  if (rounds.length === 0) return [];
+  const stats = await fetchPaperRoundScoreStats(paperId);
+  if (!stats) return [];
+  const byRound = new Map(stats.map((s) => [s.roundNumber, s]));
+
+  return rounds
+    .filter((r) => r.totalQuestions > 0)
+    .map((r) => {
+      const myPct = (r.score * 100) / r.totalQuestions;
+      const stat = byRound.get(r.round);
+      // 집계에 내 응시가 없으면(캐시가 내 응시 전에 만들어졌다) 뺄 것도 없다.
+      const includesMe = (stat?.attempts ?? 0) > 0;
+      return {
+        round: r.round,
+        myPct: Math.round(myPct),
+        othersAvgPct: stat
+          ? othersRoundAveragePct(stat.attempts, stat.pctSum, includesMe ? myPct : null)
+          : null,
+        othersCount: Math.max(0, (stat?.attempts ?? 0) - (includesMe ? 1 : 0)),
+      };
+    });
 }
 
 // ── 문제지 오답노트 (과목 → 문제지 드릴다운) ───────────────────────────────

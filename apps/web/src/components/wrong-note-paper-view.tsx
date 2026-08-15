@@ -11,6 +11,8 @@ import {
   WrongNoteMarkActions,
   WrongNoteUndoToast,
 } from "@/components/wrong-note-mark-actions";
+import { RoundAverageCompare } from "@/components/round-average-compare";
+import type { PaperRoundComparison } from "@/lib/wrong-notes";
 
 export type PaperViewQuestion = {
   questionNumber: number;
@@ -54,14 +56,20 @@ export function WrongNotePaperView({
   questions,
   rounds,
   unresolvedCount,
-  // 무료 회원의 해설 잠금 카드가 결제 후 돌아올 곳.
+  // 무료 회원의 해설·회독 비교 잠금 카드가 결제 후 돌아올 곳.
   lockNext,
+  // 회독별 "다른 회원 평균 점수"(멤버십 전용). 무료 회원에게는 빈 배열이 오고,
+  // 그 자리에는 무엇이 잠겼는지 알리는 한 줄이 대신 들어간다.
+  roundComparisons,
+  premium,
 }: {
   paperId: string;
   questions: PaperViewQuestion[];
   rounds: PaperViewRound[];
   unresolvedCount: number;
   lockNext: string;
+  roundComparisons: PaperRoundComparison[];
+  premium: boolean;
 }) {
   const [view, setView] = useState<ViewKey>("all");
   // "아직 틀리는 문제만" 필터는 통합 보기에서만 의미가 있다.
@@ -173,6 +181,14 @@ export function WrongNotePaperView({
           </button>
         ))}
       </div>
+
+      {/* 회독 스트립 바로 아래 — "내 점수"를 방금 본 자리에서 남들과 견주게 한다. */}
+      <RoundAverageCompare
+        comparisons={roundComparisons}
+        premium={premium}
+        next={lockNext}
+        selectedRound={selectedRound?.round ?? null}
+      />
 
       {/* 지금 보고 있는 것이 무엇인지 한 줄로 설명해주는 컨텍스트. */}
       {selectedRound ? (

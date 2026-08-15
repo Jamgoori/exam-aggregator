@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Monitor } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getPaperWrongNote } from "@/lib/wrong-notes";
+import { getPaperRoundComparisons, getPaperWrongNote } from "@/lib/wrong-notes";
 import {
   WrongNotePaperView,
   type PaperViewQuestion,
@@ -43,6 +43,12 @@ export default async function PaperWrongNotePage({
 
   const { paper, rounds, questions, unresolvedCount } = note;
   const subject = paper.subjects!;
+
+  // 회독별 "다른 회원 평균 점수"는 멤버십 전용이라 무료 회원에게는 조회하지 않는다
+  // (화면에는 무엇이 잠겼는지 알리는 한 줄만 들어간다).
+  const roundComparisons = premium
+    ? await getPaperRoundComparisons(paper.id, rounds)
+    : [];
 
   const viewQuestions: PaperViewQuestion[] = questions.map((q) => ({
     questionNumber: q.questionNumber,
@@ -98,12 +104,14 @@ export default async function PaperWrongNotePage({
         rounds={rounds}
         unresolvedCount={unresolvedCount}
         lockNext={`/mypage/wrong-notes/${slug}/${paperId}`}
+        roundComparisons={roundComparisons}
+        premium={premium}
       />
 
       {!premium && (
         <MembershipUpsell
           title="해설까지 보면서 복습하려면"
-          description="멤버십은 문항별 해설을 제한 없이 볼 수 있고, 언제 다시 볼지 계산해주는 복습 일정과 AI 약점 진단까지 이어져요."
+          description="멤버십은 문항별 해설과 회독별 다른 회원 평균 점수를 볼 수 있고, 언제 다시 볼지 계산해주는 복습 일정과 AI 약점 진단까지 이어져요."
           next={`/mypage/wrong-notes/${slug}/${paperId}`}
         />
       )}
