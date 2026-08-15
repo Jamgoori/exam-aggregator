@@ -87,6 +87,29 @@ export function wrongRatePct(attempts: number, wrongs: number): number | null {
   return Math.round((wrongs / attempts) * 100);
 }
 
+// "다른 회원 N회독 평균 점수"를 보여줄 최소 표본(나를 뺀 응시 수). 전국 오답률보다
+// 낮게 잡는 이유: 회독은 번호가 올라갈수록 표본이 급격히 줄어(3회독까지 푸는 사람이
+// 많지 않다) 10명을 요구하면 정작 비교가 필요한 뒷 회독이 전부 빈칸이 된다. 그래도
+// 두세 명짜리 평균은 "평균"이라고 부를 수 없어 하한은 남긴다.
+export const ROUND_AVERAGE_MIN_SAMPLE = 5;
+
+// 회독 하나의 전체 집계(응시 수, 점수 백분율 합)에서 내 응시를 빼고 낸 "다른 회원
+// 평균 점수(%)". 표본이 모자라면 null(= 그 회독은 비교를 그리지 않는다).
+//
+// 내 점수를 빼는 이유: 집계는 나를 포함한 전체다. 회독당 응시가 적을 때 내 점수가
+// 비교 대상에 섞이면 "나 vs 평균"이 자기 자신과의 비교로 흐려진다.
+// myPct가 null이면 그 회독에 내 응시가 없다는 뜻이라 뺄 것도 없다.
+export function othersRoundAveragePct(
+  attempts: number,
+  pctSum: number,
+  myPct: number | null,
+): number | null {
+  const others = attempts - (myPct === null ? 0 : 1);
+  if (others < ROUND_AVERAGE_MIN_SAMPLE) return null;
+  const sum = pctSum - (myPct ?? 0);
+  return Math.round(sum / others);
+}
+
 // 응시 목록 + 오답 행을 과목 → 문제지 → 문제 순으로 묶는다. "몇 번 틀렸는지"와
 // "가장 최근 응시에서는 맞혔는지(극복)"까지 여기서 한 번에 계산해서, 화면들은
 // 이 결과를 그대로 그리기만 하면 된다.

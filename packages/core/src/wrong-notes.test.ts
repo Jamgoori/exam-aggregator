@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildWrongNoteGroups,
+  othersRoundAveragePct,
+  ROUND_AVERAGE_MIN_SAMPLE,
   type WrongAnswerRow,
   type WrongNoteAttemptRow,
 } from "./wrong-notes";
@@ -157,4 +159,34 @@ test("문항은 번호 오름차순", () => {
 
 test("빈 입력에도 안전하다", () => {
   assert.deepEqual(buildWrongNoteGroups([], []), []);
+});
+
+// ── 회독별 "다른 회원 평균 점수" ────────────────────────────────────────────
+// 이 값은 화면에 "나 82점 vs 다른 회원 71점"으로 직접 찍힌다. 내 점수를 못 빼거나
+// 표본이 적은 회독을 그대로 그리면 그 자리에서 거짓말이 된다.
+
+test("내 응시를 빼고 평균을 낸다", () => {
+  // 6명이 이 회독을 풀었고 합이 420(평균 70), 그중 내가 100점.
+  // 나를 빼면 5명 320점 → 64점.
+  assert.equal(othersRoundAveragePct(6, 420, 100), 64);
+});
+
+test("내 응시가 없는 회독은 전체를 그대로 평균낸다", () => {
+  assert.equal(othersRoundAveragePct(5, 300, null), 60);
+});
+
+test("나를 뺀 표본이 최소치 미만이면 null", () => {
+  // 5명 중 내가 하나 → 남은 4명은 최소 표본(5) 미만.
+  assert.equal(othersRoundAveragePct(5, 350, 70), null);
+  assert.equal(othersRoundAveragePct(ROUND_AVERAGE_MIN_SAMPLE, 350, null), 70);
+  assert.equal(othersRoundAveragePct(0, 0, null), null);
+});
+
+test("나 혼자 푼 회독은 null (자기 자신과 비교하지 않는다)", () => {
+  assert.equal(othersRoundAveragePct(1, 90, 90), null);
+});
+
+test("평균은 정수로 반올림한다", () => {
+  // 5명 합 333 → 66.6
+  assert.equal(othersRoundAveragePct(5, 333, null), 67);
 });

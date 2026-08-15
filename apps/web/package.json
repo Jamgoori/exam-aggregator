@@ -12,6 +12,7 @@
     "bulk-upload": "node --env-file=.env.local scripts/bulk-upload.mjs",
     "upload-answer": "node --env-file=.env.local scripts/upload-answer-key.mjs",
     "extract-answers": "node --env-file=.env.local scripts/extract-answer-keys.mjs",
+    "set-membership": "node --env-file=.env.local scripts/set-membership.mjs",
     "list-pending-answers": "node --env-file=.env.local scripts/list-pending-answer-keys.mjs",
     "retention-report": "node --import tsx --env-file=.env.local scripts/srs-retention-report.mjs",
     "concept-inventory": "node --import tsx --env-file=.env.local scripts/concept-inventory.mjs",

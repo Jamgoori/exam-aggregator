@@ -18,7 +18,7 @@ import {
 
 export const metadata: Metadata = {
   title: "멤버십 요금제",
-  description: `공모아 멤버십 요금제 안내. 오답노트·복습·AI 약점 진단·무제한 해설을 월 ${allPlanPricing()[2].monthlyPrice.toLocaleString("ko-KR")}원부터 이용하세요.`,
+  description: `공모아 멤버십 요금제 안내. 무제한 문항 해설·복습 일정·AI 약점 진단을 월 ${allPlanPricing()[2].monthlyPrice.toLocaleString("ko-KR")}원부터 이용하세요.`,
   alternates: { canonical: "/membership" },
 };
 
@@ -196,20 +196,25 @@ function StatusPill({
 
 // 무료/멤버십 비교. 여기 적힌 것이 실제 동작과 어긋나면 그 자체로 허위 표시가 되므로,
 // 줄을 고칠 때는 반드시 대응하는 게이팅 코드도 함께 확인할 것.
-//   - 해설 하루 한도: lib/explanation-rate-limit.ts (FREE_EXPLANATION_DAILY_PAPERS)
-//   - 오답노트/복습/진단: app/mypage/** 의 isPremium 확인
+//   - 해설 하루 한도(문제지 해설 페이지): lib/explanation-rate-limit.ts
+//     (FREE_EXPLANATION_DAILY_PAPERS)
+//   - 오답노트는 무료(열람·정리·섞어풀기): app/mypage/wrong-notes/** 의 isPremium 은
+//     "해설 본문을 받을지"에만 쓴다 (lib/wrong-notes.ts 의 includeExplanations)
+//   - 오늘의 복습(간격 반복)/AI 진단: app/mypage/** 의 isPremium 확인
 const FEATURE_ROWS: { label: string; free: string | boolean; premium: string | boolean }[] = [
   { label: "기출문제·정답 열람", free: true, premium: true },
   { label: "문제지 PDF 다운로드", free: true, premium: true },
   { label: "CBT 온라인 풀이·채점", free: true, premium: true },
   { label: "댓글·난이도 평가·북마크", free: true, premium: true },
   {
-    label: "문항 해설",
+    label: "문제지 해설 열람",
     free: `하루 ${FREE_EXPLANATION_DAILY_PAPERS}개`,
     premium: "제한 없음",
   },
-  { label: "오답노트 전체 기능", free: false, premium: true },
-  { label: "복습 (간격 반복)", free: false, premium: true },
+  { label: "오답노트 (모아보기·메모·다시 풀기)", free: true, premium: true },
+  { label: "오답노트 안에서 문항 해설 보기", free: false, premium: true },
+  { label: "회독별 다른 회원 평균 점수", free: false, premium: true },
+  { label: "오늘의 복습 (간격 반복 일정)", free: false, premium: true },
   { label: "AI 약점 진단", free: false, premium: true },
 ];
 
@@ -325,8 +330,10 @@ function faqItems(paymentEnabled: boolean): { q: string; a: React.ReactNode }[] 
     q: "멤버십이 끝나면 오답노트가 사라지나요?",
     a: (
       <>
-        아니요. 틀린 문제·메모·복습 기록은 그대로 남아 있고, 화면만 잠깁니다. 다시
-        시작하면 쌓여 있던 그대로 이어서 쓸 수 있어요.
+        아니요. 틀린 문제를 과목별로 모아 보고, 메모를 남기고, 섞어서 다시 푸는
+        것까지는 멤버십이 끝나도 그대로 쓸 수 있어요. 잠기는 것은 문항 해설과
+        &ldquo;오늘의 복습&rdquo;(언제 다시 볼지 계산해주는 일정), AI 약점 진단이고,
+        쌓아둔 기록은 지워지지 않아 다시 시작하면 그대로 이어집니다.
       </>
     ),
   },

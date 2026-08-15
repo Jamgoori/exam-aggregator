@@ -2,8 +2,6 @@ import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getReviewSessionView } from "@/lib/review-session";
 import { ReviewSolver } from "@/components/review-solver";
-import { isPremium } from "@/lib/membership";
-import { MembershipLockedPage } from "@/components/membership-upsell";
 
 // 섞어풀기 풀이/결과 페이지. 세션은 과목 오답노트의 "섞어풀기" 버튼(createReviewSession)
 // 이 먼저 만들고 이 주소로 넘어온다. 본인 세션이 아니거나 없으면 404.
@@ -24,20 +22,10 @@ export default async function ReviewSessionPage({
     );
   }
 
-  // 세션을 만드는 액션들이 이미 멤버십을 확인하지만, 체험이 끝난 뒤 남아 있던 세션
-  // 주소로 다시 들어오는 경로가 있어 풀이 화면에서도 확인한다.
-  if (!(await isPremium(supabase, user.id))) {
-    return (
-      <MembershipLockedPage
-        title="복습·섞어풀기는 멤버십 기능이에요"
-        description="틀린 문제를 언제 다시 볼지 문항마다 계산해서 그날 볼 것만 내주는 기능이에요. 풀던 세션과 오답 기록은 그대로 남아 있어요."
-        backHref="/mypage?tab=wrong-notes"
-        backLabel="마이페이지로"
-        next={`/mypage/wrong-notes/${slug}/review/${sessionId}`}
-      />
-    );
-  }
-
+  // 멤버십을 보지 않는다. 섞어풀기는 무료고, "오늘의 복습"으로 만들어진 세션도
+  // 여기서 막으면 체험이 끝난 사람이 풀던 세션의 답안이 통째로 날아간다(채점을
+  // 막지 않는 것과 같은 판단 — actions.ts 의 submitReviewSession 주석 참조).
+  // 이 화면은 해설을 보여주지 않으므로 해설 페이월과도 무관하다.
   const view = await getReviewSessionView(supabase, user.id, sessionId);
   if (!view) notFound();
 

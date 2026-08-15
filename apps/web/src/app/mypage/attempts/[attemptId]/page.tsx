@@ -145,13 +145,14 @@ export default async function AttemptWrongNotePage({
                 key={group.rows[0].questionNumber}
                 rows={group.rows}
                 images={group.images}
+                explanationLockNext={`/mypage/attempts/${attemptId}`}
               />
             ))}
           </div>
           {!premium && (
             <MembershipUpsell
               title="이 문항들의 해설이 궁금하다면"
-              description="멤버십은 해설을 제한 없이 볼 수 있고, 틀린 문제가 과목별 오답노트로 정리돼 복습 일정까지 이어져요."
+              description="멤버십은 해설을 제한 없이 볼 수 있고, 과목별 오답노트에 메모·다시 볼 문제를 붙여 복습 일정까지 이어갈 수 있어요."
               next={`/mypage/attempts/${attemptId}`}
             />
           )}

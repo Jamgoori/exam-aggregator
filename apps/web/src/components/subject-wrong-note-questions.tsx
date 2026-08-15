@@ -36,6 +36,7 @@ function toRow(q: SubjectWrongNoteQuestion): WrongNoteCardRow {
     correctChoice: q.correctChoice,
     choiceCount: q.choiceCount,
     explanation: q.explanation,
+    explanationLocked: q.explanationLocked,
     wrongCount: q.wrongCount,
     resolved: q.resolved,
     wrongRatePct: q.wrongRatePct,
@@ -236,6 +237,9 @@ export function SubjectWrongNoteQuestions({
         : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
     }`;
 
+  // 해설 잠금 카드가 결제 후 돌아올 곳(무료 회원 화면에서만 쓰인다).
+  const lockNext = `/mypage/wrong-notes/${subjectSlug}?view=questions`;
+
   return (
     <div className={`flex flex-col gap-4 ${selected.size > 0 ? "pb-24" : ""}`}>
       {playableUnresolved > 0 ? (
@@ -354,6 +358,7 @@ export function SubjectWrongNoteQuestions({
                 <WrongNoteQuestionCard
                   rows={card.rows}
                   images={card.images}
+                  explanationLockNext={lockNext}
                   renderRowActions={(questionNumber) => {
                     const key = `${card.paperId}#${questionNumber}`;
                     return (

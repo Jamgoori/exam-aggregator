@@ -810,6 +810,41 @@ $$;
 
 grant execute on function paper_question_wrong_rates(uuid[]) to authenticated;
 
+-- 회독별 평균 점수: 이 문제지를 "N회독째"로 푼 응시들의 점수를 회독 번호별로 모은다.
+-- 오답노트의 문제지 화면이 "내 3회독 82점 vs 다른 회원 3회독 평균 71점"을 보여주는 데
+-- 쓴다(멤버십 전용 표시).
+--
+-- 회독 번호는 저장돼 있지 않고 (user_id, paper_id) 안에서 응시 순서로 정해진다 —
+-- 화면의 "N회독" 배지와 같은 기준(created_at 오름차순)으로 여기서도 매긴다.
+--
+-- cbt_attempts 는 본인 것만 select 되는 RLS라 전체 집계는 security definer 로
+-- 우회한다. 돌려주는 값은 회독별 응시 수와 점수(백분율) 합뿐이라 누가 몇 점인지는
+-- 알 수 없다. 평균을 여기서 내지 않고 합·개수를 그대로 주는 이유는, 호출부가 자기
+-- 응시를 빼고 "나를 제외한 다른 회원 평균"을 계산하기 때문이다(자기 점수가 자기
+-- 비교 대상에 섞이면 회독당 응시가 적을 때 비교가 무의미해진다).
+--
+-- total_questions = 0 인 행은 백분율을 낼 수 없어 제외한다.
+create or replace function paper_round_score_stats(p_paper_id uuid)
+returns table(round_number int, attempts bigint, pct_sum numeric)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select r.round_number, count(*) as attempts, sum(r.pct) as pct_sum
+  from (
+    select row_number() over (
+             partition by a.user_id order by a.created_at
+           )::int as round_number,
+           (a.score::numeric * 100 / a.total_questions) as pct
+    from cbt_attempts a
+    where a.paper_id = p_paper_id and a.total_questions > 0
+  ) r
+  group by r.round_number
+$$;
+
+grant execute on function paper_round_score_stats(uuid) to authenticated;
+
 -- 이메일/비밀번호 가입이 폐쇄되고 소셜 로그인(구글·카카오) 전용이 되면서, 자체 가입
 -- 레이트리밋 테이블(signup_attempts)과 아이디/비밀번호 찾기 레이트리밋(auth_attempts)은
 -- 더 이상 쓰지 않는다. 봇/대량 가입 방어는 provider(구글·카카오) 계정 생성 절차에 위임.

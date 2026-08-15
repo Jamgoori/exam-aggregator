@@ -61,8 +61,11 @@ export function MembershipUpsell({
   );
 }
 
-// 화면 하나가 통째로 멤버십 전용일 때(과목 오답노트, 문제지 오답노트, 진단 등).
+// 화면 하나가 통째로 멤버십 전용일 때(복습 세션, AI 약점 진단 등).
 // 404로 돌려보내지 않는 이유: 주소는 유효하고 데이터도 남아 있다 — 지금 못 볼 뿐이다.
+//
+// 오답노트 화면들은 여기 해당하지 않는다 — 열람 자체는 무료고, 해설만 문항별
+// 잠금 카드(explanation-lock.tsx)로 가린다.
 export function MembershipLockedPage({
   title,
   description,

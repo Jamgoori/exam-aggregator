@@ -33,10 +33,15 @@ import type { SessionSchedule, ReviewPickStrategy } from "@gongmoa/core";
 
 export type CreateReviewResult = { error?: string; sessionId?: string };
 
-// 오답노트·복습·진단은 전부 멤버십 기능이다. 화면에서 버튼을 숨기는 건 표시일 뿐이고,
-// 서버 액션은 이름만 알면 직접 부를 수 있으므로 각 경로에서 다시 확인한다.
-const WRONG_NOTE_LOCKED = "오답노트는 멤버십 기능이에요.";
-const REVIEW_LOCKED = "복습은 멤버십 기능이에요.";
+// 오답노트는 열람도, 정리(메모·다시 볼 문제·삭제)도, 섞어풀기(내가 고른 오답을 모아
+// 다시 푸는 것)도 무료다 — 전부 자기 데이터를 자기가 다시 보는 일이고, 섞어풀기
+// 화면은 해설을 보여주지 않는다.
+//
+// 멤버십으로 남는 것은 해설 본문과 "오늘의 복습"(간격 반복 일정), AI 약점 진단이다.
+// 복습은 세션을 만드는 것 말고도 스케줄을 다시 뿌리는 쓰기(밀린 복습 정리·과목
+// 재개·접어둔 문항 되살리기)가 붙어 있어, 화면에서 버튼을 숨기는 것과 별개로 서버
+// 액션마다 다시 확인한다 — 서버 액션은 이름만 알면 직접 부를 수 있다.
+const REVIEW_LOCKED = "오늘의 복습(간격 반복)은 멤버십 기능이에요.";
 
 // 클라이언트가 보내는 값이라 문자열을 그대로 믿지 않는다. 모르는 값은 기본값
 // ("약한 문제 우선")으로 떨어뜨린다.
@@ -58,7 +63,6 @@ export async function createReviewSession(input: {
 
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  if (!(await isPremium(supabase, user.id))) return { error: REVIEW_LOCKED };
 
   return createReviewSessionForUser(supabase, user.id, {
     subjectSlug: slug,
@@ -107,7 +111,6 @@ export async function saveQuestionMemo(input: {
 
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  if (!(await isPremium(supabase, user.id))) return { error: WRONG_NOTE_LOCKED };
 
   const memo = String(input.memo ?? "").trim().slice(0, 2000);
 
@@ -150,7 +153,6 @@ export async function setQuestionPinned(input: {
   }
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  if (!(await isPremium(supabase, user.id))) return { error: WRONG_NOTE_LOCKED };
 
   const { error } = await supabase.from("wrong_note_marks").upsert(
     {
@@ -179,7 +181,6 @@ export async function deleteWrongNoteQuestion(input: {
   }
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  if (!(await isPremium(supabase, user.id))) return { error: WRONG_NOTE_LOCKED };
 
   const { error } = await supabase.from("wrong_note_marks").upsert(
     {
@@ -207,7 +208,6 @@ export async function restoreWrongNoteQuestion(input: {
   }
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  if (!(await isPremium(supabase, user.id))) return { error: WRONG_NOTE_LOCKED };
 
   const { error } = await supabase.from("wrong_note_marks").upsert(
     {
@@ -233,7 +233,6 @@ export async function createReviewFromPapers(input: {
   if (paperIds.length === 0) return { error: "시험지를 선택해주세요." };
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  if (!(await isPremium(supabase, user.id))) return { error: REVIEW_LOCKED };
   return createPaperReviewSessionForUser(supabase, user.id, paperIds);
 }
 
@@ -245,7 +244,11 @@ export async function createReviewAll(input: {
 }): Promise<CreateReviewResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  if (!(await isPremium(supabase, user.id))) return { error: REVIEW_LOCKED };
+  // 전 과목 섞어풀기는 과목 섞어풀기와 같은 성격이라 무료다. onlyDue(복습)만
+  // "오늘의 복습"과 같은 기능이므로 여기서 멤버십을 확인한다.
+  if (input?.onlyDue && !(await isPremium(supabase, user.id))) {
+    return { error: REVIEW_LOCKED };
+  }
   return createAllReviewSessionForUser(supabase, user.id, {
     onlyDue: input?.onlyDue ?? false,
     includeResolved: input?.includeResolved ?? false,
@@ -413,7 +416,6 @@ export async function createReviewFromWrong(input: {
   const items = Array.isArray(input?.items) ? input.items : [];
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  if (!(await isPremium(supabase, user.id))) return { error: REVIEW_LOCKED };
   return createReviewSessionFromItems(supabase, user.id, items);
 }
 
