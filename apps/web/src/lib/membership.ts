@@ -23,8 +23,10 @@ const MEMBERSHIP_COLUMNS = "tier, source, started_at, expires_at";
 // 콜백을 타지 않는 경로가 있다 — 앱에서 가입한 사람, 콜백 전에 이미 있던 계정,
 // 배포 전에 가입한 사람. 그래서 조회할 때도 아직 안 켜졌으면 여기서 켠다.
 //
-// 매 조회마다 UPDATE 가 도는 건 아니다. started_at 이 null 인 계정은 처음 한 번뿐이고,
-// 그 뒤로는 isTrialUnstarted 가 false 라 이 분기 자체를 지나가지 않는다.
+// 매 조회마다 쓰기가 도는 건 아니다. started_at 이 null 인 계정은 처음 한 번뿐이고,
+// 그 뒤로는 isTrialUnstarted 가 false 라 이 분기 자체를 지나가지 않는다. 체험을 거절당한
+// 재가입자도 마찬가지다 — DB 함수가 거절하면서 started_at 을 찍어 두기 때문에 다음
+// 조회부터는 여기 들어오지 않는다.
 export async function getMembership(
   supabase: Supabase,
   userId: string,
@@ -43,7 +45,7 @@ export async function getMembership(
 
   // 켠 결과를 DB 가 돌려준 행으로 확인한다. 여기서 낙관적으로 "프리미엄"을 지어내면,
   // 쓰기가 실패했을 때 매 요청마다 같은 거짓말을 반복하며 유료 기능을 계속 열어준다.
-  // 갱신된 행이 없으면(쓰기 실패·경합) 방금 읽은 값을 그대로 쓴다.
+  // 갱신된 행이 없으면(재가입자·쓰기 실패·경합) 방금 읽은 값을 그대로 쓴다.
   const started = await startTrialIfEligible(userId);
   return started ? membershipFromRow(started) : membership;
 }
@@ -62,39 +64,36 @@ export async function isPremium(supabase: Supabase, userId: string): Promise<boo
   return isPremiumMembership(await getMembership(supabase, userId));
 }
 
-// 아직 무료 기간을 안 쓴 계정의 무료 기간을 켠다. 로그인 콜백과 getMembership 이
-// 부른다 — 이벤트 안내가 "가입하는 순간부터"라서, 무언가를 하기 전에 이미 켜져
-// 있어야 한다.
-//
-// started_at is null 을 조건에 건 단일 UPDATE라 요청이 겹쳐도 두 번 시작되지 않는다
-// (두 번째 UPDATE는 0행 갱신). 그래서 기간이 슬금슬금 연장되지 않는다.
-//
-// 부가 처리이므로 실패해도 호출부를 막지 않는다 — 호출부에서 삼킨다.
-// 갱신된 행을 돌려준다(이미 켜져 있었거나 실패했으면 null). 호출부가 "정말 켜졌는지"를
-// 지어내지 않고 DB 가 돌려준 값으로 판단할 수 있게 하려는 것.
-export async function startTrialIfEligible(
-  userId: string,
-): Promise<{
+export type MembershipRow = {
   tier: string | null;
   source: string | null;
   started_at: string | null;
   expires_at: string | null;
-} | null> {
-  const now = new Date();
-  const expires = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+};
 
-  const { data } = await createAdminClient()
-    .from("memberships")
-    .update({
-      tier: "premium",
-      started_at: now.toISOString(),
-      expires_at: expires.toISOString(),
-      updated_at: now.toISOString(),
-    })
-    .eq("user_id", userId)
-    .eq("source", "trial")
-    .is("started_at", null)
-    .select(MEMBERSHIP_COLUMNS)
-    .maybeSingle();
-  return data ?? null;
+// 아직 무료 기간을 안 쓴 계정의 무료 기간을 켠다. 로그인 콜백과 getMembership 이
+// 부른다 — 이벤트 안내가 "가입하는 순간부터"라서, 무언가를 하기 전에 이미 켜져
+// 있어야 한다.
+//
+// 판정과 쓰기는 DB 함수 start_trial_if_eligible 하나가 한 트랜잭션으로 한다
+// (supabase/schema.sql). 여기서 UPDATE 를 직접 날리지 말 것 — 그 함수는 "탈퇴 후
+// 재가입인가"(trial_consumptions 원장)까지 함께 보는데, 웹과 앱이 각자 UPDATE 를
+// 날리던 예전 구조로 돌아가면 한쪽만 검사하는 상태가 조용히 생긴다.
+//
+// 부가 처리이므로 실패해도 호출부를 막지 않는다 — 호출부에서 삼킨다.
+// 실제로 켜졌을 때만 갱신된 행을 돌려준다(이미 켜졌거나·재가입자거나·실패면 null).
+// 호출부가 "정말 켜졌는지"를 지어내지 않고 DB 가 돌려준 값으로 판단하게 하려는 것.
+export async function startTrialIfEligible(
+  userId: string,
+): Promise<MembershipRow | null> {
+  const expires = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+
+  const { data } = await createAdminClient().rpc("start_trial_if_eligible", {
+    p_user_id: userId,
+    p_expires_at: expires.toISOString(),
+  });
+
+  // setof 라 배열로 온다. 켜지지 않았으면 빈 배열이다.
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row as MembershipRow | undefined) ?? null;
 }

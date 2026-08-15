@@ -1239,6 +1239,133 @@ create trigger trg_create_membership
 -- 신규보다 체험 품질이 좋다.
 insert into memberships (user_id) select id from auth.users on conflict do nothing;
 
+-- ── 무료 기간 소진 원장 ──────────────────────────────────────────────────────
+--
+-- 무료 기간은 "계정당 한 번"이 전제인데, memberships.started_at 으로만 판정하면 실제로는
+-- **auth.users 행당 한 번**이 된다. 그 행은 탈퇴할 때 계정과 함께 cascade 로 사라지므로,
+-- 탈퇴 → 같은 소셜 계정으로 재가입하면 새 user_id 에 새 memberships 행이 생겨 60일이
+-- 다시 켜진다. 몇 번이고 반복할 수 있어 결제할 이유가 없어진다.
+--
+-- 그래서 "이 사람은 이미 썼다"를 계정과 별개로 남긴다. **auth.users 에 FK 를 걸지 말 것** —
+-- 걸면 탈퇴할 때 같이 지워져서 이 테이블이 존재하는 이유가 사라진다.
+--
+-- 남기는 값은 이메일의 SHA-256 해시다. 원문을 남기면 "탈퇴하면 지운다"는 약속을 어기게
+-- 되고, 해시는 되돌릴 수 없어 "이 이메일이 전에 있었는지"만 확인된다. 정규화는 소문자·
+-- 앞뒤 공백까지만 한다 — 그 이상(점 제거 등) 하면 서로 다른 사람을 같은 사람으로 묶어
+-- 무고한 신규 가입자의 체험을 뺏는다. (설계 근거: scripts/sql/2026-08-15-trial-reuse.sql)
+create table if not exists trial_consumptions (
+  -- sha256('gongmoa:trial:' || lower(trim(email))) 의 hex.
+  email_hash text primary key,
+  consumed_at timestamptz not null default now()
+);
+
+alter table trial_consumptions enable row level security;
+-- 정책 없음 = 전부 차단. 읽을 수 있으면 "이 이메일이 이 서비스를 쓴 적 있는가"를
+-- 밖에서 대조할 수 있게 된다.
+
+-- sha256() 은 PostgreSQL 11+ 내장이라 pgcrypto 확장이 필요 없다. 이메일이 없는 계정은
+-- null 을 돌려주고, 호출부는 그때 원장 검사를 건너뛴다 — 식별할 수 없다고 체험을
+-- 뺏으면 정상 가입자가 피해를 본다.
+create or replace function trial_identity_hash(p_user_id uuid)
+returns text
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select encode(
+    sha256(convert_to('gongmoa:trial:' || lower(trim(u.email)), 'UTF8')),
+    'hex'
+  )
+  from auth.users u
+  where u.id = p_user_id
+    and u.email is not null
+    and trim(u.email) <> ''
+$$;
+
+-- 무료 기간을 켜는 **유일한 경로**. 웹(apps/web/src/lib/membership.ts)과 앱 Edge
+-- Function(supabase/functions/_shared/membership.ts)이 둘 다 이 함수를 부른다. 예전에는
+-- 양쪽이 각자 UPDATE 를 날렸는데, 그러면 원장 검사를 한쪽에만 넣는 실수가 언제든 가능하다.
+--
+-- 만료 시각은 앱이 계산해 넘긴다(TRIAL_DAYS 의 정본은 packages/core). apply_paid_membership
+-- 과 같은 규칙 — 날짜 계산을 SQL 로 한 벌 더 옮겨 적으면 두 곳이 조용히 어긋난다.
+--
+-- 돌려주는 값은 "실제로 켜졌을 때만" 한 행이다(0행 = 안 켜짐). 호출부가 켜졌는지를
+-- 지어내지 않고 DB 가 돌려준 값으로 판단하게 하려는 것.
+--
+-- returns table(tier, source, ...) 로 컬럼을 나열하지 않는다: 그 이름들이 OUT 파라미터가
+-- 되어 본문의 `where started_at is null` 이 컬럼인지 파라미터인지 모호해진다.
+create or replace function start_trial_if_eligible(
+  p_user_id uuid,
+  p_expires_at timestamptz
+)
+returns setof memberships
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_hash text;
+  v_row memberships%rowtype;
+begin
+  v_hash := trial_identity_hash(p_user_id);
+
+  -- 이미 이 이메일로 무료 기간을 쓴 적이 있으면(= 탈퇴 후 재가입) 켜지 않는다.
+  if v_hash is not null
+     and exists (select 1 from trial_consumptions where email_hash = v_hash) then
+    -- "소진했다"를 행에 못박아 둔다. 안 찍으면 started_at 이 영원히 null 이라 요청마다
+    -- 이 함수를 다시 부르게 된다. tier 는 free 그대로, expires_at 도 null 그대로 둔다 —
+    -- 과거 시각을 찍으면 화면이 "체험 0일 남음"을 띄운다(trialDaysLeft).
+    update memberships
+       set started_at = now(), updated_at = now()
+     where user_id = p_user_id and source = 'trial' and started_at is null;
+    return;
+  end if;
+
+  -- started_at is null 을 조건에 건 단일 UPDATE 라 요청이 겹쳐도 두 번 시작되지 않는다
+  -- (같은 행을 두고 줄을 서고, 두 번째는 0행 갱신이 된다).
+  update memberships
+     set tier = 'premium',
+         started_at = now(),
+         expires_at = p_expires_at,
+         updated_at = now()
+   where user_id = p_user_id and source = 'trial' and started_at is null
+  returning * into v_row;
+
+  -- 대상이 아니었다(이미 켰거나·유료 계정이거나·행이 없다). 원장도 건드리지 않는다.
+  if not found then return; end if;
+
+  -- 켠 뒤에 남긴다. 같은 트랜잭션이라 "체험은 켜졌는데 원장에는 없는" 상태가 없다.
+  insert into trial_consumptions (email_hash)
+  select v_hash
+  where v_hash is not null
+  on conflict (email_hash) do nothing;
+
+  return next v_row;
+end $$;
+
+-- ⚠ 둘 다 security definer 라 RLS 를 우회한다. 사용자가 직접 부를 수 있으면 원하는
+-- 만료일(2099년)을 넘겨 스스로 프리미엄이 된다. 실행 권한을 회수하고 service_role 에만
+-- 다시 준다. (Postgres 는 새 함수의 EXECUTE 를 PUBLIC 에 기본 부여한다.)
+revoke all on function trial_identity_hash(uuid) from public, anon, authenticated;
+revoke all on function start_trial_if_eligible(uuid, timestamptz)
+  from public, anon, authenticated;
+grant execute on function trial_identity_hash(uuid) to service_role;
+grant execute on function start_trial_if_eligible(uuid, timestamptz) to service_role;
+
+-- 이미 체험을 쓴 사람들을 원장에 채운다. 이게 없으면 이 변경 전에 가입한 사람들은
+-- 원장에 없어서, 지금 탈퇴하면 한 번 더 받을 수 있다.
+insert into trial_consumptions (email_hash, consumed_at)
+select encode(sha256(convert_to('gongmoa:trial:' || lower(trim(u.email)), 'UTF8')), 'hex'),
+       min(m.started_at)
+  from memberships m
+  join auth.users u on u.id = m.user_id
+ where m.started_at is not null
+   and u.email is not null
+   and trim(u.email) <> ''
+ group by 1
+on conflict (email_hash) do nothing;
+
 -- ── user_question_status 의 SRS 상태 ─────────────────────────────────────────
 -- 문항별 복습 스케줄. 계산은 packages/core/src/srs.ts(웹·모바일 공유)와 그 Deno
 -- 포팅본(supabase/functions/_shared/srs.ts)이 하고, 여기에는 결과만 저장한다.

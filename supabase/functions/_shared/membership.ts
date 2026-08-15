@@ -9,29 +9,23 @@ export const TRIAL_DAYS = 60;
 // 라서, 무언가를 하기 전에 이미 켜져 있어야 한다 — 아래 isPremiumUser 와 채점 경로
 // (status.ts)가 부른다.
 //
-// started_at is null 을 조건에 건 단일 UPDATE라 요청이 겹쳐도 두 번 시작되지 않는다
-// (두 번째 UPDATE는 0행 갱신). 그래서 기간이 슬금슬금 연장되지 않는다.
+// 판정과 쓰기는 DB 함수 start_trial_if_eligible 하나가 한 트랜잭션으로 한다
+// (supabase/schema.sql). **여기서 memberships 를 직접 UPDATE 하지 말 것** — 그 함수는
+// "탈퇴 후 재가입인가"(trial_consumptions 원장)까지 함께 보는데, 웹과 앱이 각자 UPDATE 를
+// 날리던 예전 구조로 돌아가면 앱에서만 체험이 다시 켜지는 구멍이 조용히 생긴다.
 //
-// 갱신된 행을 돌려준다(이미 켜져 있었거나 실패했으면 null). 호출부가 "정말 켜졌는지"를
-// 지어내지 않고 DB 가 돌려준 값으로 판단할 수 있게 하려는 것.
+// 실제로 켜졌을 때만 갱신된 행을 돌려준다(이미 켜졌거나·재가입자거나·실패면 null).
+// 호출부가 "정말 켜졌는지"를 지어내지 않고 DB 가 돌려준 값으로 판단하게 하려는 것.
 export async function startTrialIfEligible(admin: any, userId: string): Promise<any> {
-  const now = new Date();
-  const expires = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  const expires = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
 
-  const { data } = await admin
-    .from("memberships")
-    .update({
-      tier: "premium",
-      started_at: now.toISOString(),
-      expires_at: expires.toISOString(),
-      updated_at: now.toISOString(),
-    })
-    .eq("user_id", userId)
-    .eq("source", "trial")
-    .is("started_at", null)
-    .select("tier, source, started_at, expires_at")
-    .maybeSingle();
-  return data ?? null;
+  const { data } = await admin.rpc("start_trial_if_eligible", {
+    p_user_id: userId,
+    p_expires_at: expires.toISOString(),
+  });
+
+  // setof 라 배열로 온다. 켜지지 않았으면 빈 배열이다.
+  return (Array.isArray(data) ? data[0] : data) ?? null;
 }
 
 // 무료 회원이 하루에 해설을 열어볼 수 있는 문제지 수.
