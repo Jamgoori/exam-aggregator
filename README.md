@@ -11,6 +11,7 @@ supabase/        Edge Functions + schema.sql
 ```
 
 npm workspaces + Turborepo. 상세 규칙은 `apps/web/AGENTS.md`, `apps/mobile/README.md`.
+코드 밖 작업 중 사업자등록·업종코드·세무는 `BUSINESS.md`.
 
 ## 개발
 
