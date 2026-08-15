@@ -236,23 +236,6 @@ export default async function PaperDetailPage({
               {paper.tags.map((tag) => `#${tag}`).join(" ")}
             </p>
           )}
-          {/* 이 페이지는 원래 제목 한 줄과 버튼 몇 개뿐이라, 크롤러가 읽을 문장이
-              사실상 없었다 — 그런 페이지가 3천 장이면 사이트 전체가 "내용 없는
-              문서 뭉치"로 평가된다. 아래 문장은 전부 이 문제지의 실제 데이터로
-              조립되므로 문제지마다 내용이 다르고, 없는 것을 있다고 말하지 않는다. */}
-          <p className="mt-3 text-zinc-600 dark:text-zinc-400">
-            {[examType?.name, paper.level].filter(Boolean).join(" ")}{" "}
-            {paper.year}년{paper.round > 1 ? ` ${paper.round}회차` : ""}{" "}
-            {subject?.name} 기출문제입니다.
-            {paper.question_count
-              ? ` 총 ${paper.question_count}문항이며, 문제지와`
-              : " 문제지와"}
-            {answerKey ? " 공식 정답을" : " 관련 자료를"} 무료로
-            열람·다운로드할 수 있습니다.
-            {hasCbtAnswers &&
-              " 온라인 CBT로 실제 시험처럼 풀고 바로 채점할 수 있어요."}
-            {hasFullExplanations && " 전 문항 해설도 준비되어 있습니다."}
-          </p>
         </div>
       </div>
 

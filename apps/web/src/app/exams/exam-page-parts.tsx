@@ -4,14 +4,13 @@ import { ExamCard } from "@/components/exam-card";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getCbtAvailability } from "@/lib/cbt-availability";
-import { examHref, type ExamCombo, type ExamComboPaper } from "@/lib/exam-index";
+import { examYearHref, type ExamCombo, type ExamComboPaper } from "@/lib/exam-index";
 import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 
-// /exams/[exam] 과 /exams/[exam]/[year] 가 함께 쓰는 조각들. 두 페이지는 보여주는
-// 목록만 다르고 머리말·빵부스러기·카드 그리드는 같다.
+// /exams/[exam] 이 쓰는 조각들.
 
 // JSX가 아니라 JsonLd에 넘길 데이터를 만드는 함수라 소문자로 둔다.
-export function examBreadcrumbLd(combo: ExamCombo, year?: number) {
+export function examBreadcrumbLd(combo: ExamCombo) {
   return {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
@@ -23,33 +22,13 @@ export function examBreadcrumbLd(combo: ExamCombo, year?: number) {
         name: "시험별 기출문제",
         item: absoluteUrl("/exams"),
       },
-      {
-        "@type": "ListItem",
-        position: 3,
-        name: `${combo.label} 기출문제`,
-        ...(year ? { item: absoluteUrl(examHref(combo.slug)) } : {}),
-      },
-      ...(year
-        ? [
-            {
-              "@type": "ListItem",
-              position: 4,
-              name: `${year} ${combo.label} 기출문제`,
-            },
-          ]
-        : []),
+      { "@type": "ListItem", position: 3, name: `${combo.label} 기출문제` },
     ],
   };
 }
 
 /** 상위 계층으로 되짚어 올라가는 실제 링크 — JSON-LD 빵부스러기와 같은 경로다. */
-export function ExamCrumbs({
-  combo,
-  showComboLink = false,
-}: {
-  combo: ExamCombo;
-  showComboLink?: boolean;
-}) {
+export function ExamCrumbs() {
   return (
     <div className="flex flex-wrap items-center gap-x-2 text-sm text-zinc-500 dark:text-zinc-500">
       <Link href="/" className="hover:text-blue-600 dark:hover:text-blue-400">
@@ -62,22 +41,11 @@ export function ExamCrumbs({
       >
         시험별 기출문제
       </Link>
-      {showComboLink && (
-        <>
-          <span aria-hidden>·</span>
-          <Link
-            href={examHref(combo.slug)}
-            className="hover:text-blue-600 dark:hover:text-blue-400"
-          >
-            {combo.label} 기출문제
-          </Link>
-        </>
-      )}
     </div>
   );
 }
 
-/** 연도 이동 줄. 지금 보고 있는 연도는 눌러도 제자리라 링크 대신 표시만 한다. */
+/** 연도 고르는 줄. 지금 보고 있는 연도는 눌러도 제자리라 링크 대신 표시만 한다. */
 export function ExamYearNav({
   combo,
   activeYear,
@@ -100,34 +68,13 @@ export function ExamYearNav({
         ) : (
           <Link
             key={year}
-            href={examHref(combo.slug, year)}
+            href={examYearHref(combo.slug, year)}
             className="rounded-full border border-zinc-200 px-4 py-1.5 text-sm font-medium text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-800 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
           >
             {year}년 {count}건
           </Link>
         ),
       )}
-    </div>
-  );
-}
-
-export function ExamHeading({
-  combo,
-  year,
-  children,
-}: {
-  combo: ExamCombo;
-  year?: number;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-3">
-      {/* 제목이 이미 "2026 국가직 9급 기출문제"라 급수 배지를 따로 달지 않는다. */}
-      <h1 className="text-3xl font-bold">
-        {year ? `${year} ` : ""}
-        {combo.label} 기출문제
-      </h1>
-      <p className="text-zinc-600 dark:text-zinc-400">{children}</p>
     </div>
   );
 }

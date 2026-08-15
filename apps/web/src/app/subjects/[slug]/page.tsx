@@ -174,17 +174,6 @@ export default async function SubjectPage({
     (a, b) => a.display_order - b.display_order,
   );
 
-  // 목록 소개 문장에 쓰는 연도 범위. 목록은 연도 내림차순이라 양 끝이 곧 최신/최고다.
-  const years = dedupedPapers.map((p) => p.year);
-  const newestYear = years.length > 0 ? Math.max(...years) : null;
-  const oldestYear = years.length > 0 ? Math.min(...years) : null;
-  const yearRangeLabel =
-    newestYear === null || oldestYear === null
-      ? null
-      : newestYear === oldestYear
-        ? `${newestYear}년`
-        : `${oldestYear}~${newestYear}년`;
-
   const filteredPapers = dedupedPapers.slice(pageStart, pageStart + PAGE_SIZE);
 
   // 급수 탭·직렬 탭이 서로의 선택 상태를 지우지 않도록, 두 탭 모두 이 헬퍼로
@@ -251,22 +240,9 @@ export default async function SubjectPage({
             loggedIn={!!userId}
           />
         </div>
-        {/* 카드 그리드만 있으면 크롤러에게는 링크 뭉치일 뿐이라, 이 목록이 무엇을
-            담고 있는지 한 문장으로 밝혀준다. 숫자는 실제 목록에서 계산한 값이다. */}
         {dedupedPapers.length > 0 && (
-          <p className="mt-3 text-zinc-600 dark:text-zinc-400">
-            {subject.name} 과목의 공무원 기출문제{" "}
-            <strong className="font-semibold text-zinc-800 dark:text-zinc-200">
-              {dedupedPapers.length.toLocaleString()}건
-            </strong>
-            을 모았어요.
-            {yearRangeLabel && ` ${yearRangeLabel} 시행 기출문제를`}
-            {availableExamTypes.length > 0 &&
-              ` ${availableExamTypes
-                .slice(0, 4)
-                .map((t) => t.name)
-                .join("·")} 등 시행처별로`}{" "}
-            연도순으로 정리했으며, 정답과 함께 무료로 열람·다운로드할 수 있습니다.
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
+            {dedupedPapers.length.toLocaleString()}건
           </p>
         )}
       </div>
