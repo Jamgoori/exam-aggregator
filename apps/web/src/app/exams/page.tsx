@@ -35,9 +35,8 @@ function groupByExamType(combos: ExamCombo[]) {
 }
 
 export default async function ExamsIndexPage() {
-  const { combos, totalCount } = await getExamIndex();
+  const { combos } = await getExamIndex();
   const groups = groupByExamType(combos);
-  const newestYear = Math.max(...combos.flatMap((c) => c.years));
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 pt-6 pb-12 sm:pt-8">
@@ -70,14 +69,6 @@ export default async function ExamsIndexPage() {
           ← 홈으로
         </Link>
         <h1 className="text-3xl font-bold">시험별 기출문제</h1>
-        <p className="text-zinc-600 dark:text-zinc-400">
-          국가직·지방직·법원직·국회직·군무원·경찰·소방 등 공무원 시험 기출문제{" "}
-          <strong className="font-semibold text-zinc-800 dark:text-zinc-200">
-            {totalCount.toLocaleString()}건
-          </strong>
-          을 시험별로 정리했어요. 최신 자료는 {newestYear}년까지 올라와 있고,
-          시험을 고르면 연도별 기출문제를 정답과 함께 무료로 볼 수 있습니다.
-        </p>
       </div>
 
       {groups.map((group) => (
@@ -112,18 +103,13 @@ export default async function ExamsIndexPage() {
         </section>
       ))}
 
-      <section className="flex flex-col gap-3 border-t border-zinc-100 pt-6 dark:border-zinc-800">
-        <h2 className="text-lg font-semibold">과목으로 찾기</h2>
-        <p className="text-sm text-zinc-500 dark:text-zinc-500">
-          국어·영어·한국사·행정법처럼 과목 하나만 몰아서 풀고 싶다면{" "}
-          <Link
-            href="/subjects"
-            className="font-medium text-blue-600 hover:underline dark:text-blue-400"
-          >
-            과목별 기출문제
-          </Link>
-          에서 찾을 수 있습니다.
-        </p>
+      <section className="border-t border-zinc-100 pt-6 dark:border-zinc-800">
+        <Link
+          href="/subjects"
+          className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+        >
+          과목별 기출문제 →
+        </Link>
       </section>
     </div>
   );

@@ -7,11 +7,6 @@ import { getExamIndex, examHref } from "@/lib/exam-index";
 import { paperHref } from "@/lib/paper-href";
 import { absoluteUrl } from "@/lib/site-url";
 
-// 자료가 이보다 적은 연도 페이지는 사이트맵에서 뺀다 — 해당 페이지가 스스로
-// noindex를 달고 있어서(app/exams/[exam]/[year]/page.tsx), 색인하지 않을 주소를
-// 사이트맵에 실으면 서치콘솔에 "제외됨" 경고만 쌓인다.
-const MIN_INDEXABLE_PAPERS = 3;
-
 // 홈은 클라이언트 검색 UI라 문제지 3천여 장으로 가는 <a> 링크가 HTML에 거의 없다.
 // 즉 사이트맵이 사실상 유일한 색인 경로다 — 여기서 빠진 문제지는 검색에 안 뜬다.
 //
@@ -86,8 +81,9 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "weekly" as const,
       priority: 0.8,
     })),
-    // 시험(시행처+급수)축 허브와 그 아래 시험·연도 페이지. "2026 국가직 9급
-    // 기출문제"처럼 의도가 뚜렷한 검색어의 착지 지점이라 문제지 상세보다 위에 둔다.
+    // 시험(시행처+급수)축 허브와 그 아래 시험 페이지. "국가직 9급 기출문제"처럼
+    // 의도가 뚜렷한 검색어의 착지 지점이라 문제지 상세보다 위에 둔다. 연도는
+    // 별도 주소가 아니라 시험 페이지의 ?year= 필터라 여기 실을 것이 없다.
     {
       url: absoluteUrl("/exams"),
       lastModified: newest,
@@ -100,16 +96,6 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "weekly" as const,
       priority: 0.8,
     })),
-    ...combos.flatMap((c) =>
-      c.yearCounts
-        .filter((y) => y.count >= MIN_INDEXABLE_PAPERS)
-        .map((y) => ({
-          url: absoluteUrl(examHref(c.slug, y.year)),
-          lastModified: newest,
-          changeFrequency: "monthly" as const,
-          priority: 0.8,
-        })),
-    ),
     ...papers.map((p) => ({
       url: absoluteUrl(paperHref(p)),
       lastModified: uploadedAt.get(p.id),

@@ -52,7 +52,7 @@ function yearRange(entry: SubjectIndexEntry) {
 }
 
 export default async function SubjectsIndexPage() {
-  const [{ entries, totalCount }, { combos }] = await Promise.all([
+  const [{ entries }, { combos }] = await Promise.all([
     getSubjectIndex(),
     getExamIndex(),
   ]);
@@ -91,14 +91,6 @@ export default async function SubjectsIndexPage() {
           ← 홈으로
         </Link>
         <h1 className="text-3xl font-bold">과목별 기출문제</h1>
-        <p className="text-zinc-600 dark:text-zinc-400">
-          국가직·지방직·법원직·국회직·경찰·소방 등 공무원 시험 기출문제{" "}
-          <strong className="font-semibold text-zinc-800 dark:text-zinc-200">
-            {totalCount.toLocaleString()}건
-          </strong>
-          을 {entries.length}개 과목으로 정리했어요. 과목을 고르면 연도별·급수별
-          기출문제를 정답·해설과 함께 무료로 볼 수 있습니다.
-        </p>
       </div>
 
       {groups.map((group) => (
@@ -145,14 +137,12 @@ export default async function SubjectsIndexPage() {
             </Link>
           ))}
         </div>
-        <p className="text-sm text-zinc-500 dark:text-zinc-500">
-          <Link
-            href="/exams"
-            className="font-medium text-blue-600 hover:underline dark:text-blue-400"
-          >
-            시험별 기출문제 전체보기
-          </Link>
-        </p>
+        <Link
+          href="/exams"
+          className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
+        >
+          시험별 기출문제 전체보기 →
+        </Link>
       </section>
     </div>
   );

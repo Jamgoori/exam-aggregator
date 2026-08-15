@@ -8,8 +8,8 @@ import type { ExamType, Subject } from "@gongmoa/core";
 //
 // 왜 둘을 한 슬러그로 묶었나: 경찰·계리직은 level이 비어 있어서 /[시행처]/[급수]
 // 처럼 두 칸으로 나누면 빈 칸이 생긴다. "국가직-9급"과 "경찰"을 같은 자리에 두면
-// 라우트가 /exams/[exam]/[year] 두 칸으로 끝나고, 슬러그 자체가 사람이 읽을 수
-// 있는 검색어("국가직-9급")가 된다.
+// 라우트가 /exams/[exam] 한 칸으로 끝나고, 슬러그 자체가 사람이 읽을 수 있는
+// 검색어("국가직-9급")가 된다.
 export type ExamCombo = {
   slug: string;
   examTypeName: string;
@@ -30,9 +30,16 @@ export function comboSlug(examTypeName: string, level: string | null): string {
 
 // 한글이 섞인 슬러그라 링크·canonical·사이트맵 어디서든 반드시 인코딩해서 쓴다.
 // 한쪽만 인코딩하면 canonical이 실제 주소와 달라져 색인이 갈린다.
-export function examHref(slug: string, year?: number): string {
-  const base = `/exams/${encodeURIComponent(slug)}`;
-  return year ? `${base}/${year}` : base;
+export function examHref(slug: string): string {
+  return `/exams/${encodeURIComponent(slug)}`;
+}
+
+// 연도는 별도 주소가 아니라 같은 페이지의 필터다. 연도마다 라우트를 두면 시험
+// 18개 × 연도 14년 = 250장짜리 페이지 무더기가 생기는데, 대부분 카드 몇 장짜리라
+// 과목 페이지에 이미 실린 문제지를 다시 늘어놓는 것 이상의 내용이 없었다.
+// 정본은 언제나 연도 없는 주소다 (app/exams/[exam]/page.tsx의 canonical).
+export function examYearHref(slug: string, year: number): string {
+  return `${examHref(slug)}?year=${year}`;
 }
 
 async function loadPapers() {
@@ -163,7 +170,7 @@ async function collectComboPapers(slug: string): Promise<ExamComboPaper[]> {
 
 // 거의 모든 수험생이 치는 필수과목. 순수 가나다순으로 두면 "건축계획"이 맨 앞에
 // 오고 국어·영어·한국사가 목록 한가운데 묻히는데, 이 셋을 찾아온 사람이 압도적으로
-// 많다. 목록 첫 화면과 소개 문장 양쪽에 이 순서가 그대로 쓰인다.
+// 많다.
 const CORE_SUBJECTS = ["국어", "영어", "한국사"];
 
 function compareSubjectNames(a: string, b: string): number {
@@ -179,9 +186,9 @@ function compareSubjectNames(a: string, b: string): number {
 }
 
 /**
- * 한 시험의 특정 연도 문제지 전체 (연도 페이지용).
+ * 한 시험의 특정 연도 문제지 전체 (/exams/[exam]의 ?year= 필터용).
  *
- * 연도와 회차는 이미 페이지가 고정하고 있어서 정렬 기준으로 아무 정보도 주지
+ * 연도와 회차는 이미 필터가 고정하고 있어서 정렬 기준으로 아무 정보도 주지
  * 못하므로, 과목명으로 정렬한다(필수과목 먼저, 나머지는 가나다순).
  */
 export async function getExamYearPapers(
@@ -197,23 +204,4 @@ export async function getExamYearPapers(
     compareSubjectNames(a.subjectName ?? "", b.subjectName ?? ""),
   );
   return papers;
-}
-
-/**
- * 시험 페이지 상단에 걸 최근 문제지 몇 장.
- *
- * 왜 최신 "연도 전체"가 아니라 N장인가: 그러면 /exams/국가직-9급 과
- * /exams/국가직-9급/2026 이 같은 목록을 두 주소로 내보내게 된다. 검색엔진은 둘 중
- * 하나만 골라 색인하므로, "국가직 9급 기출문제"와 "2026 국가직 9급 기출문제" 중
- * 한쪽 검색어를 스스로 버리는 셈이 된다. 두 페이지가 서로 다른 것을 보여줘야 한다.
- */
-export async function getExamRecentPapers(
-  slug: string,
-  limit: number,
-): Promise<ExamComboPaper[]> {
-  "use cache";
-  cacheLife({ revalidate: 3600 });
-  cacheTag("home-data");
-
-  return (await collectComboPapers(slug)).slice(0, limit);
 }
