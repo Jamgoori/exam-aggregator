@@ -12,7 +12,6 @@ import { SubjectPaperList } from "@/components/subject-paper-list";
 import { WrongNoteViewTabs } from "@/components/wrong-note-view-tabs";
 import { subjectColor } from "@/lib/subject-colors";
 import { isPremium } from "@/lib/membership";
-import { MembershipLockedPage } from "@/components/membership-upsell";
 
 type ViewKey = "papers" | "questions";
 
@@ -56,20 +55,10 @@ export default async function SubjectWrongNotePage({
   const subject = await getSubjectBySlug(supabase, slug);
   if (!subject) notFound();
 
-  // 오답노트는 멤버십 기능이다. 화면에서 링크를 숨기는 것과 별개로 주소로 직접
-  // 들어올 수 있으므로 여기서도 막는다 — 아래의 집계는 회독이 쌓인 계정에서 꽤
-  // 무거워서, 못 볼 화면을 위해 돌리고 버릴 이유도 없다.
-  if (!(await isPremium(supabase, user.id))) {
-    return (
-      <MembershipLockedPage
-        title={`${subject.name} 오답노트는 멤버십 기능이에요`}
-        description="틀린 문제가 문제지별·문항별로 정리되고, 해설과 메모를 붙여 다시 풀 수 있어요. 지금까지 쌓인 오답은 그대로 남아 있어요."
-        backHref="/mypage?tab=wrong-notes"
-        backLabel="마이페이지로"
-        next={`/mypage/wrong-notes/${slug}`}
-      />
-    );
-  }
+  // 오답노트 열람 자체는 무료다 — 내가 틀린 문제 목록은 내 데이터고, 이걸 막으면
+  // 무료 회원은 오답이 쌓이는 것조차 볼 수 없다. 멤버십은 해설 본문과 정리·복습
+  // 도구(메모·다시 볼 문제·섞어풀기)에만 건다.
+  const premium = await isPremium(supabase, user.id);
 
   return (
     <SubjectWrongNoteShell
@@ -78,18 +67,38 @@ export default async function SubjectWrongNotePage({
       summary={
         <Suspense fallback={<SummarySkeleton />}>
           {view === "questions" ? (
-            <QuestionsSummary supabase={supabase} userId={user.id} slug={slug} />
+            <QuestionsSummary
+              supabase={supabase}
+              userId={user.id}
+              slug={slug}
+              premium={premium}
+            />
           ) : (
-            <PapersSummary supabase={supabase} userId={user.id} slug={slug} />
+            <PapersSummary
+              supabase={supabase}
+              userId={user.id}
+              slug={slug}
+              premium={premium}
+            />
           )}
         </Suspense>
       }
     >
       <Suspense fallback={<ListSkeleton />}>
         {view === "questions" ? (
-          <QuestionsView supabase={supabase} userId={user.id} slug={slug} />
+          <QuestionsView
+            supabase={supabase}
+            userId={user.id}
+            slug={slug}
+            premium={premium}
+          />
         ) : (
-          <PapersView supabase={supabase} userId={user.id} slug={slug} />
+          <PapersView
+            supabase={supabase}
+            userId={user.id}
+            slug={slug}
+            premium={premium}
+          />
         )}
       </Suspense>
     </SubjectWrongNoteShell>
@@ -100,24 +109,26 @@ type ViewProps = {
   supabase: Awaited<ReturnType<typeof createClient>>;
   userId: string;
   slug: string;
+  premium: boolean;
 };
 
-async function QuestionsSummary({ supabase, userId, slug }: ViewProps) {
-  const note = await loadQuestions(supabase, userId, slug);
+async function QuestionsSummary({ supabase, userId, slug, premium }: ViewProps) {
+  const note = await loadQuestions(supabase, userId, slug, premium);
   if (!note || note.unresolvedCount + note.resolvedCount === 0) return null;
   return (
     <WrongNoteSummary unresolved={note.unresolvedCount} resolved={note.resolvedCount} />
   );
 }
 
-async function QuestionsView({ supabase, userId, slug }: ViewProps) {
-  const note = await loadQuestions(supabase, userId, slug);
+async function QuestionsView({ supabase, userId, slug, premium }: ViewProps) {
+  const note = await loadQuestions(supabase, userId, slug, premium);
   if (!note) notFound();
   return (
     <SubjectWrongNoteQuestions
       questions={note.questions}
       unresolvedCount={note.unresolvedCount}
       subjectSlug={slug}
+      premium={premium}
     />
   );
 }
@@ -137,7 +148,7 @@ async function PapersSummary({ supabase, userId, slug }: ViewProps) {
   );
 }
 
-async function PapersView({ supabase, userId, slug }: ViewProps) {
+async function PapersView({ supabase, userId, slug, premium }: ViewProps) {
   const note = await loadOverview(supabase, userId, slug);
   if (!note) notFound();
 
@@ -151,7 +162,9 @@ async function PapersView({ supabase, userId, slug }: ViewProps) {
     <>
       {totalWrong > 0 && (
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
-          시험지를 눌러 회독 기록·해설을 보거나, 아래 버튼으로 바로 다시 풀 수 있어요.
+          {premium
+            ? "시험지를 눌러 회독 기록·해설을 보거나, 아래 버튼으로 바로 다시 풀 수 있어요."
+            : "시험지를 눌러 회독 기록과 틀린 문항을 볼 수 있어요."}
         </p>
       )}
 
@@ -163,6 +176,7 @@ async function PapersView({ supabase, userId, slug }: ViewProps) {
       ) : (
         <SubjectPaperList
           subjectSlug={slug}
+          premium={premium}
           papers={papers.map((p) => ({
             paperId: p.paper.id,
             title: p.paper.title,

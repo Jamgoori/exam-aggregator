@@ -43,7 +43,8 @@ export const FREE_EXPLANATION_DAILY_PAPERS = 3;
 // src/lib/membership.ts 의 isPremium(관리자 우대 포함)을 합친 Deno 포팅본이다.
 //
 // 이게 없으면 웹에서만 페이월이 걸리고, 같은 계정으로 Edge Function 을 직접 부르면
-// 오답노트·복습·진단·해설이 전부 열린다 — 화면을 막는 것과 API 를 막는 것은 다르다.
+// 복습·진단·해설이 전부 열린다 — 화면을 막는 것과 API 를 막는 것은 다르다.
+// (오답노트 열람은 무료라 여기 해당하지 않는다 — 본인 응시 기록을 RLS 로 읽는다.)
 export async function isPremiumUser(
   admin: any,
   userId: string,

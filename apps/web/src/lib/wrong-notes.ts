@@ -164,6 +164,9 @@ export type WrongNoteQuestionDetail = WrongNoteQuestionSummary & {
   choiceCount: number;
   images: string[];
   explanation: QuestionExplanationContent | null;
+  // 해설은 등록돼 있지만 무료 회원이라 본문을 받지 않은 문항(화면은 잠금 자리를 그린다).
+  // explanation === null 이면서 이 값이 false 면 "해설 자체가 없는 문항"이다.
+  explanationLocked: boolean;
   // "다시 볼 문제" 체크 여부.
   pinned: boolean;
 };
@@ -502,6 +505,52 @@ async function fetchExplanations(
   return byPaper;
 }
 
+// 해설 "있음/없음"만 확인한다(본문은 받지 않는다).
+//
+// 무료 회원의 오답노트는 해설을 잠금 자리로 덮는데, 그 자리를 그리려면 그 문항에
+// 실제로 해설이 있는지 알아야 한다 — 해설이 없는 문항까지 "멤버십에서 볼 수 있어요"로
+// 덮으면 결제한 뒤에 빈 자리만 남아 거짓 안내가 된다.
+//
+// 잠금은 CSS 블러가 아니라 이 경로로 만든다. 본문을 내려보내고 화면에서 흐리게만
+// 하면 개발자도구로 그대로 읽힌다 — 무료 회원에게는 해설 본문이 아예 서버를 떠나지
+// 않아야 한다. 이 조회는 본문(jsonb)을 빼고 question_id만 받으므로
+// fetchExplanations 보다 훨씬 가볍다.
+async function fetchExplainedNumbers(
+  paperIds: string[],
+  wanted?: Map<string, Set<number>>,
+): Promise<Map<string, Set<number>>> {
+  const admin = createAdminClient();
+  const byPaper = new Map<string, Set<number>>();
+
+  try {
+    const keys = await fetchQuestionKeys(admin, paperIds, wanted);
+    const questionIds = [...keys.keys()];
+    if (questionIds.length === 0) return byPaper;
+
+    await inParallel(chunk(questionIds, QUESTION_ID_CHUNK), async (ids) => {
+      const { data, error } = await admin
+        .from("question_explanations")
+        .select("question_id")
+        .in("question_id", ids);
+      if (error) throw error;
+      for (const row of data ?? []) {
+        const key = keys.get((row as { question_id: string }).question_id);
+        if (!key) continue;
+        const set = byPaper.get(key.paperId) ?? new Set<number>();
+        set.add(key.questionNumber);
+        byPaper.set(key.paperId, set);
+      }
+    });
+  } catch (e) {
+    // 실패하면 잠금 자리 없이 그린다(해설이 없는 문항과 같은 모양). 본문인 "내가 틀린
+    // 문항"은 살려서 보여주는 fetchExplanations 의 판단과 같다.
+    console.error("fetchExplainedNumbers 실패", { paperIds, error: e });
+    return new Map();
+  }
+
+  return byPaper;
+}
+
 function toQuestionDetail(
   q: WrongNoteQuestionSummary,
   paper: WrongNotePaperInfo,
@@ -509,6 +558,8 @@ function toQuestionDetail(
   answers: number[] | undefined,
   explanations: Map<number, QuestionExplanationContent> | undefined,
   pinnedKeys?: Set<string>,
+  // 해설은 있지만 멤버십이 아니라 본문을 안 받은 문항 번호들.
+  lockedNumbers?: Set<number>,
 ): WrongNoteQuestionDetail {
   const entry = media?.get(q.questionNumber);
   return {
@@ -517,6 +568,7 @@ function toQuestionDetail(
     choiceCount: entry?.choiceCount ?? paper.choice_count,
     images: entry?.images ?? [],
     explanation: explanations?.get(q.questionNumber) ?? null,
+    explanationLocked: lockedNumbers?.has(q.questionNumber) ?? false,
     pinned: pinnedKeys?.has(`${paper.id}#${q.questionNumber}`) ?? false,
   };
 }
@@ -585,6 +637,8 @@ export type SubjectWrongNoteQuestion = {
   choiceCount: number;
   images: string[];
   explanation: QuestionExplanationContent | null;
+  // 해설은 있지만 무료 회원이라 본문을 받지 않은 문항(화면은 잠금 자리를 그린다).
+  explanationLocked: boolean;
   // 사용자가 이 문항에 남긴 개인 메모(없으면 null).
   memo: string | null;
   // 전국 오답률(%). 표본이 충분한 문항만 채워지고, 적으면 null(배지 숨김).
@@ -742,10 +796,15 @@ async function fetchWrongRates(paperIds: string[]): Promise<Map<string, number>>
   return out;
 }
 
+// includeExplanations=false 면 해설 본문을 조회하지 않고 "해설이 있는 문항"만 표시해
+// 준다(무료 회원). 오답노트 열람 자체는 무료라 목록·이미지·정답은 그대로 내려가고,
+// 해설만 잠금 자리로 바뀐다 — 무료 해설 한도(FREE_EXPLANATION_DAILY_PAPERS)가 이
+// 경로로 새지 않게 하려는 것.
 export async function getSubjectWrongNoteQuestions(
   supabase: Supabase,
   userId: string,
   slug: string,
+  includeExplanations = true,
 ): Promise<SubjectWrongNoteQuestions | null> {
   const { data: subjectRow } = await supabase
     .from("subjects")
@@ -866,11 +925,25 @@ export async function getSubjectWrongNoteQuestions(
     wantedNumbers.set(agg.repId, set);
   }
 
-  const [mediaByPaper, answersByPaper, explanationsByPaper, statusByRepQ, memoByRepQ, rateByRepQ, rawMarks] =
+  const [
+    mediaByPaper,
+    answersByPaper,
+    explanationsByPaper,
+    explainedByPaper,
+    statusByRepQ,
+    memoByRepQ,
+    rateByRepQ,
+    rawMarks,
+  ] =
     await Promise.all([
       fetchQuestionMedia(supabase, repIds, wantedNumbers),
       fetchCorrectAnswers(repIds),
-      fetchExplanations(repIds, wantedNumbers),
+      includeExplanations
+        ? fetchExplanations(repIds, wantedNumbers)
+        : new Map<string, Map<number, QuestionExplanationContent>>(),
+      includeExplanations
+        ? new Map<string, Set<number>>()
+        : fetchExplainedNumbers(repIds, wantedNumbers),
       fetchQuestionStatusByRep(supabase, userId, paperList.map((p) => p.id), repId),
       fetchMemos(supabase, userId, repIds),
       fetchWrongRates(repIds),
@@ -917,6 +990,8 @@ export async function getSubjectWrongNoteQuestions(
       choiceCount: media?.choiceCount ?? info.choiceCount,
       images: media?.images ?? [],
       explanation: explanationsByPaper.get(agg.repId)?.get(agg.questionNumber) ?? null,
+      explanationLocked:
+        explainedByPaper.get(agg.repId)?.has(agg.questionNumber) ?? false,
       memo: memoByRepQ.get(`${agg.repId}#${agg.questionNumber}`) ?? null,
       wrongRatePct: rateByRepQ.get(`${agg.repId}#${agg.questionNumber}`) ?? null,
       pinned: pinnedRepKeys.has(`${agg.repId}#${agg.questionNumber}`),
@@ -1082,10 +1157,14 @@ export type PaperWrongNote = {
 
 // 문제지 오답노트 페이지용: 이 문제지에 대한 내 회독 기록 전체와, 통합 오답
 // 목록(이미지·정답·해설 포함)을 돌려준다. 응시 기록이 없거나 문제지가 삭제됐으면 null.
+//
+// includeExplanations=false 면 해설 본문 없이 "해설이 있는 문항" 표시만 돌려준다
+// (무료 회원 — getSubjectWrongNoteQuestions 와 같은 기준).
 export async function getPaperWrongNote(
   supabase: Supabase,
   userId: string,
   paperId: string,
+  includeExplanations = true,
 ): Promise<PaperWrongNote | null> {
   const { data: attemptRows } = await supabase
     .from("cbt_attempts")
@@ -1131,11 +1210,17 @@ export async function getPaperWrongNote(
     return { paper, rounds, questions: [], unresolvedCount: 0, resolvedCount: 0 };
   }
 
-  const [mediaByPaper, answersByPaper, explanationsByPaper] = await Promise.all([
-    fetchQuestionMedia(supabase, [paper.id]),
-    fetchCorrectAnswers([paper.id]),
-    fetchExplanations([paper.id]),
-  ]);
+  const [mediaByPaper, answersByPaper, explanationsByPaper, explainedByPaper] =
+    await Promise.all([
+      fetchQuestionMedia(supabase, [paper.id]),
+      fetchCorrectAnswers([paper.id]),
+      includeExplanations
+        ? fetchExplanations([paper.id])
+        : new Map<string, Map<number, QuestionExplanationContent>>(),
+      includeExplanations
+        ? new Map<string, Set<number>>()
+        : fetchExplainedNumbers([paper.id]),
+    ]);
 
   return {
     paper,
@@ -1148,6 +1233,7 @@ export async function getPaperWrongNote(
         answersByPaper.get(paper.id),
         explanationsByPaper.get(paper.id),
         marks.pinned,
+        explainedByPaper.get(paper.id),
       ),
     ),
     unresolvedCount: group.unresolvedCount,
@@ -1249,12 +1335,15 @@ export type AttemptWrongNote = {
     choiceCount: number;
     images: string[];
     explanation: QuestionExplanationContent | null;
+    // 해설은 있지만 무료 회원이라 본문을 받지 않은 문항(화면은 잠금 자리를 그린다).
+    explanationLocked: boolean;
   }[];
 };
 
-// includeExplanations=false 면 해설을 아예 조회하지 않고 null로 채운다. 응시 기록
-// 상세는 무료 회원도 보는 화면이라(점수·틀린 문항 확인은 CBT의 일부다) 화면 자체는
-// 남기되, 해설만 빼서 "무료는 하루 문제지 3개"라는 한도가 이 경로로 새지 않게 한다.
+// includeExplanations=false 면 해설 본문을 아예 조회하지 않고, 해설이 있는 문항인지만
+// 표시해 준다. 응시 기록 상세는 무료 회원도 보는 화면이라(점수·틀린 문항 확인은 CBT의
+// 일부다) 화면 자체는 남기되, 해설 본문만 빼서 "무료는 하루 문제지 3개"라는 한도가 이
+// 경로로 새지 않게 한다.
 export async function getAttemptWrongNote(
   supabase: Supabase,
   userId: string,
@@ -1303,7 +1392,7 @@ export async function getAttemptWrongNote(
 
   // 문제지가 삭제됐으면 이미지·정답·해설 없이 번호/선택지만 보여준다.
   const paper = attempt.exam_papers;
-  const [mediaByPaper, answersByPaper, explanationsByPaper] =
+  const [mediaByPaper, answersByPaper, explanationsByPaper, explainedByPaper] =
     paper && wrong.length > 0
       ? await Promise.all([
           fetchQuestionMedia(supabase, [paper.id]),
@@ -1311,16 +1400,21 @@ export async function getAttemptWrongNote(
           includeExplanations
             ? fetchExplanations([paper.id])
             : new Map<string, Map<number, QuestionExplanationContent>>(),
+          includeExplanations
+            ? new Map<string, Set<number>>()
+            : fetchExplainedNumbers([paper.id]),
         ])
       : [
           new Map<string, Map<number, QuestionMediaEntry>>(),
           new Map<string, number[]>(),
           new Map<string, Map<number, QuestionExplanationContent>>(),
+          new Map<string, Set<number>>(),
         ];
 
   const media = paper ? mediaByPaper.get(paper.id) : undefined;
   const answers = paper ? answersByPaper.get(paper.id) : undefined;
   const explanations = paper ? explanationsByPaper.get(paper.id) : undefined;
+  const explained = paper ? explainedByPaper.get(paper.id) : undefined;
 
   return {
     attempt: {
@@ -1341,6 +1435,7 @@ export async function getAttemptWrongNote(
         choiceCount: entry?.choiceCount ?? paper?.choice_count ?? 4,
         images: entry?.images ?? [],
         explanation: explanations?.get(row.question_number) ?? null,
+        explanationLocked: explained?.has(row.question_number) ?? false,
       };
     }),
   };

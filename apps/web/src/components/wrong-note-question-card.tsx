@@ -4,6 +4,7 @@ import {
   type QuestionExplanationContent,
 } from "@/components/explanation-body";
 import { ExplanationDisclosure } from "@/components/explanation-disclosure";
+import { ExplanationLock } from "@/components/explanation-lock";
 
 // 오답노트 화면(회차별/과목별)이 공유하는 문제 카드. 훅을 쓰지 않는 순수 표시용
 // 컴포넌트라 서버 컴포넌트(회차 페이지)와 클라이언트 컴포넌트(과목 페이지의 필터
@@ -21,6 +22,10 @@ export type WrongNoteCardRow = {
   choiceCount: number;
   // 해설이 등록된 문항만 채워진다 (없으면 "해설 보기" 자체가 안 뜬다).
   explanation?: QuestionExplanationContent | null;
+  // 해설은 등록돼 있지만 무료 회원이라 본문을 안 받은 문항. 이 자리에는 본문 대신
+  // 잠금 카드를 그린다(해설이 아예 없는 문항과 구분하려는 값 — 없는 문항까지 잠금으로
+  // 덮으면 결제 후 빈 자리만 남는다).
+  explanationLocked?: boolean;
   // 과목별 모아보기에서만 채워지는 값들 (회차별 보기에서는 undefined).
   wrongCount?: number;
   resolved?: boolean;
@@ -137,6 +142,8 @@ export function WrongNoteQuestionCard({
   // 오답노트 화면에서 문항별 액션(다시보기 체크·삭제)을 붙일 때 쓴다. 단일 문항
   // 카드는 번호 헤더 우측 끝에, 세트문제는 답 줄마다 붙는다.
   renderRowActions,
+  // 해설 잠금 카드의 "멤버십 보러 가기"가 결제 후 돌아올 곳(현재 화면 주소).
+  explanationLockNext,
 }: {
   rows: WrongNoteCardRow[];
   images: string[];
@@ -144,6 +151,7 @@ export function WrongNoteQuestionCard({
   showSelection?: boolean;
   eagerImages?: boolean;
   renderRowActions?: (questionNumber: number) => React.ReactNode;
+  explanationLockNext?: string;
 }) {
   const firstNumber = rows[0]?.questionNumber;
   const lastNumber = rows[rows.length - 1]?.questionNumber;
@@ -214,13 +222,22 @@ export function WrongNoteQuestionCard({
           - 전체 해설 페이지(explanationsOpen)는 처음부터 펼쳐 두고 인쇄까지 하므로
             예전처럼 서버에서 통째로 그린다.
           - 오답노트 목록은 접힌 채로 시작하므로 ExplanationDisclosure가 실제로 펼친
-            해설만 그린다(문항 수백 개짜리 목록의 첫 화면을 가볍게 하려는 분리). */}
-      {rows.some((row) => row.explanation) && (
+            해설만 그린다(문항 수백 개짜리 목록의 첫 화면을 가볍게 하려는 분리).
+          - 무료 회원(explanationLocked)은 본문이 서버에서 오지 않으므로 잠금 카드를
+            대신 그린다 — 자리를 비우면 "해설 없는 문항"과 구분이 안 된다. */}
+      {rows.some((row) => row.explanation || row.explanationLocked) && (
         <div className="flex flex-col gap-1 border-t border-zinc-100 px-4 py-3 print:py-1.5 dark:border-zinc-700">
           {rows
-            .filter((row) => row.explanation)
+            .filter((row) => row.explanation || row.explanationLocked)
             .map((row) =>
-              explanationsOpen ? (
+              !row.explanation ? (
+                <ExplanationLock
+                  key={row.questionNumber}
+                  questionNumber={row.questionNumber}
+                  showNumber={rows.length > 1}
+                  next={explanationLockNext}
+                />
+              ) : explanationsOpen ? (
                 <details key={row.questionNumber} open className="group">
                   {/* 인쇄에서 "해설 보기" 토글 줄은 숨긴다. 단, 세트문제(카드에 해설
                       여러 개)는 이 줄이 몇 번 해설인지 알려주는 유일한 라벨이라

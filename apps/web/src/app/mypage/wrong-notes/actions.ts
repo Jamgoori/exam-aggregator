@@ -33,9 +33,10 @@ import type { SessionSchedule, ReviewPickStrategy } from "@gongmoa/core";
 
 export type CreateReviewResult = { error?: string; sessionId?: string };
 
-// 오답노트·복습·진단은 전부 멤버십 기능이다. 화면에서 버튼을 숨기는 건 표시일 뿐이고,
-// 서버 액션은 이름만 알면 직접 부를 수 있으므로 각 경로에서 다시 확인한다.
-const WRONG_NOTE_LOCKED = "오답노트는 멤버십 기능이에요.";
+// 오답노트 열람 자체는 무료지만, 정리 도구(메모·다시 볼 문제·삭제)와 복습·진단은
+// 멤버십이다. 화면에서 버튼을 숨기는 건 표시일 뿐이고 서버 액션은 이름만 알면 직접
+// 부를 수 있으므로 각 경로에서 다시 확인한다.
+const WRONG_NOTE_LOCKED = "메모·다시 볼 문제 정리는 멤버십 기능이에요.";
 const REVIEW_LOCKED = "복습은 멤버십 기능이에요.";
 
 // 클라이언트가 보내는 값이라 문자열을 그대로 믿지 않는다. 모르는 값은 기본값

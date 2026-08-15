@@ -144,19 +144,19 @@ export default async function MyPage({
   const myAttempts = (attemptRows ?? []) as unknown as MyAttempt[];
   const { attemptsByPaper, roundNumberByAttemptId } = computeAttemptRounds(myAttempts);
 
-  // 멤버십 판정을 오답노트 집계보다 먼저 한다. 오답노트·복습·진단이 전부 멤버십
-  // 기능이라, 무료 회원에게는 아래의 무거운 집계(문항별 오답 행 + 문항 상태 맵)를
-  // 아예 돌리지 않는다. 관리자는 멤버십과 무관하게 프리미엄으로 본다 — 검수·문의
-  // 대응을 하려면 사용자와 같은 화면을 볼 수 있어야 한다.
+  // 멤버십 판정을 오답노트 집계보다 먼저 한다. 복습·진단이 멤버십 기능이고 오답노트
+  // 탭의 과목 카드도 회원 여부에 따라 다르게 그리므로, 무료 회원에게는 아래의 무거운
+  // 집계(문항별 오답 행 + 문항 상태 맵)를 돌리지 않는다. 관리자는 멤버십과 무관하게
+  // 프리미엄으로 본다 — 검수·문의 대응을 하려면 사용자와 같은 화면을 볼 수 있어야 한다.
   const [membership, admin] = await Promise.all([
     getMembership(supabase, user.id),
     isAdminUser(supabase),
   ]);
   const premium = admin || isPremiumMembership(membership);
 
-  // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고,
-  // 문항별 오답 행만 추가로 조회한다. 무료 회원은 목록 자체가 잠기므로 조회하지
-  // 않는다 — 못 볼 화면을 위해 응시 전체의 문항 행을 긁어올 이유가 없다.
+  // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고, 문항별 오답
+  // 행만 추가로 조회한다. 무료 회원에게는 돌리지 않는다 — 이 집계가 주는 건 과목
+  // 카드의 "극복 진행률"뿐이고, 목록·이동은 아래 unresolvedBySubject 로 충분하다.
   let wrongNoteGroups: WrongNoteSubjectGroup[] = [];
   if (premium) {
     const myAttemptPaperIds = [
@@ -183,8 +183,8 @@ export default async function MyPage({
   // 극복한 게 헤드라인·과목·오늘 카드에 즉시 반영되고, 섞어풀기 후보 수와 일치한다.
   // 표가 비어 있으면(백필 전 등) 응시 기준(buildWrongNoteGroups)으로 폴백.
   //
-  // 무료 회원에게도 이 값은 계산한다. 상단 "남은 오답"은 자기 데이터의 요약일 뿐이고,
-  // 잠긴 화면에서 "그동안 쌓인 오답은 그대로 있다"를 보여주는 근거이기도 하다.
+  // 무료 회원에게도 이 값은 계산한다. 상단 "남은 오답" 요약과, 무료 회원 오답노트
+  // 탭의 과목 카드(이름·slug·남은 오답)가 전부 이 결과로 그려진다.
   const unresolvedBySubject = await getUnresolvedCountBySubject(supabase, user.id);
   const totalUnresolved =
     unresolvedBySubject.size > 0
@@ -487,27 +487,67 @@ function WrongNotesTab({
   diagnosisHint: string | null;
   reviewDue: ReviewDueCardProps;
 }) {
-  // 무료 회원: 오답노트·복습·진단이 모두 멤버십 기능이라 탭 전체를 안내로 바꾼다.
-  // 카드를 늘어놓고 누를 때마다 막는 것보다, 한 번에 무엇이 잠겼는지 보여주는 쪽이
-  // 덜 불쾌하다. 쌓인 오답 수를 같이 보여주는 건 "기록이 사라진 게 아니다"를
-  // 분명히 하기 위해서다 — 실제로 데이터는 그대로 남아 있고 결제하면 그대로 열린다.
+  // 무료 회원: 오답노트 열람 자체는 열어 둔다(내가 틀린 문제 목록은 내 데이터다).
+  // 다만 무거운 집계(buildWrongNoteGroups)는 돌리지 않았으므로, 과목 카드는
+  // 이미 계산해 둔 미극복 집계로 그린다 — 극복 진행률만 빠지고 이동은 그대로 된다.
+  // 잠기는 것은 해설 본문·복습·진단·정리 도구뿐이고, 그 안내는 아래 카드가 한다.
   if (!premium) {
+    const freeSubjects = [...unresolvedBySubject.values()].sort(
+      (a, b) => b.unresolved - a.unresolved || a.name.localeCompare(b.name, "ko"),
+    );
     return (
       <section id="wrong-notes" className="flex scroll-mt-4 flex-col gap-4">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
           오답노트
         </h2>
+        <HowItWorksStrip />
+        {freeSubjects.length === 0 ? (
+          <div className="flex flex-col items-center gap-4 py-12">
+            <p className="text-center text-sm text-zinc-500 dark:text-zinc-500">
+              아직 모인 오답이 없어요. CBT로 문제를 풀면 틀린 문제가 과목별로
+              자동으로 정리돼요.
+            </p>
+            <Link
+              href="/"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700"
+            >
+              문제 풀러 가기
+            </Link>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {freeSubjects.map((s) => (
+              <Link
+                key={s.slug}
+                href={`/mypage/wrong-notes/${s.slug}`}
+                className="group flex items-center gap-3 rounded-xl border border-zinc-200 p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-700 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+              >
+                <span
+                  className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${subjectColor(s.slug)}`}
+                >
+                  {s.name}
+                </span>
+                <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                  남은 오답 {s.unresolved}
+                </span>
+                <span className="ml-auto flex shrink-0 items-center gap-1 text-sm font-medium text-blue-600 group-hover:underline dark:text-blue-400">
+                  오답 보기
+                  <ChevronRight size={15} />
+                </span>
+              </Link>
+            ))}
+          </div>
+        )}
         <MembershipUpsell
-          title="오답노트는 멤버십 기능이에요"
+          title="해설·복습까지 이어가려면 멤버십"
           description={
             totalUnresolved > 0
-              ? `지금까지 쌓인 오답 ${totalUnresolved}문항은 그대로 남아 있어요. 멤버십을 시작하면 과목별 정리·복습 일정·AI 약점 진단까지 이어서 쓸 수 있어요.`
-              : "틀린 문제가 과목별로 자동 정리되고, 언제 다시 볼지 계산된 복습 일정과 AI 약점 진단까지 이어져요."
+              ? `쌓인 오답 ${totalUnresolved}문항은 지금도 그대로 볼 수 있어요. 멤버십을 시작하면 문항별 해설과 복습 일정, AI 약점 진단까지 이어져요.`
+              : "틀린 문제는 무료로도 모아서 볼 수 있어요. 멤버십을 시작하면 문항별 해설과 복습 일정, AI 약점 진단까지 이어져요."
           }
           next="/mypage?tab=wrong-notes"
         />
-        <HowItWorksStrip />
       </section>
     );
   }

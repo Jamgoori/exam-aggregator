@@ -25,9 +25,14 @@ export type SubjectPaperItem = {
 export function SubjectPaperList({
   subjectSlug,
   papers,
+  // 목록·회독 기록 열람은 무료지만 다시 풀기(복습 세션 생성)는 멤버십이다.
+  // 무료 회원에게는 버튼을 그리지 않는다 — 서버 액션이 어차피 막으므로 누르면
+  // 에러 문구만 보게 된다.
+  premium,
 }: {
   subjectSlug: string;
   papers: SubjectPaperItem[];
+  premium: boolean;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -61,7 +66,8 @@ export function SubjectPaperList({
   }
 
   // 시험지가 2장 이상일 때만 "합쳐 풀기"가 의미 있어, 체크박스·안내를 그때만 노출한다.
-  const multiSelectable = papers.length > 1;
+  // 다시 풀기 자체가 멤버십이므로 무료 회원에게는 선택 UI도 두지 않는다.
+  const multiSelectable = premium && papers.length > 1;
 
   return (
     <div className={`flex flex-col gap-3 ${selected.size > 0 ? "pb-24" : ""}`}>
@@ -168,19 +174,21 @@ export function SubjectPaperList({
               </Link>
             </div>
 
-            <button
-              type="button"
-              onClick={() => launch([p.paperId], p.paperId)}
-              disabled={pending}
-              className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
-            >
-              <RotateCcw size={15} />
-              {pending && activePaper === p.paperId
-                ? "준비 중..."
-                : cleared
-                  ? "틀렸던 문제 복습하기"
-                  : "틀린 문제 다시 풀기"}
-            </button>
+            {premium && (
+              <button
+                type="button"
+                onClick={() => launch([p.paperId], p.paperId)}
+                disabled={pending}
+                className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                <RotateCcw size={15} />
+                {pending && activePaper === p.paperId
+                  ? "준비 중..."
+                  : cleared
+                    ? "틀렸던 문제 복습하기"
+                    : "틀린 문제 다시 풀기"}
+              </button>
+            )}
           </div>
         );
       })}
