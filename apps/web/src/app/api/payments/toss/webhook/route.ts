@@ -1,6 +1,13 @@
 import { connection } from "next/server";
 import { syncTossPaymentByKey } from "@/lib/payments";
 import { isTossConfigured } from "@/lib/toss";
+import {
+  createRateLimiter,
+  isAllowedIp,
+  isValidPaymentKey,
+  parseIpAllowlist,
+  requestIp,
+} from "@/lib/webhook-guard";
 
 // 토스 결제 상태 변경 웹훅.
 //
@@ -14,14 +21,33 @@ import { isTossConfigured } from "@/lib/toss";
 // 그 응답만 진실로 취급한다(lib/payments.ts 의 syncTossPaymentByKey). 위조된 키는
 // 조회 단계에서 걸러지고, 남의 실제 키를 넣어도 주문 금액이 맞지 않으면 무시된다.
 //
+// 다만 그 구조 때문에 **요청 한 번이 토스 API 호출 한 번**이 된다. 주소만 알면 누구나
+// 우리 이름으로 토스 API 를 두들기게 만들 수 있고, 토스가 우리를 레이트리밋하면 그때
+// 들어온 진짜 결제의 동기화가 실패한다. 그래서 토스에 되묻기 전에 세 가지를 먼저 본다
+// (lib/webhook-guard.ts): paymentKey 형식 · 발신 IP 허용 목록 · IP 당 유량.
+//
 // 토스 웹훅 등록: 개발자센터 → 웹훅 → `https://gongmoa.kr/api/payments/toss/webhook`,
 // 이벤트는 PAYMENT_STATUS_CHANGED.
+
+// 발신 IP 허용 목록(선택). 토스 개발자센터가 공지하는 웹훅 발신 IP 를 쉼표로 넣는다.
+// 비워 두면 IP 로는 거르지 않는다 — 목록을 코드에 박아 두면 토스가 IP 를 바꾸는 날
+// 웹훅이 통째로 조용히 죽는다.
+const ALLOWED_IPS = parseIpAllowlist(process.env.TOSS_WEBHOOK_IPS);
+
+// IP 당 분당 300건. 실제 토스 웹훅은 결제 한 건당 몇 개 수준이라 정상 운영에서는
+// 닿을 일이 없는 숫자다(여기 걸려서 진짜 웹훅이 버려지는 쪽이 훨씬 나쁘다).
+const limiter = createRateLimiter({ limit: 300, windowMs: 60_000 });
+
 export async function POST(request: Request) {
   await connection();
 
   // 키가 없으면 토스에 되물을 수단이 없다. 조용히 200 으로 받아 넘긴다 — 에러를 주면
   // 토스가 재시도를 계속 쌓는다.
   if (!isTossConfigured()) return Response.json({ ok: true });
+
+  const ip = requestIp(request.headers);
+  if (!isAllowedIp(ip, ALLOWED_IPS)) return Response.json({ ok: true });
+  if (!limiter.take(ip ?? "unknown")) return Response.json({ ok: true });
 
   let body: unknown;
   try {
@@ -47,11 +73,13 @@ export async function POST(request: Request) {
 }
 
 // { eventType: "PAYMENT_STATUS_CHANGED", data: { paymentKey, ... } } 형태.
-// 외부 입력이라 모양을 가정하지 않고 확인하며 꺼낸다.
+// 외부 입력이라 모양을 가정하지 않고 확인하며 꺼낸다. 형식(영문·숫자·-·_, 200자
+// 이내)까지 맞아야 통과시킨다 — 조회 경로에 그대로 들어가는 값이라, 여기서 좁히면
+// 아무 문자열이나 실어 보내 토스 API 를 두들기는 경로가 같이 닫힌다.
 function extractPaymentKey(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
   const data = (body as { data?: unknown }).data;
   if (!data || typeof data !== "object") return null;
   const key = (data as { paymentKey?: unknown }).paymentKey;
-  return typeof key === "string" && key.length > 0 ? key : null;
+  return isValidPaymentKey(key) ? key : null;
 }
