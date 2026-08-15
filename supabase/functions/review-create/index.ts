@@ -6,7 +6,6 @@
 // 단순화했다(user_question_status wrong_count>0 기준). 상세 규칙은 웹 참고.
 import { corsHeaders, json } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
-import { isPremiumUser } from "../_shared/membership.ts";
 import { fetchQuestionMedia } from "../_shared/media.ts";
 import {
   pickReviewCandidates,
@@ -44,12 +43,13 @@ Deno.serve(async (req) => {
 
   const admin = adminClient();
 
-  // 복습은 멤버십 기능이다. 웹 서버 액션(app/mypage/wrong-notes/actions.ts)이 같은
-  // 확인을 하고 있고, 이 함수는 앱이 부르는 같은 기능의 다른 입구다 — 여기가 열려
-  // 있으면 토큰만 있으면 누구나 복습 세션을 만들 수 있어 페이월이 무의미해진다.
-  if (!(await isPremiumUser(admin, userId, auth.email))) {
-    return json({ error: "복습은 멤버십 기능이에요." }, 403);
-  }
+  // 멤버십을 확인하지 않는다. 섞어풀기(내 오답을 모아 다시 풀기)는 무료다 — 웹의
+  // 같은 기능(app/mypage/wrong-notes/actions.ts 의 createReviewSession 계열)도
+  // 열려 있고, 여기만 막으면 같은 계정이 웹에서는 되고 앱에서는 안 된다.
+  //
+  // 유료로 남는 것은 "오늘의 복습"(간격 반복 일정)·AI 진단·해설이고, 그중 앱이
+  // 부르는 입구는 ai-diagnose 와 explanations-get 이라 각자 확인한다. 이 응답에는
+  // 정답도 해설도 싣지 않으므로(아래 items 참고) 해설 페이월과도 무관하다.
 
   // 최근에 만들고 아직 제출하지 않은 세션이 있으면 그걸 그대로 이어준다.
   {

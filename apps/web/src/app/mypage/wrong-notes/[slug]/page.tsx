@@ -55,9 +55,9 @@ export default async function SubjectWrongNotePage({
   const subject = await getSubjectBySlug(supabase, slug);
   if (!subject) notFound();
 
-  // 오답노트 열람 자체는 무료다 — 내가 틀린 문제 목록은 내 데이터고, 이걸 막으면
-  // 무료 회원은 오답이 쌓이는 것조차 볼 수 없다. 멤버십은 해설 본문과 정리·복습
-  // 도구(메모·다시 볼 문제·섞어풀기)에만 건다.
+  // 오답노트는 무료다 — 열람도, 메모·다시 볼 문제 정리도, 섞어풀기도. 내가 틀린
+  // 문제를 내가 다시 보는 일이라 막지 않는다. 여기서 멤버십을 확인하는 건 해설
+  // 본문을 조회할지 정하기 위해서다(무료 회원에게는 잠금 자리만 내려간다).
   const premium = await isPremium(supabase, user.id);
 
   return (
@@ -128,7 +128,6 @@ async function QuestionsView({ supabase, userId, slug, premium }: ViewProps) {
       questions={note.questions}
       unresolvedCount={note.unresolvedCount}
       subjectSlug={slug}
-      premium={premium}
     />
   );
 }
@@ -164,7 +163,7 @@ async function PapersView({ supabase, userId, slug, premium }: ViewProps) {
         <p className="text-xs text-zinc-400 dark:text-zinc-500">
           {premium
             ? "시험지를 눌러 회독 기록·해설을 보거나, 아래 버튼으로 바로 다시 풀 수 있어요."
-            : "시험지를 눌러 회독 기록과 틀린 문항을 볼 수 있어요."}
+            : "시험지를 눌러 회독 기록·틀린 문항을 보거나, 아래 버튼으로 바로 다시 풀 수 있어요."}
         </p>
       )}
 
@@ -176,7 +175,6 @@ async function PapersView({ supabase, userId, slug, premium }: ViewProps) {
       ) : (
         <SubjectPaperList
           subjectSlug={slug}
-          premium={premium}
           papers={papers.map((p) => ({
             paperId: p.paper.id,
             title: p.paper.title,

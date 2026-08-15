@@ -33,9 +33,9 @@ export default async function PaperWrongNotePage({
     );
   }
 
-  // 오답노트 열람 자체는 무료다 — 내가 틀린 문항 목록은 내 데이터고, 점수·정답은
-  // 회차별 오답 페이지(/mypage/attempts/[id])에서 이미 무료로 보여주고 있다. 멤버십은
-  // 해설 본문과 정리·복습 도구에만 건다(해설은 아래 includeExplanations 로 갈린다).
+  // 오답노트는 무료다(회차 기록·틀린 문항·정답 표시·정리·다시 풀기). 여기서 멤버십을
+  // 확인하는 건 해설 본문을 조회할지 정하기 위해서다 — 무료 회원에게는 본문 대신
+  // 잠금 자리만 내려간다.
   const premium = await isPremium(supabase, user.id);
   const note = await getPaperWrongNote(supabase, user.id, paperId, premium);
   // 잘못된 주소(다른 과목의 문제지 등)로 들어오면 404.
@@ -97,14 +97,13 @@ export default async function PaperWrongNotePage({
         questions={viewQuestions}
         rounds={rounds}
         unresolvedCount={unresolvedCount}
-        premium={premium}
         lockNext={`/mypage/wrong-notes/${slug}/${paperId}`}
       />
 
       {!premium && (
         <MembershipUpsell
           title="해설까지 보면서 복습하려면"
-          description="멤버십은 해설을 제한 없이 볼 수 있고, 다시 볼 문제 체크·메모와 복습 일정까지 이어져요."
+          description="멤버십은 문항별 해설을 제한 없이 볼 수 있고, 언제 다시 볼지 계산해주는 복습 일정과 AI 약점 진단까지 이어져요."
           next={`/mypage/wrong-notes/${slug}/${paperId}`}
         />
       )}

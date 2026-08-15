@@ -54,17 +54,13 @@ export function WrongNotePaperView({
   questions,
   rounds,
   unresolvedCount,
-  // 오답 열람 자체는 무료지만 정리 도구(다시 볼 문제 체크·삭제)는 멤버십이다.
-  // 무료 회원에게는 버튼을 아예 안 그린다 — 눌러도 서버가 막으므로 에러만 보게 된다.
-  premium,
-  // 해설 잠금 카드가 결제 후 돌아올 곳.
+  // 무료 회원의 해설 잠금 카드가 결제 후 돌아올 곳.
   lockNext,
 }: {
   paperId: string;
   questions: PaperViewQuestion[];
   rounds: PaperViewRound[];
   unresolvedCount: number;
-  premium: boolean;
   lockNext: string;
 }) {
   const [view, setView] = useState<ViewKey>("all");
@@ -220,29 +216,25 @@ export function WrongNotePaperView({
                 rows={group.rows}
                 images={group.images}
                 explanationLockNext={lockNext}
-                renderRowActions={
-                  premium
-                    ? (questionNumber) => (
-                        <WrongNoteMarkActions
-                          paperId={paperId}
-                          questionNumber={questionNumber}
-                          pinned={pinnedNumbers.has(questionNumber)}
-                          onPinnedChange={(p) =>
-                            setPinnedNumbers((prev) => {
-                              const next = new Set(prev);
-                              if (p) next.add(questionNumber);
-                              else next.delete(questionNumber);
-                              return next;
-                            })
-                          }
-                          onDeleted={() => {
-                            setDeletedNumbers((prev) => new Set(prev).add(questionNumber));
-                            setLastDeleted(questionNumber);
-                          }}
-                        />
-                      )
-                    : undefined
-                }
+                renderRowActions={(questionNumber) => (
+                  <WrongNoteMarkActions
+                    paperId={paperId}
+                    questionNumber={questionNumber}
+                    pinned={pinnedNumbers.has(questionNumber)}
+                    onPinnedChange={(p) =>
+                      setPinnedNumbers((prev) => {
+                        const next = new Set(prev);
+                        if (p) next.add(questionNumber);
+                        else next.delete(questionNumber);
+                        return next;
+                      })
+                    }
+                    onDeleted={() => {
+                      setDeletedNumbers((prev) => new Set(prev).add(questionNumber));
+                      setLastDeleted(questionNumber);
+                    }}
+                  />
+                )}
               />
             ))}
           </div>

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Shuffle } from "lucide-react";
 import {
@@ -62,15 +61,10 @@ export function SubjectWrongNoteQuestions({
   questions,
   unresolvedCount,
   subjectSlug,
-  // 목록·필터·정렬은 무료로 열어 두고, 섞어풀기와 정리 도구(메모·다시 볼 문제·삭제)만
-  // 멤버십으로 둔다. 무료 회원에게는 그 버튼들을 아예 그리지 않는다 — 서버 액션이
-  // 어차피 막으므로 누르면 에러 문구만 보게 된다.
-  premium,
 }: {
   questions: SubjectWrongNoteQuestion[];
   unresolvedCount: number;
   subjectSlug: string;
-  premium: boolean;
 }) {
   const router = useRouter();
 
@@ -243,28 +237,12 @@ export function SubjectWrongNoteQuestions({
         : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
     }`;
 
-  // 결제 후 돌아올 곳(해설 잠금 카드·섞어풀기 안내가 공유한다).
+  // 해설 잠금 카드가 결제 후 돌아올 곳(무료 회원 화면에서만 쓰인다).
   const lockNext = `/mypage/wrong-notes/${subjectSlug}?view=questions`;
 
   return (
     <div className={`flex flex-col gap-4 ${selected.size > 0 ? "pb-24" : ""}`}>
-      {!premium ? (
-        // 무료 회원: 목록은 그대로 보되 섞어풀기 자리에는 무엇이 잠겼는지만 알린다.
-        // 큰 안내 카드를 여기 두지 않는 이유는 문항마다 해설 잠금 카드가 이미 있어서다.
-        visibleUnresolved > 0 && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 dark:border-blue-900/60 dark:bg-blue-950/25">
-            <p className="text-xs text-blue-900 dark:text-blue-200">
-              남은 오답 {visibleUnresolved}개를 모아 섞어 푸는 건 멤버십 기능이에요.
-            </p>
-            <Link
-              href={`/membership?next=${encodeURIComponent(lockNext)}`}
-              className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700"
-            >
-              멤버십 보러 가기
-            </Link>
-          </div>
-        )
-      ) : playableUnresolved > 0 ? (
+      {playableUnresolved > 0 ? (
         <div className="flex flex-col gap-1.5">
           <button
             type="button"
@@ -327,18 +305,14 @@ export function SubjectWrongNoteQuestions({
         >
           2번 이상 틀림
         </button>
-        {/* "다시 볼 문제" 체크 자체가 멤버십이라, 무료 회원에게는 항상 빈 필터가 되는
-            이 칩을 아예 두지 않는다. */}
-        {premium && (
-          <button
-            type="button"
-            onClick={() => setOnlyPinned((v) => !v)}
-            disabled={!hasPinned && !onlyPinned}
-            className={`${chip(onlyPinned)} disabled:cursor-not-allowed disabled:opacity-40`}
-          >
-            다시 볼 문제만
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setOnlyPinned((v) => !v)}
+          disabled={!hasPinned && !onlyPinned}
+          className={`${chip(onlyPinned)} disabled:cursor-not-allowed disabled:opacity-40`}
+        >
+          다시 볼 문제만
+        </button>
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
@@ -385,60 +359,52 @@ export function SubjectWrongNoteQuestions({
                   rows={card.rows}
                   images={card.images}
                   explanationLockNext={lockNext}
-                  renderRowActions={
-                    premium
-                      ? (questionNumber) => {
-                          const key = `${card.paperId}#${questionNumber}`;
-                          return (
-                            <WrongNoteMarkActions
-                              paperId={card.paperId}
-                              questionNumber={questionNumber}
-                              pinned={pinnedKeys.has(key)}
-                              onPinnedChange={(p) => markPinned(key, p)}
-                              onDeleted={() => {
-                                setDeletedKeys((prev) => new Set(prev).add(key));
-                                setLastDeleted({
-                                  key,
-                                  paperId: card.paperId,
-                                  questionNumber,
-                                });
-                              }}
-                            />
-                          );
-                        }
-                      : undefined
-                  }
+                  renderRowActions={(questionNumber) => {
+                    const key = `${card.paperId}#${questionNumber}`;
+                    return (
+                      <WrongNoteMarkActions
+                        paperId={card.paperId}
+                        questionNumber={questionNumber}
+                        pinned={pinnedKeys.has(key)}
+                        onPinnedChange={(p) => markPinned(key, p)}
+                        onDeleted={() => {
+                          setDeletedKeys((prev) => new Set(prev).add(key));
+                          setLastDeleted({
+                            key,
+                            paperId: card.paperId,
+                            questionNumber,
+                          });
+                        }}
+                      />
+                    );
+                  }}
                 />
-                {/* 선택해서 다시 풀기·메모는 멤버십 기능이라 무료 회원에게는 줄
-                    자체를 두지 않는다(빈 입력칸을 남기면 눌렀을 때 에러만 뜬다). */}
-                {premium && (
-                  <div className="flex flex-col divide-y divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-700 dark:border-zinc-700/70">
-                    {card.source.map((q) => {
-                      const key = `${q.paperId}#${q.questionNumber}`;
-                      return (
-                        <div key={q.questionNumber} className="flex items-start gap-1">
-                          <label className="flex shrink-0 cursor-pointer items-center gap-1 py-2 pl-2 text-xs text-zinc-500 dark:text-zinc-400">
-                            <input
-                              type="checkbox"
-                              checked={selected.has(key)}
-                              onChange={() => toggleSelect(q.paperId, q.questionNumber)}
-                              className="h-4 w-4 accent-blue-600"
-                            />
-                            <span className="select-none">선택</span>
-                          </label>
-                          <div className="min-w-0 flex-1">
-                            <MemoEditor
-                              paperId={q.paperId}
-                              questionNumber={q.questionNumber}
-                              initialMemo={q.memo}
-                              label={card.source.length > 1 ? `${q.questionNumber}번` : undefined}
-                            />
-                          </div>
+                <div className="flex flex-col divide-y divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-700 dark:border-zinc-700/70">
+                  {card.source.map((q) => {
+                    const key = `${q.paperId}#${q.questionNumber}`;
+                    return (
+                      <div key={q.questionNumber} className="flex items-start gap-1">
+                        <label className="flex shrink-0 cursor-pointer items-center gap-1 py-2 pl-2 text-xs text-zinc-500 dark:text-zinc-400">
+                          <input
+                            type="checkbox"
+                            checked={selected.has(key)}
+                            onChange={() => toggleSelect(q.paperId, q.questionNumber)}
+                            className="h-4 w-4 accent-blue-600"
+                          />
+                          <span className="select-none">선택</span>
+                        </label>
+                        <div className="min-w-0 flex-1">
+                          <MemoEditor
+                            paperId={q.paperId}
+                            questionNumber={q.questionNumber}
+                            initialMemo={q.memo}
+                            label={card.source.length > 1 ? `${q.questionNumber}번` : undefined}
+                          />
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ))}
           </div>

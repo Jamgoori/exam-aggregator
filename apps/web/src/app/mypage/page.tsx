@@ -487,10 +487,10 @@ function WrongNotesTab({
   diagnosisHint: string | null;
   reviewDue: ReviewDueCardProps;
 }) {
-  // 무료 회원: 오답노트 열람 자체는 열어 둔다(내가 틀린 문제 목록은 내 데이터다).
-  // 다만 무거운 집계(buildWrongNoteGroups)는 돌리지 않았으므로, 과목 카드는
-  // 이미 계산해 둔 미극복 집계로 그린다 — 극복 진행률만 빠지고 이동은 그대로 된다.
-  // 잠기는 것은 해설 본문·복습·진단·정리 도구뿐이고, 그 안내는 아래 카드가 한다.
+  // 무료 회원: 오답노트는 열람도 정리도 섞어풀기도 그대로 쓴다. 다만 무거운
+  // 집계(buildWrongNoteGroups)는 돌리지 않았으므로 과목 카드를 이미 계산해 둔
+  // 미극복 집계로 그린다 — 극복 진행률 바만 빠지고 이동·기능은 같다. 잠기는 것은
+  // 문항 해설과 오늘의 복습(간격 반복)·AI 진단뿐이고, 그건 아래 잠금 카드가 알린다.
   if (!premium) {
     const freeSubjects = [...unresolvedBySubject.values()].sort(
       (a, b) => b.unresolved - a.unresolved || a.name.localeCompare(b.name, "ko"),
@@ -501,6 +501,7 @@ function WrongNotesTab({
           <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
           오답노트
         </h2>
+        <ReviewDueCard {...reviewDue} />
         <HowItWorksStrip />
         {freeSubjects.length === 0 ? (
           <div className="flex flex-col items-center gap-4 py-12">
@@ -540,11 +541,11 @@ function WrongNotesTab({
           </div>
         )}
         <MembershipUpsell
-          title="해설·복습까지 이어가려면 멤버십"
+          title="해설·복습 일정까지 이어가려면 멤버십"
           description={
             totalUnresolved > 0
-              ? `쌓인 오답 ${totalUnresolved}문항은 지금도 그대로 볼 수 있어요. 멤버십을 시작하면 문항별 해설과 복습 일정, AI 약점 진단까지 이어져요.`
-              : "틀린 문제는 무료로도 모아서 볼 수 있어요. 멤버십을 시작하면 문항별 해설과 복습 일정, AI 약점 진단까지 이어져요."
+              ? `쌓인 오답 ${totalUnresolved}문항은 지금도 모아 보고 다시 풀 수 있어요. 멤버십을 시작하면 문항별 해설과 언제 다시 볼지 계산해주는 복습 일정, AI 약점 진단까지 이어져요.`
+              : "틀린 문제를 모아 보고 다시 푸는 건 무료예요. 멤버십을 시작하면 문항별 해설과 언제 다시 볼지 계산해주는 복습 일정, AI 약점 진단까지 이어져요."
           }
           next="/mypage?tab=wrong-notes"
         />
