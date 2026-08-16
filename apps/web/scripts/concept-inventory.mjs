@@ -52,12 +52,15 @@ const verify = process.argv.includes("--verify");
 
 const PAGE = 1000;
 
-async function pageAll(table, select, tweak = (q) => q) {
+// orderBy 는 페이징이 흔들리지 않게 유일한 컬럼 조합이어야 한다. 대부분의 테이블은
+// id 하나로 되지만 concept_aliases 는 id 가 없다 — PK 가 (concept_id, normalized) 다.
+// (apply-concepts.mjs 의 pageAll 과 같은 규칙. 한쪽만 고치면 --verify 만 다시 죽는다)
+async function pageAll(table, select, orderBy = ["id"]) {
   const rows = [];
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await tweak(
-      supabase.from(table).select(select).order("id").range(from, from + PAGE - 1),
-    );
+    let query = supabase.from(table).select(select);
+    for (const column of orderBy) query = query.order(column);
+    const { data, error } = await query.range(from, from + PAGE - 1);
     if (error) {
       console.error(`${table} 조회 실패: ${error.message}`);
       process.exit(1);
@@ -174,7 +177,10 @@ async function runVerify() {
   } catch {
     concepts = await pageAll("concepts", "id, subject_id, name, parent_id, merged_into");
   }
-  const aliases = await pageAll("concept_aliases", "concept_id, subject_id, alias");
+  const aliases = await pageAll("concept_aliases", "concept_id, subject_id, alias", [
+    "concept_id",
+    "normalized",
+  ]);
   if (concepts.length === 0) {
     console.log("concepts 테이블이 비어 있다. 먼저 apply-concepts.mjs 로 등록할 것.");
     process.exit(0);
