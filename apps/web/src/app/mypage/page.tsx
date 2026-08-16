@@ -497,7 +497,6 @@ function WrongNotesTab({
           <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
           오답노트
         </h2>
-        <ReviewDueCard {...reviewDue} />
         <HowItWorksStrip />
         {freeSubjects.length === 0 ? (
           <div className="flex flex-col items-center gap-4 py-12">
@@ -536,6 +535,7 @@ function WrongNotesTab({
             ))}
           </div>
         )}
+        <ReviewDueCard {...reviewDue} />
       </section>
     );
   }
@@ -548,7 +548,6 @@ function WrongNotesTab({
         <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
         오답노트
       </h2>
-      <ReviewDueCard {...reviewDue} />
       <DiagnosisBanner initialState={diagnosisState} hint={diagnosisHint} />
       <HowItWorksStrip />
       {groups.length === 0 ? (
@@ -620,6 +619,7 @@ function WrongNotesTab({
           })}
         </div>
       )}
+      <ReviewDueCard {...reviewDue} />
     </section>
   );
 }
