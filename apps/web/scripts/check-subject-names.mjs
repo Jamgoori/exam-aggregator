@@ -1,0 +1,264 @@
+// 시행처별 과목 표기 점검 (읽기 전용).
+//
+// 업로드는 파일명("행정법.pdf")을 SUBJECT_ALIASES 로 DB 과목명("행정법총론")에
+// 맞춰 붙인다. 그래서 **문제지가 실제로 쓰는 과목명이 DB 이름과 다른 경우**가
+// 조용히 묻힌다 — 군무원 26장이 "행정법총론"으로 올라간 사고가 그것이다.
+//
+// 두 가지 방식으로 본다.
+//
+//   node scripts/check-subject-names.mjs
+//     빠른 점검. exam_papers.file_name(업로드 원본 파일명)에서 과목명을 되뽑아
+//     subjects.name 과 다른 조합을 시행처별로 센다. 다운로드가 없어 몇 초면 끝나지만,
+//     통합본에서 잘라 올린 문제지는 파일명이 "1교시 1책형"이라 아무 말도 못 한다.
+//
+//   node scripts/check-subject-names.mjs --pdf [--type 군무원] [--samples 3]
+//     정밀 점검. (시행처, 급수, 과목) 조합마다 연도 양끝·가운데 표본을 내려받아
+//     **문제지에 실제로 인쇄된 과목명**과 대조한다. 파일명이 무엇이든 상관없고
+//     통합본 분리본도 볼 수 있다. 전체를 돌리면 표본 1,100여 장 · 10분쯤 걸린다.
+//
+// 표시 규칙(packages/core/src/subject-label.ts)에 이미 등록된 조합은 "등록됨"으로
+// 빠지고, 나머지가 사람이 판단할 목록이다.
+import { createClient } from "@supabase/supabase-js";
+
+// packages/core 의 SUBJECT_NAME_BY_EXAM_TYPE 사본. 스크립트는 plain node 로 돌아
+// TypeScript 패키지를 import 할 수 없다. 한쪽만 고치면 점검 결과가 어긋난다.
+const SUBJECT_NAME_BY_EXAM_TYPE = {
+  군무원: { 행정법총론: "행정법", 행정학개론: "행정학" },
+  "국가직 7급": { 행정법총론: "행정법", 행정학개론: "행정학" },
+  "지방직 7급": { 행정법총론: "행정법", 행정학개론: "행정학" },
+  "국회직 8급": { 행정법총론: "행정법", 행정학개론: "행정학" },
+  경찰: { 행정법총론: "행정법", 행정학개론: "행정학" },
+  "경력경쟁 9급": { 행정법총론: "행정법", 행정학개론: "행정학" },
+};
+
+// 급수까지 적힌 규칙이 시행처만 적힌 규칙을 이긴다(core 와 같은 규칙).
+const namesFor = (type, level) =>
+  (level ? SUBJECT_NAME_BY_EXAM_TYPE[`${type} ${level}`] : undefined) ??
+  SUBJECT_NAME_BY_EXAM_TYPE[type];
+
+const args = process.argv.slice(2);
+const flag = (name) => {
+  const i = args.indexOf(`--${name}`);
+  return i >= 0 ? (args[i + 1]?.startsWith("--") ? true : (args[i + 1] ?? true)) : false;
+};
+const USE_PDF = Boolean(flag("pdf"));
+const ONLY_TYPE = typeof flag("type") === "string" ? flag("type") : null;
+const SAMPLES_PER_COMBO = Number(flag("samples")) || 3;
+
+// bulk-upload.mjs 의 파일명 → 과목명 추출과 같은 규칙.
+function subjectNameFromFileName(fileName) {
+  return (fileName ?? "")
+    .replace(/\.pdf$/i, "")
+    .replace(/^\d{6}\s+\S+\s+\d+급\s+/, "")
+    .replace(/^[12]차\s+/, "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/[-_][가-힣A-Za-z0-9]$/, "")
+    .trim();
+}
+
+// 통합본을 잘라 올린 문제지는 파일명이 과목명이 아니라 편성 표기("1교시 1책형")나
+// 원본 PDF의 쪽 범위("2015 경찰 공채 3차.pdf p6")다. 숫자가 섞인 표기는 전부 그것이다.
+const NOT_A_SUBJECT = /교시|책형|출제문제|[0-9]|\.pdf/i;
+
+// 자간을 벌린 조판("행 정 법")과 가운뎃점 이형(·/ㆍ/・)을 같은 글자로 본다.
+const squash = (s) => s.replace(/[\s·ㆍ・‧․]/g, "");
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+);
+
+const [{ data: subjects }, { data: examTypes }] = await Promise.all([
+  supabase.from("subjects").select("id, name"),
+  supabase.from("exam_types").select("id, name"),
+]);
+const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
+const examTypeName = new Map(examTypes.map((t) => [t.id, t.name]));
+
+// exam_papers 는 PostgREST 기본 1000행 상한에 걸리므로 페이지로 나눠 받는다.
+const papers = [];
+for (let from = 0; ; from += 1000) {
+  const { data, error } = await supabase
+    .from("exam_papers")
+    .select("id, subject_id, exam_type_id, level, year, title, file_name, file_path")
+    .order("id")
+    .range(from, from + 999);
+  if (error) throw error;
+  papers.push(...data);
+  if (data.length < 1000) break;
+}
+
+const rows = papers
+  .map((p) => ({
+    ...p,
+    type: examTypeName.get(p.exam_type_id) ?? "?",
+    db: subjectName.get(p.subject_id) ?? "?",
+  }))
+  .filter((p) => !ONLY_TYPE || p.type === ONLY_TYPE);
+
+const registered = (type, level, db, printed) => namesFor(type, level)?.[db] === printed;
+
+if (!USE_PDF) {
+  const combos = new Map();
+  for (const p of rows) {
+    const printed = subjectNameFromFileName(p.file_name);
+    if (!printed || printed === p.db || NOT_A_SUBJECT.test(printed)) continue;
+    const key = [p.type, p.level ?? "-", p.db, printed].join("\t");
+    combos.set(key, (combos.get(key) ?? 0) + 1);
+  }
+  const list = [...combos.entries()]
+    .map(([key, count]) => {
+      const [type, level, db, printed] = key.split("\t");
+      return {
+        type,
+        level,
+        db,
+        printed,
+        count,
+        ok: registered(type, level === "-" ? null : level, db, printed),
+      };
+    })
+    .sort((a, b) => b.count - a.count);
+
+  if (list.length === 0) {
+    console.log("파일명 표기와 DB 과목명이 다른 문제지 없음.");
+  } else {
+    console.log("시행처\t급수\tDB 과목명\t파일명 표기\t장수\t표시규칙");
+    for (const r of list)
+      console.log(
+        `${r.type}\t${r.level}\t${r.db}\t${r.printed}\t${r.count}\t${r.ok ? "등록됨" : "미등록 ← 확인"}`,
+      );
+    const pending = list.filter((r) => !r.ok);
+    console.log(`\n총 ${list.length}개 조합 중 ${pending.length}개가 미등록.`);
+  }
+  console.log(
+    "\n※ 파일명은 축약형인 경우가 많다(형소법, 네트워크보안). 무엇이 맞는지는" +
+      "\n   --pdf 로 문제지에 인쇄된 이름을 직접 보고 판단할 것.",
+  );
+  process.exit(0);
+}
+
+// ── --pdf: 문제지에 인쇄된 과목명과 대조 ────────────────────────────────
+// 이 컨테이너에는 @napi-rs/canvas 네이티브 바인딩이 없을 수 있다. 여기서는 텍스트만
+// 뽑으므로 pdfjs 가 로드 중 찾는 렌더링용 전역만 흉내 내면 된다.
+globalThis.DOMMatrix ??= class DOMMatrix {
+  constructor() {
+    Object.assign(this, { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
+  }
+  scale() {
+    return this;
+  }
+  translate() {
+    return this;
+  }
+};
+globalThis.Path2D ??= class Path2D {};
+const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+
+// DB 이름이 안 보일 때 "그럼 뭐라고 적혀 있나"를 좁히는 후보. 꼬리말을 떼거나 붙인다.
+function candidates(db) {
+  const out = new Set();
+  for (const tail of ["총론", "각론", "학개론", "개론", "론", "학"])
+    if (db.endsWith(tail) && db.length > tail.length) out.add(db.slice(0, -tail.length));
+  for (const tail of ["총론", "개론", "학", "론"]) out.add(db + tail);
+  out.delete(db);
+  return [...out];
+}
+
+async function firstPagesText(buffer, maxPages = 3) {
+  const task = getDocument({ data: new Uint8Array(buffer), verbosity: 0 });
+  const pdf = await task.promise;
+  const texts = [];
+  for (let i = 1; i <= Math.min(maxPages, pdf.numPages); i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    texts.push(content.items.map((it) => it.str).join(""));
+  }
+  await task.destroy();
+  return texts;
+}
+
+// (시행처, 급수, 과목) 조합마다 연도 양끝·가운데를 표본으로 뽑는다. 과목명은
+// 연도에 따라 바뀌기도 해서(국회직 8급 언어논리 개편) 한 장만 보면 놓친다.
+const groups = new Map();
+for (const p of rows) {
+  const key = `${p.type}\t${p.level ?? "-"}\t${p.db}`;
+  if (!groups.has(key)) groups.set(key, []);
+  groups.get(key).push(p);
+}
+
+const samples = [];
+for (const [key, list] of groups) {
+  const [type, level, db] = key.split("\t");
+  const sorted = [...list].sort((a, b) => a.year - b.year);
+  const picks = new Set();
+  const idx = [0, Math.floor(sorted.length / 2), sorted.length - 1].slice(
+    0,
+    SAMPLES_PER_COMBO,
+  );
+  for (const i of idx) picks.add(sorted[i]);
+  for (const p of picks)
+    samples.push({ type, level, db, comboSize: list.length, paper: p });
+}
+
+console.error(
+  `조합 ${groups.size}개 · 표본 ${samples.length}장 확인 중 (동시 6장)…`,
+);
+
+async function checkOne(s) {
+  const out = { ...s, verdict: null, printed: null };
+  try {
+    const { data: blob, error } = await supabase.storage
+      .from("exam-papers")
+      .download(s.paper.file_path);
+    if (error || !blob) throw new Error(error?.message ?? "다운로드 실패");
+    const texts = await firstPagesText(Buffer.from(await blob.arrayBuffer()));
+    const joined = squash(texts.join("\n"));
+    if (joined.length < 50) out.verdict = "텍스트없음"; // 스캔본 — 이 방법으로는 판정 불가
+    else if (joined.includes(squash(s.db))) out.verdict = "일치";
+    else {
+      const hit = candidates(s.db).find((c) => joined.includes(squash(c)));
+      out.verdict = hit ? "다름" : "미검출";
+      out.printed = hit;
+    }
+  } catch (err) {
+    out.verdict = "오류";
+    out.printed = err.message;
+  }
+  return out;
+}
+
+const results = [];
+let next = 0;
+let done = 0;
+await Promise.all(
+  Array.from({ length: 6 }, async () => {
+    while (next < samples.length) {
+      results.push(await checkOne(samples[next++]));
+      if (++done % 100 === 0) console.error(`  ${done}/${samples.length}`);
+    }
+  }),
+);
+
+const tally = new Map();
+for (const r of results) tally.set(r.verdict, (tally.get(r.verdict) ?? 0) + 1);
+console.log("판정:", [...tally].map(([k, v]) => `${k} ${v}`).join(" · "));
+
+const differs = results.filter(
+  (r) =>
+    r.verdict === "다름" &&
+    !registered(r.type, r.level === "-" ? null : r.level, r.db, r.printed),
+);
+console.log(`\n=== DB 과목명이 문제지 인쇄 표기와 다른 표본 (${differs.length}건) ===`);
+console.log("시행처\t급수\tDB 과목명\t인쇄 표기\t표본연도\t조합장수");
+for (const r of differs.sort((a, b) => b.comboSize - a.comboSize))
+  console.log(
+    `${r.type}\t${r.level}\t${r.db}\t${r.printed}\t${r.paper.year}\t${r.comboSize}`,
+  );
+
+const unknown = results.filter((r) => r.verdict === "미검출" || r.verdict === "텍스트없음");
+if (unknown.length > 0)
+  console.log(
+    `\n※ 판정 못 한 표본 ${unknown.length}건(스캔본이라 텍스트가 없거나 표지에 과목명이` +
+      " 없는 문제지). 필요하면 그 문제지만 직접 열어 볼 것.",
+  );

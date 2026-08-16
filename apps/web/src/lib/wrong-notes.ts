@@ -21,7 +21,7 @@ import {
   fetchPaperIdentitySignals,
   representativePaperIds,
 } from "@/lib/dedup-papers";
-import { stripTrackFromTitle } from "@/lib/paper-title";
+import { applyExamTypeSubjectName, stripTrackFromTitle } from "@/lib/paper-title";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -855,7 +855,12 @@ export async function getSubjectWrongNoteQuestions(
     if (repId(p.id) !== p.id) continue;
     const collapsed = (finalGroupSizeByRepId.get(p.id) ?? 1) > 1;
     repInfo.set(p.id, {
-      title: collapsed && p.track ? stripTrackFromTitle(p.title, p.track) : p.title,
+      // 시행처 표기(군무원 행정법총론 → 행정법)는 제목이 어디에 실리든 같아야 해서
+      // 여기서도 건다 — 카드는 행정법인데 오답노트만 행정법총론이면 같은 문제지가
+      // 화면마다 다른 과목이 된다.
+      title: applyExamTypeSubjectName(
+        collapsed && p.track ? stripTrackFromTitle(p.title, p.track) : p.title,
+      ),
       level: p.level,
       choiceCount: p.choice_count,
     });

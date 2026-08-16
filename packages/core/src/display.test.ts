@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getPaperDisplayTitle, stripTrackFromTitle } from "./paper-title";
+import { applyExamTypeSubjectName, getSubjectDisplayName } from "./subject-label";
 import { compareLevels, LEVEL_ORDER } from "./levels";
 import { roundTierName, streakTierName } from "./tiers";
 import { subjectColorIndex, SUBJECT_PALETTE_SIZE } from "./subject-color";
@@ -32,6 +33,74 @@ test("직류가 없으면 제목을 그대로 둔다", () => {
 
 test("전각 괄호도 푼다", () => {
   assert.equal(getPaperDisplayTitle("2024 경찰（간부후보）1차", null), "2024 경찰간부후보1차");
+});
+
+// ── 시행처별 과목 표기 ──────────────────────────────────────────────────
+// 군무원 문제지 표지는 "행정법"·"행정학"인데 업로드가 국가직 표기(행정법총론·
+// 행정학개론)로 바꿔 저장했다. 저장값은 그대로 두고 화면에서만 되돌린다.
+test("군무원 문제지는 제목의 과목명을 문제지 표기로 되돌린다", () => {
+  assert.equal(
+    getPaperDisplayTitle("2026 군무원 9급 행정법총론", null),
+    "2026 군무원 9급 행정법",
+  );
+  assert.equal(
+    getPaperDisplayTitle("2025 군무원 7급 행정학개론", null),
+    "2025 군무원 7급 행정학",
+  );
+});
+
+// 같은 시행처라도 급수마다 갈린다 — 9급 문제지에는 "행정법총론"이 인쇄돼 있고
+// 7급에는 "행정법"이 인쇄돼 있다(문제지 표본 대조로 확인).
+test("9급은 총론·개론이 정본이라 건드리지 않는다", () => {
+  for (const title of [
+    "2026 국가직 9급 행정법총론",
+    "2026 지방직 9급 행정학개론",
+    "2026 국회직 9급 행정법총론",
+  ]) {
+    assert.equal(getPaperDisplayTitle(title, null), title);
+  }
+});
+
+test("7급·국회직 8급·경찰·경력경쟁도 문제지 표기로 되돌린다", () => {
+  const cases: [string, string][] = [
+    ["2025 국가직 7급 행정법총론", "2025 국가직 7급 행정법"],
+    ["2025 지방직 7급 행정학개론", "2025 지방직 7급 행정학"],
+    ["2026 국회직 8급 행정법총론", "2026 국회직 8급 행정법"],
+    ["2017 경력경쟁 9급 행정학개론", "2017 경력경쟁 9급 행정학"],
+    // 경찰은 급수가 없어 셋째 토큰이 급수가 아니다("공채 3차").
+    ["2012 경찰 공채 3차 행정법총론", "2012 경찰 공채 3차 행정법"],
+  ];
+  for (const [input, expected] of cases)
+    assert.equal(getPaperDisplayTitle(input, null), expected);
+});
+
+test("군무원이라도 표기가 같은 과목은 그대로 둔다", () => {
+  assert.equal(getPaperDisplayTitle("2026 군무원 9급 국어", null), "2026 군무원 9급 국어");
+});
+
+test("과목명은 제목 맨 뒤에서만 바꾼다", () => {
+  // 시행처 자리(둘째 토큰)가 군무원이 아니면 제목 안에 글자가 겹쳐도 손대지 않는다.
+  assert.equal(
+    applyExamTypeSubjectName("2026 국가직 9급 군무원 행정법총론 해설"),
+    "2026 국가직 9급 군무원 행정법총론 해설",
+  );
+});
+
+test("과목 표시 이름은 시행처를 알 때만 바뀐다", () => {
+  assert.equal(getSubjectDisplayName("행정법총론", "군무원"), "행정법");
+  assert.equal(getSubjectDisplayName("행정학개론", "군무원"), "행정학");
+  assert.equal(getSubjectDisplayName("행정법총론", "경찰"), "행정법");
+  // 과목 페이지·오답노트처럼 여러 시행처가 섞이는 화면은 DB 이름이 정본이다.
+  assert.equal(getSubjectDisplayName("행정법총론", null), "행정법총론");
+});
+
+test("급수 규칙이 시행처 규칙을 이긴다", () => {
+  assert.equal(getSubjectDisplayName("행정법총론", "국가직", "7급"), "행정법");
+  assert.equal(getSubjectDisplayName("행정법총론", "국가직", "9급"), "행정법총론");
+  // 급수를 안 넘기면 시행처 규칙만 본다 — 국가직은 시행처 단위 규칙이 없으니 그대로.
+  assert.equal(getSubjectDisplayName("행정법총론", "국가직"), "행정법총론");
+  // 군무원은 9급·7급 모두 "행정법"이라 시행처 단위로 걸어 뒀다.
+  assert.equal(getSubjectDisplayName("행정법총론", "군무원", "7급"), "행정법");
 });
 
 // ── 급수 정렬 ───────────────────────────────────────────────────────────
@@ -90,6 +159,7 @@ const SUBJECTS: Subject[] = [
   { id: "2", slug: "chinese", name: "중국어", display_order: 2 },
   { id: "3", slug: "admin-law", name: "행정법총론", display_order: 3 },
   { id: "4", slug: "criminal-law", name: "형법", display_order: 4 },
+  { id: "5", slug: "administration", name: "행정학개론", display_order: 5 },
 ];
 
 test("이름이 검색어로 시작하는 과목이 있으면 그것만 보여준다", () => {
@@ -99,6 +169,15 @@ test("이름이 검색어로 시작하는 과목이 있으면 그것만 보여�
 
 test("시작하는 과목이 없을 때만 중간 포함까지 넓힌다", () => {
   assert.deepEqual(matchSubjectIds(SUBJECTS, "법").sort(), ["3", "4"]);
+});
+
+// 군무원은 "행정법"·"행정학"으로, 국가직·지방직은 "행정법총론"·"행정학개론"으로
+// 부른다. 더 큰 개념인 앞 이름으로 검색하면 총론·개론 문제지까지 함께 나와야 한다
+// (군무원 문제지도 같은 과목 행에 있으므로 한 번에 걸린다).
+test("상위 개념 이름으로 검색하면 총론·개론까지 함께 나온다", () => {
+  assert.deepEqual(matchSubjectIds(SUBJECTS, "행정법"), ["3"]);
+  assert.deepEqual(matchSubjectIds(SUBJECTS, "행정학"), ["5"]);
+  assert.deepEqual(matchSubjectIds(SUBJECTS, "행정").sort(), ["3", "5"]);
 });
 
 test("초성 검색", () => {

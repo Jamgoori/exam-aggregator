@@ -24,7 +24,13 @@ function parseArgs(argv) {
   return args;
 }
 
-// 파일명이 subjects.name과 정확히 일치하지 않을 때를 위한 별칭
+// 파일명이 subjects.name과 정확히 일치하지 않을 때를 위한 별칭.
+//
+// 여기서 맞추는 건 **어느 subjects 행에 붙일지**다. 시행처가 같은 과목을 다르게
+// 부르는 경우(군무원 "행정법"·"행정학" ↔ 국가직·지방직 "행정법총론"·"행정학개론")
+// 문제지는 같은 과목 행에 모으되, 화면에 나갈 이름은 시행처 표기로 되돌린다
+// (`packages/core/src/subject-label.ts`). 저장되는 title은 지금처럼 subjects.name
+// 기준이고, 되돌리는 건 표시 단계에서만 한다.
 const SUBJECT_ALIASES = {
   행정법: "행정법총론",
   행정학: "행정학개론",
