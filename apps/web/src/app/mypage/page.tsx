@@ -335,7 +335,7 @@ function BookmarksTab({
         subjects={allSubjects}
         initialBookmarkedIds={bookmarkedSubjectIds}
       />
-      <h2 className="mt-2 flex items-center gap-2 text-lg font-semibold">
+      <h2 className="flex items-center gap-2 text-lg font-semibold">
         <Star size={18} className="text-amber-400" />
         즐겨찾기한 문제 ({papers.length})
       </h2>
