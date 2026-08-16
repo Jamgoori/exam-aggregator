@@ -70,6 +70,13 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* 헤더가 sticky(65px)라, 해시 앵커(#wrong-notes 등)로 이동하면 목표 지점이 헤더에
+   가려진 채로 멈춘다. 스크롤 컨테이너(html)에 헤더 높이 + 여유만큼 패딩을 주면
+   브라우저 기본 해시 이동과 scrollIntoView 둘 다 헤더 아래에서 멈춘다. */
+html {
+  scroll-padding-top: 4.75rem;
+}
+
 /* 인쇄(해설 PDF 저장): 브라우저 기본 여백이 커서 페이지당 담기는 양이 적다.
    여백을 줄여 같은 분량을 더 적은 페이지에 담는다. */
 @page {
@@ -291,10 +298,26 @@ button:not(:disabled) {
   animation: modal-panel-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* 모바일 메뉴 서랍 — 오른쪽 화면 밖에서 밀려 들어온다. 페이드로만 나타나면 "어디서
+   온 판인지"가 안 보여서, 닫을 때 어디로 보내야 하는지도 감이 안 온다. */
+@keyframes drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-drawer-in {
+  animation: drawer-in 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 /* 모션 최소화를 켠 사용자에게는 등장 효과를 끈다. */
 @media (prefers-reduced-motion: reduce) {
   .animate-modal-fade-in,
-  .animate-modal-panel-in {
+  .animate-modal-panel-in,
+  .animate-drawer-in {
     animation: none;
   }
 }
