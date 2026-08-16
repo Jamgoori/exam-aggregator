@@ -402,13 +402,18 @@ function LockedCard() {
     >
       <Lock size={16} className="shrink-0 text-zinc-400 dark:text-zinc-500" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold text-zinc-700 dark:text-zinc-300">오늘의 복습</p>
+        <p className="flex items-center gap-1.5 text-sm font-bold text-zinc-700 dark:text-zinc-300">
+          오늘의 복습
+          <span className="shrink-0 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+            멤버십
+          </span>
+        </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-500">
-          틀린 문제를 언제 다시 볼지 문항마다 계산해서 그날 것만 보여줘요 · 멤버십
+          공모아만의 특수 알고리즘이 틀린 문제를 가장 잊기 쉬운 순간에 다시 복습시켜줘요
         </p>
       </div>
       <span className="shrink-0 text-xs font-bold text-blue-600 dark:text-blue-400">
-        요금제 보기 ›
+        멤버십 되기 ›
       </span>
     </Link>
   );
