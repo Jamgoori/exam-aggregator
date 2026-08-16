@@ -276,6 +276,21 @@ export function HomeExamBrowser({
     () => matchSubjectIds(subjects, subjectQuery),
     [subjects, subjectQuery],
   );
+  // 검색창 아래 뜨는 과목 추천(구글 자동완성처럼). 아래 카드 그리드와 같은 매칭
+  // 규칙(matchedSubjectIds)을 그대로 재사용해 "카드로 보이는 과목"과 "추천으로
+  // 뜨는 과목"이 항상 같은 목록이 되게 한다. 너무 길면 스크롤 없이 훑을 수 없어
+  // 6개로 자른다 — 검색어를 더 좁히면 자연히 줄어든다.
+  const subjectsById = useMemo(
+    () => new Map(subjects.map((s) => [s.id, s])),
+    [subjects],
+  );
+  const searchSuggestions = useMemo(() => {
+    if (!isSearching) return [];
+    return matchedSubjectIds
+      .map((id) => subjectsById.get(id))
+      .filter((s): s is Subject => !!s)
+      .slice(0, 6);
+  }, [isSearching, matchedSubjectIds, subjectsById]);
   const filtered = useMemo(
     () =>
       filterPapers(allPapers, {
@@ -395,7 +410,11 @@ export function HomeExamBrowser({
       <section className="flex flex-col items-start gap-4">
         {heroText}
 
-        <SearchInput value={query} onChange={handleQueryChange} />
+        <SearchInput
+          value={query}
+          onChange={handleQueryChange}
+          suggestions={searchSuggestions}
+        />
 
         {/* 오답노트 바로가기: 로그인 상태이고 아직 극복 못 한 오답이 있을 때만
             검색창 바로 아래에 배너로 노출한다. */}

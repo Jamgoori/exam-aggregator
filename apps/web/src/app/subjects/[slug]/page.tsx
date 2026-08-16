@@ -201,7 +201,7 @@ export default async function SubjectPage({
   ]);
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-12">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
       {/* 검색 결과에 "공모아 > 과목별 기출문제 > 국어" 경로가 URL 대신 표시되게 한다.
           화면의 "← 홈으로 / 과목별 기출문제" 링크와 같은 계층이라 구조상 정직하다. */}
       <JsonLd
