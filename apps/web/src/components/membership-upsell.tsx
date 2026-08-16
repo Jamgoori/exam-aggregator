@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
 import { allPlanPricing, formatWon } from "@gongmoa/core";
 
 // 무료 회원이 유료 기능 자리에서 보게 되는 안내 카드. 사이트 곳곳(해설 한도, 오답노트,
@@ -33,9 +32,6 @@ export function MembershipUpsell({
     <div
       className={`flex flex-col items-center gap-3 rounded-2xl border border-blue-200 bg-gradient-to-b from-blue-50 to-white px-6 py-10 text-center dark:border-blue-900/60 dark:from-blue-950/40 dark:to-zinc-900 ${className}`}
     >
-      <span className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-600 text-white">
-        <Sparkles size={20} />
-      </span>
       <p className="text-base font-bold text-zinc-900 dark:text-zinc-100">{title}</p>
       <p className="max-w-md break-keep text-sm text-zinc-600 dark:text-zinc-400">
         {description}
