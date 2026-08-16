@@ -30,6 +30,7 @@ import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@gongmoa/core";
 import { computeStreakDays, streakTier } from "@/lib/streak";
 import { subjectColor } from "@/lib/subject-colors";
+import { applyExamTypeSubjectName } from "@/lib/paper-title";
 import {
   buildWrongNoteGroups,
   fetchQuestionStatusMap,
@@ -398,7 +399,7 @@ function HistoryTab({
                 <div className="flex flex-col gap-0.5">
                   {a.exam_papers ? (
                     <span className="text-sm font-medium group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                      {a.exam_papers.title}
+                      {applyExamTypeSubjectName(a.exam_papers.title)}
                     </span>
                   ) : (
                     <span className="text-sm text-zinc-400 dark:text-zinc-600">삭제된 문제</span>

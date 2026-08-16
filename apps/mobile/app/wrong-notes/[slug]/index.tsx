@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
-import type { WrongNoteSubjectGroup } from "@gongmoa/core";
+import { applyExamTypeSubjectName, type WrongNoteSubjectGroup } from "@gongmoa/core";
 import { ImageZoomModal } from "../../../src/components/image-zoom-modal";
 import { WrongNoteQuestionCard } from "../../../src/components/wrong-note-question-card";
 import {
@@ -185,7 +185,7 @@ export default function SubjectWrongNoteScreen() {
                 }}
               >
                 <Text style={{ fontWeight: "600" }} numberOfLines={2}>
-                  {p.paper.title}
+                  {applyExamTypeSubjectName(p.paper.title)}
                 </Text>
                 <Text style={{ color: colors.textMuted, fontSize: 12 }}>
                   {p.attemptCount}회 응시 ·{" "}

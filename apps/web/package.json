@@ -14,6 +14,7 @@
     "extract-answers": "node --env-file=.env.local scripts/extract-answer-keys.mjs",
     "set-membership": "node --env-file=.env.local scripts/set-membership.mjs",
     "list-pending-answers": "node --env-file=.env.local scripts/list-pending-answer-keys.mjs",
+    "check-subject-names": "node --env-file=.env.local scripts/check-subject-names.mjs",
     "retention-report": "node --import tsx --env-file=.env.local scripts/srs-retention-report.mjs",
     "concept-inventory": "node --import tsx --env-file=.env.local scripts/concept-inventory.mjs",
     "apply-concepts": "node --import tsx --env-file=.env.local scripts/apply-concepts.mjs",

@@ -21,6 +21,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 | 복습 스케줄(SRS) 상수 조정 (`packages/core/src/srs.ts`, 학습 단계·ease·leech·연체 점수) | `docs/agents/srs-tuning.md` |
 | 개념 사전 정리 (`keyword_title` 정본화, `concepts`/`concept_aliases`, 약점 진단 축, 재분류 배치 `next-concept-chunk.mjs`/`save-concepts.mjs`) | `docs/agents/concept-dictionary.md` |
 | 해외 IP 차단 (`geo-block.ts`, `proxy.ts`, `GEO_BLOCK*` 환경변수, 크롤러 예외) | `docs/agents/geo-block.md` |
+| 과목명 표기 (시행처마다 다른 과목명, `subject-label.ts`, `SUBJECT_ALIASES`, 새 과목 행 추가) | `docs/agents/subject-names.md` |
 
 # 금지선 (문서 안 읽었어도 이것만은 절대)
 
@@ -60,6 +61,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
   미국 IP 에서 오므로, 예외가 빠지면 403 이 계속 나가 색인이 통째로 사라진다.
   `/payments/**`·`/auth/**`·`/api/**` 를 차단 대상에 넣지 말 것 (결제 승인
   리다이렉트를 막으면 돈만 빠진 주문이 남는다). 국가를 모를 때는 언제나 통과시킬 것.
+- **과목명 표기**: 시행처가 과목을 다르게 부른다고(군무원 "행정법" ↔ 국가직
+  "행정법총론") `subjects` 에 과목 행을 새로 만들지 말 것 — 개념 사전이 과목 단위라
+  사전 복제와 `concept_id` 재발급이 따라온다. 표시 이름만
+  `packages/core/src/subject-label.ts` 에서 되돌린다. `exam_papers.title` 을 UPDATE
+  로 고치지 말 것 (업로드 시점 기록).
 - **정답 등록**: `question_count`와 길이가 다른 정답 배열을 덮어쓰지 말 것.
   공통과목이라고 정답을 다른 직류(track) 문제지에 수동 복사하지 말 것 (법원직
   서기보는 국어·한국사 15문항/영어 20문항 별도 문제지 — 실측 사고 있음).

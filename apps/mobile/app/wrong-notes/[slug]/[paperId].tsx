@@ -8,7 +8,11 @@ import {
   Text,
   View,
 } from "react-native";
-import type { WrongNotePaperGroup } from "@gongmoa/core";
+import {
+  applyExamTypeSubjectName,
+  getSubjectDisplayName,
+  type WrongNotePaperGroup,
+} from "@gongmoa/core";
 import { ImageZoomModal } from "../../../src/components/image-zoom-modal";
 import { WrongNoteQuestionCard } from "../../../src/components/wrong-note-question-card";
 import {
@@ -104,11 +108,20 @@ export default function PaperWrongNoteScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ headerShown: true, title: paper.subjects?.name ?? "오답노트" }} />
+      <Stack.Screen
+        options={{
+          headerShown: true,
+          title: paper.subjects
+            ? getSubjectDisplayName(paper.subjects.name, paper.exam_types?.name)
+            : "오답노트",
+        }}
+      />
 
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 32 }}>
         <View style={{ gap: 4 }}>
-          <Text style={{ fontSize: 17, fontWeight: "700" }}>{paper.title}</Text>
+          <Text style={{ fontSize: 17, fontWeight: "700" }}>
+            {applyExamTypeSubjectName(paper.title)}
+          </Text>
           <Text style={{ color: colors.textMuted, fontSize: 12 }}>
             {group.attemptCount}회 응시 ·{" "}
             {new Date(group.lastAttemptAt).toLocaleDateString("ko-KR")}

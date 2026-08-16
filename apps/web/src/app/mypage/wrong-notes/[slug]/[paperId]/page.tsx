@@ -9,6 +9,7 @@ import {
 } from "@/components/wrong-note-paper-view";
 import { levelColor } from "@/lib/level-colors";
 import { paperCbtHref } from "@/lib/paper-href";
+import { applyExamTypeSubjectName } from "@/lib/paper-title";
 import { subjectColor } from "@/lib/subject-colors";
 import { isPremium } from "@/lib/membership";
 import { MembershipUpsell } from "@/components/membership-upsell";
@@ -87,7 +88,9 @@ export default async function PaperWrongNotePage({
           )}
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold leading-snug">{paper.title}</h1>
+          <h1 className="text-2xl font-semibold leading-snug">
+            {applyExamTypeSubjectName(paper.title)}
+          </h1>
           <Link
             href={paperCbtHref(paper)}
             className="flex shrink-0 items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"

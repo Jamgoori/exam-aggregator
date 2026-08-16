@@ -1,4 +1,4 @@
-import type { Subject } from "@gongmoa/core";
+import { getSubjectDisplayName, type Subject } from "@gongmoa/core";
 
 // matchSubjectIds / parseSearchQuery 는 @gongmoa/core 로 단일화(모바일과 공유). 재노출.
 export { matchSubjectIds, parseSearchQuery } from "@gongmoa/core";
@@ -140,6 +140,15 @@ export function filterPapers(
   });
 }
 
+// 묶음 제목에 쓸 과목명. 문제지마다 시행처를 알고 있으므로 그 시행처가 쓰는 표기를
+// 따른다 — 군무원 문제지는 "행정법"으로 묶이고 국가직·지방직은 "행정법총론"으로
+// 묶여, 두 이름이 목록에 나란히 보인다(같은 과목 행이라 검색은 한 번에 걸린다).
+function groupSubjectName(paper: LightPaper): string {
+  const name = paper.subjects?.name;
+  if (!name) return "기타";
+  return getSubjectDisplayName(name, paper.exam_types?.name);
+}
+
 // "즐겨찾기한 과목만 보기" 화면은 연도 내림차순 → 같은 연도 안에서는 과목명
 // 가나다순으로 묶어서 보여준다. 같은 연도·과목 안에서는 papers가 이미 정렬돼
 // 들어온 순서(fetchAllExamPapers의 시행 시기 순)를 그대로 유지한다(안정 정렬).
@@ -148,14 +157,14 @@ export function groupByYearAndSubject(
 ): Map<number, Map<string, LightPaper[]>> {
   const sorted = [...papers].sort((a, b) => {
     if (a.year !== b.year) return b.year - a.year;
-    return (a.subjects?.name ?? "").localeCompare(b.subjects?.name ?? "", "ko");
+    return groupSubjectName(a).localeCompare(groupSubjectName(b), "ko");
   });
 
   const byYear = new Map<number, Map<string, LightPaper[]>>();
   for (const paper of sorted) {
     if (!byYear.has(paper.year)) byYear.set(paper.year, new Map());
     const bySubject = byYear.get(paper.year)!;
-    const subjectName = paper.subjects?.name ?? "기타";
+    const subjectName = groupSubjectName(paper);
     if (!bySubject.has(subjectName)) bySubject.set(subjectName, []);
     bySubject.get(subjectName)!.push(paper);
   }

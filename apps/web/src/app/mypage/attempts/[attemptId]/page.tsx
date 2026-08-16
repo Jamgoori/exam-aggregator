@@ -11,6 +11,7 @@ import {
 import { formatDuration } from "@gongmoa/core";
 import { levelColor } from "@/lib/level-colors";
 import { paperHref, paperCbtHref } from "@/lib/paper-href";
+import { applyExamTypeSubjectName } from "@/lib/paper-title";
 import { examTypeColor } from "@/lib/exam-type-colors";
 import { subjectColor } from "@/lib/subject-colors";
 import { isPremium } from "@/lib/membership";
@@ -93,7 +94,7 @@ export default async function AttemptWrongNotePage({
         {paper ? (
           <h1 className="text-2xl font-semibold leading-snug">
             <Link href={paperHref(paper)} className="hover:text-blue-600 dark:hover:text-blue-400">
-              {paper.title}
+              {applyExamTypeSubjectName(paper.title)}
             </Link>
           </h1>
         ) : (

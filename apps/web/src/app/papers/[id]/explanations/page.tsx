@@ -17,7 +17,7 @@ import { FREE_EXPLANATION_DAILY_PAPERS } from "@gongmoa/core";
 import { levelColor } from "@/lib/level-colors";
 import { examTypeColor } from "@/lib/exam-type-colors";
 import { subjectColor } from "@/lib/subject-colors";
-import { getPaperDisplayTitle } from "@/lib/paper-title";
+import { getPaperDisplayTitle, getSubjectDisplayName } from "@/lib/paper-title";
 import { paperHref, paperCbtHref, paperExplanationsHref } from "@/lib/paper-href";
 import type { Metadata } from "next";
 
@@ -148,7 +148,8 @@ export default async function PaperExplanationsPage({
             <span
               className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(subject.slug)}`}
             >
-              {subject.name}
+              {/* 이 문제지의 과목명이라 시행처 표기를 따른다(군무원 → 행정법). */}
+              {getSubjectDisplayName(subject.name, examType?.name)}
             </span>
           )}
         </div>
