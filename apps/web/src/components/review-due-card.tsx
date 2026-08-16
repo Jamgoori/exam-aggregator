@@ -398,9 +398,9 @@ function LockedCard() {
   return (
     <Link
       href="/membership?next=%2Fmypage%3Ftab%3Dwrong-notes"
-      className="flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3.5 transition-colors hover:border-blue-300 hover:bg-blue-50/50 dark:border-zinc-700 dark:bg-zinc-800/50 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+      className="flex items-start gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3.5 transition-colors hover:border-blue-300 hover:bg-blue-50/50 dark:border-zinc-700 dark:bg-zinc-800/50 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
     >
-      <Lock size={16} className="shrink-0 text-zinc-400 dark:text-zinc-500" />
+      <Lock size={16} className="mt-0.5 shrink-0 text-zinc-400 dark:text-zinc-500" />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-1.5 text-sm font-bold text-zinc-700 dark:text-zinc-300">
           오늘의 복습
@@ -408,13 +408,13 @@ function LockedCard() {
             멤버십
           </span>
         </p>
-        <p className="text-xs text-zinc-500 dark:text-zinc-500">
+        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-500">
           공모아만의 특수 알고리즘이 틀린 문제를 가장 잊기 쉬운 순간에 다시 복습시켜줘요
         </p>
+        <p className="mt-1.5 text-xs font-bold text-blue-600 dark:text-blue-400">
+          멤버십 혜택 알아보기 ›
+        </p>
       </div>
-      <span className="shrink-0 text-xs font-bold text-blue-600 dark:text-blue-400">
-        멤버십 되기 ›
-      </span>
     </Link>
   );
 }
