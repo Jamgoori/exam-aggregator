@@ -2,7 +2,6 @@ import {
   BookOpenCheck,
   Crown,
   FileStack,
-  Landmark,
   Library,
   Receipt,
   Settings,
@@ -46,16 +45,12 @@ export const PRIMARY_NAV: NavItem[] = [
     hint: "검색·연도별로 찾기",
   },
   {
-    href: "/exams",
-    label: "시험별",
-    icon: Landmark,
-    match: (p) => p.startsWith("/exams"),
-    hint: "국가직·지방직·소방·경찰",
-  },
-  {
     href: "/subjects",
     label: "과목별",
     icon: Library,
+    // 시험별(/exams)은 메뉴바에서 뺐지만 페이지 자체는 남아 있다 — 과목별 목록
+    // 맨 아래("시험으로 찾기")와 푸터에서 여전히 닿는다. 과목축 하나만 메뉴에 남기는
+    // 게 "국어 기출문제"처럼 과목명으로 찾아오는 절대다수 검색 흐름과 더 맞는다.
     match: (p) => p.startsWith("/subjects"),
     hint: "국어·영어·한국사·전공",
   },
