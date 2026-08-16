@@ -5,9 +5,25 @@
 // 모든 exam_papers(과목별 문제지)의 paper_answers를 자동으로 채운다. choice_count와
 // question_count는 관리자 화면(admin/actions.ts의 savePaperAnswers)과 동일한 규칙
 // (정답 배열 자체에서 추론)으로 계산해 exam_papers에도 반영한다.
+//
+// 텍스트 레이어 교차 검증 (2026-08-16 이후 필수 게이트): 비전 추출이 격자 중간
+// 구간을 오독해 국회직 9급 정답 49셀이 오염된 사고가 있었다 (AI 해설 배치의
+// unverified 급증으로 발견 — docs/agents/answer-keys-tracks.md). 그래서 저장 전에
+// lib/answer-grid-parser.mjs로 PDF 텍스트 레이어를 결정적으로 파싱해 추출 결과와
+// 셀 단위 대조하고, **불일치하는 과목은 저장하지 않고 보고만** 한다. 텍스트
+// 레이어가 없거나(스캔본) 열을 못 찾은 과목은 종전처럼 저장하되 "교차 검증 불가"로
+// 집계해 알려준다 — 그 과목들은 저장 후 scripts/audit-answer-keys.mjs와 해설 배치의
+// unverified 신호가 이중 안전망이다. 이 게이트는 "표를 옮겨 적다 생긴 오독"을 막는
+// 것이고, 책형(가/나형) 선택이 문제지 이미지와 다른 경우는 못 잡는다 — 그건
+// unverified 신호가 잡는다.
 
 import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
+import {
+  loadPdfjs,
+  parseAnswerPdf,
+  findSubjectColumns,
+} from "./lib/answer-grid-parser.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -139,9 +155,19 @@ async function main() {
     process.exit(1);
   }
 
-  const base64Pdf = Buffer.from(await fileBlob.arrayBuffer()).toString(
-    "base64",
-  );
+  const pdfBuffer = Buffer.from(await fileBlob.arrayBuffer());
+  const base64Pdf = pdfBuffer.toString("base64");
+
+  // 텍스트 레이어 증인 준비 — 실패해도 추출은 계속한다 (검증 불가로 집계).
+  let witnessPages = null;
+  try {
+    const pdfjs = await loadPdfjs();
+    const parsed = await parseAnswerPdf(pdfjs, pdfBuffer);
+    if (parsed.hasText) witnessPages = parsed.pages;
+    else console.log("경고: 정답표에 텍스트 레이어가 없습니다(스캔본) — 교차 검증 없이 진행.");
+  } catch (e) {
+    console.log(`경고: 텍스트 레이어 파싱 실패 (${e?.message ?? e}) — 교차 검증 없이 진행.`);
+  }
 
   // 이 시험에 실제로 등록된 문제지들을 먼저 모아, 직류(track) 목록을 프롬프트에 넘기고
   // 추출 결과를 문제지 단위로 대조한다. 법원직처럼 한 정답표 안에 직렬별 표가 여러 개
@@ -243,6 +269,12 @@ async function main() {
     JSON.stringify([e.answers, e.voided_questions ?? []]);
   const usedEntries = new Set();
   let updated = 0;
+  let witnessedCount = 0;
+  const unwitnessed = [];
+  const subjectNameById = new Map(subjects.map((s) => [s.id, s.name]));
+  const candidateSubjectNames = candidatePapers.map(
+    (p) => subjectNameById.get(p.subject_id) ?? "",
+  );
 
   for (const paper of candidatePapers) {
     const entries = validEntries.filter((e) => e.subject_id === paper.subject_id);
@@ -290,6 +322,40 @@ async function main() {
       continue;
     }
 
+    // 텍스트 레이어 증인 게이트: 추출 배열이 PDF의 어느 후보 열과도 (voided·빈 셀
+    // 제외) 완전 일치하지 않으면 저장하지 않는다 — 비전 오독 방지의 핵심 장치.
+    if (witnessPages) {
+      const cols = findSubjectColumns(
+        witnessPages,
+        subjectNameById.get(paper.subject_id) ?? "",
+        candidateSubjectNames,
+        pick.answers.length,
+        paper,
+      );
+      if (cols.length === 0) {
+        unwitnessed.push(paper.title);
+      } else {
+        const voided = new Set(pick.voided_questions ?? []);
+        const diffsOf = (c) => {
+          const cells = [];
+          for (let qn = 1; qn <= pick.answers.length; qn++) {
+            if (voided.has(qn) || !c.map.has(qn)) continue;
+            if (c.map.get(qn) !== pick.answers[qn - 1])
+              cells.push(`문${qn} 추출${pick.answers[qn - 1]}≠PDF${c.map.get(qn)}`);
+          }
+          return cells;
+        };
+        const best = cols.map(diffsOf).sort((a, b) => a.length - b.length)[0];
+        if (best.length > 0) {
+          skipped.push(
+            `${paper.title} (텍스트 레이어와 ${best.length}셀 불일치: ${best.slice(0, 5).join(", ")}${best.length > 5 ? " …" : ""} — 오독 방지를 위해 저장 안 함, PDF 확인 후 수동 등록 필요)`,
+          );
+          continue;
+        }
+        witnessedCount++;
+      }
+    }
+
     usedEntries.add(pick);
     const choiceCount = Math.max(4, ...pick.answers);
 
@@ -333,6 +399,15 @@ async function main() {
   }
 
   console.log(`\n총 ${updated}개 문제지 정답 저장 완료.`);
+  if (witnessPages) {
+    console.log(
+      `텍스트 레이어 교차 검증: 일치 ${witnessedCount}개${unwitnessed.length > 0 ? `, 검증 불가(열 미발견) ${unwitnessed.length}개 — 저장은 했으니 scripts/audit-answer-keys.mjs로 사후 확인 권장: ${unwitnessed.join(", ")}` : ""}`,
+    );
+  } else if (updated > 0) {
+    console.log(
+      "텍스트 레이어가 없어 교차 검증 없이 저장했습니다 — scripts/audit-answer-keys.mjs 사후 감사와 해설 배치 unverified 신호로 확인할 것.",
+    );
+  }
   if (skipped.length > 0) {
     console.log(`건너뜀 (${skipped.length}개):`);
     skipped.forEach((s) => console.log(`  - ${s}`));
