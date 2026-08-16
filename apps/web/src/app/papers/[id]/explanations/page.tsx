@@ -149,7 +149,7 @@ export default async function PaperExplanationsPage({
               className={`rounded px-2 py-0.5 text-xs font-medium ${subjectColor(subject.slug)}`}
             >
               {/* 이 문제지의 과목명이라 시행처 표기를 따른다(군무원 → 행정법). */}
-              {getSubjectDisplayName(subject.name, examType?.name)}
+              {getSubjectDisplayName(subject.name, examType?.name, paper.level)}
             </span>
           )}
         </div>

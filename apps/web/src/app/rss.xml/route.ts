@@ -61,7 +61,7 @@ async function buildFeed(): Promise<string> {
     const title = `${getPaperDisplayTitle(paper.title, paper.track)} 기출문제`;
     const url = absoluteUrl(paperHref(paper));
     const description =
-      `${paper.exam_types?.name ?? ""} ${paper.level ?? ""} ${paper.year}년 ${getSubjectDisplayName(paper.subjects?.name ?? "", paper.exam_types?.name)} 기출문제를 정답과 함께 무료로 열람·다운로드하세요.`
+      `${paper.exam_types?.name ?? ""} ${paper.level ?? ""} ${paper.year}년 ${getSubjectDisplayName(paper.subjects?.name ?? "", paper.exam_types?.name, paper.level)} 기출문제를 정답과 함께 무료로 열람·다운로드하세요.`
         .replace(/\s+/g, " ")
         .trim();
 

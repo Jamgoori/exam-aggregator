@@ -112,7 +112,7 @@ export default function PaperWrongNoteScreen() {
         options={{
           headerShown: true,
           title: paper.subjects
-            ? getSubjectDisplayName(paper.subjects.name, paper.exam_types?.name)
+            ? getSubjectDisplayName(paper.subjects.name, paper.exam_types?.name, paper.level)
             : "오답노트",
         }}
       />

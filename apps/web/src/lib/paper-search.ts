@@ -146,7 +146,7 @@ export function filterPapers(
 function groupSubjectName(paper: LightPaper): string {
   const name = paper.subjects?.name;
   if (!name) return "기타";
-  return getSubjectDisplayName(name, paper.exam_types?.name);
+  return getSubjectDisplayName(name, paper.exam_types?.name, paper.level);
 }
 
 // "즐겨찾기한 과목만 보기" 화면은 연도 내림차순 → 같은 연도 안에서는 과목명

@@ -49,14 +49,29 @@ test("군무원 문제지는 제목의 과목명을 문제지 표기로 되돌�
   );
 });
 
-test("같은 과목이라도 다른 시행처 제목은 건드리지 않는다", () => {
+// 같은 시행처라도 급수마다 갈린다 — 9급 문제지에는 "행정법총론"이 인쇄돼 있고
+// 7급에는 "행정법"이 인쇄돼 있다(문제지 표본 대조로 확인).
+test("9급은 총론·개론이 정본이라 건드리지 않는다", () => {
   for (const title of [
     "2026 국가직 9급 행정법총론",
     "2026 지방직 9급 행정학개론",
-    "2026 국회직 8급 행정법총론",
+    "2026 국회직 9급 행정법총론",
   ]) {
     assert.equal(getPaperDisplayTitle(title, null), title);
   }
+});
+
+test("7급·국회직 8급·경찰·경력경쟁도 문제지 표기로 되돌린다", () => {
+  const cases: [string, string][] = [
+    ["2025 국가직 7급 행정법총론", "2025 국가직 7급 행정법"],
+    ["2025 지방직 7급 행정학개론", "2025 지방직 7급 행정학"],
+    ["2026 국회직 8급 행정법총론", "2026 국회직 8급 행정법"],
+    ["2017 경력경쟁 9급 행정학개론", "2017 경력경쟁 9급 행정학"],
+    // 경찰은 급수가 없어 셋째 토큰이 급수가 아니다("공채 3차").
+    ["2012 경찰 공채 3차 행정법총론", "2012 경찰 공채 3차 행정법"],
+  ];
+  for (const [input, expected] of cases)
+    assert.equal(getPaperDisplayTitle(input, null), expected);
 });
 
 test("군무원이라도 표기가 같은 과목은 그대로 둔다", () => {
@@ -74,9 +89,18 @@ test("과목명은 제목 맨 뒤에서만 바꾼다", () => {
 test("과목 표시 이름은 시행처를 알 때만 바뀐다", () => {
   assert.equal(getSubjectDisplayName("행정법총론", "군무원"), "행정법");
   assert.equal(getSubjectDisplayName("행정학개론", "군무원"), "행정학");
-  assert.equal(getSubjectDisplayName("행정법총론", "국가직"), "행정법총론");
+  assert.equal(getSubjectDisplayName("행정법총론", "경찰"), "행정법");
   // 과목 페이지·오답노트처럼 여러 시행처가 섞이는 화면은 DB 이름이 정본이다.
   assert.equal(getSubjectDisplayName("행정법총론", null), "행정법총론");
+});
+
+test("급수 규칙이 시행처 규칙을 이긴다", () => {
+  assert.equal(getSubjectDisplayName("행정법총론", "국가직", "7급"), "행정법");
+  assert.equal(getSubjectDisplayName("행정법총론", "국가직", "9급"), "행정법총론");
+  // 급수를 안 넘기면 시행처 규칙만 본다 — 국가직은 시행처 단위 규칙이 없으니 그대로.
+  assert.equal(getSubjectDisplayName("행정법총론", "국가직"), "행정법총론");
+  // 군무원은 9급·7급 모두 "행정법"이라 시행처 단위로 걸어 뒀다.
+  assert.equal(getSubjectDisplayName("행정법총론", "군무원", "7급"), "행정법");
 });
 
 // ── 급수 정렬 ───────────────────────────────────────────────────────────
