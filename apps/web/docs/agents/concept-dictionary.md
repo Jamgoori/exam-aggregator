@@ -199,7 +199,10 @@ node scripts/save-concepts.mjs result.json          # 이름 → concept_id
 ```
 
 지시문은 `scripts/concept-reclassify-prompt.md`(원본이 이 레포다 — 해설 생성
-지시문과 달리 Storage 배포 절차가 없다).
+지시문과 달리 Storage 배포 절차가 없다). 이걸 무인 루틴으로 돌릴 때 쓰는 프롬프트
+문안은 `scripts/concept-reclassify-routine.md` 에 있다 — 권한 심기 0단계와 90분
+컷오프가 거기 들어 있고, 빼면 2026-07-15 사고(보안 분류기가 `.mjs` 실행을 차단해
+세션이 저장 0건으로 끝남)가 재발한다.
 
 - **문항 이미지를 안 읽는다.** `keyword_title` + `question_text` 만으로 결정된다.
   해설 생성 배치보다 훨씬 싸다
