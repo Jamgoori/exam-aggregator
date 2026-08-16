@@ -122,24 +122,47 @@ async function main() {
   }
 
   // 아직 concept_id 가 없는 해설 수. 많이 남은 과목부터 처리한다.
+  //
+  // count:"exact" 로 세면 안 된다. 조인 전체를 끝까지 세느라 8초 statement timeout
+  // 을 넘긴다 (2026-08-16 실측: 봇 8.2초로 초과, service_role 도 7.8초로 아슬아슬).
+  // 코퍼스가 커지면서 넘은 선이라 앞으로 더 나빠지기만 한다. 이 숫자는 "어느 과목을
+  // 먼저 볼까"를 정하는 데에만 쓰이므로 planner 추정치로 충분하다.
+  //
+  // 과목 하나가 타임아웃해도 세션을 죽이지 않는다 — 예전에는 exit(1) 이라, 잔여가
+  // 0 이라 스캔이 끝까지 가는 과목(경찰학) 하나 때문에 배치 전체가 못 돌았다.
   const pending = [];
+  const skipped = [];
   for (const s of targets) {
     const hasList = (conceptsBySubject.get(s.id) ?? []).length > 0;
     if (mine === hasList) continue; // mine 모드면 목록 없는 과목만, 아니면 있는 과목만
+
+    // 과목을 직접 지정했으면 셀 이유가 없다. 대상이 하나뿐이라 우선순위가 없고,
+    // 세는 쿼리가 그 자체로 이 스크립트가 죽던 자리다.
+    if (subjectFilter && !mine) {
+      pending.push({ ...s, remaining: null });
+      continue;
+    }
+
     const { count, error } = await supabase
       .from("question_explanations")
       .select("question_id, questions!inner(exam_papers!inner(subject_id))", {
-        count: "exact",
+        count: "planned",
         head: true,
       })
       .is("concept_id", null)
       .not("keyword_title", "is", null)
       .eq("questions.exam_papers.subject_id", s.id);
     if (error) {
-      console.error(`잔여량 조회 실패 (${s.name}): ${error.message}`);
-      process.exit(1);
+      skipped.push({ subject: s.name, reason: error.message || error.code || "타임아웃" });
+      continue;
     }
     if ((count ?? 0) > 0) pending.push({ ...s, remaining: count });
+  }
+  if (skipped.length > 0) {
+    console.error(
+      `잔여량을 못 센 과목 ${skipped.length}개 (이번 회차만 건너뜀): ` +
+        skipped.map((s) => s.subject).join(", "),
+    );
   }
 
   if (pending.length === 0) {
@@ -162,15 +185,19 @@ async function main() {
   // "주제 파악"인지 "빈칸추론"인지 갈린다.
   const select =
     "question_id, keyword_title, question_text, questions!inner(exam_papers!inner(subject_id))";
-  const fetchRange = async (from, to) => {
-    const { data, error } = await supabase
+  // ordered 는 --mine 에서만 켠다. 무작위 위치 블록을 뽑으려면 순서가 고정돼야
+  // 하는데, 정렬을 걸면 조인 위에서 깊이 훑느라 느려진다 (2026-08-16 실측: 같은
+  // 조회가 정렬 있으면 60건에 8초 초과, 없으면 0.3초). 일반 모드는 미분류 해설
+  // 아무거나 60건이면 되고, 붙은 것은 다음 회차의 대상에서 빠지므로 순서가 필요 없다.
+  const fetchRange = async (from, to, ordered = false) => {
+    let query = supabase
       .from("question_explanations")
       .select(select)
       .is("concept_id", null)
       .not("keyword_title", "is", null)
-      .eq("questions.exam_papers.subject_id", subject.id)
-      .order("question_id")
-      .range(from, to);
+      .eq("questions.exam_papers.subject_id", subject.id);
+    if (ordered) query = query.order("question_id");
+    const { data, error } = await query.range(from, to);
     if (error) {
       console.error(`해설 조회 실패 (${subject.name}): ${error.message}`);
       process.exit(1);
@@ -190,7 +217,7 @@ async function main() {
     rows = [];
     for (let b = 0; b < blocks && rows.length < limit; b++) {
       const from = Math.floor(Math.random() * span);
-      for (const r of await fetchRange(from, from + per - 1)) {
+      for (const r of await fetchRange(from, from + per - 1, true)) {
         if (seen.has(r.question_id)) continue;
         seen.add(r.question_id);
         rows.push(r);
