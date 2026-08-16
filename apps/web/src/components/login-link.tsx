@@ -5,13 +5,21 @@ import { usePathname } from "next/navigation";
 
 // 헤더는 서버 컴포넌트라 현재 경로를 모르므로, 로그인 링크만 클라이언트 컴포넌트로 분리해서
 // "지금 보고 있던 페이지로 돌아가기"용 next 파라미터를 붙인다.
-export function LoginLink({ className }: { className?: string }) {
+export function LoginLink({
+  className,
+  onClick,
+}: {
+  className?: string;
+  // 모바일 메뉴 서랍처럼 "누르면 닫아야 하는" 자리에서 쓴다.
+  onClick?: () => void;
+}) {
   const pathname = usePathname();
 
   return (
     <Link
       href={`/login?next=${encodeURIComponent(pathname || "/")}`}
       className={className}
+      onClick={onClick}
     >
       로그인
     </Link>
