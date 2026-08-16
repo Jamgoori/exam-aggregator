@@ -20,7 +20,6 @@ import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { ScrollToHash } from "@/components/scroll-to-hash";
 import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
 import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-card";
-import { MembershipUpsell } from "@/components/membership-upsell";
 import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { getDueReviewSummary } from "@/lib/review-queue";
@@ -494,11 +493,11 @@ function WrongNotesTab({
     );
     return (
       <section id="wrong-notes" className="flex scroll-mt-4 flex-col gap-4">
-        <ReviewDueCard {...reviewDue} />
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
           오답노트
         </h2>
+        <ReviewDueCard {...reviewDue} />
         <HowItWorksStrip />
         {freeSubjects.length === 0 ? (
           <div className="flex flex-col items-center gap-4 py-12">
@@ -537,11 +536,6 @@ function WrongNotesTab({
             ))}
           </div>
         )}
-        <MembershipUpsell
-          title="해설·복습 일정까지 이어가려면 멤버십"
-          description="멤버십을 시작하면 문항별 해설과 언제 다시 볼지 계산해주는 복습 일정, AI 약점 진단까지 이어져요."
-          next="/mypage?tab=wrong-notes"
-        />
       </section>
     );
   }
@@ -550,11 +544,11 @@ function WrongNotesTab({
     // 홈 오답노트 배너(#wrong-notes)가 페이지 최상단이 아닌 이 섹션으로 바로
     // 스크롤되도록 앵커를 건다. scroll-mt는 스크롤 정지 위치에 약간의 여백.
     <section id="wrong-notes" className="flex scroll-mt-4 flex-col gap-4">
-      <ReviewDueCard {...reviewDue} />
       <h2 className="flex items-center gap-2 text-lg font-semibold">
         <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
         오답노트
       </h2>
+      <ReviewDueCard {...reviewDue} />
       <DiagnosisBanner initialState={diagnosisState} hint={diagnosisHint} />
       <HowItWorksStrip />
       {groups.length === 0 ? (
