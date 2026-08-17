@@ -11,6 +11,7 @@ export const unstable_instant = {
 import { createClient } from "@/lib/supabase/server";
 import { HomeExamBrowser } from "@/components/home-exam-browser";
 import { ReviewNudgeModal } from "@/components/review-nudge-modal";
+import { BetaNoticeModal } from "@/components/beta-notice-modal";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
@@ -92,6 +93,10 @@ export default async function Home({
           조회는 전부 컴포넌트가 마운트된 뒤에 한다 — 홈 서버 렌더에 복습 요약을
           넣으면 모두가 매번 무거운 조회를 하게 된다. */}
       {userId && <ReviewNudgeModal />}
+      {/* "아직 개발 중이고, 멤버십 기능은 지금 전부 무료" 안내. 홈에 들어온 로그인
+          사용자에게 방문당 한 번 뜨고, "다음부터 보지 않기"를 누르면 영영 안 뜬다.
+          문제지·풀이 화면이 아니라 홈에만 두는 이유는 beta-notice-modal.tsx 주석 참고. */}
+      {userId && <BetaNoticeModal />}
       <HomeExamBrowser
         heroText={
           <>

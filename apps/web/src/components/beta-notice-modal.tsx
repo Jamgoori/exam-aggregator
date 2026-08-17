@@ -2,11 +2,18 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { BookOpen, CalendarCheck, Hammer, MessageSquareWarning, Sparkles, X } from "lucide-react";
+import {
+  BookOpen,
+  CalendarCheck,
+  FileText,
+  Hammer,
+  MessageSquareWarning,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { TRIAL_DAYS } from "@gongmoa/core";
 
-// 로그인한 사람에게 딱 한 번 뜨는 "아직 개발 중" 안내.
+// 로그인한 사람이 홈에 들어왔을 때 뜨는 "아직 개발 중" 안내.
 //
 // 지금 사이트는 화면과 기능이 계속 바뀌는 중이라, 아무 말 없이 두면 사용자는 그걸
 // "미완성"이 아니라 "고장"으로 읽는다. 먼저 말해두면 같은 화면도 다르게 보이고,
@@ -15,57 +22,67 @@ import { TRIAL_DAYS } from "@gongmoa/core";
 // 두 번째 문단(멤버십 무료)이 이 모달의 진짜 용건이다. 잠긴 기능을 만나기 전에
 // "지금은 다 열려 있다"를 알려야, 잠금 아이콘을 보고 지레 발길을 돌리지 않는다.
 //
-// 로그인 콜백에 붙이지 않고 레이아웃에 두는 이유: 콜백은 원래 보던 곳으로 되돌려
-// 보내기만 하므로(auth/callback), 로그인 직후 어느 화면에 떨어지든 이 안내가 한 번은
-// 지나가야 한다. 대신 "한 번"은 브라우저에 기록해서 지킨다.
+// 뜨는 자리는 홈뿐이다(app/page.tsx). 문제지·풀이 화면에서 덮으면 하려던 일을
+// 끊는 셈이고, 홈은 어차피 대부분이 거쳐 가는 입구라 안내가 닿는다.
 //
-// 문구를 바꾸거나 다시 띄우고 싶으면 STORAGE_KEY 의 버전을 올린다 — 그러면 이미 본
-// 사람에게도 새 안내가 한 번 더 뜬다.
+// 빈도는 두 겹으로 잡는다:
+//   - 방문(탭)당 한 번 — sessionStorage. 홈을 몇 번 오가도 그 방문에선 다시 안 뜬다.
+//   - "다음부터 보지 않기" 를 누르면 영영 안 뜬다 — localStorage.
+// 닫기만 눌렀을 때 다음 방문에 한 번 더 뜨는 건 의도한 것이다. 안 읽고 닫은 사람에게
+// 멤버십이 무료라는 말이 한 번은 더 가야 한다. 그게 성가신 사람을 위한 문이
+// "다음부터 보지 않기" 다.
+//
+// 문구를 바꿔서 이미 끈 사람에게도 다시 알리고 싶으면 아래 키의 버전을 올린다.
 
-const STORAGE_KEY = "beta-notice-seen-v1";
+const HIDDEN_KEY = "beta-notice-hidden-v1";
+const SHOWN_KEY = "beta-notice-shown-v1";
 
 // 한 박자 늦게 띄운다. 화면이 그려지는 순간 같이 덮으면 사용자가 뭘 열었는지도 모르는
-// 채로 닫기부터 누른다 — 로그인해서 도착한 화면을 먼저 보게 두는 것.
+// 채로 닫기부터 누른다 — 도착한 화면을 먼저 보게 두는 것.
 const OPEN_DELAY_MS = 500;
 
-function seen(): boolean {
+// 시크릿 모드 등 저장소가 막힌 환경에서는 "이미 봤다"로 친다. 매번 뜨는 것보다 안 뜨는
+// 쪽이 낫다(review-nudge-modal 과 같은 판단).
+function shouldSkip(): boolean {
   try {
-    return window.localStorage.getItem(STORAGE_KEY) === "1";
+    return (
+      window.localStorage.getItem(HIDDEN_KEY) === "1" ||
+      window.sessionStorage.getItem(SHOWN_KEY) === "1"
+    );
   } catch {
-    // 시크릿 모드 등 localStorage 가 막힌 환경. 매번 뜨는 것보다 안 뜨는 쪽이 낫다
-    // (review-nudge-modal 과 같은 판단).
     return true;
   }
 }
 
-function markSeen(): void {
+function markShown(): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, "1");
+    window.sessionStorage.setItem(SHOWN_KEY, "1");
   } catch {
-    // 무시: 기록이 안 되면 다음 방문에 한 번 더 뜰 뿐이다.
+    // 무시: 기록이 안 되면 다음에 한 번 더 뜰 뿐이다.
+  }
+}
+
+function markHidden(): void {
+  try {
+    window.localStorage.setItem(HIDDEN_KEY, "1");
+  } catch {
+    // 무시: 끄지 못해도 방문당 한 번이라는 상한은 그대로다.
   }
 }
 
 export function BetaNoticeModal() {
-  const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
-  // 풀이 화면(CBT·섞어풀기·복습)은 자체 UI로 화면을 꽉 쓰는 몰입형이라 띄우지 않는다.
-  // 시험처럼 시간을 재며 푸는 중에 안내가 덮이면 그 회차를 통째로 망친다.
-  // 판별 규칙은 site-header-gate.tsx·review-fab.tsx 와 같다.
-  const immersive =
-    /^\/papers\/[^/]+\/cbt(\/|$)/.test(pathname ?? "") ||
-    /^\/mypage\/wrong-notes\/[^/]+\/review\/[^/]+/.test(pathname ?? "");
-
   useEffect(() => {
-    if (immersive || seen()) return;
+    if (shouldSkip()) return;
     const id = window.setTimeout(() => {
-      // 띄우는 순간 "봤다"로 기록한다. 닫기를 안 누르고 나가도 다시 뜨면 안 된다.
-      markSeen();
+      // 띄우는 순간 "이번 방문에 봤다"로 기록한다. 닫기를 안 누르고 다른 데로 가도
+      // 홈에 돌아올 때마다 다시 뜨면 안 된다.
+      markShown();
       setOpen(true);
     }, OPEN_DELAY_MS);
     return () => window.clearTimeout(id);
-  }, [immersive]);
+  }, []);
 
   // 열려 있는 동안 뒤 화면 스크롤을 막고 Esc 로 닫는다(다른 모달과 같은 규칙).
   useEffect(() => {
@@ -84,13 +101,20 @@ export function BetaNoticeModal() {
 
   if (!open) return null;
 
+  function dismissForever() {
+    markHidden();
+    setOpen(false);
+  }
+
+  // z-[60] — 홈에는 복습 유도 모달(review-nudge-modal, z-50)도 뜬다. 둘이 겹치는 날엔
+  // 이쪽이 위에 와야 한다: 한 번 보고 마는 안내를 먼저 치워야 아래 것이 보인다.
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-label="개발 중 안내"
       onClick={() => setOpen(false)}
-      className="animate-modal-fade-in fixed inset-0 z-50 flex items-end justify-center bg-zinc-900/40 backdrop-blur-sm sm:items-center sm:p-4 dark:bg-black/60"
+      className="animate-modal-fade-in fixed inset-0 z-[60] flex items-end justify-center bg-zinc-900/40 backdrop-blur-sm sm:items-center sm:p-4 dark:bg-black/60"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -128,7 +152,18 @@ export function BetaNoticeModal() {
             화면과 기능이 <B>거의 매일 바뀌고</B> 있어요. 그러다 보니 가끔 어색한 부분이나
             오류가 보일 수 있어요.
           </p>
-          <p className="mt-2 text-pretty">
+
+          {/* 자료가 비어 보이는 건 사이트가 부실한 게 아니라 아직 올리는 중이라는 뜻이다.
+              이 말이 없으면 찾던 시험지가 없을 때 그대로 나가고 다시 안 온다. */}
+          <p className="mt-3 flex gap-2 rounded-xl bg-zinc-50 px-3 py-2.5 text-pretty dark:bg-zinc-800/50">
+            <FileText size={14} className="mt-1 shrink-0 text-blue-500 dark:text-blue-400" />
+            <span>
+              <B>기출문제와 해설도 계속 올라오는 중</B>이에요. 지금 안 보이는 시험지나
+              해설도 차례로 채워지고 있으니 조금만 기다려 주세요.
+            </span>
+          </p>
+
+          <p className="mt-3 text-pretty">
             이상한 걸 발견하면 문항 아래{" "}
             <span className="mx-0.5 inline-flex items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 align-baseline text-[12px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
               <MessageSquareWarning size={11} />
@@ -166,11 +201,21 @@ export function BetaNoticeModal() {
           </p>
         </div>
 
-        <div className="border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
+        {/* "다음부터 보지 않기"를 체크박스가 아니라 버튼으로 둔다. 체크박스는 누른 뒤
+            닫기까지 두 번 눌러야 하고, 안 누르고 닫으면 아무 일도 안 일어난다.
+            폭은 확인 버튼에 양보한다 — 대부분은 읽고 닫는 쪽이다. */}
+        <div className="flex gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
+          <button
+            type="button"
+            onClick={dismissForever}
+            className="flex-1 rounded-xl border border-zinc-200 py-2.5 text-[13px] font-medium text-zinc-600 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          >
+            다음부터 보지 않기
+          </button>
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="w-full rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700"
+            className="flex-[1.2] rounded-xl bg-blue-600 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700"
           >
             알겠어요
           </button>
