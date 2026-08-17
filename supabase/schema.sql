@@ -907,9 +907,12 @@ create unique index if not exists profiles_nickname_unique_idx on profiles (lowe
 
 alter table profiles enable row level security;
 
+-- 본인 프로필 + 관리자는 전체(문항 오류 신고 관리 화면이 신고자 닉네임을 보여주려면
+-- 관리자가 다른 사람의 프로필도 읽을 수 있어야 한다 — 닉네임은 댓글에 이미 공개로
+-- 붙는 값이라 관리자에게 추가로 노출해도 새로운 정보 유출이 아니다).
 drop policy if exists "select own profile" on profiles;
 create policy "select own profile" on profiles
-  for select to authenticated using (auth.uid() = user_id);
+  for select to authenticated using (auth.uid() = user_id or is_admin());
 
 -- insert/update는 서버 액션에서 service role로만 수행한다 (유니크 위반을 애플리케이션이
 -- 깔끔한 에러 메시지로 바꿔줄 수 있게 anon/authenticated에는 쓰기 정책을 열지 않음).

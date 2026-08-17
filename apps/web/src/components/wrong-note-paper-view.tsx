@@ -232,6 +232,8 @@ export function WrongNotePaperView({
                 rows={group.rows}
                 images={group.images}
                 explanationLockNext={lockNext}
+                paperId={paperId}
+                reportContext="explanation"
                 renderRowActions={(questionNumber) => (
                   <WrongNoteMarkActions
                     paperId={paperId}

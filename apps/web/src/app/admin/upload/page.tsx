@@ -47,6 +47,12 @@ export default async function UploadPage() {
       >
         미검증 해설 검수하기 →
       </Link>
+      <Link
+        href="/admin/reports"
+        className="text-sm text-blue-600 underline dark:text-blue-400"
+      >
+        문항 오류 신고 확인하기 →
+      </Link>
       <UploadForm
         subjects={(subjects ?? []) as Subject[]}
         examTypes={(examTypes ?? []) as ExamType[]}

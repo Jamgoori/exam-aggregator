@@ -42,3 +42,10 @@ create policy "insert own question_reports" on question_reports
 drop policy if exists "admin update question_reports" on question_reports;
 create policy "admin update question_reports" on question_reports
   for update to authenticated using (is_admin());
+
+-- 관리 화면(/admin/reports)이 신고자 닉네임을 보여주려면 관리자가 다른 사람의
+-- profiles 행도 읽을 수 있어야 한다. 기존 정책은 본인 것만 select였다. 닉네임은
+-- 댓글에 이미 공개로 붙는 값이라 관리자에게 추가로 노출해도 새로운 정보 유출이 아니다.
+drop policy if exists "select own profile" on profiles;
+create policy "select own profile" on profiles
+  for select to authenticated using (auth.uid() = user_id or is_admin());
