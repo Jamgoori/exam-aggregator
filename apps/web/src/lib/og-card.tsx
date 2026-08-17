@@ -123,12 +123,16 @@ export async function renderOgCard({
       ...OG_SIZE,
       ...(fonts.length > 0 ? { fonts } : {}),
       // 이 라우트들은 데이터를 그때그때 읽어 오느라 빌드 때 미리 그려지지 않는다
-      // (빌드 결과에서 ƒ). 카드 내용은 문제지가 바뀌지 않는 한 그대로이므로 CDN 이
-      // 하루 붙들고 있게 해서, 링크가 퍼질 때마다 폰트 내려받기 + DB 조회가
-      // 반복되지 않게 한다.
+      // (빌드 결과에서 ƒ). 링크가 퍼질 때마다 폰트 내려받기 + DB 조회 + satori
+      // 렌더가 반복되지 않게 CDN 이 오래 붙들고 있게 한다.
+      //
+      // 30일은 짧지 않은데, 카드에 그리는 값(문제지 제목·과목명)은 업로드 시점 기록이라
+      // 사실상 바뀌지 않는다 (`exam_papers.title` 을 UPDATE 하지 않는 것이 레포 규칙).
+      // 하루였을 때는 문제지 3,800장 × 크롤러 순회가 매일 새 렌더를 유발했고, 이
+      // 라우트가 요청당 CPU·메모리를 가장 많이 먹는 경로다.
       headers: {
         "cache-control":
-          "public, max-age=0, s-maxage=86400, stale-while-revalidate=604800",
+          "public, max-age=0, s-maxage=2592000, stale-while-revalidate=31536000",
       },
     },
   );

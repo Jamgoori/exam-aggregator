@@ -114,9 +114,28 @@ function geoBlock(request: NextRequest): NextResponse | null {
   });
 }
 
+/**
+ * 로그인 세션 쿠키(@supabase/ssr 이 심는 `sb-<ref>-auth-token`)가 하나라도 있는지.
+ *
+ * 없으면 갱신할 세션 자체가 없으므로 아래에서 Supabase 클라이언트를 만들지도, 토큰을
+ * 검증하지도 않는다. 이 사이트 트래픽의 대부분은 로그인하지 않은 검색·수집 봇인데,
+ * 그 요청 하나하나에 쿠키 파싱 + 토큰 검증을 붙이면 실제로 하는 일이 없는 CPU 시간이
+ * 요청 수만큼 쌓인다 (Vercel 실측: 사용자 없는 6일 동안 함수 호출 103만 건).
+ */
+function hasSessionCookie(request: NextRequest): boolean {
+  return request.cookies.getAll().some((c) => c.name.startsWith("sb-"));
+}
+
 export async function proxy(request: NextRequest) {
   const blocked = geoBlock(request);
   if (blocked) return blocked;
+
+  const isLegacyPaperUrl = LEGACY_PAPER_PATH.test(request.nextUrl.pathname);
+
+  // 익명 요청이고 옛 주소도 아니면 여기서 할 일이 없다. 아무것도 만들지 않고 통과.
+  if (!hasSessionCookie(request) && !isLegacyPaperUrl) {
+    return NextResponse.next({ request });
+  }
 
   let response = NextResponse.next({ request });
 
@@ -145,10 +164,16 @@ export async function proxy(request: NextRequest) {
   // auth to work correctly in Server Components. getClaims()는 프로젝트가
   // 비대칭(ECC/RSA) JWT 서명 키를 쓰면 인증 서버 왕복 없이 로컬에서 검증하므로
   // getUser()보다 훨씬 빠르다 (대칭 키면 getUser()와 동일하게 동작).
-  await supabase.auth.getClaims();
+  //
+  // 세션 쿠키가 있을 때만 부른다 — 없으면 갱신할 것이 없어 왕복이 통째로 낭비다.
+  if (hasSessionCookie(request)) {
+    await supabase.auth.getClaims();
+  }
 
-  const legacyRedirect = await redirectLegacyPaperUrl(request, supabase);
-  if (legacyRedirect) return legacyRedirect;
+  if (isLegacyPaperUrl) {
+    const legacyRedirect = await redirectLegacyPaperUrl(request, supabase);
+    if (legacyRedirect) return legacyRedirect;
+  }
 
   return response;
 }
@@ -157,7 +182,11 @@ export const config = {
   // 정적 자산에는 세션 갱신이 전혀 필요 없는데도 프록시를 태우면 요청마다 Supabase
   // 쿠키 파싱/검증 비용이 붙는다. 특히 /pdf.worker.min.mjs(1MB+, CBT 진입마다 로드)가
   // 기존 패턴(svg|png|jpg|jpeg|webp)에 안 걸려서 매번 프록시를 통과하고 있었다.
+  //
+  // opengraph-image 도 같은 이유로 뺀다. 로그인과 무관한 이미지인데(지오블록 판정에서도
+  // 설비 경로로 통과시킨다) 문제지마다 하나씩 있어서, 크롤러가 사이트를 훑을 때마다
+  // 카드 렌더링과 별개로 프록시 호출이 그 수만큼 따라붙는다.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|mjs|pdf|woff2?|ttf|otf|map|txt|xml|webmanifest)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*opengraph-image[^/]*$|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|mjs|pdf|woff2?|ttf|otf|map|txt|xml|webmanifest)$).*)",
   ],
 };
