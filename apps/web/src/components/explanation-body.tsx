@@ -46,8 +46,12 @@ export function ExplanationBody({
     explanation.currentAnswerStatus === "정답변경" ||
     explanation.currentAnswerStatus === "성립불가";
 
+  // select-none: 해설은 약관 제4조로 보호하는 자체 제작 콘텐츠라 드래그 선택·복사를
+  // 막는다. 이 컴포넌트는 서버에서도 그리므로(파일 상단 주석) 이벤트 핸들러가 아닌
+  // CSS로만 막는다. [-webkit-touch-callout:none] 은 iOS 길게 누르기의 "복사" 팝업을
+  // 없앤다. 인쇄(해설 PDF)는 선택과 무관해 그대로 동작한다.
   return (
-    <div className="mt-2 flex flex-col gap-3 rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700 print:mt-1 print:gap-2 print:p-2 print:text-xs print:leading-snug dark:bg-zinc-800/50 dark:text-zinc-300">
+    <div className="mt-2 flex flex-col gap-3 rounded-lg bg-zinc-50 p-3 text-sm leading-relaxed text-zinc-700 select-none [-webkit-touch-callout:none] print:mt-1 print:gap-2 print:p-2 print:text-xs print:leading-snug dark:bg-zinc-800/50 dark:text-zinc-300">
       {answerChanged && (
         <div className="rounded-md border border-amber-300 bg-amber-100 px-3 py-2 text-xs text-amber-900 break-inside-avoid dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300">
           <p className="font-bold">
