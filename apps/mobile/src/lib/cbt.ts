@@ -4,7 +4,7 @@ import { supabase } from "./supabase";
 // RLS 로 차단돼 있어 앱이 직접 채점할 수 없다. invoke 는 로그인 사용자의 JWT 를
 // Authorization 헤더로 자동 첨부한다.
 
-export const MIN_ATTEMPT_SECONDS = 180;
+export const MIN_ATTEMPT_SECONDS = 90;
 
 export type CbtQuestionResult = {
   question_number: number;
