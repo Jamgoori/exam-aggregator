@@ -6,6 +6,7 @@ import { SiteHeaderGate } from "@/components/site-header-gate";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { ReviewFab } from "@/components/review-fab";
+import { BetaNoticeModal } from "@/components/beta-notice-modal";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
 import { createClient } from "@/lib/supabase/server";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site-url";
@@ -112,6 +113,11 @@ async function StreamedSiteHeader() {
       {/* 스크롤을 내리면 따라오는 "복습 N" 버튼. 로그인한 사람에게만 붙인다 —
           비로그인 방문자에게는 셀 것도 없는데 조회만 한 번 더 도는 셈이다. */}
       {headerUser && <ReviewFab />}
+      {/* "아직 개발 중이고, 멤버십 기능은 지금 전부 무료" 안내. 로그인한 사람에게
+          브라우저당 한 번만 뜬다. 로그인 콜백이 아니라 여기 있는 이유는
+          beta-notice-modal.tsx 주석 참고 — 로그인 직후 어느 화면에 떨어지든
+          한 번은 지나가야 한다. */}
+      {headerUser && <BetaNoticeModal />}
     </>
   );
 }
