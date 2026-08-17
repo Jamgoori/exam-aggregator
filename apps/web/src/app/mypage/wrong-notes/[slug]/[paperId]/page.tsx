@@ -114,7 +114,7 @@ export default async function PaperWrongNotePage({
       {!premium && (
         <MembershipUpsell
           title="해설까지 보면서 복습하려면"
-          description="멤버십은 문항별 해설과 회독별 다른 회원 평균 점수를 볼 수 있고, 언제 다시 볼지 계산해주는 복습 일정과 AI 약점 진단까지 이어져요."
+          description="멤버십은 문항별 해설과 회독별 다른 회원 평균 점수를 볼 수 있고, 언제 다시 볼지 계산해주는 복습 일정까지 이어져요."
           next={`/mypage/wrong-notes/${slug}/${paperId}`}
         />
       )}

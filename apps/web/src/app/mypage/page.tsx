@@ -18,9 +18,7 @@ import { ExamCard } from "@/components/exam-card";
 import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { ScrollToHash } from "@/components/scroll-to-hash";
-import { DiagnosisBanner, type DiagnosisBannerState } from "@/components/diagnosis-banner";
 import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-card";
-import { getTodayDiagnosis, getDiagnosisEligibility } from "@/lib/ai-diagnosis";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { getDueReviewSummary } from "@/lib/review-queue";
 import { findUnfinishedDueSession } from "@/lib/review-session";
@@ -194,21 +192,6 @@ export default async function MyPage({
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
 
-  // AI 약점 진단 배너 상태. 오늘 진단이 있으면 그 상태, 없으면 자격 판정으로 결정.
-  // 진단도 멤버십 전용이라 무료 회원에게는 조회조차 하지 않는다.
-  const todayDiag = premium ? await getTodayDiagnosis(supabase, user.id) : null;
-  const diagEligibility =
-    !premium || todayDiag ? null : await getDiagnosisEligibility(supabase, user.id);
-  const diagnosisState: DiagnosisBannerState =
-    todayDiag?.status === "ready"
-      ? "ready"
-      : todayDiag?.status === "pending"
-        ? "pending"
-        : diagEligibility?.eligible
-          ? "eligible"
-          : "locked";
-  const diagnosisHint = diagEligibility?.hint ?? null;
-
   // 오늘의 복습(멤버십 전용). 무료 사용자에게는 요약을 조회하지도 않는다 — 못 누르는
   // 숫자는 압박만 되고, 후보 수집이 이미지 조회까지 도는 무거운 작업이라 값이다.
   // 체험 남은 일수는 관리자에게 보여주지 않는다 — 관리자는 체험이 끝나도 계속 쓸 수
@@ -305,8 +288,6 @@ export default async function MyPage({
             premium={premium}
             groups={wrongNoteGroups}
             unresolvedBySubject={unresolvedBySubject}
-            diagnosisState={diagnosisState}
-            diagnosisHint={diagnosisHint}
             reviewDue={reviewDue}
           />
         }
@@ -473,21 +454,17 @@ function WrongNotesTab({
   premium,
   groups,
   unresolvedBySubject,
-  diagnosisState,
-  diagnosisHint,
   reviewDue,
 }: {
   premium: boolean;
   groups: WrongNoteSubjectGroup[];
   unresolvedBySubject: Map<string, { name: string; slug: string; unresolved: number; due: number }>;
-  diagnosisState: DiagnosisBannerState;
-  diagnosisHint: string | null;
   reviewDue: ReviewDueCardProps;
 }) {
   // 무료 회원: 오답노트는 열람도 정리도 섞어풀기도 그대로 쓴다. 다만 무거운
   // 집계(buildWrongNoteGroups)는 돌리지 않았으므로 과목 카드를 이미 계산해 둔
   // 미극복 집계로 그린다 — 극복 진행률 바만 빠지고 이동·기능은 같다. 잠기는 것은
-  // 문항 해설과 오늘의 복습(간격 반복)·AI 진단뿐이고, 그건 아래 잠금 카드가 알린다.
+  // 문항 해설과 오늘의 복습(간격 반복)뿐이고, 그건 아래 잠금 카드가 알린다.
   if (!premium) {
     const freeSubjects = [...unresolvedBySubject.values()].sort(
       (a, b) => b.unresolved - a.unresolved || a.name.localeCompare(b.name, "ko"),
@@ -549,7 +526,6 @@ function WrongNotesTab({
         <BookOpenCheck size={18} className="text-blue-600 dark:text-blue-400" />
         오답노트
       </h2>
-      <DiagnosisBanner initialState={diagnosisState} hint={diagnosisHint} />
       <HowItWorksStrip />
       {groups.length === 0 ? (
         <div className="flex flex-col items-center gap-4 py-12">

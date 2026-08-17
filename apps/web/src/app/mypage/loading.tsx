@@ -77,10 +77,9 @@ export default function MyPageLoading() {
         <Block className="h-8 w-20 rounded-full" delay={0.35} />
       </div>
 
-      {/* 오답노트 탭: 섹션 제목 → AI 진단 배너 → 사용법 스트립 → 과목 카드들 */}
+      {/* 오답노트 탭: 섹션 제목 → 사용법 스트립 → 과목 카드들 */}
       <div className="flex flex-col gap-4">
         <Block className="h-6 w-24" delay={0.4} />
-        <Block className="h-14 w-full rounded-xl" delay={0.45} />
         <Block className="h-24 w-full rounded-xl sm:h-11" delay={0.5} />
         <div className="flex flex-col gap-3">
           <WrongNoteCardSkeleton delay={0.55} />

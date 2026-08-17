@@ -88,7 +88,7 @@ export default async function PaymentCompletePage({
             멤버십이 시작됐어요
           </h1>
           <p className="break-keep text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            오답노트·복습·AI 약점 진단과 무제한 해설이 지금 바로 열렸어요.
+            오답노트·복습과 무제한 해설이 지금 바로 열렸어요.
           </p>
         </div>
 
