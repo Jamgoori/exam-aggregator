@@ -5,7 +5,6 @@ import {
   Library,
   Receipt,
   Settings,
-  Sparkles,
   Star,
   Trophy,
   UserRound,
@@ -66,7 +65,7 @@ export const PRIMARY_NAV: NavItem[] = [
     label: "멤버십",
     icon: Crown,
     match: (p) => p.startsWith("/membership"),
-    hint: "해설·AI 진단 이용권",
+    hint: "해설·복습 이용권",
   },
 ];
 
@@ -93,12 +92,6 @@ export const ACCOUNT_NAV: NavItem[][] = [
       label: "즐겨찾기",
       icon: Star,
       match: () => false,
-    },
-    {
-      href: "/mypage/diagnosis",
-      label: "AI 약점 진단",
-      icon: Sparkles,
-      match: (p) => p.startsWith("/mypage/diagnosis"),
     },
   ],
   [
