@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Flag } from "lucide-react";
+import { Flag, X } from "lucide-react";
 import {
   submitQuestionReport,
   type QuestionReportContext,
@@ -15,9 +15,11 @@ const REASONS: { value: QuestionReportReason; label: string }[] = [
   { value: "other", label: "기타" },
 ];
 
-// 해설/CBT 화면 어디서나 붙일 수 있는 작은 신고 버튼. 깃발 아이콘만 있는 트리거를
-// 누르면 그 문항 자리 바로 아래에 사유 선택 카드가 뜬다 — 별도 페이지로 이동시키면
-// 신고하려던 문항 화면을 잃어버리므로 팝오버로 둔다.
+// 해설/CBT 화면 어디서나 붙일 수 있는 작은 신고 버튼. 트리거 옆에 붙는 팝오버로
+// 만들었더니, CBT 문제별 풀기(모바일)에서는 트리거가 화면 가운데 근처에 있어
+// 고정폭 팝오버가 화면 왼쪽 밖으로 잘려 나가는 문제가 있었다 — 트리거 위치와
+// 무관하게 항상 화면 안에 들어오도록 가운데 정렬 모달로 바꿨다(my-cbt-record-modal
+// 과 같은 패턴).
 export function ReportQuestionButton({
   paperId,
   questionNumber,
@@ -33,9 +35,13 @@ export function ReportQuestionButton({
   const [pending, startTransition] = useTransition();
   const [result, setResult] = useState<{ error?: string; success?: boolean } | null>(null);
 
-  // CBT 응시 중에는 아직 해설이 뜨지 않으므로 "해설에 오류가 있어요"는 의미가 없다.
+  // CBT 응시 중에는 아직 채점 전이라 정답도 해설도 보여주지 않는다 — "정답이
+  // 잘못됐다"/"해설에 오류가 있다"는 채점·해설 열람 후에나 판단할 수 있는 사유라
+  // 응시 화면에서는 이미지/문제 표시 오류와 기타만 남긴다.
   const reasons =
-    context === "cbt" ? REASONS.filter((r) => r.value !== "wrong_explanation") : REASONS;
+    context === "cbt"
+      ? REASONS.filter((r) => r.value !== "wrong_answer" && r.value !== "wrong_explanation")
+      : REASONS;
 
   function close() {
     setOpen(false);
@@ -59,50 +65,58 @@ export function ReportQuestionButton({
   }
 
   return (
-    <div className="relative print:hidden">
+    <>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(true)}
         aria-label={`${questionNumber}번 문항 오류 신고`}
-        aria-expanded={open}
-        className="flex items-center justify-center rounded-full p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+        className="flex items-center justify-center rounded-full p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 print:hidden dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-red-400"
       >
         <Flag size={14} />
       </button>
 
       {open && (
-        <>
-          {/* 카드 밖을 누르면 닫히도록 하는 투명 오버레이. */}
-          <button
-            type="button"
-            aria-label="닫기"
-            onClick={close}
-            className="fixed inset-0 z-40 cursor-default"
-          />
-          <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-xl border border-zinc-200 bg-white p-3 text-left shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 print:hidden"
+          onClick={close}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 text-left shadow-xl dark:bg-zinc-900"
+            onClick={(e) => e.stopPropagation()}
+          >
             {result?.success ? (
-              <div className="flex flex-col items-center gap-2 py-1 text-center">
-                <p className="text-xs text-zinc-600 dark:text-zinc-400">
+              <div className="flex flex-col items-center gap-3 py-2 text-center">
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
                   신고가 접수됐어요. 확인 후 반영할게요.
                 </p>
                 <button
                   type="button"
                   onClick={close}
-                  className="rounded-lg bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                  className="rounded-lg bg-zinc-100 px-4 py-1.5 text-sm font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
                 >
                   닫기
                 </button>
               </div>
             ) : (
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  {questionNumber}번 문항 오류 신고
-                </p>
-                <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                    {questionNumber}번 문항 오류 신고
+                  </p>
+                  <button
+                    type="button"
+                    onClick={close}
+                    aria-label="닫기"
+                    className="rounded-full p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-400"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+                <div className="flex flex-col gap-1.5">
                   {reasons.map((r) => (
                     <label
                       key={r.value}
-                      className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400"
+                      className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400"
                     >
                       <input
                         type="radio"
@@ -120,7 +134,7 @@ export function ReportQuestionButton({
                   placeholder="자세히 알려주시면 도움이 돼요 (선택)"
                   maxLength={500}
                   rows={2}
-                  className="w-full resize-none rounded-lg border border-zinc-200 px-2 py-1.5 text-xs text-zinc-800 placeholder:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+                  className="w-full resize-none rounded-lg border border-zinc-200 px-2.5 py-1.5 text-sm text-zinc-800 placeholder:text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
                 />
                 {result?.error && (
                   <p className="text-xs text-red-600 dark:text-red-400">{result.error}</p>
@@ -129,7 +143,7 @@ export function ReportQuestionButton({
                   <button
                     type="button"
                     onClick={close}
-                    className="rounded-lg px-3 py-1 text-xs text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
+                    className="rounded-lg px-3 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
                   >
                     취소
                   </button>
@@ -137,7 +151,7 @@ export function ReportQuestionButton({
                     type="button"
                     disabled={!reason || pending}
                     onClick={submit}
-                    className="rounded-lg bg-red-500 px-3 py-1 text-xs font-medium text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="rounded-lg bg-red-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {pending ? "제출 중..." : "신고하기"}
                   </button>
@@ -145,8 +159,8 @@ export function ReportQuestionButton({
               </div>
             )}
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </>
   );
 }

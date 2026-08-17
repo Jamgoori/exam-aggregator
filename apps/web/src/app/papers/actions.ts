@@ -526,6 +526,15 @@ export async function submitQuestionReport(input: {
     return { error: "신고 사유를 선택해주세요." };
   }
 
+  // CBT 응시 중에는 아직 채점 전이라 정답/해설을 보여주지 않으므로, 그 둘을 근거로
+  // 하는 사유는 UI에서 애초에 안 보여준다 — 서버에서도 같은 기준으로 거절한다.
+  if (
+    input.context === "cbt" &&
+    (input.reason === "wrong_answer" || input.reason === "wrong_explanation")
+  ) {
+    return { error: "잘못된 접근입니다." };
+  }
+
   const message = String(input.message ?? "").trim().slice(0, REPORT_MESSAGE_MAX);
 
   const { supabase, user } = await getSessionUser();
