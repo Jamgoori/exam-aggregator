@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { Lock } from "lucide-react";
+import { Lock, Pin } from "lucide-react";
 import { SuggestionAnswerForm } from "@/components/suggestion-answer-form";
 import { SuggestionDeleteButton } from "@/components/suggestion-delete-button";
 import { countSuggestionView, fetchSuggestion, getSuggestionViewer } from "@/lib/suggestions";
@@ -81,6 +81,12 @@ export default async function SuggestionDetailPage({
       <article className="flex flex-col gap-4">
         <header className="flex flex-col gap-2 border-b border-zinc-200 pb-4 dark:border-zinc-700">
           <div className="flex flex-wrap items-center gap-2">
+            {suggestion.isPinned && (
+              <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+                <Pin size={11} />
+                공지
+              </span>
+            )}
             {suggestion.isSecret && (
               <span className="flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                 <Lock size={11} />

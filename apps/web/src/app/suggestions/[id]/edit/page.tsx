@@ -46,7 +46,9 @@ export default async function EditSuggestionPage({
           title: result.suggestion.title,
           content: result.suggestion.content,
           isSecret: result.suggestion.isSecret,
+          isPinned: result.suggestion.isPinned,
         }}
+        isAdmin={viewer.isAdmin}
       />
     </div>
   );

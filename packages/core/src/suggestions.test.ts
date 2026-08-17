@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   canDeleteSuggestion,
   canEditSuggestion,
+  canPinSuggestion,
   canReadSuggestion,
   SECRET_TITLE_PLACEHOLDER,
   suggestionListTitle,
@@ -85,6 +86,13 @@ test("제목·내용 검증", () => {
     title: "제목",
     content: "내용",
   });
+});
+
+test("공지 고정은 관리자만 켤 수 있다", () => {
+  assert.equal(canPinSuggestion(admin), true);
+  assert.equal(canPinSuggestion(author), false);
+  assert.equal(canPinSuggestion(stranger), false);
+  assert.equal(canPinSuggestion(guest), false);
 });
 
 test("빈 답변은 거절한다 (답변 완료 배지만 붙는 글 방지)", () => {

@@ -49,6 +49,13 @@ export function canDeleteSuggestion(
   return viewer.isAdmin || canEditSuggestion(suggestion, viewer);
 }
 
+// 상단 고정(공지) 여부를 켤 수 있는가 — 관리자만. 작성자 본인 여부와는 무관하다
+// (관리자가 자기 명의 공지를 쓰는 흐름을 가정하지만, 판단 자체는 글쓴이가 누구인지
+// 보지 않는다 — canEditSuggestion 이 그 글을 실제로 고칠 수 있는지는 따로 막는다).
+export function canPinSuggestion(viewer: SuggestionViewer): boolean {
+  return viewer.isAdmin;
+}
+
 // 목록에 실제로 그릴 제목. 볼 수 없는 비밀글이면 문구로 바꿔치기한다.
 export function suggestionListTitle(
   suggestion: SuggestionOwnership & { title: string },

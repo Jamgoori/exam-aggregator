@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { SuggestionForm } from "@/components/suggestion-form";
-import { getSessionUser } from "@/lib/supabase/session";
+import { getSuggestionViewer } from "@/lib/suggestions";
 
 export const metadata: Metadata = {
   title: "건의하기",
@@ -10,10 +10,10 @@ export const metadata: Metadata = {
 };
 
 export default async function NewSuggestionPage() {
-  const { user } = await getSessionUser();
+  const viewer = await getSuggestionViewer();
   // 글쓰기는 로그인 회원만 — 비밀글의 "본인"을 특정할 수 있어야 한다.
   // 로그인 후 이 화면으로 돌아오게 next 를 실어 보낸다.
-  if (!user) redirect(`/login?next=${encodeURIComponent("/suggestions/new")}`);
+  if (!viewer.loggedIn) redirect(`/login?next=${encodeURIComponent("/suggestions/new")}`);
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
@@ -26,7 +26,7 @@ export default async function NewSuggestionPage() {
 
       <h1 className="text-2xl font-bold">건의하기</h1>
 
-      <SuggestionForm />
+      <SuggestionForm isAdmin={viewer.isAdmin} />
     </div>
   );
 }

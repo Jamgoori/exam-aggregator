@@ -7,9 +7,11 @@ import { getSuggestionViewer } from "@/lib/suggestions";
 import {
   canDeleteSuggestion,
   canEditSuggestion,
+  canPinSuggestion,
   NICKNAME_MAX,
   validateSuggestionAnswer,
   validateSuggestionInput,
+  type SuggestionViewer,
 } from "@gongmoa/core";
 
 export type SuggestionResult = { error?: string; success?: boolean; id?: string };
@@ -28,16 +30,37 @@ function revalidateSuggestion(id?: string) {
   if (id) revalidatePath(`/suggestions/${id}`);
 }
 
+// 클라이언트가 보낸 isPinned/isSecret 을 서버가 다시 확정한다. 체크박스는 비관리자
+// 화면에서 아예 지워두지만, 폼 데이터를 직접 조작해 보내는 경로는 여기서 막아야
+// 실제로 지켜진다("관리자만 고정할 수 있다" — canPinSuggestion). 공지는 성격상
+// 비밀글일 이유가 없어, 고정되는 글은 비밀글 여부를 강제로 끈다.
+function resolvePinAndSecret(
+  input: { isSecret: boolean; isPinned: boolean },
+  viewer: SuggestionViewer,
+) {
+  const isPinned = canPinSuggestion(viewer) && input.isPinned === true;
+  const isSecret = isPinned ? false : input.isSecret === true;
+  return { isPinned, isSecret };
+}
+
 export async function createSuggestion(input: {
   title: string;
   content: string;
   isSecret: boolean;
+  isPinned?: boolean;
 }): Promise<SuggestionResult> {
   const validated = validateSuggestionInput(input);
   if ("error" in validated) return { error: validated.error };
 
-  const { user } = await getSessionUser();
+  const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  const { data: isAdminData } = await supabase.rpc("is_admin");
+  const viewer: SuggestionViewer = { userId: user.id, isAdmin: isAdminData === true };
+  const { isPinned, isSecret } = resolvePinAndSecret(
+    { isSecret: input.isSecret, isPinned: input.isPinned ?? false },
+    viewer,
+  );
 
   const admin = createAdminClient();
 
@@ -67,7 +90,8 @@ export async function createSuggestion(input: {
       nickname: nickname.slice(0, NICKNAME_MAX),
       title: validated.title,
       content: validated.content,
-      is_secret: input.isSecret === true,
+      is_secret: isSecret,
+      is_pinned: isPinned,
     })
     .select("id")
     .single();
@@ -83,6 +107,7 @@ export async function updateSuggestion(input: {
   title: string;
   content: string;
   isSecret: boolean;
+  isPinned?: boolean;
 }): Promise<SuggestionResult> {
   const id = String(input.id ?? "");
   if (!isUuid(id)) return { error: "잘못된 접근입니다." };
@@ -105,12 +130,18 @@ export async function updateSuggestion(input: {
     return { error: "권한이 없어요." };
   }
 
+  const { isPinned, isSecret } = resolvePinAndSecret(
+    { isSecret: input.isSecret, isPinned: input.isPinned ?? false },
+    viewer,
+  );
+
   const { error } = await admin
     .from("suggestions")
     .update({
       title: validated.title,
       content: validated.content,
-      is_secret: input.isSecret === true,
+      is_secret: isSecret,
+      is_pinned: isPinned,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);

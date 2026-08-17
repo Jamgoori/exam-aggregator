@@ -3,21 +3,28 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Lock } from "lucide-react";
+import { Lock, Pin } from "lucide-react";
 import { createSuggestion, updateSuggestion } from "@/app/suggestions/actions";
 import { SUGGESTION_CONTENT_MAX, SUGGESTION_TITLE_MAX } from "@gongmoa/core";
 
 // 건의 작성/수정 폼. 새 글과 수정이 같은 컴포넌트인 이유는 입력 항목이 완전히
 // 같아서다 — 따로 두면 "수정 화면에만 비밀글 체크박스가 빠진" 식으로 갈라진다.
+//
+// isAdmin 이 false 면 고정 체크박스 자체를 그리지 않는다 — 서버 액션도 관리자
+// 여부를 다시 검사하지만(canPinSuggestion), 화면에서부터 안 보여야 "체크할 수
+// 있을 것처럼 보이는데 눌러도 안 먹는" 혼란이 없다.
 export function SuggestionForm({
   suggestion,
+  isAdmin = false,
 }: {
   suggestion?: {
     id: string;
     title: string;
     content: string;
     isSecret: boolean;
+    isPinned: boolean;
   };
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -26,6 +33,7 @@ export function SuggestionForm({
   const [title, setTitle] = useState(suggestion?.title ?? "");
   const [content, setContent] = useState(suggestion?.content ?? "");
   const [isSecret, setIsSecret] = useState(suggestion?.isSecret ?? false);
+  const [isPinned, setIsPinned] = useState(suggestion?.isPinned ?? false);
 
   const editing = suggestion !== undefined;
 
@@ -34,8 +42,8 @@ export function SuggestionForm({
     setError(null);
     startTransition(async () => {
       const result = editing
-        ? await updateSuggestion({ id: suggestion.id, title, content, isSecret })
-        : await createSuggestion({ title, content, isSecret });
+        ? await updateSuggestion({ id: suggestion.id, title, content, isSecret, isPinned })
+        : await createSuggestion({ title, content, isSecret, isPinned });
 
       if (result.error) {
         setError(result.error);
@@ -83,12 +91,45 @@ export function SuggestionForm({
         </p>
       </div>
 
-      {/* 비밀글 — 이 게시판의 핵심 옵션이라 체크박스를 눈에 띄는 카드로 둔다. */}
-      <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-200 px-3.5 py-3 transition-colors hover:border-blue-300 has-checked:border-blue-400 has-checked:bg-blue-50/60 dark:border-zinc-700 dark:hover:border-blue-800 dark:has-checked:border-blue-800 dark:has-checked:bg-blue-950/25">
+      {isAdmin && (
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-200 px-3.5 py-3 transition-colors hover:border-amber-300 has-checked:border-amber-400 has-checked:bg-amber-50/60 dark:border-zinc-700 dark:hover:border-amber-800 dark:has-checked:border-amber-800 dark:has-checked:bg-amber-950/20">
+          <input
+            type="checkbox"
+            checked={isPinned}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setIsPinned(checked);
+              // 공지는 성격상 비밀글일 이유가 없다 — 켜는 순간 비밀글 체크를 같이 끈다.
+              if (checked) setIsSecret(false);
+            }}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-amber-600"
+          />
+          <span className="min-w-0">
+            <span className="flex items-center gap-1.5 text-sm font-semibold">
+              <Pin size={14} className="shrink-0 text-amber-600 dark:text-amber-400" />
+              공지로 상단 고정 (운영자)
+            </span>
+            <span className="mt-0.5 block text-xs text-zinc-500 dark:text-zinc-400">
+              체크하면 목록 맨 위에 항상 고정돼요. 공지는 비밀글로 둘 수 없어요.
+            </span>
+          </span>
+        </label>
+      )}
+
+      {/* 비밀글 — 이 게시판의 핵심 옵션이라 체크박스를 눈에 띄는 카드로 둔다.
+          공지로 고정하면 비밀글일 수 없으므로 그동안은 비활성화한다. */}
+      <label
+        className={`flex items-start gap-3 rounded-xl border border-zinc-200 px-3.5 py-3 transition-colors dark:border-zinc-700 ${
+          isPinned
+            ? "cursor-not-allowed opacity-50"
+            : "cursor-pointer hover:border-blue-300 has-checked:border-blue-400 has-checked:bg-blue-50/60 dark:hover:border-blue-800 dark:has-checked:border-blue-800 dark:has-checked:bg-blue-950/25"
+        }`}
+      >
         <input
           type="checkbox"
           checked={isSecret}
           onChange={(e) => setIsSecret(e.target.checked)}
+          disabled={isPinned}
           className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
         />
         <span className="min-w-0">

@@ -1,11 +1,12 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Lock, MessageSquarePlus } from "lucide-react";
+import { Lock, MessageSquarePlus, Pin } from "lucide-react";
 import { Pagination } from "@/components/pagination";
 import {
   fetchSuggestionPage,
   getSuggestionViewer,
   SUGGESTIONS_PAGE_SIZE,
+  type SuggestionListItem,
 } from "@/lib/suggestions";
 
 // 건의게시판 목록.
@@ -33,6 +34,80 @@ function formatDate(iso: string) {
     : d.toLocaleDateString("ko-KR", { year: "2-digit", month: "2-digit", day: "2-digit" });
 }
 
+// 공지·일반 글이 번호 칸만 다르고 나머지 줄 구성은 같아서 하나로 그린다.
+// number 가 없으면(공지) 번호 대신 압정 배지를 보여주고, 줄 배경을 살짝 강조한다.
+function SuggestionRow({ item, number }: { item: SuggestionListItem; number: number | null }) {
+  return (
+    <li>
+      <Link
+        href={`/suggestions/${item.id}`}
+        className={`flex flex-col gap-1 px-4 py-3 transition-colors sm:flex-row sm:items-center sm:gap-0 ${
+          item.isPinned
+            ? "bg-amber-50/50 hover:bg-amber-50 dark:bg-amber-950/10 dark:hover:bg-amber-950/20"
+            : "hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
+        }`}
+      >
+        <span className="hidden w-14 shrink-0 items-center justify-center text-xs sm:flex">
+          {item.isPinned ? (
+            <span className="flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+              <Pin size={10} />
+              공지
+            </span>
+          ) : (
+            <span className="text-zinc-400 dark:text-zinc-500">{number}</span>
+          )}
+        </span>
+
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          {item.isPinned && (
+            <Pin
+              size={13}
+              aria-label="공지"
+              className="shrink-0 text-amber-600 sm:hidden dark:text-amber-400"
+            />
+          )}
+          {item.isSecret && (
+            <Lock
+              size={13}
+              aria-label="비밀글"
+              className={
+                item.readable
+                  ? "shrink-0 text-blue-600 dark:text-blue-400"
+                  : "shrink-0 text-zinc-400 dark:text-zinc-500"
+              }
+            />
+          )}
+          <span
+            className={`truncate text-sm ${
+              item.isPinned ? "font-semibold" : ""
+            } ${item.readable ? "font-medium" : "text-zinc-400 italic dark:text-zinc-500"}`}
+          >
+            {item.title}
+          </span>
+          {item.isAnswered && (
+            <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
+              답변완료
+            </span>
+          )}
+        </span>
+
+        <span className="flex items-center gap-2 text-xs text-zinc-400 sm:contents dark:text-zinc-500">
+          <span className="sm:w-24 sm:shrink-0 sm:truncate sm:text-center">
+            {item.nickname}
+          </span>
+          <span className="sm:w-20 sm:shrink-0 sm:text-center">
+            {formatDate(item.createdAt)}
+          </span>
+          <span className="sm:w-14 sm:shrink-0 sm:text-center">
+            <span className="sm:hidden">조회 </span>
+            {item.viewCount}
+          </span>
+        </span>
+      </Link>
+    </li>
+  );
+}
+
 export default async function SuggestionsPage({
   searchParams,
 }: {
@@ -42,9 +117,10 @@ export default async function SuggestionsPage({
   const page = Math.max(1, Number(pageParam) || 1);
 
   const viewer = await getSuggestionViewer();
-  const { items, total, totalPages } = await fetchSuggestionPage(page, viewer);
+  const { items, pinnedItems, total, totalPages } = await fetchSuggestionPage(page, viewer);
 
-  // 게시판 번호는 "전체에서 몇 번째 글인가" — 최신순이라 위에서부터 줄어든다.
+  // 게시판 번호는 "전체(공지 제외)에서 몇 번째 글인가" — 최신순이라 위에서부터
+  // 줄어든다. 공지는 이 번호 매김에서 빠진다(고정 자리를 따로 쓴다).
   const firstNumber = total - (page - 1) * SUGGESTIONS_PAGE_SIZE;
 
   return (
@@ -82,64 +158,18 @@ export default async function SuggestionsPage({
         </div>
 
         <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {items.length === 0 && (
+          {pinnedItems.length === 0 && items.length === 0 && (
             <li className="px-4 py-16 text-center text-sm text-zinc-500 dark:text-zinc-400">
               아직 등록된 건의가 없어요. 첫 건의를 남겨보세요.
             </li>
           )}
 
+          {pinnedItems.map((item) => (
+            <SuggestionRow key={item.id} item={item} number={null} />
+          ))}
+
           {items.map((item, i) => (
-            <li key={item.id}>
-              <Link
-                href={`/suggestions/${item.id}`}
-                className="flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-zinc-50 sm:flex-row sm:items-center sm:gap-0 dark:hover:bg-zinc-800/40"
-              >
-                <span className="hidden w-14 shrink-0 text-center text-xs text-zinc-400 sm:block dark:text-zinc-500">
-                  {firstNumber - i}
-                </span>
-
-                <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                  {item.isSecret && (
-                    <Lock
-                      size={13}
-                      aria-label="비밀글"
-                      className={
-                        item.readable
-                          ? "shrink-0 text-blue-600 dark:text-blue-400"
-                          : "shrink-0 text-zinc-400 dark:text-zinc-500"
-                      }
-                    />
-                  )}
-                  <span
-                    className={`truncate text-sm ${
-                      item.readable
-                        ? "font-medium"
-                        : "text-zinc-400 italic dark:text-zinc-500"
-                    }`}
-                  >
-                    {item.title}
-                  </span>
-                  {item.isAnswered && (
-                    <span className="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
-                      답변완료
-                    </span>
-                  )}
-                </span>
-
-                <span className="flex items-center gap-2 text-xs text-zinc-400 sm:contents dark:text-zinc-500">
-                  <span className="sm:w-24 sm:shrink-0 sm:truncate sm:text-center">
-                    {item.nickname}
-                  </span>
-                  <span className="sm:w-20 sm:shrink-0 sm:text-center">
-                    {formatDate(item.createdAt)}
-                  </span>
-                  <span className="sm:w-14 sm:shrink-0 sm:text-center">
-                    <span className="sm:hidden">조회 </span>
-                    {item.viewCount}
-                  </span>
-                </span>
-              </Link>
-            </li>
+            <SuggestionRow key={item.id} item={item} number={firstNumber - i} />
           ))}
         </ul>
       </div>

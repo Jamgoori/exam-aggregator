@@ -190,6 +190,7 @@ export type Suggestion = {
   title: string;
   content: string;
   is_secret: boolean;
+  is_pinned: boolean;
   view_count: number;
   answer: string | null;
   answered_at: string | null;

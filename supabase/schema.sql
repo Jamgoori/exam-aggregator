@@ -1822,6 +1822,10 @@ create table if not exists suggestions (
   title text not null,
   content text not null,
   is_secret boolean not null default false,
+  -- 관리자 공지. 목록 맨 위에 항상 고정해 보여준다. 관리자가 자기 글에만 켤 수
+  -- 있고(서버 액션이 admin 여부를 다시 검사한다), 공지는 성격상 비밀글일 이유가
+  -- 없어 켜지는 순간 is_secret 을 강제로 끈다.
+  is_pinned boolean not null default false,
   view_count int not null default 0,
   -- 관리자 답변. null 이면 "답변 대기", 채워지면 "답변 완료" — 상태 컬럼을 따로
   -- 두지 않는 이유는 두 값이 어긋날 수 있어서다.
@@ -1831,6 +1835,9 @@ create table if not exists suggestions (
   created_at timestamptz not null default now(),
   updated_at timestamptz
 );
+
+-- 기존 설치본에 컬럼이 없다면 추가 (이 테이블을 먼저 만든 적이 있는 경우 대비).
+alter table suggestions add column if not exists is_pinned boolean not null default false;
 
 do $$ begin
   alter table suggestions add constraint suggestions_title_len
@@ -1849,6 +1856,8 @@ exception when duplicate_object then null; end $$;
 
 -- 목록은 항상 최신순 한 페이지씩 읽는다.
 create index if not exists suggestions_created_idx on suggestions(created_at desc);
+-- 고정 공지 조회용 (흔치 않게 참이므로 부분 인덱스로 충분히 작다).
+create index if not exists suggestions_pinned_idx on suggestions(created_at desc) where is_pinned;
 -- 도배 방지(시간당 작성 수) 조회용.
 create index if not exists suggestions_user_idx on suggestions(user_id, created_at desc);
 
