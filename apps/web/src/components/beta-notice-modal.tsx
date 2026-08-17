@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import {
   BookOpen,
   CalendarCheck,
@@ -149,8 +148,8 @@ export function BetaNoticeModal() {
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-4 text-[13px] leading-[1.75] break-keep text-zinc-600 dark:text-zinc-300">
           <p className="text-pretty">
-            화면과 기능이 <B>거의 매일 바뀌고</B> 있어요. 그러다 보니 가끔 어색한 부분이나
-            오류가 보일 수 있어요.
+            만들어가는 중이라 <B>화면과 기능이 바뀔 수 있어요.</B> 그러다 보니 가끔 어색한
+            부분이나 오류가 보일 수 있어요.
           </p>
 
           {/* 자료가 비어 보이는 건 사이트가 부실한 게 아니라 아직 올리는 중이라는 뜻이다.
@@ -181,7 +180,7 @@ export function BetaNoticeModal() {
             </p>
             <p className="mt-1.5 text-[13px] text-pretty text-emerald-800/90 dark:text-emerald-300/80">
               가입하는 순간부터 <B tone="emerald">{TRIAL_DAYS}일</B> 동안 멤버십 전체가
-              열려요. 카드 등록도 없고, 기간이 끝나도 자동으로 결제되지 않아요.
+              열려요.
             </p>
             <ul className="mt-2.5 flex flex-col gap-1.5 text-[12.5px] text-emerald-900/85 dark:text-emerald-200/85">
               <Perk icon={<BookOpen size={13} />}>문제지 해설 제한 없이 보기</Perk>
@@ -189,16 +188,6 @@ export function BetaNoticeModal() {
               <Perk icon={<Sparkles size={13} />}>오답노트 안에서 바로 해설 보기</Perk>
             </ul>
           </div>
-
-          <p className="mt-3.5 text-center text-[12px] text-zinc-500 dark:text-zinc-500">
-            <Link
-              href="/membership"
-              onClick={() => setOpen(false)}
-              className="underline underline-offset-2 hover:text-blue-600 dark:hover:text-blue-400"
-            >
-              멤버십으로 뭐가 열리는지 보기
-            </Link>
-          </p>
         </div>
 
         {/* "다음부터 보지 않기"를 체크박스가 아니라 버튼으로 둔다. 체크박스는 누른 뒤
