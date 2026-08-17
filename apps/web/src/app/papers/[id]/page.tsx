@@ -105,7 +105,6 @@ export default async function PaperDetailPage({
     hasFullExplanations,
     roundAverages,
     myCbtRecordItems,
-    paperFileUrl,
     answerKey,
     answerKeyFileUrl,
   } = await getPaperDetailData(paper);
@@ -258,8 +257,11 @@ export default async function PaperDetailPage({
         )}
 
         <div className="flex items-stretch gap-2">
+          {/* Storage 공개 URL(paperFileUrl)로 바로 걸지 않는다 — 사람들이 가장 많이 누르는
+              이 버튼이 카운트 라우트를 안 지나서, 홈의 "누적 다운로드"가 실제 열람의
+              극히 일부만 세고 있었다. ?view=1 은 파일을 저장시키지 않고 그대로 연다. */}
           <a
-            href={paperFileUrl}
+            href={`/download/${paper.id}?view=1`}
             target="_blank"
             rel="noopener noreferrer"
             className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-4 text-lg font-medium ${

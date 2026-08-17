@@ -160,11 +160,10 @@ export async function getPaperDetailData(paper: ExamPaper) {
     createdAt: a.created_at,
   }));
 
-  // "열기"는 브라우저 내장 뷰어로 바로 보여주는 원본 URL (다운로드 카운트 미반영),
-  // "다운로드"는 /download 라우트를 거쳐 실제 파일 저장 + 카운트 반영
-  const { data: paperFileUrl } = supabase.storage
-    .from("exam-papers")
-    .getPublicUrl(paper.file_path);
+  // 문제지 원본 URL은 여기서 만들지 않는다. "열기"·"다운로드" 둘 다 /download 라우트를
+  // 거쳐야 카운트가 붙는다(app/download/[id]/route.ts) — 화면에 Storage 공개 URL을
+  // 그대로 내려주면 누군가 다시 거기에 링크를 걸어 카운트가 조용히 새 나간다.
+  //
   // exact track 정답표 우선, 없으면 공용(track null) 정답표.
   const answerKeys = (answerKeyRows ?? []) as AnswerKey[];
   const typedAnswerKey =
@@ -189,7 +188,6 @@ export async function getPaperDetailData(paper: ExamPaper) {
     hasFullExplanations,
     roundAverages,
     myCbtRecordItems,
-    paperFileUrl: paperFileUrl.publicUrl,
     answerKey: typedAnswerKey,
     answerKeyFileUrl,
   };

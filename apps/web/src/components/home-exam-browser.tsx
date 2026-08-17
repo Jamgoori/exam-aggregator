@@ -432,21 +432,30 @@ export function HomeExamBrowser({
             <span className="whitespace-nowrap text-sm font-medium text-zinc-600 dark:text-zinc-400">
               총 자료 수
             </span>
-            <strong className="text-lg tabular-nums">{totalCount ?? 0}건</strong>
+            {/* 자릿수 구분을 넣는다. 3790건이 "3790"으로 붙어 나오면 한눈에 안 읽힌다.
+                로케일을 고정하는 건 서버 렌더와 클라이언트 렌더가 달라지면 하이드레이션이
+                깨지기 때문이다. */}
+            <strong className="text-lg tabular-nums">
+              {(totalCount ?? 0).toLocaleString("ko-KR")}건
+            </strong>
           </div>
           <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-700">
             <Download size={20} className="text-blue-500" />
             <span className="whitespace-nowrap text-sm font-medium text-zinc-600 dark:text-zinc-400">
               누적 다운로드
             </span>
-            <strong className="text-lg tabular-nums">{totalDownloads ?? 0}회</strong>
+            <strong className="text-lg tabular-nums">
+              {(totalDownloads ?? 0).toLocaleString("ko-KR")}회
+            </strong>
           </div>
           <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-700">
             <Users size={20} className="text-blue-500" />
             <span className="whitespace-nowrap text-sm font-medium text-zinc-600 dark:text-zinc-400">
               실시간 총 응시 수
             </span>
-            <strong className="text-lg tabular-nums">{totalAttempts ?? 0}건</strong>
+            <strong className="text-lg tabular-nums">
+              {(totalAttempts ?? 0).toLocaleString("ko-KR")}건
+            </strong>
           </div>
         </div>
 

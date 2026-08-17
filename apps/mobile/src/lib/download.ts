@@ -38,7 +38,8 @@ export async function downloadAndOpenPdf(
   const res = await RNBlobUtil.config({ path: target, fileCache: true }).fetch("GET", url);
   const path = res.path();
 
-  await countDownload(paperId);
+  // 여기서 다시 세지 않는다. 이 함수를 부르는 화면(app/papers/[id]/pdf.tsx)이 원본을
+  // 연 시점에 이미 한 번 셌으므로, 저장·공유까지 누른 사람만 한 번 더 세는 셈이 된다.
 
   if (Platform.OS === "ios") {
     await RNBlobUtil.ios.previewDocument(path);
