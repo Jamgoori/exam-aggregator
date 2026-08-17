@@ -10,6 +10,8 @@ import {
 } from "@/components/wrong-note-question-card";
 import { PrintButton } from "@/components/print-button";
 import { ExplanationAutoPrint } from "@/components/explanation-auto-print";
+import { PrintWatermark } from "@/components/print-watermark";
+import { printIdentityLabel } from "@/lib/identity-label";
 import { resolveExplanationAccess } from "@/lib/explanation-rate-limit";
 import { isPremium } from "@/lib/membership";
 import { MembershipUpsell } from "@/components/membership-upsell";
@@ -122,6 +124,12 @@ export default async function PaperExplanationsPage({
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-12 print:max-w-none print:gap-4 print:py-0">
       {hasFullAccess && isDownload && <ExplanationAutoPrint />}
 
+      {/* 인쇄물에만 박히는 계정 워터마크. 인쇄가 가능한 상태(전체 열람 권한)일
+          때만 붙인다 — 미리보기만 보이는 사람에게는 인쇄 버튼 자체가 없다. */}
+      {hasFullAccess && (
+        <PrintWatermark label={printIdentityLabel(user!.id, user!.email)} />
+      )}
+
       <div className="flex flex-col gap-3">
         <Link
           href={paperHref(paper)}
@@ -159,6 +167,13 @@ export default async function PaperExplanationsPage({
           {displayTitle} 해설
         </h1>
 
+        {/* 인쇄물 첫 줄 저작권 고지. 워터마크는 흐리게 깔리는 배경이라, 조건을
+            분명히 읽히게 하는 문장은 따로 한 줄 박아둔다(약관 제4조). */}
+        <p className="hidden text-[8pt] text-zinc-500 print:block">
+          공모아(gongmoa) 제작 해설 · 개인 학습용으로만 이용할 수 있으며 무단 전재·
+          재배포·2차 이용을 금합니다. 문제 이미지는 원본 문제지 PDF에서 확인하세요.
+        </p>
+
         {/* "N문항 해설" 줄 — 버튼·범례 포함 전부 화면 전용이라 인쇄에서 통째로 숨긴다. */}
         <div className="flex flex-wrap items-center gap-3 text-sm text-zinc-500 print:hidden dark:text-zinc-500">
           <span>{questions.length}문항 해설</span>
@@ -167,7 +182,10 @@ export default async function PaperExplanationsPage({
             정답
           </span>
           {hasFullAccess && (
-            <span className="ml-auto">
+            <span className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-zinc-400 dark:text-zinc-600">
+                인쇄본에는 해설만 담겨요
+              </span>
               <PrintButton />
             </span>
           )}
@@ -217,7 +235,7 @@ export default async function PaperExplanationsPage({
             images={group.images}
             explanationsOpen
             showSelection={false}
-            eagerImages
+            hideImagesInPrint
             paperId={hasFullAccess ? paper.id : undefined}
             reportContext="explanation"
           />

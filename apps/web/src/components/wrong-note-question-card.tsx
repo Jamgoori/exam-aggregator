@@ -137,9 +137,14 @@ export function WrongNoteQuestionCard({
   // "내가 고른 답"/"풀지 않음" 표시는 숨긴다.
   explanationsOpen = false,
   showSelection = true,
-  // 해설 페이지(?download=1)는 로드 직후 window.print()를 띄우는데, lazy 이미지는
-  // 브라우저에 따라 화면 밖 문항이 안 실린 채 인쇄될 수 있어 eager로 전환한다.
+  // 화면 밖 문항 이미지까지 미리 받아야 하는 화면에서 쓴다. (해설 페이지는 인쇄에서
+  // 이미지를 빼면서 더는 쓰지 않는다 — hideImagesInPrint 참고.)
   eagerImages = false,
+  // 인쇄(PDF 저장)에서 문제 이미지를 빼고 해설만 남긴다. 전체 해설 페이지 전용 —
+  // 문제지 이미지는 원본 PDF로 따로 받을 수 있어 인쇄물에서는 자리만 잡아먹고,
+  // 이미지가 빠지면 같은 분량에 해설이 훨씬 많이 들어간다. 대신 번호를 이미지가
+  // 아니라 카드 헤더로 알려야 하므로 아래에서 헤더를 인쇄에 남긴다.
+  hideImagesInPrint = false,
   // 오답노트 화면에서 문항별 액션(다시보기 체크·삭제)을 붙일 때 쓴다. 단일 문항
   // 카드는 번호 헤더 우측 끝에, 세트문제는 답 줄마다 붙는다.
   renderRowActions,
@@ -155,6 +160,7 @@ export function WrongNoteQuestionCard({
   explanationsOpen?: boolean;
   showSelection?: boolean;
   eagerImages?: boolean;
+  hideImagesInPrint?: boolean;
   renderRowActions?: (questionNumber: number) => React.ReactNode;
   explanationLockNext?: string;
   paperId?: string;
@@ -190,14 +196,23 @@ export function WrongNoteQuestionCard({
     // 해설 항목)의 break-inside-avoid로 제어한다 — 카드 전체에 avoid를 걸면 긴
     // 카드가 통째로 다음 페이지로 밀리며 아래가 비기 때문.
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white print:mb-3 dark:border-zinc-700 dark:bg-zinc-900">
-      {/* print:hidden: 문제 이미지에 이미 번호가 있어 인쇄물에서는 중복이라 뺀다. */}
-      <div className="flex items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 print:hidden dark:border-zinc-700 dark:bg-zinc-800/50">
-        <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{numberLabel}</span>
+      {/* 인쇄에서 이 줄은 보통 숨긴다 — 문제 이미지에 이미 번호가 있어 중복이므로.
+          단, 이미지를 빼고 인쇄하는 경우엔 번호를 알려줄 것이 이 줄뿐이라 남긴다. */}
+      <div
+        className={`flex items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-800/50 ${
+          hideImagesInPrint
+            ? "print:border-b-0 print:bg-transparent print:py-1"
+            : "print:hidden"
+        }`}
+      >
+        <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 print:text-xs">
+          {numberLabel}
+        </span>
         {headerActions && <span className="print:hidden">{headerActions}</span>}
       </div>
 
       {images.length > 0 ? (
-        <div className="flex flex-col">
+        <div className={`flex flex-col ${hideImagesInPrint ? "print:hidden" : ""}`}>
           {/* 인쇄: 이미지를 인쇄 폭 전체로 확대하면 원본 시험지보다 훨씬 커져 문항
               하나가 페이지를 넘겨버린다. 크롭 스크립트가 항상 PDF 1pt당 3px(scale=3)로
               렌더링하므로, 원본 크기(zoom 0.444)가 되는 배율 기준으로 zoom 0.5를 걸면
@@ -217,7 +232,11 @@ export function WrongNoteQuestionCard({
           ))}
         </div>
       ) : (
-        <p className="px-4 py-6 text-center text-xs text-zinc-400 dark:text-zinc-500">
+        <p
+          className={`px-4 py-6 text-center text-xs text-zinc-400 dark:text-zinc-500 ${
+            hideImagesInPrint ? "print:hidden" : ""
+          }`}
+        >
           아직 이 문제의 이미지가 등록되지 않았어요. 문제 내용은 원본 문제지에서
           확인해주세요.
         </p>
