@@ -479,6 +479,66 @@ export async function submitCbtAttempt(input: {
   };
 }
 
+const REPORT_REASONS = ["wrong_answer", "wrong_explanation", "image_issue", "other"] as const;
+export type QuestionReportReason = (typeof REPORT_REASONS)[number];
+export type QuestionReportContext = "explanation" | "cbt";
+const REPORT_MESSAGE_MAX = 500;
+
+export type ReportResult = CommentResult;
+
+// 해설/CBT 화면의 "오류 신고" 버튼이 호출한다. 로그인 사용자만 가능(비회원은 누가
+// 신고했는지 특정할 수 없어 도배 방지가 안 됨). 같은 문항을 같은 화면에서 중복
+// 신고하면 question_reports_open_unique 유니크 인덱스가 막고, 그 경우도 사용자
+// 입장에서는 "접수됐다"와 다르지 않으므로 에러 대신 안내 문구로 돌려준다.
+export async function submitQuestionReport(input: {
+  paperId: string;
+  questionNumber: number;
+  context: QuestionReportContext;
+  reason: string;
+  message?: string;
+}): Promise<ReportResult> {
+  const paperId = String(input.paperId ?? "");
+  if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
+
+  const questionNumber = Number(input.questionNumber);
+  if (!Number.isInteger(questionNumber) || questionNumber < 1) {
+    return { error: "잘못된 접근입니다." };
+  }
+
+  if (input.context !== "explanation" && input.context !== "cbt") {
+    return { error: "잘못된 접근입니다." };
+  }
+
+  if (!REPORT_REASONS.includes(input.reason as QuestionReportReason)) {
+    return { error: "신고 사유를 선택해주세요." };
+  }
+
+  const message = String(input.message ?? "").trim().slice(0, REPORT_MESSAGE_MAX);
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  const { error } = await supabase.from("question_reports").insert({
+    user_id: user.id,
+    paper_id: paperId,
+    question_number: questionNumber,
+    context: input.context,
+    reason: input.reason,
+    message: message || null,
+  });
+
+  if (error) {
+    return {
+      error:
+        error.code === "23505"
+          ? "이미 신고한 문항이에요. 확인 후 반영할게요."
+          : "신고 접수에 실패했어요.",
+    };
+  }
+
+  return { success: true };
+}
+
 export type BookmarkResult = CommentResult & { bookmarked?: boolean };
 
 export async function toggleBookmark(paperId: string): Promise<BookmarkResult> {

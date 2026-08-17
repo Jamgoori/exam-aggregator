@@ -32,6 +32,7 @@ import { CbtDrawingToolbar, PEN_COLORS } from "@/components/cbt-drawing-toolbar"
 import { OmrPanel } from "@/components/cbt-omr-panel";
 import { CbtResultModal } from "@/components/cbt-result-modal";
 import { CbtViewModeLock } from "@/components/cbt-view-mode-lock";
+import { ReportQuestionButton } from "@/components/report-question-button";
 import { DEFAULT_PEN_WIDTH, type DrawTool } from "@/components/pdf-canvas-viewer";
 import {
   clampZoom,
@@ -631,7 +632,7 @@ export function CbtSolver({
                 줄이 넘칠 수 있어 숨기고, 그쪽은 문제별 뷰의 자체 헤더를 그대로 쓴다. */}
             {viewMode === "single" && (
               <div className="ml-auto hidden items-center gap-2 lg:flex">
-                <div className="text-sm">
+                <div className="flex items-center gap-1 text-sm">
                   <span className="font-bold text-zinc-800 dark:text-zinc-200">
                     {groupFirstNumber === groupLastNumber
                       ? `${groupFirstNumber}번`
@@ -641,6 +642,11 @@ export function CbtSolver({
                     {" "}
                     / {totalQuestions}
                   </span>
+                  <ReportQuestionButton
+                    paperId={paperId}
+                    questionNumber={groupFirstNumber}
+                    context="cbt"
+                  />
                 </div>
                 {!result && (
                   <button
@@ -738,6 +744,13 @@ export function CbtSolver({
                 error={error}
                 zoom={zoom}
                 onPinchZoom={handlePinchZoom}
+                report={
+                  <ReportQuestionButton
+                    paperId={paperId}
+                    questionNumber={groupFirstNumber}
+                    context="cbt"
+                  />
+                }
               />
             )}
           </div>

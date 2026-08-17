@@ -5,6 +5,7 @@ import {
 } from "@/components/explanation-body";
 import { ExplanationDisclosure } from "@/components/explanation-disclosure";
 import { ExplanationLock } from "@/components/explanation-lock";
+import { ReportQuestionButton } from "@/components/report-question-button";
 
 // 오답노트 화면(회차별/과목별)이 공유하는 문제 카드. 훅을 쓰지 않는 순수 표시용
 // 컴포넌트라 서버 컴포넌트(회차 페이지)와 클라이언트 컴포넌트(과목 페이지의 필터
@@ -144,6 +145,10 @@ export function WrongNoteQuestionCard({
   renderRowActions,
   // 해설 잠금 카드의 "멤버십 보러 가기"가 결제 후 돌아올 곳(현재 화면 주소).
   explanationLockNext,
+  // 문항 오류 신고 버튼을 붙일 문제지 id. 이 값을 주는 화면(전체 해설 페이지)에서만
+  // 신고 버튼이 뜬다 — 오답노트처럼 아직 paperId를 안 넘기는 화면은 그대로 안 보인다.
+  paperId,
+  reportContext = "explanation",
 }: {
   rows: WrongNoteCardRow[];
   images: string[];
@@ -152,13 +157,31 @@ export function WrongNoteQuestionCard({
   eagerImages?: boolean;
   renderRowActions?: (questionNumber: number) => React.ReactNode;
   explanationLockNext?: string;
+  paperId?: string;
+  reportContext?: "explanation" | "cbt";
 }) {
   const firstNumber = rows[0]?.questionNumber;
   const lastNumber = rows[rows.length - 1]?.questionNumber;
   const numberLabel =
     firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`;
-  const headerActions =
-    rows.length === 1 && renderRowActions ? renderRowActions(rows[0].questionNumber) : null;
+
+  function reportButton(questionNumber: number) {
+    return paperId ? (
+      <ReportQuestionButton
+        paperId={paperId}
+        questionNumber={questionNumber}
+        context={reportContext}
+      />
+    ) : null;
+  }
+
+  const hasHeaderActions = rows.length === 1 && (!!renderRowActions || !!paperId);
+  const headerActions = hasHeaderActions ? (
+    <>
+      {renderRowActions?.(rows[0].questionNumber)}
+      {reportButton(rows[0].questionNumber)}
+    </>
+  ) : null;
 
   return (
     // print:mb-3: 해설 인쇄가 2단 그리드로 전환되면(page.tsx의 print:grid) 그리드
@@ -210,9 +233,12 @@ export function WrongNoteQuestionCard({
             showNumberBadge={rows.length > 1}
             showSelection={showSelection}
             actions={
-              rows.length > 1 && renderRowActions
-                ? renderRowActions(row.questionNumber)
-                : undefined
+              rows.length > 1 && (renderRowActions || paperId) ? (
+                <>
+                  {renderRowActions?.(row.questionNumber)}
+                  {reportButton(row.questionNumber)}
+                </>
+              ) : undefined
             }
           />
         ))}
