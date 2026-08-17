@@ -3,6 +3,7 @@
 // duration 은 신뢰하지 않는다.
 import {
   corsHeaders,
+  formatDuration,
   isUuid,
   json,
   MIN_ATTEMPT_SECONDS,
@@ -67,7 +68,7 @@ Deno.serve(async (req) => {
     const waitSeconds = Math.ceil(MIN_ATTEMPT_SECONDS - elapsedSeconds);
     return json(
       {
-        error: `최소 ${MIN_ATTEMPT_SECONDS / 60}분은 풀어야 채점할 수 있어요. ${waitSeconds}초 후에 다시 시도해주세요.`,
+        error: `최소 ${formatDuration(MIN_ATTEMPT_SECONDS)}은 풀어야 채점할 수 있어요. ${waitSeconds}초 후에 다시 시도해주세요.`,
       },
       400,
     );

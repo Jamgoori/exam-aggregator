@@ -116,11 +116,12 @@ function useFullscreen(ref: RefObject<HTMLElement | null>) {
 
 // 페이지에 들어오면 곧바로 재기 시작하는 대신 5초 카운트다운을 보여주고, 그
 // 카운트다운이 끝나면 서버에 시작 시각을 기록한다(startCbtAttempt). 채점 시 최소
-// 응시시간(3분) 검증은 이 서버 기록 시각을 기준으로 하므로, 클라이언트도 반드시
-// 그 응답의 시각을 기다렸다가 기준으로 삼아야 한다 — 응답을 기다리지 않고 클라이언트
-// 자기 시계로 먼저 타이머를 시작해버리면, 그 사이의 네트워크 지연(드물게는 수십
-// 초까지도)만큼 서버 기준 3분이 화면보다 항상 늦게 끝나 실제로는 3분보다 더
-// 기다려야 제출되는 문제가 생긴다. running이 꺼지면(채점 완료) 시간도 멈춘다.
+// 응시시간(MIN_ATTEMPT_SECONDS) 검증은 이 서버 기록 시각을 기준으로 하므로,
+// 클라이언트도 반드시 그 응답의 시각을 기다렸다가 기준으로 삼아야 한다 — 응답을
+// 기다리지 않고 클라이언트 자기 시계로 먼저 타이머를 시작해버리면, 그 사이의
+// 네트워크 지연(드물게는 수십 초까지도)만큼 서버 기준 최소 응시시간이 화면보다
+// 항상 늦게 끝나 실제로는 그보다 더 기다려야 제출되는 문제가 생긴다. running이
+// 꺼지면(채점 완료) 시간도 멈춘다.
 function useCbtTimer(paperId: string, running: boolean) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [countdown, setCountdown] = useState(5);
@@ -404,11 +405,12 @@ export function CbtSolver({
       alert("시작 기록 확인 중이에요. 잠시 후 다시 시도해주세요.");
       return;
     }
-    // 실제 최소 응시시간 검증은 서버가 하지만, 3분이 안 지났으면 서버까지 왕복하지
-    // 않고 바로 알려준다. startedAtRef는 서버가 실제로 기록한 시각이라(클라이언트가
-    // 응답을 기다리지 않고 먼저 잰 시각이 아니라) 이 검사가 서버 판정과 일치한다.
+    // 실제 최소 응시시간 검증은 서버가 하지만, MIN_ATTEMPT_SECONDS가 안 지났으면
+    // 서버까지 왕복하지 않고 바로 알려준다. startedAtRef는 서버가 실제로 기록한
+    // 시각이라(클라이언트가 응답을 기다리지 않고 먼저 잰 시각이 아니라) 이 검사가
+    // 서버 판정과 일치한다.
     if (Date.now() - startedAtRef.current < MIN_ATTEMPT_SECONDS * 1000) {
-      alert("최소 3분은 풀어야 채점할 수 있어요. 조금만 더 풀어보세요!");
+      alert(`최소 ${formatDuration(MIN_ATTEMPT_SECONDS)}은 풀어야 채점할 수 있어요. 조금만 더 풀어보세요!`);
       return;
     }
     if (

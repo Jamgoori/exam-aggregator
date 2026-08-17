@@ -38,7 +38,8 @@ import { useColors, type Colors } from "../../../src/theme/colors";
 
 // 5초 카운트다운 후 서버에 시작 기록(startCbtAttempt) → 응답의 startedAt 을 기준으로
 // 경과시간을 잰다. 웹과 동일하게 클라이언트 시계로 먼저 시작하지 않는다(네트워크
-// 지연만큼 서버 기준 3분이 늦게 끝나는 문제 방지). running 이 꺼지면 시간도 멈춘다.
+// 지연만큼 서버 기준 최소 응시시간이 늦게 끝나는 문제 방지). running 이 꺼지면
+// 시간도 멈춘다.
 function useCbtTimer(paperId: string, enabled: boolean, running: boolean) {
   const [countdown, setCountdown] = useState(5);
   const [elapsed, setElapsed] = useState(0);
@@ -192,7 +193,7 @@ export default function CbtScreen() {
       return;
     }
     if (Date.now() - timer.startedAtRef.current < MIN_ATTEMPT_SECONDS * 1000) {
-      Alert.alert("조금만 더", "최소 3분은 풀어야 채점할 수 있어요.");
+      Alert.alert("조금만 더", `최소 ${formatDuration(MIN_ATTEMPT_SECONDS)}은 풀어야 채점할 수 있어요.`);
       return;
     }
     const doSubmit = async () => {
