@@ -247,10 +247,15 @@ export default async function SubjectPage({
         )}
       </div>
 
+      {/* 필터 탭은 전부 rel="nofollow" 다 — 누르면 같은 목록을 걸러 보여줄 뿐이라
+          정본은 파라미터 없는 주소 하나고, 직렬은 다중 선택이라 크롤러가 따라가면
+          조합이 폭발한다. robots.txt 가 크롤 자체를 막지만, 여기서 nofollow 로
+          링크를 끊어야 "발견됨" 목록에 쌓이는 것까지 멈춘다. */}
       {availableLevels.length > 1 && (
         <div className="flex flex-wrap gap-2">
           <Link
             href={buildFilterHref(undefined, selectedExamTypeIds)}
+            rel="nofollow"
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               !level
                 ? "bg-zinc-800 text-white"
@@ -263,6 +268,7 @@ export default async function SubjectPage({
             <Link
               key={lv}
               href={buildFilterHref(lv, selectedExamTypeIds)}
+              rel="nofollow"
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 level === lv
                   ? levelColor(lv)
@@ -282,6 +288,7 @@ export default async function SubjectPage({
         <div className="flex flex-wrap gap-2">
           <Link
             href={buildFilterHref(level, new Set())}
+            rel="nofollow"
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               selectedExamTypeIds.size === 0
                 ? "bg-zinc-800 text-white"
@@ -299,6 +306,7 @@ export default async function SubjectPage({
               <Link
                 key={et.id}
                 href={buildFilterHref(level, nextExamTypeIds)}
+                rel="nofollow"
                 aria-pressed={isSelected}
                 className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                   isSelected

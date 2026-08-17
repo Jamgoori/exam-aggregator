@@ -69,6 +69,10 @@ export function ExamYearNav({
           <Link
             key={year}
             href={examYearHref(combo.slug, year)}
+            // 연도는 같은 목록을 걸러 보여줄 뿐이고 정본은 연도 없는 주소다
+            // (generateMetadata 의 canonical). 크롤러가 연도 줄을 훑어봐야
+            // 대체 페이지만 쌓이므로 링크를 끊는다.
+            rel="nofollow"
             className="rounded-full border border-zinc-200 px-4 py-1.5 text-sm font-medium text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-800 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
           >
             {year}년 {count}건

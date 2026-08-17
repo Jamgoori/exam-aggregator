@@ -319,6 +319,7 @@ export default async function PaperDetailPage({
             </Link>
             <Link
               href={`${paperExplanationsHref(paper)}?download=1`}
+              rel="nofollow"
               aria-label="해설 다운로드"
               title="해설 다운로드"
               className="flex shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 text-zinc-600 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/40 dark:hover:text-emerald-400"
@@ -501,10 +502,14 @@ function RelatedPapersSection({
         </Link>
       </div>
 
+      {/* 과목 페이지의 필터 탭과 같은 이유로 전부 rel="nofollow" — 문제지 3천여
+          장마다 이 변형이 딸려서, 크롤러가 따라가면 사이트맵의 문제지가 차례를
+          못 받는다 (robots.txt 의 level/examTypes 차단과 한 쌍). */}
       {availableLevels.length > 1 && (
         <div className="flex flex-wrap gap-2">
           <Link
             href={buildFilterHref(undefined, selectedExamTypeIds)}
+            rel="nofollow"
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               !level
                 ? "bg-zinc-800 text-white"
@@ -517,6 +522,7 @@ function RelatedPapersSection({
             <Link
               key={lv}
               href={buildFilterHref(lv, selectedExamTypeIds)}
+              rel="nofollow"
               className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                 level === lv
                   ? levelColor(lv)
@@ -536,6 +542,7 @@ function RelatedPapersSection({
         <div className="flex flex-wrap gap-2">
           <Link
             href={buildFilterHref(level, new Set())}
+            rel="nofollow"
             className={`rounded-full px-4 py-1.5 text-sm font-medium ${
               selectedExamTypeIds.size === 0
                 ? "bg-zinc-800 text-white"
@@ -553,6 +560,7 @@ function RelatedPapersSection({
               <Link
                 key={et.id}
                 href={buildFilterHref(level, nextExamTypeIds)}
+                rel="nofollow"
                 aria-pressed={isSelected}
                 className={`rounded-full px-4 py-1.5 text-sm font-medium ${
                   isSelected
