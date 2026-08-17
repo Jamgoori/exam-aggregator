@@ -147,9 +147,14 @@ export function BetaNoticeModal() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-4 text-[13px] leading-[1.75] break-keep text-zinc-600 dark:text-zinc-300">
+          {/* 두 문장을 한 문단에 붙이면 좁은 폭에서 "그러다"가 첫 줄 끝에 혼자 남는다.
+              <br> 대신 문단을 나누는 건, 글자 크기를 키운 사용자에게도 두 번째 문장이
+              언제나 새 줄에서 시작하게 하려는 것 — 줄바꿈 위치를 폭에 맡기지 않는다. */}
           <p className="text-pretty">
-            만들어가는 중이라 <B>화면과 기능이 바뀔 수 있어요.</B> 그러다 보니 가끔 어색한
-            부분이나 오류가 보일 수 있어요.
+            만들어가는 중이라 <B>화면과 기능이 바뀔 수 있어요.</B>
+          </p>
+          <p className="mt-1 text-pretty">
+            그러다 보니 가끔 어색한 부분이나 오류가 보일 수 있어요.
           </p>
 
           {/* 자료가 비어 보이는 건 사이트가 부실한 게 아니라 아직 올리는 중이라는 뜻이다.
