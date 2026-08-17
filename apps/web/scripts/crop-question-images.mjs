@@ -211,7 +211,7 @@ function findAnnotationLines(items, half) {
 // "[문 19.∼문 20.]" 안내문과 같은 줄(y=966, 둘 다 x<페이지폭/2)로 오인 병합되어
 // 소실). extractQuestionsFromPdf가 1차 패스로 대략의 columnSplitX를 구한 뒤,
 // 이를 넘겨 2차로 다시 호출해 정확한 안내문 분류로 재추출한다.
-async function findQuestionMarkers(page, columnSplitX) {
+export async function findQuestionMarkers(page, columnSplitX) {
   const viewport = page.getViewport({ scale: 1 });
   const textContent = await page.getTextContent();
   const items = textContent.items.filter((i) => "str" in i);
@@ -665,7 +665,7 @@ function filterMarginMarkers(columnMarkers) {
 // columnSplitX는 computeColumnSplitX가 실측한 진짜 칼럼 경계다(있으면). 페이지
 // 폭 절반이 경계와 어긋나는 조판(국회직 등)에서도 정확히 좌/우를 가르기 위해
 // pageWidthPt/2 대신 이 값을 우선한다.
-function splitIntoColumns(markers, pageWidthPt, columnMode, columnSplitX) {
+export function splitIntoColumns(markers, pageWidthPt, columnMode, columnSplitX) {
   const half = columnSplitX ?? pageWidthPt / 2;
   if (columnMode === "single") {
     const left = filterMarginMarkers(markers).sort((a, b) => b.y - a.y);
@@ -1211,7 +1211,7 @@ function medianLineLead(lines) {
 // 크롭 영역까지 뻗는다). 텍스트 조각은 시작 x로 왼쪽 칼럼에 기록되지만 픽셀은
 // 오른쪽 칼럼 크롭에도 들어오므로, 페이지 값은 **칼럼과 무관하게 그 페이지 전체**
 // 에 적용해야 한다(실측: 이걸 칼럼별로만 적용했더니 15·19번에 쪽번호가 남았다).
-function computeFooterInkTopByPage(pageDataList) {
+export function computeFooterInkTopByPage(pageDataList) {
   const empty = pageDataList.map(() => null);
   if (pageDataList.length < 2) return empty;
   const buckets = new Map();
@@ -1322,6 +1322,44 @@ async function dropRunningHeader(rawPng, headerBandPx, scale) {
   return sharp(rawPng).extract({ left: 0, top: y, width, height: height - y }).png().toBuffer();
 }
 
+// dropRunningHeader의 사촌 — 조각을 칼럼 맨 위(지면 top)부터 담을 때, **이 조각의
+// 첫 본문 줄 baseline보다 위에서 끝나는** 잉크 덩어리를 걷어낸다. 되풀이 머리글이든
+// 1쪽 표제든 괘선이든 한 기준으로 처리된다.
+//
+// 좌표로 "머리글과 본문 사이"를 그어 자르면 안 된다 — 그 틈이 실측 2.2pt뿐이고 줄
+// 높이가 실제 글리프 높이를 과소평가해 본문 첫 줄이 잘린 적이 있다(법원직 문2).
+// 그래서 **덩어리 단위**로 본다: baseline은 그 줄의 글리프 안쪽이므로 본문 첫 줄이
+// 속한 덩어리는 반드시 baseline 아래까지 이어진다. 경계가 어긋나면 덩어리를 통째로
+// 남기는(=손대지 않는) 쪽으로만 틀리므로 본문이 깎이는 일이 없다.
+async function dropInkAboveBaseline(rawPng, baselinePx) {
+  const { data, info } = await sharp(rawPng)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  const hasInk = new Uint8Array(height);
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x] < 245) {
+        hasInk[y] = 1;
+        break;
+      }
+    }
+  }
+  let y = 0;
+  for (;;) {
+    while (y < height && !hasInk[y]) y++;
+    if (y >= height) return null; // 잉크가 없다 = 빈 조각
+    let end = y;
+    while (end < height && hasInk[end]) end++;
+    if (end - 1 >= baselinePx) break; // 첫 본문 줄이 속한 덩어리
+    y = end;
+  }
+  if (y === 0) return rawPng;
+  return sharp(rawPng).extract({ left: 0, top: y, width, height: height - y }).png().toBuffer();
+}
+
 function planCrossPageSets(pageDataList, columnMode) {
   const colKeys = columnMode === "single" ? ["L"] : ["L", "R"];
   // 읽기 순서 슬롯: [{ pageIdx, col }]
@@ -1405,7 +1443,7 @@ function normalizeRunningText(text) {
   return text.replace(/\s+/g, "").replace(/\d+/g, "#");
 }
 
-function computeHeaderInkBottomByPage(pageDataList) {
+export function computeHeaderInkBottomByPage(pageDataList) {
   const empty = pageDataList.map(() => null);
   if (pageDataList.length < 2) return empty;
   const buckets = new Map();
@@ -1435,6 +1473,156 @@ function computeHeaderInkBottomByPage(pageDataList) {
     }
   }
   return result;
+}
+
+// 한 문항이 칼럼 끝에서 끊겨 다음 칼럼(또는 다음 페이지)의 맨 위로 이어지는 조판을
+// 찾는다. 크롭은 "마커가 있는 칼럼 안"만 잘라내므로, 넘어간 부분은 **어느 이미지에도
+// 담기지 않고 그대로 사라졌다** — 다음 칼럼의 첫 문항은 자기 마커에서부터 잘리기
+// 때문에 그 위쪽 잉크는 아무도 가져가지 않는다. 자료해석처럼 표·그래프가 커서 한
+// 문항이 칼럼 하나를 넘기는 과목에서 **선지가 통째로 없는 이미지**가 나온 원인이다
+// (실측: 2021 국가직 7급 자료해석 15·24번 — ①~⑤ 전부가 우측 칼럼 맨 위에 있었다).
+//
+// **오검출이 나면 멀쩡한 문항에 남의 머리글·본문이 붙으므로, 판정은 선지 글리프의
+// 연속성 하나로만 한다.** "다음 칼럼 맨 위에 마커보다 위쪽 잉크가 있는가"로 재면
+// 되풀이 머리글을 못 걸러낸 페이지에서 전부 참이 되어버린다(머리글 감지는 문서
+// 절반 이상의 페이지에 같은 문구가 나와야 성립하므로 null이 되는 문서가 있다).
+// 대신 **끊긴 쪽에 없는 선지 번호가 넘어간 쪽에 순서대로 이어져 있는지**를 본다 —
+// 머리글·쪽번호가 이 조건을 우연히 만족할 일은 없다.
+const CHOICE_GLYPHS = ["①", "②", "③", "④", "⑤"];
+// 이어붙일 다음 조각 수 상한. 한 문항이 칼럼 두 개를 더 잡아먹는 조판까지만 본다.
+const SPILL_MAX_EXTRA_SLOTS = 2;
+
+// 조각 후보 줄들 중 "본문 시작선(bodyTopY)보다 위"에 있는 것들을 떨어낸다.
+// **본문과 줄간격 이상으로 뚝 떨어져 있을 때만** 떨어낸다 — bodyTopY는 지면에서
+// 가장 위에 있는 마커/안내문의 y라서, 두 칼럼 모두 맨 위가 앞 문항의 연속인
+// 지면(마커가 한참 아래에 처음 나오는 경우)에서는 실제 본문보다 아래로 잡힌다.
+// 그 경우까지 잘라내면 이어붙일 내용이 통째로 깎이므로, 붙어 있는 줄은 건드리지
+// 않는다(= 예전처럼 그냥 다 담는다).
+function dropPageTopJunk(lines, slot) {
+  if (lines.length === 0 || slot.bodyTopY === null) return lines;
+  const kept = lines.filter((l) => l.y <= slot.bodyTopY);
+  const dropped = lines.filter((l) => l.y > slot.bodyTopY);
+  if (dropped.length === 0 || kept.length === 0) return lines;
+  const gap = Math.min(...dropped.map((l) => l.y)) - Math.max(...kept.map((l) => l.y));
+  if (slot.lead && gap <= slot.lead * 1.5) return lines;
+  return kept;
+}
+
+function choiceIndicesIn(lines) {
+  const found = new Set();
+  for (const l of lines) {
+    for (let i = 0; i < CHOICE_GLYPHS.length; i++) {
+      if ((l.text ?? "").includes(CHOICE_GLYPHS[i])) found.add(i + 1);
+    }
+  }
+  return found;
+}
+
+export function planColumnSpills(pageDataList, columnMode, headerInkBottomByPage, footerInkTopByPage) {
+  const colKeys = columnMode === "single" ? ["L"] : ["L", "R"];
+  const slots = [];
+  for (let p = 0; p < pageDataList.length; p++) {
+    const d = pageDataList[p];
+    const { left, right } = splitIntoColumns(d.markers, d.pageWidthPt, columnMode, d._columnSplitX);
+    const byCol = { L: left, R: right ?? [] };
+    const headerBottom = headerInkBottomByPage[p];
+    const footerTop = footerInkTopByPage[p];
+    // 지면의 본문이 시작되는 y. 되풀이 머리글은 위에서 이미 걸러지지만, **1쪽
+    // 표제처럼 한 번만 나오는 덩어리는 머리글 감지에 안 걸린다**(감지 조건이
+    // "문서 절반 이상 페이지에 같은 문구"다). 그 표제가 지면 폭 전체를 쓰면 우측
+    // 칼럼 맨 위에도 그 오른쪽 절반이 남아, 이어붙일 조각의 머리로 딸려 들어온다
+    // (실측: 2011 경찰 공채 2차 형사소송법 4번 — "…원(순경)채용시험 문제"와
+    // "【문제지 이상유무 확인】"이 ③과 ④ 사이에 박혔다). 마커·안내문은 반드시
+    // 본문이므로, 지면에서 가장 위에 있는 마커/안내문이 본문 시작선이 된다.
+    const things = [...d.markers, ...(d.groups ?? [])];
+    const bodyTopY = things.length > 0 ? Math.max(...things.map((t) => t.y)) : null;
+    const lead = medianLineLead(d.lines ?? []);
+    for (const col of colKeys) {
+      // 머리글·꼬리말 줄은 애초에 후보에서 뺀다 — 어차피 픽셀 단계에서도 걷어낸다.
+      const lines = (d.lines ?? [])
+        .filter((l) => l.col === col)
+        .filter((l) => headerBottom === null || l.y < headerBottom)
+        .filter((l) => footerTop === null || l.y > footerTop)
+        .sort((a, b) => b.y - a.y);
+      slots.push({
+        pageIdx: p,
+        col,
+        markers: [...(byCol[col] ?? [])].sort((a, b) => b.y - a.y),
+        groups: (d.groups ?? []).filter((g) => g.col === col).sort((a, b) => b.y - a.y),
+        lines,
+        bodyTopY,
+        lead,
+      });
+    }
+  }
+
+  // 안내문(세트)에 속한 번호는 손대지 않는다 — 스트립 붙이기/세트 병합이 크롭
+  // 시작점(topOverride)과 조각 구성을 따로 정하므로, 여기서 다시 조립하면 두 로직이
+  // 어긋난다. 자료해석의 유실은 전부 안내문 없는 단문항에서 나온다.
+  const inGroup = new Set();
+  for (const d of pageDataList) {
+    for (const g of d.groups ?? []) {
+      for (let n = g.start; n <= g.end; n++) inGroup.add(n);
+    }
+  }
+
+  const plans = [];
+  for (let i = 0; i < slots.length; i++) {
+    const slot = slots[i];
+    if (slot.markers.length === 0) continue;
+    const last = slot.markers[slot.markers.length - 1];
+    if (inGroup.has(last.number)) continue;
+    // 이 칼럼에서 마커보다 아래에 안내문이 있으면 문항이 거기서 끝난다.
+    if (slot.groups.some((g) => g.y < last.y)) continue;
+
+    const baseLines = slot.lines.filter((l) => l.y < last.y + last.height);
+    const baseChoices = choiceIndicesIn(baseLines);
+    const baseMax = baseChoices.size === 0 ? 0 : Math.max(...baseChoices);
+    // 이미 ⑤까지 다 있으면 넘어간 게 없다(4지선다는 ④가 끝이지만, 그 판정을 문서
+    // 단위로 세우면 5지선다 문제지 하나가 섞여도 틀어지므로 "다음 조각이 이어지는
+    // 번호를 갖고 있는가"만으로 가른다).
+    if (baseMax >= CHOICE_GLYPHS.length) continue;
+
+    const extra = [];
+    let expectNext = baseMax + 1;
+    for (let j = i + 1; j < slots.length && extra.length < SPILL_MAX_EXTRA_SLOTS; j++) {
+      const nextSlot = slots[j];
+      const things = [...nextSlot.markers, ...nextSlot.groups].sort((a, b) => b.y - a.y);
+      const top = things[0] ?? null;
+      const orphanLines = dropPageTopJunk(
+        top ? nextSlot.lines.filter((l) => l.y > top.y + (top.height ?? 0)) : nextSlot.lines,
+        nextSlot,
+      );
+      if (orphanLines.length === 0) break;
+      const orphanChoices = choiceIndicesIn(orphanLines);
+      if (orphanChoices.size === 0 || Math.min(...orphanChoices) !== expectNext) break;
+      extra.push({
+        pageIdx: nextSlot.pageIdx,
+        col: nextSlot.col,
+        boundary: top,
+        // 이어붙일 조각의 첫 본문 줄 baseline. 픽셀 단계에서 "이보다 위에서
+        // 끝나는 잉크 덩어리"를 표제·머리글로 보고 걷어내는 기준이다.
+        firstLineY: orphanLines[0].y,
+        // 마지막 본문 줄. 아래에 마커도 안내문도 없는 칼럼을 끝까지 담으면 지면
+        // 괘선과 커다란 빈 공간이 함께 들어온다(실측: 2009 국회직 8급 국어 25번 —
+        // 선지 5줄 뒤로 지면 바닥까지의 괘선·여백이 통째로 붙어 2,000px 넘는
+        // 대부분이 빈 이미지가 됐다). 글자높이만큼 아래로 넉넉히 잡아 디센더를
+        // 남기고, 남는 여백은 어차피 세로 여백 제거가 걷어낸다.
+        lastLineBottomY: orphanLines[orphanLines.length - 1].y - orphanLines[orphanLines.length - 1].height,
+      });
+      expectNext = Math.max(...orphanChoices) + 1;
+      // 다음 조각이 마커·안내문으로 끝나면 거기서 문항이 끝난 것이다. 칼럼 전체가
+      // 이어짐(마커도 안내문도 없음)이면 그다음 칼럼까지 계속 본다.
+      if (top) break;
+    }
+    if (extra.length === 0) continue;
+    plans.push({
+      number: last.number,
+      base: { pageIdx: slot.pageIdx, col: slot.col, marker: last },
+      extra,
+    });
+  }
+  return plans;
 }
 
 // 한 문제지 안에서 이미지 폭을 전부 같게 맞춘다(좁은 쪽에 흰 여백을 양옆으로
@@ -1592,6 +1780,59 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
       cropped.push({ number: n, image, groupNumbers: plan.numbers });
       handledNumbers.add(n);
     }
+  }
+
+  // 칼럼/페이지를 넘어 이어지는 단문항(자료해석 등)도 문서 단위로 먼저 이어붙인다.
+  // 페이지 단위 크롭은 마커가 있는 칼럼만 보므로 넘어간 선지를 담을 방법이 없다.
+  const spillPlans = planColumnSpills(
+    pageMarkerData.map((d) => d.data),
+    columnMode,
+    headerInkBottomByPage,
+    footerInkTopByPage,
+  );
+  if (process.env.CROP_DEBUG_SPILL && spillPlans.length > 0) {
+    console.log(
+      `[spill] 칼럼 넘김 문항: ${spillPlans
+        .map((p) => `${p.number}번(+${p.extra.length}조각)`)
+        .join(", ")}`,
+    );
+  }
+  for (const plan of spillPlans) {
+    if (handledNumbers.has(plan.number)) continue;
+    const baseCtx = await ctxFor(plan.base.pageIdx);
+    const baseColDef = baseCtx.columnDefs.find((c) => c.key === plan.base.col);
+    if (!baseColDef) continue;
+    const marker = plan.base.marker;
+    const baseRaw = await baseCtx.extractRegion(
+      baseColDef,
+      Math.min(baseCtx.pageHeightPt, marker.y + marker.height + TOP_PAD),
+      baseCtx.findBottomBoundary(baseColDef, marker.y),
+    );
+    if (!baseRaw) continue;
+    const pieces = [await trimVerticalWhitespace(baseRaw)];
+    for (const seg of plan.extra) {
+      const ctx = await ctxFor(seg.pageIdx);
+      const colDef = ctx.columnDefs.find((c) => c.key === seg.col);
+      if (!colDef) continue;
+      const bottom = seg.boundary
+        ? ctx.cutAboveInk(seg.col, seg.boundary.y + (seg.boundary.height ?? 0))
+        : Math.max(ctx.columnBottomPt, seg.lastLineBottomY);
+      const raw = await ctx.extractRegion(colDef, ctx.columnTopPt, bottom);
+      if (!raw) continue;
+      // 조각이 칼럼 맨 위에서 시작하니 그 위의 머리글·표제를 픽셀로 걷어낸다.
+      const deheaded = await dropInkAboveBaseline(
+        raw,
+        Math.round((ctx.pageHeightPt - seg.firstLineY) * scale),
+      );
+      if (!deheaded) continue;
+      const trimmed = await trimVerticalWhitespace(deheaded);
+      if (trimmed) pieces.push(trimmed);
+    }
+    if (pieces.filter(Boolean).length < 2) continue;
+    const stacked = await stackVertically(pieces, Math.round(SEGMENT_GAP_PT * scale));
+    if (!stacked) continue;
+    cropped.push({ number: plan.number, image: await finalizeQuestionImage(stacked, scale) });
+    handledNumbers.add(plan.number);
   }
 
   let carriedStrips = new Map();
