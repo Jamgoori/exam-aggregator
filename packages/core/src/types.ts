@@ -180,3 +180,19 @@ export type AiDiagnosis = {
   requested_at: string;
   generated_at: string | null;
 };
+
+// 건의게시판 글 한 건. answer 가 채워지면 곧 "답변 완료"다 — 상태 컬럼을 따로 두면
+// 답변만 지웠을 때 배지가 남는 식으로 두 값이 어긋난다.
+export type Suggestion = {
+  id: string;
+  user_id: string;
+  nickname: string;
+  title: string;
+  content: string;
+  is_secret: boolean;
+  view_count: number;
+  answer: string | null;
+  answered_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+};

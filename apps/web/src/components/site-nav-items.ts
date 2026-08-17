@@ -3,6 +3,7 @@ import {
   Crown,
   FileStack,
   Library,
+  MessageSquarePlus,
   Receipt,
   Settings,
   Star,
@@ -106,6 +107,15 @@ export const ACCOUNT_NAV: NavItem[][] = [
       label: "내 정보 수정",
       icon: Settings,
       match: (p) => p.startsWith("/mypage/edit"),
+    },
+    // 건의게시판은 계정 메뉴에 둔다 — 메뉴바 본줄(PRIMARY_NAV)은 "자료를 찾는"
+    // 흐름이라 성격이 다르고, 다섯 번째 항목을 넣으면 태블릿 폭에서 줄이 넘친다.
+    // 비회원도 목록은 볼 수 있게 푸터에도 같은 링크가 있다(site-footer.tsx).
+    {
+      href: "/suggestions",
+      label: "건의게시판",
+      icon: MessageSquarePlus,
+      match: (p) => p.startsWith("/suggestions"),
     },
   ],
 ];

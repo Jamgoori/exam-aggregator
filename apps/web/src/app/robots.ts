@@ -70,6 +70,9 @@ export default function robots(): MetadataRoute.Robots {
           "/login",
           "/signup",
           "/download",
+          // 회원이 남긴 건의·운영자 답변. 공개 콘텐츠가 아니고(비밀글도 섞인다)
+          // 검색에서 찾아올 이유도 없다.
+          "/suggestions",
           // CBT는 로그인 게이트가 걸린 풀이 화면이라 크롤러에게는 빈 껍데기다.
           "/papers/*/cbt",
           // 급수·직렬·연도 필터 탭이 만들어내는 변형 주소. 내용은 정본과 같고(각

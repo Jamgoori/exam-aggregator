@@ -1805,3 +1805,77 @@ revoke all on function apply_paid_membership(text, timestamptz) from public, ano
 revoke all on function revoke_paid_membership(text, timestamptz) from public, anon, authenticated;
 grant execute on function apply_paid_membership(text, timestamptz) to service_role;
 grant execute on function revoke_paid_membership(text, timestamptz) to service_role;
+
+-- ── 건의게시판 (suggestions) ─────────────────────────────────────────────────
+-- 사이트에 바라는 점을 회원이 직접 남기고 관리자가 답변하는 일반 게시판.
+-- "비밀글"(is_secret)은 글쓴이와 관리자만 제목·내용을 볼 수 있다.
+--
+-- 왜 로그인 회원만 쓸 수 있나: 비밀글의 "본인"을 특정할 수 있어야 한다. 비회원
+-- 비밀번호 방식(comments 처럼)으로 하면 비밀번호를 아는 사람 아무나 남의 비밀글을
+-- 열 수 있고, 도배도 막기 어렵다.
+create table if not exists suggestions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  -- 작성 시점 닉네임을 그대로 박아둔다 (comments 와 같은 이유 — 나중에 닉네임을
+  -- 바꿔도 예전 글의 작성자 표시가 흔들리지 않게).
+  nickname text not null,
+  title text not null,
+  content text not null,
+  is_secret boolean not null default false,
+  view_count int not null default 0,
+  -- 관리자 답변. null 이면 "답변 대기", 채워지면 "답변 완료" — 상태 컬럼을 따로
+  -- 두지 않는 이유는 두 값이 어긋날 수 있어서다.
+  answer text,
+  answered_at timestamptz,
+  answered_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz
+);
+
+do $$ begin
+  alter table suggestions add constraint suggestions_title_len
+    check (char_length(title) between 1 and 100);
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table suggestions add constraint suggestions_content_len
+    check (char_length(content) between 1 and 2000);
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table suggestions add constraint suggestions_answer_len
+    check (answer is null or char_length(answer) between 1 and 2000);
+exception when duplicate_object then null; end $$;
+
+-- 목록은 항상 최신순 한 페이지씩 읽는다.
+create index if not exists suggestions_created_idx on suggestions(created_at desc);
+-- 도배 방지(시간당 작성 수) 조회용.
+create index if not exists suggestions_user_idx on suggestions(user_id, created_at desc);
+
+alter table suggestions enable row level security;
+
+-- 정책을 하나도 만들지 않는다 = anon/authenticated 는 이 테이블을 읽지도 쓰지도
+-- 못한다. 읽기까지 서버(service_role)로만 하는 이유:
+--   목록 화면은 남의 비밀글도 "비밀글입니다" 한 줄로 자리는 보여줘야 하는데,
+--   그러려면 RLS 로 행을 통째로 숨길 수가 없다. 반대로 행을 열어주면 REST 를
+--   직접 부르는 것만으로 비밀글 본문이 그대로 새어나간다. 그래서 "행은 서버가
+--   읽고, 볼 수 없는 사람에게는 서버가 제목·내용을 지워서 내려준다"로 정리했다
+--   (apps/web/src/lib/suggestions.ts).
+-- 아래 revoke 는 심층 방어다 — 나중에 실수로 select 정책이 하나 붙어도 컬럼
+-- 권한이 없어 곧바로 새지는 않는다.
+revoke all on suggestions from anon, authenticated;
+
+-- 조회수 +1. 목록/상세를 전부 service_role 로 읽으므로 이 함수도 서버 전용이다
+-- (익명에게 열어주면 누구나 조회수만 무한히 올릴 수 있다 — exam_papers 의
+-- increment_download_count 와 달리 여기서는 열어줄 이유가 없다).
+create or replace function increment_suggestion_view(p_suggestion_id uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update suggestions set view_count = view_count + 1 where id = p_suggestion_id;
+$$;
+
+revoke all on function increment_suggestion_view(uuid) from public, anon, authenticated;
+grant execute on function increment_suggestion_view(uuid) to service_role;

@@ -31,6 +31,12 @@ export function SiteFooter() {
           <Link href="/membership" className="hover:text-zinc-600 dark:hover:text-zinc-300">
             멤버십 요금제
           </Link>
+          <Link
+            href="/suggestions"
+            className="hover:text-zinc-600 dark:hover:text-zinc-300"
+          >
+            건의게시판
+          </Link>
           <Link href="/terms" className="hover:text-zinc-600 dark:hover:text-zinc-300">
             이용약관
           </Link>

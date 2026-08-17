@@ -15,6 +15,7 @@ export * from "./hangul";
 export * from "./format";
 export * from "./comment-constraints";
 export * from "./comments";
+export * from "./suggestions";
 export * from "./nickname";
 export * from "./search";
 export * from "./streak";
