@@ -23,7 +23,7 @@ import { PRIMARY_NAV } from "@/components/site-nav-items";
 export function SiteHeader({
   user,
 }: {
-  user: { nickname: string } | null | "pending";
+  user: { nickname: string; isAdmin: boolean } | null | "pending";
 }) {
   const pending = user === "pending";
 
@@ -57,7 +57,7 @@ export function SiteHeader({
             <>
               {user ? (
                 <div className="hidden md:block">
-                  <UserMenu nickname={user.nickname} />
+                  <UserMenu nickname={user.nickname} isAdmin={user.isAdmin} />
                 </div>
               ) : (
                 <LoginLink className="hidden rounded-full bg-blue-600 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-700 md:block" />

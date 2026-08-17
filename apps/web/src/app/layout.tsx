@@ -90,12 +90,19 @@ async function StreamedSiteHeader() {
   const { data } = await supabase.auth.getClaims();
   const claims = data?.claims;
 
+  // is_admin()은 DB 왕복이 있는 쿼리라 비로그인 방문자(=대부분의 트래픽)에게는
+  // 아예 부르지 않는다 — 로그인 사용자에 한해서만, 그것도 admins 테이블 이메일
+  // 인덱스 조회 한 번이라 비용이 작다. 위 getClaims()는 로컬 JWT 검증이라 이
+  // 조회와 무관하게 계속 DB를 안 탄다.
+  const isAdmin = claims ? (await supabase.rpc("is_admin")).data === true : false;
+
   const headerUser = claims
     ? {
         nickname:
           (claims.user_metadata?.nickname as string | undefined) ??
           claims.email?.split("@")[0] ??
           "회원",
+        isAdmin,
       }
     : null;
 

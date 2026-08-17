@@ -9,7 +9,7 @@ import { SiteHeader } from "@/components/site-header";
 export function SiteHeaderGate({
   user,
 }: {
-  user: { nickname: string } | null | "pending";
+  user: { nickname: string; isAdmin: boolean } | null | "pending";
 }) {
   const pathname = usePathname();
   // CBT 풀이 화면과 섞어풀기/복습 풀이 화면 둘 다 자체 헤더로 화면을 꽉 채우는

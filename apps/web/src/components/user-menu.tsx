@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ShieldCheck } from "lucide-react";
 import { signOutUser } from "@/app/actions";
 import { SignOutButton } from "@/components/sign-out-button";
 import { ACCOUNT_NAV, avatarInitial } from "@/components/site-nav-items";
@@ -18,7 +18,13 @@ import { ACCOUNT_NAV, avatarInitial } from "@/components/site-nav-items";
 // role="menu"를 쓰지 않는 이유: 그 역할을 붙이면 스크린리더 사용자는 화살표 키
 // 이동을 기대하는데, 여기 항목은 전부 평범한 링크라 Tab 이동이 자연스럽다.
 // 거짓 약속을 하느니 aria-expanded/aria-controls 로 "열고 닫는 패널"이라고만 알린다.
-export function UserMenu({ nickname }: { nickname: string }) {
+export function UserMenu({
+  nickname,
+  isAdmin = false,
+}: {
+  nickname: string;
+  isAdmin?: boolean;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -126,6 +132,19 @@ export function UserMenu({ nickname }: { nickname: string }) {
                 })}
               </div>
             ))}
+
+            {isAdmin && (
+              <div className="mt-1.5 border-t border-zinc-100 pt-1.5 dark:border-zinc-800">
+                <Link
+                  href="/admin/upload"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                >
+                  <ShieldCheck size={16} className="shrink-0 text-zinc-400" />
+                  관리자 페이지
+                </Link>
+              </div>
+            )}
 
             <div className="mt-1.5 border-t border-zinc-100 pt-1.5 dark:border-zinc-800">
               <form action={signOutUser}>
