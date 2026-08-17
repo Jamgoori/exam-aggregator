@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GraduationCap, Menu, X } from "lucide-react";
+import { GraduationCap, Menu, ShieldCheck, X } from "lucide-react";
 import { signOutUser } from "@/app/actions";
 import { SignOutButton } from "@/components/sign-out-button";
 import { LoginLink } from "@/components/login-link";
@@ -17,7 +17,11 @@ import { ACCOUNT_NAV, PRIMARY_NAV } from "@/components/site-nav-items";
 // 그렇다고 예전처럼 "닉네임 + 로그아웃"만 놔두면 시험별·과목별·멤버십으로 가는 길이
 // 푸터 링크밖에 없다. 서랍은 그 둘을 다 푼다 — 헤더는 아이콘 하나만 쓰고, 열면
 // 사이트의 모든 입구가 한 화면에 보인다.
-export function MobileNav({ user }: { user: { nickname: string } | null }) {
+export function MobileNav({
+  user,
+}: {
+  user: { nickname: string; isAdmin: boolean } | null;
+}) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -53,7 +57,7 @@ function MobileNavDrawer({
   user,
   onClose,
 }: {
-  user: { nickname: string } | null;
+  user: { nickname: string; isAdmin: boolean } | null;
   onClose: () => void;
 }) {
   const pathname = usePathname();
@@ -203,6 +207,16 @@ function MobileNavDrawer({
                     </Link>
                   );
                 })}
+                {user.isAdmin && (
+                  <Link
+                    href="/admin/upload"
+                    onClick={onClose}
+                    className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                  >
+                    <ShieldCheck size={17} className="shrink-0 text-zinc-400" />
+                    관리자 페이지
+                  </Link>
+                )}
               </nav>
             </>
           )}
