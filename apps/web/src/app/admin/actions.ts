@@ -122,6 +122,35 @@ export async function uploadExamPaper(
   return { success: true };
 }
 
+export type ReportActionState = { error?: string; success?: boolean };
+
+// 관리 화면(/admin/reports)의 "해결" 토글. 쓰기는 RLS(admin update question_reports)가
+// 최종 방어선이지만, 업로드 액션들과 같은 이유로 여기서도 먼저 관리자인지 확인해
+// 일반 계정에는 폼 제출 자체를 시도할 이유를 주지 않는다.
+export async function setQuestionReportStatus(
+  reportId: string,
+  status: "open" | "resolved",
+): Promise<ReportActionState> {
+  const supabase = await createClient();
+
+  const auth = await requireAdmin(supabase);
+  if ("error" in auth) return { error: auth.error };
+
+  if (status !== "open" && status !== "resolved") {
+    return { error: "잘못된 접근입니다." };
+  }
+
+  const { error } = await supabase
+    .from("question_reports")
+    .update({ status })
+    .eq("id", reportId);
+
+  if (error) return { error: "처리에 실패했어요." };
+
+  revalidatePath("/admin/reports");
+  return { success: true };
+}
+
 export type SaveAnswersState = { error?: string; success?: boolean };
 
 export async function savePaperAnswers(

@@ -359,6 +359,8 @@ export function SubjectWrongNoteQuestions({
                   rows={card.rows}
                   images={card.images}
                   explanationLockNext={lockNext}
+                  paperId={card.paperId}
+                  reportContext="explanation"
                   renderRowActions={(questionNumber) => {
                     const key = `${card.paperId}#${questionNumber}`;
                     return (

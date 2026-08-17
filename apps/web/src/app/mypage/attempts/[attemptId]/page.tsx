@@ -147,6 +147,8 @@ export default async function AttemptWrongNotePage({
                 rows={group.rows}
                 images={group.images}
                 explanationLockNext={`/mypage/attempts/${attemptId}`}
+                paperId={paper?.id}
+                reportContext="explanation"
               />
             ))}
           </div>

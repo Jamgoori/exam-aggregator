@@ -218,6 +218,8 @@ export default async function PaperExplanationsPage({
             explanationsOpen
             showSelection={false}
             eagerImages
+            paperId={hasFullAccess ? paper.id : undefined}
+            reportContext="explanation"
           />
         ))}
       </div>

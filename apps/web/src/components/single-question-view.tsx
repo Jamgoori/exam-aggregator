@@ -36,6 +36,7 @@ export function SingleQuestionView({
   error,
   zoom = 1,
   onPinchZoom,
+  report,
 }: {
   questionIndex: number;
   totalQuestions: number;
@@ -60,6 +61,9 @@ export function SingleQuestionView({
   // 올려보내는 콜백. 손(이동) 모드에서는 스크롤 영역 터치로, 펜/지우개 모드에서는
   // 캔버스 pointer로 잡아 같은 콜백을 호출한다.
   onPinchZoom?: (factor: number) => void;
+  // 모바일 헤더의 문항 번호 옆에 붙는 오류 신고 버튼. lg 이상은 이 헤더 자체가 숨고
+  // cbt-solver의 탭 줄에 별도로 붙으므로, 여기서는 lg 미만 헤더에만 쓰인다.
+  report?: React.ReactNode;
 }) {
   const firstNumber = questions[0]?.number ?? questionIndex + 1;
   const lastNumber = questions[questions.length - 1]?.number ?? firstNumber;
@@ -106,11 +110,12 @@ export function SingleQuestionView({
           공간을 아끼므로 여기서는 숨긴다. 폭이 좁은 모바일에서는 탭 줄에 넣으면
           넘쳐서, 모바일 한정으로 이 자체 헤더를 그대로 쓴다. */}
       <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2 lg:hidden dark:border-zinc-700 dark:bg-zinc-900">
-        <div>
+        <div className="flex items-center gap-1">
           <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
             {firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`}
           </span>
           <span className="text-sm text-zinc-400 dark:text-zinc-600"> / {totalQuestions}</span>
+          {report}
         </div>
         {/* 문제별 풀기 도중에도 언제든 전체 채점할 수 있도록 상단에 제출 버튼을 둔다. */}
         {!submitted && (

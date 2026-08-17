@@ -479,6 +479,89 @@ export async function submitCbtAttempt(input: {
   };
 }
 
+const REPORT_REASONS = ["wrong_answer", "wrong_explanation", "image_issue", "other"] as const;
+export type QuestionReportReason = (typeof REPORT_REASONS)[number];
+export type QuestionReportContext = "explanation" | "cbt";
+const REPORT_MESSAGE_MAX = 500;
+// 문제지에 실제로 이만큼 많은 문항이 나올 일은 없다 — question_number에 터무니없이
+// 큰 값을 넣어 의미 없는 행을 쌓는 것만 걸러내는 느슨한 상한이다.
+const REPORT_QUESTION_NUMBER_MAX = 300;
+// 같은 계정이 한 시간에 이 개수를 넘겨 신고하면, 문항별 중복 방지(유니크 인덱스)를
+// 우회해 서로 다른 문항 번호로 관리자 대기열을 도배할 수 있다. 정상적인 신고는
+// 한 세션에 몇 건을 넘기지 않으므로 넉넉히 잡는다.
+const REPORT_HOURLY_LIMIT = 20;
+
+export type ReportResult = CommentResult;
+
+// 해설/CBT 화면의 "오류 신고" 버튼이 호출한다. 로그인 사용자만 가능(비회원은 누가
+// 신고했는지 특정할 수 없어 도배 방지가 안 됨). 같은 문항을 같은 화면에서 중복
+// 신고하면 question_reports_open_unique 유니크 인덱스가 막고, 그 경우도 사용자
+// 입장에서는 "접수됐다"와 다르지 않으므로 에러 대신 안내 문구로 돌려준다.
+export async function submitQuestionReport(input: {
+  paperId: string;
+  questionNumber: number;
+  context: QuestionReportContext;
+  reason: string;
+  message?: string;
+}): Promise<ReportResult> {
+  const paperId = String(input.paperId ?? "");
+  if (!isUuid(paperId)) return { error: "잘못된 접근입니다." };
+
+  const questionNumber = Number(input.questionNumber);
+  if (
+    !Number.isInteger(questionNumber) ||
+    questionNumber < 1 ||
+    questionNumber > REPORT_QUESTION_NUMBER_MAX
+  ) {
+    return { error: "잘못된 접근입니다." };
+  }
+
+  if (input.context !== "explanation" && input.context !== "cbt") {
+    return { error: "잘못된 접근입니다." };
+  }
+
+  if (!REPORT_REASONS.includes(input.reason as QuestionReportReason)) {
+    return { error: "신고 사유를 선택해주세요." };
+  }
+
+  const message = String(input.message ?? "").trim().slice(0, REPORT_MESSAGE_MAX);
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  // 시간당 한도. RLS의 select 정책(auth.uid() = user_id)이 본인 것만 보게 해주므로
+  // 이 카운트도 자기 신고만 센다 — 다른 사용자 신고 수를 엿볼 수 있는 경로가 아니다.
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { count: recentCount } = await supabase
+    .from("question_reports")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .gte("created_at", oneHourAgo);
+  if ((recentCount ?? 0) >= REPORT_HOURLY_LIMIT) {
+    return { error: "짧은 시간 동안 신고가 너무 많아요. 잠시 후 다시 시도해주세요." };
+  }
+
+  const { error } = await supabase.from("question_reports").insert({
+    user_id: user.id,
+    paper_id: paperId,
+    question_number: questionNumber,
+    context: input.context,
+    reason: input.reason,
+    message: message || null,
+  });
+
+  if (error) {
+    return {
+      error:
+        error.code === "23505"
+          ? "이미 신고한 문항이에요. 확인 후 반영할게요."
+          : "신고 접수에 실패했어요.",
+    };
+  }
+
+  return { success: true };
+}
+
 export type BookmarkResult = CommentResult & { bookmarked?: boolean };
 
 export async function toggleBookmark(paperId: string): Promise<BookmarkResult> {
