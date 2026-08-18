@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionUser } from "@/lib/supabase/session";
 import { recordQuestionResults } from "@/lib/question-status";
+import { recordAttendance } from "@/lib/attendance";
 import { getClientIp } from "@/lib/client-ip";
 import {
   canReplyTo,
@@ -460,6 +461,14 @@ export async function submitCbtAttempt(input: {
     await recordQuestionResults(user.id, paperId, questionResults, "cbt");
   } catch {
     // 무시: 상태 갱신 실패가 채점을 막지 않는다.
+  }
+
+  // 출석 도장(월간 카드 → 멤버십 일수). 채점된 문항 수로만 센다 — 접속이 아니라
+  // 푼 것이 출석이다. 같은 이유로 부가 처리이고, 실패해도 채점을 되돌리지 않는다.
+  try {
+    await recordAttendance(user.id, questionResults.length);
+  } catch {
+    // 무시: 출석 기록 실패가 채점을 막지 않는다.
   }
 
   // 채점에 성공했으니 시작 기록을 지워, 같은 시작 시각으로 다시 제출(replay)해

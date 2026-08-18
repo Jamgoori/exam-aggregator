@@ -19,8 +19,10 @@ import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { ScrollToHash } from "@/components/scroll-to-hash";
 import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-card";
+import { AttendanceCard } from "@/components/attendance-card";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { getDueReviewSummary } from "@/lib/review-queue";
+import { getAttendanceSummary } from "@/lib/attendance";
 import { findUnfinishedDueSession } from "@/lib/review-session";
 import { getReviewSubjectOptions } from "@/lib/review-preferences";
 import { isPremiumMembership, trialDaysLeft, DUE_QUEUE_LIMIT } from "@gongmoa/core";
@@ -192,6 +194,9 @@ export default async function MyPage({
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
 
+  // 월간 출석 카드. 본인 행만 읽으므로(select-own) 세션 클라이언트로 충분하다.
+  const attendance = await getAttendanceSummary(supabase, user.id);
+
   // 오늘의 복습(멤버십 전용). 무료 사용자에게는 요약을 조회하지도 않는다 — 못 누르는
   // 숫자는 압박만 되고, 후보 수집이 이미지 조회까지 도는 무거운 작업이라 값이다.
   // 체험 남은 일수는 관리자에게 보여주지 않는다 — 관리자는 체험이 끝나도 계속 쓸 수
@@ -265,6 +270,8 @@ export default async function MyPage({
           </span>
         </div>
       </div>
+
+      <AttendanceCard {...attendance} />
 
       <MyPageTabs
         initialTab={initialTab}

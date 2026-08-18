@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  attendanceDaysLeft,
   FREE_MEMBERSHIP,
   isPremiumMembership,
   isTrialUnstarted,
@@ -48,6 +49,16 @@ test("trialDaysLeft: 남은 일수 올림, 결제 회원은 null", () => {
   assert.equal(trialDaysLeft(trial({ expiresAt: "2026-03-10T00:00:01Z" }), NOW), 1);
   assert.equal(trialDaysLeft(trial({ expiresAt: "2026-03-01T00:00:00Z" }), NOW), 0);
   assert.equal(trialDaysLeft({ ...trial(), source: "paid" }, NOW), null);
+});
+
+test("attendanceDaysLeft: 출석 보상 기간만 세고, 체험·결제는 null", () => {
+  // 같은 만료일이어도 출처가 다르면 다른 문구를 띄워야 한다 — 출석 보상을 체험으로
+  // 부르면 끝난 체험이 되살아난 것처럼 보인다.
+  assert.equal(attendanceDaysLeft({ ...trial(), source: "attendance" }, NOW), 5);
+  assert.equal(attendanceDaysLeft(trial(), NOW), null);
+  assert.equal(attendanceDaysLeft({ ...trial(), source: "paid" }, NOW), null);
+  // 반대 방향도 막혀 있어야 한다.
+  assert.equal(trialDaysLeft({ ...trial(), source: "attendance" }, NOW), null);
 });
 
 test("isTrialUnstarted: 첫 CBT 채점 때 체험을 켜줄 대상", () => {

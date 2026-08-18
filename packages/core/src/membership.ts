@@ -26,7 +26,20 @@ export const TRIAL_DAYS = 60;
 export const FREE_EXPLANATION_DAILY_PAPERS = 3;
 
 export type MembershipTier = "free" | "premium";
-export type MembershipSource = "trial" | "paid";
+
+// 지금 열려 있는 기간이 어디서 왔는가.
+//   trial      — 가입 시 주는 무료 기간.
+//   paid       — 결제.
+//   attendance — 출석 보상으로 받은 일수(attendance.ts).
+//
+// attendance 를 따로 두는 이유는 화면 문구 때문이다. 출석 보상을 trial 로 두면
+// 체험이 끝난 무료 회원이 1일권을 받는 순간 "무료 체험 중 · 1일 남음"이 뜬다 —
+// 끝난 체험이 되살아난 것처럼 보이고, D-3 복습 경고까지 다시 뜬다.
+//
+// 체험·구독이 아직 남아 있는 동안 받은 출석 일수는 source 를 바꾸지 않는다(그 기간의
+// 성격이 이어지는 것이고, 체험 잔여 안내는 계속 맞아야 한다). 남은 기간이 없는
+// 상태에서 받은 것만 attendance 다. 판정은 grant_attendance_membership 이 한다.
+export type MembershipSource = "trial" | "paid" | "attendance";
 
 export type Membership = {
   tier: MembershipTier;
@@ -54,16 +67,34 @@ export function isPremiumMembership(
   return new Date(membership.expiresAt).getTime() > now.getTime();
 }
 
+// 만료까지 남은 일수(올림). 만료가 없으면 null.
+function expiryDaysLeft(
+  membership: Membership | null | undefined,
+  source: MembershipSource,
+  now: Date,
+): number | null {
+  if (!membership || membership.source !== source || !membership.expiresAt) return null;
+  const ms = new Date(membership.expiresAt).getTime() - now.getTime();
+  if (ms <= 0) return 0;
+  return Math.ceil(ms / (24 * 60 * 60 * 1000));
+}
+
 // 체험 만료까지 남은 일수(올림). 체험이 아니거나 만료가 없으면 null.
 // 만료 D-3 배너처럼 "곧 끊긴다"를 알리는 화면에서 쓴다.
 export function trialDaysLeft(
   membership: Membership | null | undefined,
   now: Date = new Date(),
 ): number | null {
-  if (!membership || membership.source !== "trial" || !membership.expiresAt) return null;
-  const ms = new Date(membership.expiresAt).getTime() - now.getTime();
-  if (ms <= 0) return 0;
-  return Math.ceil(ms / (24 * 60 * 60 * 1000));
+  return expiryDaysLeft(membership, "trial", now);
+}
+
+// 출석 보상으로 열린 기간의 남은 일수(올림). 그 출처가 아니면 null.
+// "무료 체험"이 아니라 "출석 보상"이라고 말해야 하는 화면에서 쓴다.
+export function attendanceDaysLeft(
+  membership: Membership | null | undefined,
+  now: Date = new Date(),
+): number | null {
+  return expiryDaysLeft(membership, "attendance", now);
 }
 
 // 아직 무료 기간을 쓰지 않은 사용자인지(= 지금 켜줄 대상).
@@ -83,7 +114,8 @@ export function membershipFromRow(
   if (!row) return FREE_MEMBERSHIP;
   return {
     tier: row.tier === "premium" ? "premium" : "free",
-    source: row.source === "paid" ? "paid" : "trial",
+    source:
+      row.source === "paid" || row.source === "attendance" ? row.source : "trial",
     startedAt: row.started_at ?? null,
     expiresAt: row.expires_at ?? null,
   };

@@ -14,6 +14,7 @@ import {
   formatWon,
   isPremiumMembership,
   trialDaysLeft,
+  attendanceDaysLeft,
 } from "@gongmoa/core";
 
 export const metadata: Metadata = {
@@ -48,6 +49,8 @@ export default async function MembershipPage({
     : [null, false];
   const premium = admin || isPremiumMembership(membership);
   const daysLeft = admin ? null : trialDaysLeft(membership);
+  // 출석 보상으로 열린 기간은 "체험"이 아니다 — 따로 세어 따로 말한다.
+  const rewardDaysLeft = admin ? null : attendanceDaysLeft(membership);
   // PG 키가 설정된 환경에서만 결제창이 열린다. 키가 없으면 버튼도 안내도 예전처럼
   // "준비 중"으로 남는다 — 계약이 끝나기 전에 이 코드가 배포돼도 안전하게 하려는 것.
   const paymentEnabled = isTossConfigured();
@@ -72,7 +75,13 @@ export default async function MembershipPage({
           <br className="sm:hidden" />
           <span className="text-blue-600 dark:text-blue-400">두 번은 안 틀리게</span>
         </h1>
-        <CurrentStatus premium={premium} admin={admin} daysLeft={daysLeft} loggedIn={!!user} />
+        <CurrentStatus
+          premium={premium}
+          admin={admin}
+          daysLeft={daysLeft}
+          rewardDaysLeft={rewardDaysLeft}
+          loggedIn={!!user}
+        />
       </header>
 
       {/* 요금제 */}
@@ -144,11 +153,14 @@ function CurrentStatus({
   premium,
   admin,
   daysLeft,
+  rewardDaysLeft,
   loggedIn,
 }: {
   premium: boolean;
   admin: boolean;
   daysLeft: number | null;
+  // 출석 보상으로 열린 기간의 남은 일수(그 출처가 아니면 null).
+  rewardDaysLeft: number | null;
   loggedIn: boolean;
 }) {
   if (!loggedIn) {
@@ -171,6 +183,9 @@ function CurrentStatus({
   }
   if (premium && daysLeft != null) {
     return <StatusPill tone="blue">무료 체험 중 · {daysLeft}일 남음</StatusPill>;
+  }
+  if (premium && rewardDaysLeft != null) {
+    return <StatusPill tone="blue">출석 보상 멤버십 · {rewardDaysLeft}일 남음</StatusPill>;
   }
   if (premium) {
     return <StatusPill tone="blue">멤버십 이용 중</StatusPill>;
