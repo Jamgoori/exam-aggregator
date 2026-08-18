@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { CalendarCheck, Check, Sparkles } from "lucide-react";
+import { CalendarCheck, Check, Gift, PartyPopper, Sparkles } from "lucide-react";
 import {
   ATTENDANCE_MILESTONES,
   ATTENDANCE_MIN_QUESTIONS,
   ATTENDANCE_MONTHLY_MAX_DAYS,
+  attendanceMilestoneDates,
   attendanceProgress,
   daysInMonthKey,
+  type AttendanceMilestone,
 } from "@gongmoa/core";
 
 // 마이페이지 월간 출석 카드.
@@ -41,6 +43,10 @@ export function AttendanceCard({
   const granted = new Set(grantedMilestones);
   const progress = attendanceProgress(attended.size);
   const attendedToday = attended.has(today);
+  // 어느 칸에 축하를 그릴지 — 단계를 채운 그 날의 칸이다. 계산은 core 에 있다
+  // (attendanceMilestoneDates): 앱 달력과 같은 칸에 같은 표시가 떠야 한다.
+  const milestoneDates = attendanceMilestoneDates(attendedDates);
+  const todayMilestone = milestoneDates.get(today) ?? null;
 
   const monthLabel = Number(month.slice(5, 7));
   const lastDay = daysInMonthKey(month);
@@ -95,7 +101,7 @@ export function AttendanceCard({
             })}
           </div>
 
-          <div className="grid grid-cols-4 gap-1">
+          <div className="grid grid-cols-5 gap-1">
             {ATTENDANCE_MILESTONES.map((m) => {
               const done = attended.size >= m.days;
               return (
@@ -116,8 +122,13 @@ export function AttendanceCard({
                   >
                     {m.days}일
                   </span>
+                  {/* "+1일"이 아니라 "멤버십 +1일"이라고 적는다. 무엇이 늘어나는지를
+                      쓰지 않으면 포인트·문제 수 같은 다른 걸로 읽힌다 — 이 기능이 파는
+                      건 멤버십 기간이므로 그 단어가 칸마다 보여야 한다.
+                      단계가 다섯이라 좁은 화면에선 한 줄에 안 들어간다. flex-wrap 으로
+                      "멤버십 / +1일" 두 줄로 접히게 두고, 넓으면 한 줄로 붙는다. */}
                   <span
-                    className={`flex items-center gap-0.5 text-[11px] font-semibold ${
+                    className={`flex flex-wrap items-center justify-center gap-x-0.5 text-center text-[10.5px] leading-tight font-semibold ${
                       done
                         ? "text-blue-600 dark:text-blue-400"
                         : "text-zinc-300 dark:text-zinc-600"
@@ -126,7 +137,11 @@ export function AttendanceCard({
                     {/* 지급 완료 표시는 원장(granted)에 실제로 남은 것만 붙인다.
                         단계에 닿았는데 지급이 아직이면(재시도 대기) 체크를 안 띄운다 —
                         받지도 않은 걸 받았다고 하면 문의가 온다. */}
-                    {granted.has(m.days) && <Check size={11} strokeWidth={3} />}+{m.grantDays}일
+                    {granted.has(m.days) && (
+                      <Check size={10} strokeWidth={3} className="shrink-0" />
+                    )}
+                    <span>멤버십</span>
+                    <span>+{m.grantDays}일</span>
                   </span>
                 </div>
               );
@@ -161,16 +176,27 @@ export function AttendanceCard({
               const stamped = attended.has(date);
               const isToday = day === todayDay;
               const future = todayDay > 0 && day > todayDay;
+              // 단계를 채운 날. 도장(파랑) 대신 선물색으로 칠해 달력만 훑어도
+              // "여기서 받았다"가 보이게 한다 — 보상이 단계 막대 안에서만 일어나면
+              // 달력은 출석부일 뿐이고, 며칠을 더 와야 하는지가 실감나지 않는다.
+              const reward = milestoneDates.get(date) ?? null;
               return (
                 <span
                   key={date}
+                  title={
+                    reward
+                      ? `${reward.days}일 달성 — 멤버십 +${reward.grantDays}일`
+                      : undefined
+                  }
                   className={[
                     "flex aspect-square items-center justify-center rounded-lg text-xs tabular-nums",
-                    stamped
-                      ? "bg-blue-500 font-semibold text-white dark:bg-blue-500"
-                      : future
-                        ? "text-zinc-300 dark:text-zinc-700"
-                        : "bg-zinc-50 text-zinc-400 dark:bg-zinc-800/60 dark:text-zinc-500",
+                    reward
+                      ? "bg-gradient-to-br from-amber-400 to-orange-500 font-semibold text-white shadow-sm shadow-amber-500/30"
+                      : stamped
+                        ? "bg-blue-500 font-semibold text-white dark:bg-blue-500"
+                        : future
+                          ? "text-zinc-300 dark:text-zinc-700"
+                          : "bg-zinc-50 text-zinc-400 dark:bg-zinc-800/60 dark:text-zinc-500",
                     // 오늘은 테두리로만 표시한다. 도장과 색으로 겨루면 둘 다 안 읽힌다.
                     isToday && !stamped
                       ? "ring-2 ring-blue-400 dark:ring-blue-500"
@@ -179,16 +205,34 @@ export function AttendanceCard({
                         : "",
                   ].join(" ")}
                 >
-                  {stamped ? <Check size={13} strokeWidth={3} /> : day}
+                  {reward ? (
+                    <Gift size={13} strokeWidth={2.5} />
+                  ) : stamped ? (
+                    <Check size={13} strokeWidth={3} />
+                  ) : (
+                    day
+                  )}
                 </span>
               );
             })}
           </div>
+
+          {/* 달력에 처음 보는 색이 생겼으니 한 줄로 뜻을 붙인다. 받은 날이 하나도
+              없으면 아무 말도 하지 않는다 — 빈 범례는 화면만 길게 만든다. */}
+          {milestoneDates.size > 0 && (
+            <p className="flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+              <span className="flex h-4 w-4 items-center justify-center rounded bg-gradient-to-br from-amber-400 to-orange-500 text-white">
+                <Gift size={10} strokeWidth={2.5} />
+              </span>
+              멤버십을 받은 날이에요
+            </p>
+          )}
         </div>
 
         <TodayLine
           attendedToday={attendedToday}
           todayQuestions={todayQuestions}
+          todayMilestone={todayMilestone}
           daysToNext={progress.daysToNext}
           nextDays={progress.next?.days ?? null}
           nextGrant={progress.next?.grantDays ?? null}
@@ -203,16 +247,43 @@ export function AttendanceCard({
 function TodayLine({
   attendedToday,
   todayQuestions,
+  todayMilestone,
   daysToNext,
   nextDays,
   nextGrant,
 }: {
   attendedToday: boolean;
   todayQuestions: number;
+  todayMilestone: AttendanceMilestone | null;
   daysToNext: number | null;
   nextDays: number | null;
   nextGrant: number | null;
 }) {
+  // 오늘 단계를 채웠다면 그 말이 제일 위다. "오늘 출석 완료" 와 같은 파란 판으로
+  // 두면 여느 날과 구별되지 않는다 — 한 달에 다섯 번뿐인 순간이라 색을 바꾼다.
+  if (todayMilestone) {
+    return (
+      <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 px-4 py-3 dark:border-amber-500/30 dark:from-amber-500/10 dark:to-orange-500/10">
+        <PartyPopper
+          size={17}
+          className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400"
+        />
+        <p className="break-keep text-sm text-zinc-700 dark:text-zinc-200">
+          <b className="font-bold text-amber-700 dark:text-amber-300">축하해요!</b> 오늘로{" "}
+          {todayMilestone.days}일 출석을 채워{" "}
+          <b className="font-semibold">멤버십 +{todayMilestone.grantDays}일</b>을 받았어요.
+          {daysToNext !== null && nextDays !== null && nextGrant !== null && (
+            <>
+              {" "}
+              다음은 {nextDays}일 단계 — {daysToNext}일 더 오시면 멤버십 {nextGrant}일이
+              더 붙어요.
+            </>
+          )}
+        </p>
+      </div>
+    );
+  }
+
   if (!attendedToday) {
     const left = Math.max(0, ATTENDANCE_MIN_QUESTIONS - todayQuestions);
     return (

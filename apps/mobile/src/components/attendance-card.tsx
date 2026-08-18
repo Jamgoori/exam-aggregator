@@ -3,8 +3,10 @@ import {
   ATTENDANCE_MILESTONES,
   ATTENDANCE_MIN_QUESTIONS,
   ATTENDANCE_MONTHLY_MAX_DAYS,
+  attendanceMilestoneDates,
   attendanceProgress,
   daysInMonthKey,
+  type AttendanceMilestone,
 } from "@gongmoa/core";
 import { useColors, type Colors } from "../theme/colors";
 import type { AttendanceSummary } from "../lib/attendance";
@@ -29,6 +31,10 @@ export function AttendanceCard({ summary }: { summary: AttendanceSummary }) {
   const granted = new Set(grantedMilestones);
   const progress = attendanceProgress(attended.size);
   const attendedToday = attended.has(today);
+  // 어느 칸에 축하를 그릴지 — 단계를 채운 그 날의 칸이다. 계산은 core 에 있다
+  // (attendanceMilestoneDates): 웹 달력과 같은 칸에 같은 표시가 떠야 한다.
+  const milestoneDates = attendanceMilestoneDates(attendedDates);
+  const todayMilestone = milestoneDates.get(today) ?? null;
 
   const monthLabel = Number(month.slice(5, 7));
   const lastDay = daysInMonthKey(month);
@@ -159,10 +165,16 @@ export function AttendanceCard({ summary }: { summary: AttendanceSummary }) {
                   >
                     {m.days}일
                   </Text>
+                  {/* "+1일"이 아니라 "멤버십 +1일"이라고 적는다. 무엇이 늘어나는지
+                      쓰지 않으면 포인트·문제 수 같은 다른 걸로 읽힌다 — 이 기능이 파는
+                      건 멤버십 기간이므로 그 단어가 칸마다 보여야 한다.
+                      단계가 다섯이라 한 줄에 안 들어간다. 줄을 직접 나눠 "멤버십 /
+                      +1일" 두 줄로 두면 좁은 기기에서도 글자가 잘리지 않는다. */}
                   <Text
                     style={{
-                      fontSize: 10,
-                      fontWeight: "700",
+                      fontSize: 9,
+                      fontWeight: "600",
+                      textAlign: "center",
                       color: done ? colors.primary : colors.textMuted,
                       opacity: done ? 1 : 0.5,
                     }}
@@ -170,7 +182,18 @@ export function AttendanceCard({ summary }: { summary: AttendanceSummary }) {
                     {/* 지급 완료 표시는 원장(granted)에 실제로 남은 것만 붙인다.
                         단계에 닿았는데 지급이 아직이면 체크를 안 띄운다 — 받지도
                         않은 걸 받았다고 하면 문의가 온다. */}
-                    {granted.has(m.days) ? "✓ " : ""}+{m.grantDays}일
+                    {granted.has(m.days) ? "✓ " : ""}멤버십
+                  </Text>
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      fontWeight: "700",
+                      textAlign: "center",
+                      color: done ? colors.primary : colors.textMuted,
+                      opacity: done ? 1 : 0.5,
+                    }}
+                  >
+                    +{m.grantDays}일
                   </Text>
                 </View>
               );
@@ -203,17 +226,44 @@ export function AttendanceCard({ summary }: { summary: AttendanceSummary }) {
                   key={di}
                   day={day}
                   stamped={day != null && attended.has(dateOf(month, day))}
+                  // 단계를 채운 날. 도장 대신 선물색으로 칠해 달력만 훑어도 "여기서
+                  // 받았다"가 보이게 한다 — 보상이 단계 막대 안에서만 일어나면
+                  // 달력은 출석부일 뿐이고, 며칠을 더 와야 하는지가 실감나지 않는다.
+                  reward={day != null && milestoneDates.has(dateOf(month, day))}
                   isToday={day != null && day === todayDay}
                   future={day != null && todayDay > 0 && day > todayDay}
                 />
               ))}
             </View>
           ))}
+
+          {/* 달력에 처음 보는 색이 생겼으니 한 줄로 뜻을 붙인다. 받은 날이 하나도
+              없으면 아무 말도 하지 않는다 — 빈 범례는 화면만 길게 만든다. */}
+          {milestoneDates.size > 0 && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <View
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: 5,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: REWARD_COLOR,
+                }}
+              >
+                <Text style={{ fontSize: 9, color: "#ffffff" }}>🎁</Text>
+              </View>
+              <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                멤버십을 받은 날이에요
+              </Text>
+            </View>
+          )}
         </View>
 
         <TodayLine
           attendedToday={attendedToday}
           todayQuestions={todayQuestions}
+          todayMilestone={todayMilestone}
           daysToNext={progress.daysToNext}
           nextDays={progress.next?.days ?? null}
           nextGrant={progress.next?.grantDays ?? null}
@@ -222,6 +272,11 @@ export function AttendanceCard({ summary }: { summary: AttendanceSummary }) {
     </View>
   );
 }
+
+// 보상을 받은 날의 색. 도장(강조색)과 겨루지 않게 다른 계열이어야 해서 테마
+// 팔레트(primary/danger)를 쓰지 않고 여기서 고정한다 — 웹의 amber-400~orange-500
+// 그라데이션 자리이고, RN 에는 그라데이션이 없어 중간 색 하나로 대신한다.
+const REWARD_COLOR = "#f59e0b";
 
 function dateOf(month: string, day: number): string {
   return `${month.slice(0, 8)}${String(day).padStart(2, "0")}`;
@@ -236,11 +291,13 @@ function tint(colors: Colors): string {
 function DayCell({
   day,
   stamped,
+  reward,
   isToday,
   future,
 }: {
   day: number | null;
   stamped: boolean;
+  reward: boolean;
   isToday: boolean;
   future: boolean;
 }) {
@@ -255,7 +312,13 @@ function DayCell({
         alignItems: "center",
         justifyContent: "center",
         borderRadius: 9,
-        backgroundColor: stamped ? colors.primary : future ? "transparent" : colors.card,
+        backgroundColor: reward
+          ? REWARD_COLOR
+          : stamped
+            ? colors.primary
+            : future
+              ? "transparent"
+              : colors.card,
         // 오늘은 테두리로만 표시한다. 도장과 색으로 겨루면 둘 다 안 읽힌다.
         //
         // 도장이 찍힌 날이 오늘이면 테두리를 강조색으로 두면 배경과 같은 색이라 아예
@@ -277,7 +340,7 @@ function DayCell({
           opacity: future ? 0.45 : 1,
         }}
       >
-        {stamped ? "✓" : day}
+        {reward ? "🎁" : stamped ? "✓" : day}
       </Text>
     </View>
   );
@@ -288,12 +351,14 @@ function DayCell({
 function TodayLine({
   attendedToday,
   todayQuestions,
+  todayMilestone,
   daysToNext,
   nextDays,
   nextGrant,
 }: {
   attendedToday: boolean;
   todayQuestions: number;
+  todayMilestone: AttendanceMilestone | null;
   daysToNext: number | null;
   nextDays: number | null;
   nextGrant: number | null;
@@ -304,6 +369,31 @@ function TodayLine({
     paddingHorizontal: 12,
     paddingVertical: 10,
   } as const;
+
+  // 오늘 단계를 채웠다면 그 말이 제일 위다. "오늘 출석 완료" 와 같은 색으로 두면
+  // 여느 날과 구별되지 않는다 — 한 달에 다섯 번뿐인 순간이라 색을 바꾼다.
+  if (todayMilestone) {
+    return (
+      <View
+        style={{
+          ...box,
+          backgroundColor: `${REWARD_COLOR}1f`,
+          borderWidth: 1,
+          borderColor: `${REWARD_COLOR}59`,
+        }}
+      >
+        <Text style={{ fontSize: 13, color: colors.text, lineHeight: 19 }}>
+          🎉 <Text style={{ fontWeight: "700" }}>축하해요!</Text> 오늘로{" "}
+          {todayMilestone.days}일 출석을 채워{" "}
+          <Text style={{ fontWeight: "700" }}>멤버십 +{todayMilestone.grantDays}일</Text>을
+          받았어요.
+          {daysToNext !== null && nextDays !== null && nextGrant !== null
+            ? ` 다음은 ${nextDays}일 단계 — ${daysToNext}일 더 오시면 멤버십 ${nextGrant}일이 더 붙어요.`
+            : ""}
+        </Text>
+      </View>
+    );
+  }
 
   if (!attendedToday) {
     const left = Math.max(0, ATTENDANCE_MIN_QUESTIONS - todayQuestions);

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CalendarCheck, X } from "lucide-react";
 import { createDueReviewSession, getReviewNudge } from "@/app/mypage/wrong-notes/actions";
 import { srsDayIndex } from "@gongmoa/core";
+import { claimHomePopup } from "@/lib/home-popup";
 
 // 로그인하고 홈에 들어왔을 때 "복습부터" 하도록 유도하는 모달.
 //
@@ -57,6 +58,9 @@ export function ReviewNudgeModal() {
     getReviewNudge()
       .then((res) => {
         if (!alive || res.todayCount <= 0) return;
+        // 홈 팝업은 한 화면에 하나만 뜬다(lib/home-popup.ts). 자리를 못 잡으면 아무
+        // 기록도 남기지 않고 물러나, 다음 방문에 다시 기회를 얻는다.
+        if (!claimHomePopup()) return;
         // 띄우는 순간 "오늘 봤다"로 기록한다. 닫기를 안 누르고 나가도 같은 날
         // 다시 뜨면 안 된다.
         markSeen();

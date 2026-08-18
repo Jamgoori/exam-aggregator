@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { TRIAL_DAYS } from "@gongmoa/core";
+import { claimHomePopup } from "@/lib/home-popup";
 
 // 홈에 들어왔을 때 뜨는 "아직 개발 중" 안내. 로그인 여부는 보지 않는다 —
 // 처음 들른 비회원일수록 "화면이 계속 바뀐다"와 "지금은 전부 무료"를 먼저 알아야
@@ -77,6 +78,9 @@ export function BetaNoticeModal() {
   useEffect(() => {
     if (shouldSkip()) return;
     const id = window.setTimeout(() => {
+      // 홈 팝업은 한 화면에 하나만 뜬다(lib/home-popup.ts). 자리를 못 잡으면 아무
+      // 기록도 남기지 않고 물러나, 다음 방문에 다시 기회를 얻는다.
+      if (!claimHomePopup()) return;
       // 띄우는 순간 "이번 방문에 봤다"로 기록한다. 닫기를 안 누르고 다른 데로 가도
       // 홈에 돌아올 때마다 다시 뜨면 안 된다.
       markShown();
