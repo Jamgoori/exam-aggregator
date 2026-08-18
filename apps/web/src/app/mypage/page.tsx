@@ -27,7 +27,12 @@ import { getDueReviewSummary } from "@/lib/review-queue";
 import { getAttendanceSummary } from "@/lib/attendance";
 import { findUnfinishedDueSession } from "@/lib/review-session";
 import { getReviewSubjectOptions } from "@/lib/review-preferences";
-import { isPremiumMembership, trialDaysLeft, DUE_QUEUE_LIMIT } from "@gongmoa/core";
+import {
+  isPremiumMembership,
+  membershipDaysLeft,
+  trialDaysLeft,
+  DUE_QUEUE_LIMIT,
+} from "@gongmoa/core";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@gongmoa/core";
 import { computeStreakDays, streakTier } from "@/lib/streak";
@@ -75,6 +80,46 @@ function computeAttemptRounds(myAttempts: MyAttempt[]) {
       .forEach((a, i) => roundNumberByAttemptId.set(a.id, i + 1));
   }
   return { attemptsByPaper, roundNumberByAttemptId };
+}
+
+// 마이페이지 헤더의 멤버십 배지. 남은 CBT 응시 수·연속 학습일 옆에 "지금 내
+// 멤버십이 며칠 남았는지"를 바로 보여준다 — 그걸 알려면 지금까지는 요금제 페이지나
+// 출석 탭까지 가야 했다. 눌러도 항상 /membership 으로 보낸다: 남은 기간을 늘리려면
+// (재결제·요금제 확인) 결국 그리로 가야 하고, 자리를 다르게 두면 상태에 따라 어디로
+// 갈지 학습해야 한다.
+function MembershipBadge({
+  admin,
+  premium,
+  daysLeft,
+}: {
+  admin: boolean;
+  premium: boolean;
+  // 며칠 남았는지(출처 무관). 무기한(정기결제)이거나 계산 대상이 아니면 null.
+  daysLeft: number | null;
+}) {
+  // 관리자는 멤버십과 무관하게 모든 기능을 쓴다 — "N일 남음"을 보여주면 만료가
+  // 있는 것처럼 보여 거짓말이 된다.
+  const label = admin
+    ? "관리자 · 모든 기능"
+    : premium && daysLeft != null
+      ? `멤버십 ${daysLeft}일 남음`
+      : premium
+        ? "멤버십 이용 중"
+        : "무료 회원";
+  const tone =
+    premium && daysLeft != null && daysLeft <= 3
+      ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300"
+      : premium
+        ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300"
+        : "border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400";
+  return (
+    <Link
+      href="/membership"
+      className={`rounded-full border px-2.5 py-1 text-xs font-bold whitespace-nowrap hover:opacity-80 ${tone}`}
+    >
+      {label}
+    </Link>
+  );
 }
 
 export default async function MyPage({
@@ -155,6 +200,11 @@ export default async function MyPage({
     isAdminUser(supabase),
   ]);
   const premium = admin || isPremiumMembership(membership);
+  // 헤더 배지용 "며칠 남았는지". 체험·결제·출석 보상을 가리지 않는다 — 여기서는
+  // 왜 프리미엄인지가 아니라 언제까지인지만 말하면 된다(출처별 문구는 /membership
+  // 의 CurrentStatus 가 이미 맡고 있다). 관리자는 멤버십과 무관하게 프리미엄이라
+  // "N일 남음"을 보여주면 거짓말이 된다.
+  const daysLeft = admin ? null : membershipDaysLeft(membership);
 
   // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고, 문항별 오답
   // 행만 추가로 조회한다. 무료 회원에게는 돌리지 않는다 — 이 집계가 주는 건 과목
@@ -237,7 +287,10 @@ export default async function MyPage({
         <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">
           ← 홈으로
         </Link>
-        <h1 className="mt-2 text-3xl font-semibold">{nickname}님의 마이페이지</h1>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <h1 className="text-3xl font-semibold">{nickname}님의 마이페이지</h1>
+          <MembershipBadge admin={admin} premium={premium} daysLeft={daysLeft} />
+        </div>
         <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-500">
           <Link href="/mypage/edit" className="text-blue-600 hover:underline dark:text-blue-400">
             내 정보 수정
