@@ -71,7 +71,6 @@ const SHELL =
 export function ReviewDueCard({
   premium,
   todayCount,
-  deferredCount,
   newCount,
   pendingTotal,
   overdueTotal,
@@ -104,7 +103,6 @@ export function ReviewDueCard({
   // 흔한데(신규 승격 + 상한 초과 + 대기 풀), 그러면 카드가 세 줄 길어진다.
   const compactMeta = [
     newCount > 0 ? `처음 ${newCount}` : null,
-    deferredCount > 0 ? `내일 ${deferredCount}` : null,
     pendingTotal > 0 ? `대기 ${pendingTotal}` : null,
   ].filter(Boolean) as string[];
 
@@ -197,11 +195,6 @@ export function ReviewDueCard({
             {newCount > 0 && (
               <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
                 그중 {newCount}문항은 오늘 처음 복습해요
-              </p>
-            )}
-            {deferredCount > 0 && (
-              <p className="text-xs text-blue-700/60 dark:text-blue-300/50">
-                {deferredCount}문항은 내일 이어서 — 오늘치만 끝내면 돼요
               </p>
             )}
             {/* 승격 안 된 오답은 사라진 게 아니다. 1회독 중이면 이 숫자가 수백까지

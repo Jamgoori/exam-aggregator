@@ -21,9 +21,11 @@ import { ACCOUNT_NAV, avatarInitial } from "@/components/site-nav-items";
 export function UserMenu({
   nickname,
   isAdmin = false,
+  isPremium = false,
 }: {
   nickname: string;
   isAdmin?: boolean;
+  isPremium?: boolean;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -94,7 +96,10 @@ export function UserMenu({
           <div className="flex items-center gap-2.5 border-b border-zinc-100 bg-gradient-to-b from-blue-50/70 to-transparent px-3.5 py-3 dark:border-zinc-800 dark:from-blue-950/25">
             <Avatar nickname={nickname} size="lg" />
             <div className="min-w-0">
-              <p className="truncate text-sm font-bold">{nickname}님</p>
+              <p className="flex items-center gap-1.5 truncate text-sm font-bold">
+                {nickname}님
+                {isPremium && <MembershipBadge />}
+              </p>
               <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                 오늘도 한 문제씩
               </p>
@@ -155,6 +160,16 @@ export function UserMenu({
         </div>
       )}
     </div>
+  );
+}
+
+// 계정 메뉴·모바일 서랍에서 닉네임 옆에 붙이는 멤버십 배지. 체험 중인지 결제
+// 회원인지는 여기서 구분하지 않는다 — "지금 유료 기능을 쓸 수 있는가" 하나만 본다.
+export function MembershipBadge() {
+  return (
+    <span className="shrink-0 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+      멤버십
+    </span>
   );
 }
 

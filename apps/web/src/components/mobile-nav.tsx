@@ -8,7 +8,7 @@ import { GraduationCap, Menu, ShieldCheck, X } from "lucide-react";
 import { signOutUser } from "@/app/actions";
 import { SignOutButton } from "@/components/sign-out-button";
 import { LoginLink } from "@/components/login-link";
-import { Avatar } from "@/components/user-menu";
+import { Avatar, MembershipBadge } from "@/components/user-menu";
 import { ACCOUNT_NAV, PRIMARY_NAV } from "@/components/site-nav-items";
 
 // 모바일 메뉴(햄버거 → 오른쪽에서 밀려 나오는 서랍).
@@ -20,7 +20,7 @@ import { ACCOUNT_NAV, PRIMARY_NAV } from "@/components/site-nav-items";
 export function MobileNav({
   user,
 }: {
-  user: { nickname: string; isAdmin: boolean } | null;
+  user: { nickname: string; isAdmin: boolean; isPremium: boolean } | null;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -57,7 +57,7 @@ function MobileNavDrawer({
   user,
   onClose,
 }: {
-  user: { nickname: string; isAdmin: boolean } | null;
+  user: { nickname: string; isAdmin: boolean; isPremium: boolean } | null;
   onClose: () => void;
 }) {
   const pathname = usePathname();
@@ -123,7 +123,10 @@ function MobileNavDrawer({
             >
               <Avatar nickname={user.nickname} size="lg" />
               <div className="min-w-0">
-                <p className="truncate text-sm font-bold">{user.nickname}님</p>
+                <p className="flex items-center gap-1.5 truncate text-sm font-bold">
+                  {user.nickname}님
+                  {user.isPremium && <MembershipBadge />}
+                </p>
                 <p className="text-[11px] text-blue-600 dark:text-blue-400">
                   마이페이지 보기
                 </p>
