@@ -25,8 +25,12 @@
 // 호출은 다른 과목으로 넘어간다. remaining 은 일반 모드에서 항상 null 이다 (아래
 // "잔여량을 세지 않는다" 참고).
 //
-// --subject: 그 과목만 본다. 넘어가지 않는다 — 바닥나면 done: true 로 끝난다. 사람이
-//   한 과목만 손볼 때 쓰는 핀이고, 루틴은 쓰지 않는다.
+// --subject: 그 과목부터 시작한다. **가둬 두는 것이 아니다** — 그 과목이 바닥나면
+//   같은 호출 안에서 나머지 과목으로 넘어간다. 한 과목만 보려면 --only 를 함께 준다.
+//   (루틴 프롬프트가 옛 방식대로 --subject 를 이어 붙이더라도 배치가 그 과목에서
+//   멈추지 않게 하려는 것이다. 루틴은 이 플래그를 쓸 이유가 없다.)
+// --only: --subject 와 함께 쓴다. 그 과목만 보고, 바닥나면 done: true 로 끝낸다.
+//   사람이 한 과목만 손볼 때 쓴다.
 // --exclude: 그 과목들을 대상에서 뺀다. 정본 목록에 붙을 데가 없어 매 회차 같은 문항이
 //   되돌아오는 과목(과목이 잘못 붙은 잔여 등)을 소유자가 손볼 때까지 건너뛴다.
 //
@@ -64,11 +68,12 @@ async function main() {
 
   // 무인 루틴이 부르는 스크립트라 애매한 입력은 즉시 에러로 끝낸다. 조용히 다른
   // 모드로 굴러가면 엉뚱한 과목을 갈아엎는다.
-  const knownFlags = new Set(["limit", "subject", "exclude", "mine"]);
+  const knownFlags = new Set(["limit", "subject", "only", "exclude", "mine"]);
   for (const key of Object.keys(args)) {
     if (!knownFlags.has(key)) {
       console.error(
-        `알 수 없는 플래그: --${key} (지원: --limit N, --subject 이름, --exclude 이름,이름, --mine)`,
+        `알 수 없는 플래그: --${key} ` +
+          "(지원: --limit N, --subject 이름, --only, --exclude 이름,이름, --mine)",
       );
       process.exit(1);
     }
@@ -84,6 +89,15 @@ async function main() {
     process.exit(1);
   }
   const subjectFilter = typeof args["subject"] === "string" ? args["subject"] : null;
+  const only = "only" in args;
+  if (only && args["only"] !== true) {
+    console.error("--only 는 값을 받지 않습니다.");
+    process.exit(1);
+  }
+  if (only && !subjectFilter) {
+    console.error("--only 는 --subject 와 함께 씁니다.");
+    process.exit(1);
+  }
   const excluded = new Set(
     typeof args["exclude"] === "string"
       ? args["exclude"].split(",").map((n) => n.trim()).filter(Boolean)
@@ -125,11 +139,18 @@ async function main() {
   }
   let targets = subjects ?? [];
   if (subjectFilter) {
-    targets = targets.filter((s) => s.name === subjectFilter);
-    if (targets.length === 0) {
+    if (!targets.some((s) => s.name === subjectFilter)) {
       console.error(`과목을 찾을 수 없습니다: ${subjectFilter}`);
       process.exit(1);
     }
+    // --only 가 아니면 가두지 않고 순서만 앞으로 당긴다. 지정한 과목이 바닥나면
+    // 아래 훑기가 그대로 다음 과목으로 넘어간다.
+    targets = only
+      ? targets.filter((s) => s.name === subjectFilter)
+      : [
+          ...targets.filter((s) => s.name === subjectFilter),
+          ...targets.filter((s) => s.name !== subjectFilter),
+        ];
   }
 
   if (excluded.size > 0) {
@@ -222,7 +243,7 @@ async function main() {
         done: true,
         reason: mine
           ? "정본 목록이 없는 과목 중 해설이 있는 과목이 없음"
-          : subjectFilter
+          : only
             ? `${subjectFilter} 에 정본 목록이 없다`
             : "정본 목록이 있는 과목이 없다",
       }),
@@ -292,6 +313,7 @@ async function main() {
     // 아무도 못 채우면 그중 제일 많이 나온 과목을 쓴다(끝물이라 그런 것이니 그대로
     // 처리하면 된다).
     let probeErrors = 0;
+    let pinnedEmpty = false;
     let best = null;
     for (const candidate of pending) {
       const got = await fetchRange(candidate, 0, limit - 1);
@@ -299,7 +321,10 @@ async function main() {
         probeErrors++;
         continue;
       }
-      if (got.length === 0) continue;
+      if (got.length === 0) {
+        if (candidate.name === subjectFilter) pinnedEmpty = true;
+        continue;
+      }
       if (!best || got.length > best.rows.length) best = { subject: candidate, rows: got };
       if (got.length >= limit) break;
     }
@@ -313,12 +338,15 @@ async function main() {
       console.log(
         JSON.stringify({
           done: true,
-          reason: subjectFilter
+          reason: only
             ? `${subjectFilter} 의 해설에 concept_id 가 모두 붙음`
             : "정본 목록이 있는 과목의 해설에 concept_id 가 모두 붙음",
         }),
       );
       return;
+    }
+    if (pinnedEmpty && best.subject.name !== subjectFilter) {
+      console.error(`${subjectFilter} 에는 미분류 해설이 없다. 다음 과목으로 넘어간다: ${best.subject.name}`);
     }
     subject = best.subject;
     rows = best.rows;
