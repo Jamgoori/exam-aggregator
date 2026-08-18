@@ -1,5 +1,6 @@
 import {
   BookOpenCheck,
+  CalendarCheck,
   Crown,
   FileStack,
   Library,
@@ -62,6 +63,16 @@ export const PRIMARY_NAV: NavItem[] = [
     hint: "틀린 문제 복습하기",
   },
   {
+    href: "/mypage?tab=attendance",
+    label: "출석체크",
+    icon: CalendarCheck,
+    // ?tab=attendance 는 경로가 /mypage 그대로라 활성 판별을 걸 수 없다(계정 메뉴의
+    // 즐겨찾기 항목과 같은 처리). 문제를 풀면 서버가 자동으로 도장을 찍으므로 이
+    // 항목은 "그 결과를 보러 가는" 링크다.
+    match: () => false,
+    hint: "출석 채우고 멤버십 받기",
+  },
+  {
     href: "/membership",
     label: "멤버십",
     icon: Crown,
@@ -109,8 +120,10 @@ export const ACCOUNT_NAV: NavItem[][] = [
       match: (p) => p.startsWith("/mypage/edit"),
     },
     // 건의게시판은 계정 메뉴에 둔다 — 메뉴바 본줄(PRIMARY_NAV)은 "자료를 찾는"
-    // 흐름이라 성격이 다르고, 다섯 번째 항목을 넣으면 태블릿 폭에서 줄이 넘친다.
-    // 비회원도 목록은 볼 수 있게 푸터에도 같은 링크가 있다(site-footer.tsx).
+    // 흐름이라 성격이 다르고, 지금도 이미 5개(기출문제·과목별·오답노트·출석체크·
+    // 멤버십)라 여기 하나만 더 넣어도 768px(md) 폭에서 줄이 넘친다(실측: 항목 라벨이
+    // 두 줄로 접힌다). 비회원도 목록은 볼 수 있게 푸터에도 같은 링크가 있다
+    // (site-footer.tsx).
     {
       href: "/suggestions",
       label: "건의게시판",

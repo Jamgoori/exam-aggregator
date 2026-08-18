@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 
 const TABS = [
+  { key: "attendance", label: "출석체크" },
   { key: "wrong-notes", label: "오답노트" },
   { key: "history", label: "내 시험 기록" },
   { key: "bookmarks", label: "즐겨찾기" },
@@ -27,11 +28,13 @@ function toTabKey(value: string | null | undefined): MyPageTabKey | null {
 // 그래서 진짜 정본은 URL 의 ?tab= 으로 두고, state 는 그 값을 따라간다.
 export function MyPageTabs({
   initialTab,
+  attendance,
   bookmarks,
   history,
   wrongNotes,
 }: {
   initialTab: MyPageTabKey;
+  attendance: ReactNode;
   bookmarks: ReactNode;
   history: ReactNode;
   wrongNotes: ReactNode;
@@ -84,6 +87,9 @@ export function MyPageTabs({
         ))}
       </div>
 
+      <div className={activeTab === "attendance" ? "contents" : "hidden"}>
+        {attendance}
+      </div>
       <div className={activeTab === "wrong-notes" ? "contents" : "hidden"}>
         {wrongNotes}
       </div>
