@@ -67,13 +67,18 @@ export function isPremiumMembership(
   return new Date(membership.expiresAt).getTime() > now.getTime();
 }
 
-// 만료까지 남은 일수(올림). 만료가 없으면 null.
+// 만료까지 남은 일수(올림). 만료가 없으면 null. source 를 주면 그 출처일 때만 계산한다
+// (trialDaysLeft·attendanceDaysLeft 처럼 "이 화면은 체험/보상일 때만 말한다"는 쪽).
+// source 를 생략하면 출처를 가리지 않는다 — 결제든 체험이든 출석 보상이든, 지금 열려
+// 있는 기간이 며칠 남았는지만 궁금한 화면(마이페이지 헤더 배지 등)이 쓴다.
 function expiryDaysLeft(
   membership: Membership | null | undefined,
-  source: MembershipSource,
   now: Date,
+  source?: MembershipSource,
 ): number | null {
-  if (!membership || membership.source !== source || !membership.expiresAt) return null;
+  if (!membership) return null;
+  if (source && membership.source !== source) return null;
+  if (!membership.expiresAt) return null;
   const ms = new Date(membership.expiresAt).getTime() - now.getTime();
   if (ms <= 0) return 0;
   return Math.ceil(ms / (24 * 60 * 60 * 1000));
@@ -85,7 +90,7 @@ export function trialDaysLeft(
   membership: Membership | null | undefined,
   now: Date = new Date(),
 ): number | null {
-  return expiryDaysLeft(membership, "trial", now);
+  return expiryDaysLeft(membership, now, "trial");
 }
 
 // 출석 보상으로 열린 기간의 남은 일수(올림). 그 출처가 아니면 null.
@@ -94,7 +99,19 @@ export function attendanceDaysLeft(
   membership: Membership | null | undefined,
   now: Date = new Date(),
 ): number | null {
-  return expiryDaysLeft(membership, "attendance", now);
+  return expiryDaysLeft(membership, now, "attendance");
+}
+
+// 지금 열려 있는 멤버십 기간의 남은 일수(올림) — 출처(체험·결제·출석 보상)를 가리지
+// 않는다. 무료 회원이거나(에초에 premium 이 아니거나) 만료 없는 프리미엄(정기결제)이면
+// null. "얼마 남았는지"만 한 줄로 보여주는 화면(마이페이지 헤더 배지)이 쓰고, "왜
+// 남았는지"까지 말해야 하는 화면은 위 두 함수를 따로 쓴다.
+export function membershipDaysLeft(
+  membership: Membership | null | undefined,
+  now: Date = new Date(),
+): number | null {
+  if (!membership || membership.tier !== "premium") return null;
+  return expiryDaysLeft(membership, now);
 }
 
 // 아직 무료 기간을 쓰지 않은 사용자인지(= 지금 켜줄 대상).

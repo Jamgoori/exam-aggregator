@@ -5,7 +5,6 @@ import {
   ATTENDANCE_MONTHLY_MAX_DAYS,
 } from "@gongmoa/core";
 import { loadOgFonts } from "@/lib/og-font";
-import { SITE_NAME } from "@/lib/site-url";
 
 // 홈 팝업에 뜨는 출석 이벤트 광고 — HTML 이 아니라 **PNG 한 장**이다.
 //
@@ -23,9 +22,10 @@ import { SITE_NAME } from "@/lib/site-url";
 // 그리는 방식은 OG 카드(lib/og-card.tsx)와 같다: satori 라 flexbox 만 쓰고(grid 없음),
 // 한글은 Google Fonts 서브셋을 받아 넣는다.
 
-// 세로형. 카카오·토스류 이벤트 팝업이 쓰는 4:5 비율이고, 실제로는 CSS 로 360px
-// 폭에 놓이므로 2배(720)로 그려 고해상도 화면에서도 글자가 뭉개지지 않게 한다.
-export const PROMO_SIZE = { width: 720, height: 900 };
+// 세로형. 카카오·토스류 이벤트 팝업이 쓰는 4:5 비율에 가깝게 잡되, 바닥의 잔칙·출처
+// 문구를 뺀 만큼 낮췄다(예전 900 → 792). 실제로는 CSS 로 360px 폭에 놓이므로 2배로
+// 그려 고해상도 화면에서도 글자가 뭉개지지 않게 한다.
+export const PROMO_SIZE = { width: 720, height: 792 };
 export const PROMO_CONTENT_TYPE = "image/png";
 
 const INK = "#0f172a";
@@ -38,11 +38,9 @@ export async function renderAttendancePromoCard() {
   const title1 = "매일 풀면,";
   const title2 = "멤버십이 늘어나요";
   const lead = `하루 ${ATTENDANCE_MIN_QUESTIONS}문항만 풀면 그날 출석`;
-  const footerNote = `문제를 푼 날만 출석으로 인정돼요 · 매월 1일 초기화`;
   const maxLine = `한 달이면 멤버십 최대 ${ATTENDANCE_MONTHLY_MAX_DAYS}일`;
   const free = "무료";
   const membership = "멤버십";
-  const site = "gongmoa.kr";
 
   const fonts = await loadOgFonts(
     [
@@ -50,12 +48,9 @@ export async function renderAttendancePromoCard() {
       title1,
       title2,
       lead,
-      footerNote,
       maxLine,
       free,
       membership,
-      site,
-      SITE_NAME,
       // 단계 칸에 실제로 그려지는 글자("5일", "+1일" …)
       ATTENDANCE_MILESTONES.map((m) => `${m.days}일+${m.grantDays}일`).join(""),
     ].join(""),
@@ -192,6 +187,7 @@ export async function renderAttendancePromoCard() {
               justifyContent: "center",
               gap: 14,
               marginTop: 34,
+              marginBottom: 8,
               padding: "26px 20px",
               borderRadius: 24,
               backgroundColor: "#eff6ff",
@@ -213,32 +209,6 @@ export async function renderAttendancePromoCard() {
             </span>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              marginTop: 20,
-              fontSize: 21,
-              color: MUTED,
-            }}
-          >
-            {footerNote}
-          </div>
-
-          {/* 바닥: 누가 하는 이벤트인지. 광고는 주인이 보여야 광고다. */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 12,
-              marginTop: "auto",
-              paddingTop: 28,
-            }}
-          >
-            <span style={{ fontSize: 30, fontWeight: 700, color: BRAND }}>{SITE_NAME}</span>
-            <span style={{ fontSize: 24, color: MUTED }}>{site}</span>
-          </div>
         </div>
       </div>
     ),

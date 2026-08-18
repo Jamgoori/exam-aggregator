@@ -27,7 +27,12 @@ import { getDueReviewSummary } from "@/lib/review-queue";
 import { getAttendanceSummary } from "@/lib/attendance";
 import { findUnfinishedDueSession } from "@/lib/review-session";
 import { getReviewSubjectOptions } from "@/lib/review-preferences";
-import { isPremiumMembership, trialDaysLeft, DUE_QUEUE_LIMIT } from "@gongmoa/core";
+import {
+  isPremiumMembership,
+  membershipDaysLeft,
+  trialDaysLeft,
+  DUE_QUEUE_LIMIT,
+} from "@gongmoa/core";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@gongmoa/core";
 import { computeStreakDays, streakTier } from "@/lib/streak";
@@ -75,6 +80,115 @@ function computeAttemptRounds(myAttempts: MyAttempt[]) {
       .forEach((a, i) => roundNumberByAttemptId.set(a.id, i + 1));
   }
   return { attemptsByPaper, roundNumberByAttemptId };
+}
+
+// 만료일을 "9월 29일까지" 로. 해가 바뀌면 연도까지 적는다 — 12월에 보는 "1월 5일"이
+// 올해인지 내년인지 헷갈리면 남은 일수를 다시 세게 된다.
+//
+// 타임존을 반드시 명시한다: 안 하면 서버는 UTC, 브라우저는 KST 로 그려 날짜가 하루
+// 어긋난 채 hydration 경고가 난다(payments/page.tsx 의 formatDateTime 과 같은 이유).
+//
+// now 를 인자로 받는 이유(Cache Components): 서버 컴포넌트 안에서 요청 데이터를 읽기
+// 전에 new Date() 를 부르면 Next 가 프리렌더를 거부한다. 그래서 "지금"을 읽는 일은
+// 이미 searchParams·쿠키를 읽은 페이지 본문에서 한 번만 하고, 아래 타일에는 다 만든
+// 문자열만 넘긴다 — 타일은 시간을 모르는 순수 컴포넌트로 둔다.
+function formatExpiry(iso: string, now: Date): string {
+  const KST = "Asia/Seoul";
+  const year = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: KST }).slice(0, 4);
+  const expiry = new Date(iso);
+  return expiry.toLocaleDateString("ko-KR", {
+    timeZone: KST,
+    ...(year(expiry) === year(now) ? {} : { year: "numeric" }),
+    month: "long",
+    day: "numeric",
+  });
+}
+
+// 요약 타일 줄(CBT 응시·연속 학습·남은 오답) 옆에 붙는 멤버십 칸.
+//
+// 왜 제목 옆 배지가 아니라 타일인가: 사용자가 "내 숫자"를 찾는 곳이 이 줄이다.
+// 제목 옆의 작은 알약은 장식으로 읽혀 그냥 지나치는데, 멤버십 잔여일은 지나치면
+// 안 되는 값이다 — 모르고 있다가 끊기면 그건 서비스 잘못이 된다.
+//
+// 적는 건 둘뿐이다: 며칠 남았나(숫자)와 언제까지인가(날짜). "42일 남음"만 있으면
+// 달력을 열어 직접 세야 한다.
+//
+// 기간의 출처(무료 체험·출석 보상·결제)는 일부러 적지 않는다. 사용자가 이 칸에서
+// 알고 싶은 건 "언제까지 쓰나" 하나이고, 출처는 그 답을 바꾸지 않는다 — 궁금하면
+// 눌러서 요금제 페이지(CurrentStatus)에서 볼 수 있다.
+//
+// 만료가 가까우면(D-7) 색을 바꾼다. 끊기기 전에 한 번은 눈에 걸려야 한다는 게
+// 이 칸의 존재 이유다 — 평상시엔 조용하고, 급할 때만 목소리를 낸다.
+const MEMBERSHIP_SOON_DAYS = 7;
+
+function MembershipTile({
+  admin,
+  premium,
+  daysLeft,
+  expiryLabel,
+}: {
+  admin: boolean;
+  premium: boolean;
+  // 며칠 남았는지(출처 무관). 무기한이거나 무료 회원이면 null.
+  daysLeft: number | null;
+  // "9월 29일" — 페이지 본문에서 이미 만들어 넘긴다(위 formatExpiry 주석 참고).
+  expiryLabel: string | null;
+}) {
+  const soon = daysLeft != null && daysLeft <= MEMBERSHIP_SOON_DAYS;
+
+  // 관리자는 멤버십과 무관하게 모든 기능을 쓴다 — 만료가 있는 것처럼 보이면 거짓말이다.
+  //
+  // note 가 null 이면 아랫줄을 아예 안 그린다. 무료 회원에게 "출석체크로 받으세요"
+  // 같은 권유를 붙이지 않는 건, 이 칸이 상태를 알려주는 자리이지 파는 자리가
+  // 아니기 때문이다 — 출석으로 늘리는 길은 출석 탭·홈 팝업이 이미 안내한다.
+  const { value, note }: { value: string; note: string | null } = admin
+    ? { value: "무제한", note: "관리자 계정" }
+    : premium && daysLeft != null && expiryLabel
+      ? { value: `${daysLeft}일`, note: `${expiryLabel}까지` }
+      : premium
+        ? { value: "무제한", note: null }
+        : { value: "무료 회원", note: null };
+
+  return (
+    <Link
+      href="/membership"
+      className={`flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border px-4 py-3 transition-colors ${
+        soon
+          ? "border-amber-300 bg-amber-50/50 hover:border-amber-400 dark:border-amber-800 dark:bg-amber-950/20"
+          : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600"
+      }`}
+    >
+      <span className="text-xs text-zinc-500 dark:text-zinc-500">멤버십</span>
+      <div className="flex items-baseline gap-1">
+        <span
+          className={`text-xl font-semibold ${
+            soon
+              ? "text-amber-700 dark:text-amber-400"
+              : premium || admin
+                ? "text-blue-600 dark:text-blue-400"
+                : "text-zinc-400 dark:text-zinc-500"
+          }`}
+        >
+          {value}
+        </span>
+        {/* "42일"만 있으면 쓴 기간인지 남은 기간인지 모른다. 숫자가 있을 때만 붙인다. */}
+        {daysLeft != null && !admin && premium && (
+          <span className="text-xs text-zinc-500 dark:text-zinc-500">남음</span>
+        )}
+      </div>
+      {note && (
+        <span
+          className={`text-[11px] ${
+            soon
+              ? "font-medium text-amber-700 dark:text-amber-400"
+              : "text-zinc-400 dark:text-zinc-600"
+          }`}
+        >
+          {note}
+        </span>
+      )}
+    </Link>
+  );
 }
 
 export default async function MyPage({
@@ -155,6 +269,15 @@ export default async function MyPage({
     isAdminUser(supabase),
   ]);
   const premium = admin || isPremiumMembership(membership);
+  // 헤더 배지용 "며칠 남았는지". 체험·결제·출석 보상을 가리지 않는다 — 여기서는
+  // 왜 프리미엄인지가 아니라 언제까지인지만 말하면 된다(출처별 문구는 /membership
+  // 의 CurrentStatus 가 이미 맡고 있다). 관리자는 멤버십과 무관하게 프리미엄이라
+  // "N일 남음"을 보여주면 거짓말이 된다.
+  const now = new Date();
+  const daysLeft = admin ? null : membershipDaysLeft(membership, now);
+  const membershipExpiry = membership.expiresAt
+    ? formatExpiry(membership.expiresAt, now)
+    : null;
 
   // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고, 문항별 오답
   // 행만 추가로 조회한다. 무료 회원에게는 돌리지 않는다 — 이 집계가 주는 건 과목
@@ -271,6 +394,12 @@ export default async function MyPage({
             {totalUnresolved}문항
           </span>
         </div>
+        <MembershipTile
+          admin={admin}
+          premium={premium}
+          daysLeft={daysLeft}
+          expiryLabel={membershipExpiry}
+        />
       </div>
 
       <MyPageTabs

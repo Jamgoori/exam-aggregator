@@ -5,6 +5,7 @@ import {
   FREE_MEMBERSHIP,
   isPremiumMembership,
   isTrialUnstarted,
+  membershipDaysLeft,
   membershipFromRow,
   trialDaysLeft,
   type Membership,
@@ -59,6 +60,30 @@ test("attendanceDaysLeft: 출석 보상 기간만 세고, 체험·결제는 null
   assert.equal(attendanceDaysLeft({ ...trial(), source: "paid" }, NOW), null);
   // 반대 방향도 막혀 있어야 한다.
   assert.equal(trialDaysLeft({ ...trial(), source: "attendance" }, NOW), null);
+});
+
+test("membershipDaysLeft: 출처를 가리지 않는다", () => {
+  assert.equal(membershipDaysLeft(trial(), NOW), 5);
+  assert.equal(membershipDaysLeft({ ...trial(), source: "attendance" }, NOW), 5);
+  assert.equal(membershipDaysLeft({ ...trial(), source: "paid" }, NOW), 5);
+  // 만료 지난 체험 → 이미 free 로 떨어졌을 값이지만, tier 를 직접 premium 으로 두고
+  // 만료만 지난 경우에도 0을 돌려준다(음수로 새지 않는다).
+  assert.equal(
+    membershipDaysLeft(trial({ expiresAt: "2026-03-01T00:00:00Z" }), NOW),
+    0,
+  );
+});
+
+test("membershipDaysLeft: 무료 회원이거나 만료 없는 정기결제면 null", () => {
+  assert.equal(membershipDaysLeft(FREE_MEMBERSHIP, NOW), null);
+  assert.equal(membershipDaysLeft(null, NOW), null);
+  assert.equal(
+    membershipDaysLeft(
+      { tier: "premium", source: "paid", startedAt: "2026-01-01T00:00:00Z", expiresAt: null },
+      NOW,
+    ),
+    null,
+  );
 });
 
 test("isTrialUnstarted: 첫 CBT 채점 때 체험을 켜줄 대상", () => {
