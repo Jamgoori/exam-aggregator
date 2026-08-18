@@ -215,7 +215,7 @@ const FEATURE_ROWS: { label: string; free: string | boolean; premium: string | b
   { label: "오답노트 안에서 문항 해설 보기", free: false, premium: true },
   { label: "회독별 다른 회원 평균 점수", free: false, premium: true },
   { label: "오늘의 복습 (간격 반복 일정)", free: false, premium: true },
-  { label: "AI 약점 진단", free: "개발 중", premium: "개발 중" },
+  { label: "AI 약점 진단", free: false, premium: "개발 중" },
 ];
 
 // 좁은 화면에서 가로 스크롤이 생기지 않게 폭을 짠다. min-width 를 걸어두면 375px

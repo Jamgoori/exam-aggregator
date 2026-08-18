@@ -8,6 +8,8 @@ import { SiteFooter } from "@/components/site-footer";
 import { ReviewFab } from "@/components/review-fab";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
 import { createClient } from "@/lib/supabase/server";
+import { getMembership } from "@/lib/membership";
+import { isPremiumMembership } from "@gongmoa/core";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site-url";
 import { JsonLd } from "@/components/json-ld";
 import "./globals.css";
@@ -95,6 +97,11 @@ async function StreamedSiteHeader() {
   // 인덱스 조회 한 번이라 비용이 작다. 위 getClaims()는 로컬 JWT 검증이라 이
   // 조회와 무관하게 계속 DB를 안 탄다.
   const isAdmin = claims ? (await supabase.rpc("is_admin")).data === true : false;
+  // 관리자는 멤버십 레코드와 무관하게 유료 기능을 다 쓰므로, 배지도 멤버십 페이지의
+  // "관리자 계정" 취급과 맞춰 멤버십으로 본다.
+  const isPremium = claims
+    ? isAdmin || isPremiumMembership(await getMembership(supabase, claims.sub))
+    : false;
 
   const headerUser = claims
     ? {
@@ -103,6 +110,7 @@ async function StreamedSiteHeader() {
           claims.email?.split("@")[0] ??
           "회원",
         isAdmin,
+        isPremium,
       }
     : null;
 
