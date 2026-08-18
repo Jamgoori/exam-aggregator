@@ -32,6 +32,7 @@ import {
   membershipDaysLeft,
   trialDaysLeft,
   DUE_QUEUE_LIMIT,
+  type MembershipSource,
 } from "@gongmoa/core";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@gongmoa/core";
@@ -82,44 +83,120 @@ function computeAttemptRounds(myAttempts: MyAttempt[]) {
   return { attemptsByPaper, roundNumberByAttemptId };
 }
 
-// 마이페이지 헤더의 멤버십 배지. 남은 CBT 응시 수·연속 학습일 옆에 "지금 내
-// 멤버십이 며칠 남았는지"를 바로 보여준다 — 그걸 알려면 지금까지는 요금제 페이지나
-// 출석 탭까지 가야 했다. 눌러도 항상 /membership 으로 보낸다: 남은 기간을 늘리려면
-// (재결제·요금제 확인) 결국 그리로 가야 하고, 자리를 다르게 두면 상태에 따라 어디로
-// 갈지 학습해야 한다.
-function MembershipBadge({
+// 만료일을 "9월 29일까지" 로. 해가 바뀌면 연도까지 적는다 — 12월에 보는 "1월 5일"이
+// 올해인지 내년인지 헷갈리면 남은 일수를 다시 세게 된다.
+//
+// 타임존을 반드시 명시한다: 안 하면 서버는 UTC, 브라우저는 KST 로 그려 날짜가 하루
+// 어긋난 채 hydration 경고가 난다(payments/page.tsx 의 formatDateTime 과 같은 이유).
+//
+// now 를 인자로 받는 이유(Cache Components): 서버 컴포넌트 안에서 요청 데이터를 읽기
+// 전에 new Date() 를 부르면 Next 가 프리렌더를 거부한다. 그래서 "지금"을 읽는 일은
+// 이미 searchParams·쿠키를 읽은 페이지 본문에서 한 번만 하고, 아래 타일에는 다 만든
+// 문자열만 넘긴다 — 타일은 시간을 모르는 순수 컴포넌트로 둔다.
+function formatExpiry(iso: string, now: Date): string {
+  const KST = "Asia/Seoul";
+  const year = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: KST }).slice(0, 4);
+  const expiry = new Date(iso);
+  return expiry.toLocaleDateString("ko-KR", {
+    timeZone: KST,
+    ...(year(expiry) === year(now) ? {} : { year: "numeric" }),
+    month: "long",
+    day: "numeric",
+  });
+}
+
+// 요약 타일 줄(CBT 응시·연속 학습·남은 오답) 옆에 붙는 멤버십 칸.
+//
+// 왜 제목 옆 배지가 아니라 타일인가: 사용자가 "내 숫자"를 찾는 곳이 이 줄이다.
+// 제목 옆의 작은 알약은 장식으로 읽혀 그냥 지나치는데, 멤버십 잔여일은 지나치면
+// 안 되는 값이다 — 모르고 있다가 끊기면 그건 서비스 잘못이 된다.
+//
+// 남은 일수만으로는 모자라서 세 가지를 함께 적는다:
+//   · 며칠 남았나(숫자)
+//   · 언제까지인가(날짜) — "42일 남음"만 있으면 달력을 열어 직접 세야 한다.
+//   · 무엇으로 열린 기간인가(체험·출석 보상) — 체험인 걸 모르면 끝나고 나서야
+//     "결제한 줄 알았다"가 된다. 반대로 출석 보상을 체험이라 부르면 거짓말이 된다.
+//     (요금제 페이지 CurrentStatus 와 같은 구분이다.)
+//
+// 만료가 가까우면(D-7) 색을 바꾼다. 끊기기 전에 한 번은 눈에 걸려야 한다는 게
+// 이 칸의 존재 이유다 — 평상시엔 조용하고, 급할 때만 목소리를 낸다.
+const MEMBERSHIP_SOON_DAYS = 7;
+
+function MembershipTile({
   admin,
   premium,
   daysLeft,
+  source,
+  expiryLabel,
 }: {
   admin: boolean;
   premium: boolean;
-  // 며칠 남았는지(출처 무관). 무기한(정기결제)이거나 계산 대상이 아니면 null.
+  // 며칠 남았는지(출처 무관). 무기한이거나 무료 회원이면 null.
   daysLeft: number | null;
+  source: MembershipSource;
+  // "9월 29일" — 페이지 본문에서 이미 만들어 넘긴다(위 formatExpiry 주석 참고).
+  expiryLabel: string | null;
 }) {
-  // 관리자는 멤버십과 무관하게 모든 기능을 쓴다 — "N일 남음"을 보여주면 만료가
-  // 있는 것처럼 보여 거짓말이 된다.
-  const label = admin
-    ? "관리자 · 모든 기능"
-    : premium && daysLeft != null
-      ? `멤버십 ${daysLeft}일 남음`
+  const soon = daysLeft != null && daysLeft <= MEMBERSHIP_SOON_DAYS;
+
+  // 관리자는 멤버십과 무관하게 모든 기능을 쓴다 — 만료가 있는 것처럼 보이면 거짓말이다.
+  const { value, note } = admin
+    ? { value: "무제한", note: "관리자 계정" }
+    : premium && daysLeft != null && expiryLabel
+      ? {
+          value: `${daysLeft}일`,
+          note: `${sourceLabel(source)}${expiryLabel}까지`,
+        }
       : premium
-        ? "멤버십 이용 중"
-        : "무료 회원";
-  const tone =
-    premium && daysLeft != null && daysLeft <= 3
-      ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300"
-      : premium
-        ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-300"
-        : "border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400";
+        ? { value: "무제한", note: "기간 제한 없음" }
+        : { value: "무료 회원", note: "출석체크로 무료 획득" };
+
   return (
     <Link
-      href="/membership"
-      className={`rounded-full border px-2.5 py-1 text-xs font-bold whitespace-nowrap hover:opacity-80 ${tone}`}
+      href={premium || admin ? "/membership" : "/mypage?tab=attendance"}
+      className={`flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border px-4 py-3 transition-colors ${
+        soon
+          ? "border-amber-300 bg-amber-50/50 hover:border-amber-400 dark:border-amber-800 dark:bg-amber-950/20"
+          : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600"
+      }`}
     >
-      {label}
+      <span className="text-xs text-zinc-500 dark:text-zinc-500">멤버십</span>
+      <div className="flex items-baseline gap-1">
+        <span
+          className={`text-xl font-semibold ${
+            soon
+              ? "text-amber-700 dark:text-amber-400"
+              : premium || admin
+                ? "text-blue-600 dark:text-blue-400"
+                : "text-zinc-400 dark:text-zinc-500"
+          }`}
+        >
+          {value}
+        </span>
+        {/* "42일"만 있으면 쓴 기간인지 남은 기간인지 모른다. 숫자가 있을 때만 붙인다. */}
+        {daysLeft != null && !admin && premium && (
+          <span className="text-xs text-zinc-500 dark:text-zinc-500">남음</span>
+        )}
+      </div>
+      <span
+        className={`text-[11px] ${
+          soon
+            ? "font-medium text-amber-700 dark:text-amber-400"
+            : "text-zinc-400 dark:text-zinc-600"
+        }`}
+      >
+        {note}
+      </span>
     </Link>
   );
+}
+
+// 기간의 출처를 앞에 붙이는 꼬리표. 결제는 굳이 말하지 않는다 — 돈을 낸 사람에게
+// "결제"라고 다시 알리는 건 정보가 아니라 잡음이다.
+function sourceLabel(source: MembershipSource): string {
+  if (source === "trial") return "무료 체험 · ";
+  if (source === "attendance") return "출석 보상 · ";
+  return "";
 }
 
 export default async function MyPage({
@@ -204,7 +281,11 @@ export default async function MyPage({
   // 왜 프리미엄인지가 아니라 언제까지인지만 말하면 된다(출처별 문구는 /membership
   // 의 CurrentStatus 가 이미 맡고 있다). 관리자는 멤버십과 무관하게 프리미엄이라
   // "N일 남음"을 보여주면 거짓말이 된다.
-  const daysLeft = admin ? null : membershipDaysLeft(membership);
+  const now = new Date();
+  const daysLeft = admin ? null : membershipDaysLeft(membership, now);
+  const membershipExpiry = membership.expiresAt
+    ? formatExpiry(membership.expiresAt, now)
+    : null;
 
   // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고, 문항별 오답
   // 행만 추가로 조회한다. 무료 회원에게는 돌리지 않는다 — 이 집계가 주는 건 과목
@@ -287,10 +368,7 @@ export default async function MyPage({
         <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">
           ← 홈으로
         </Link>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <h1 className="text-3xl font-semibold">{nickname}님의 마이페이지</h1>
-          <MembershipBadge admin={admin} premium={premium} daysLeft={daysLeft} />
-        </div>
+        <h1 className="mt-2 text-3xl font-semibold">{nickname}님의 마이페이지</h1>
         <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-500">
           <Link href="/mypage/edit" className="text-blue-600 hover:underline dark:text-blue-400">
             내 정보 수정
@@ -324,6 +402,13 @@ export default async function MyPage({
             {totalUnresolved}문항
           </span>
         </div>
+        <MembershipTile
+          admin={admin}
+          premium={premium}
+          daysLeft={daysLeft}
+          source={membership.source}
+          expiryLabel={membershipExpiry}
+        />
       </div>
 
       <MyPageTabs
