@@ -10,8 +10,6 @@ import {
 } from "@/components/wrong-note-question-card";
 import { PrintButton } from "@/components/print-button";
 import { ExplanationAutoPrint } from "@/components/explanation-auto-print";
-import { PrintWatermark } from "@/components/print-watermark";
-import { printIdentityLabel } from "@/lib/identity-label";
 import { resolveExplanationAccess } from "@/lib/explanation-rate-limit";
 import { isPremium } from "@/lib/membership";
 import { MembershipUpsell } from "@/components/membership-upsell";
@@ -124,12 +122,6 @@ export default async function PaperExplanationsPage({
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 py-12 print:max-w-none print:gap-4 print:py-0">
       {hasFullAccess && isDownload && <ExplanationAutoPrint />}
 
-      {/* 인쇄물에만 박히는 계정 워터마크. 인쇄가 가능한 상태(전체 열람 권한)일
-          때만 붙인다 — 미리보기만 보이는 사람에게는 인쇄 버튼 자체가 없다. */}
-      {hasFullAccess && (
-        <PrintWatermark label={printIdentityLabel(user!.id, user!.email)} />
-      )}
-
       <div className="flex flex-col gap-3">
         <Link
           href={paperHref(paper)}
@@ -167,8 +159,8 @@ export default async function PaperExplanationsPage({
           {displayTitle} 해설
         </h1>
 
-        {/* 인쇄물 첫 줄 저작권 고지. 워터마크는 흐리게 깔리는 배경이라, 조건을
-            분명히 읽히게 하는 문장은 따로 한 줄 박아둔다(약관 제4조). */}
+        {/* 인쇄물 첫 줄 저작권 고지. 인쇄본에 이용 조건을 남기는 건 이 한 줄이다
+            (약관 제4조). */}
         <p className="hidden text-[8pt] text-zinc-500 print:block">
           공모아(gongmoa) 제작 해설 · 개인 학습용으로만 이용할 수 있으며 무단 전재·
           재배포·2차 이용을 금합니다. 문제 이미지는 원본 문제지 PDF에서 확인하세요.
@@ -220,14 +212,25 @@ export default async function PaperExplanationsPage({
         )}
       </div>
 
-      {/* 인쇄(PDF 저장): 카드를 좌우 2단 그리드로 채운다. CSS 멀티컬럼(columns-2)은
-          크롬이 인쇄에서 균형 배치를 페이지 단위로 처리하지 못해 오른쪽 단이 통째로
-          비는 버그가 있어(#96~#99 반복 재발) 폐기. 대신 grid-cols-2 + 기본
-          가로우선 배치(grid-auto-flow: row)를 쓰면 카드가 1·2번(윗줄) → 3·4번
-          (아랫줄) 순서로 좌→우, 위→아래로 읽히고 페이지도 그 순서로 넘어간다.
-          items-start로 한 줄의 짧은 카드가 옆 카드 높이만큼 늘어나지 않게 한다.
-          줄 간격은 카드의 print:mb-3가 준다. */}
-      <div className="flex flex-col gap-4 print:grid print:grid-cols-2 print:items-start print:gap-x-6">
+      {/* 인쇄(PDF 저장): 카드를 좌우 2단으로 흘려 채운다(CSS 멀티컬럼).
+          grid-cols-2로 채우던 때는 카드 하나가 격자 칸 하나를 통째로 차지해서,
+          짧은 해설 옆에 긴 해설이 놓이면 짧은 쪽 아래가 페이지 절반씩 비었다.
+          인쇄본은 이미지를 빼고 텍스트만 남기므로(hideImagesInPrint) 카드를
+          통으로 유지할 이유가 없다 — 단 경계에서 잘려 다음 단으로 이어져도 그냥
+          읽힌다. 그래서 카드를 칸에 넣는 대신 본문처럼 흘린다.
+
+          - print:block: 화면의 flex 컨테이너에는 column-count가 먹지 않는다.
+            예전에 "오른쪽 단이 통째로 빈다"(#96~#99)고 본 것이 이것이다.
+          - column-fill은 기본값(balance) 그대로 둔다. column-fill:auto를 주면
+            내용은 같은데 뒤에 빈 페이지가 여러 장 붙는다(크롬 141 실측: 5쪽 →
+            9쪽, 6~9쪽이 백지). balance로도 마지막 장을 뺀 모든 페이지는 양 단이
+            끝까지 차고, 마지막 장만 두 단에 고르게 나뉜다.
+          - 단 간격은 print:gap-x-6(column-gap), 카드 사이 세로 간격은 카드의
+            print:mb-3가 준다.
+
+          읽는 순서는 왼쪽 단을 끝까지 내려간 뒤 오른쪽 단으로 넘어가는 신문식이
+          된다(격자였을 때의 좌→우 가로 우선에서 바뀐 부분). */}
+      <div className="flex flex-col gap-4 print:block print:columns-2 print:gap-x-6">
         {visibleGroups.map((group) => (
           <WrongNoteQuestionCard
             key={group.rows[0].questionNumber}
