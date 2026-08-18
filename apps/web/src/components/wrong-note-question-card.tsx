@@ -190,18 +190,20 @@ export function WrongNoteQuestionCard({
   ) : null;
 
   return (
-    // print:mb-3: 해설 인쇄가 2단 그리드로 전환되면(page.tsx의 print:grid) 그리드
-    // 줄 간격을 이 아래 margin으로 준다. 화면에는 영향 없음.
-    // 페이지/줄 나눔은 카드 통째가 아니라 카드 안 작은 블록 단위(이미지·답 줄·
+    // print:mb-3: 해설 인쇄가 2단으로 흘러갈 때(page.tsx의 print:columns-2) 카드
+    // 사이 세로 간격을 이 아래 margin으로 준다. 화면에는 영향 없음.
+    // 페이지/단 나눔은 카드 통째가 아니라 카드 안 작은 블록 단위(이미지·답 줄·
     // 해설 항목)의 break-inside-avoid로 제어한다 — 카드 전체에 avoid를 걸면 긴
-    // 카드가 통째로 다음 페이지로 밀리며 아래가 비기 때문.
+    // 카드가 통째로 다음 단으로 밀리며 아래가 비기 때문.
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white print:mb-3 dark:border-zinc-700 dark:bg-zinc-900">
       {/* 인쇄에서 이 줄은 보통 숨긴다 — 문제 이미지에 이미 번호가 있어 중복이므로.
-          단, 이미지를 빼고 인쇄하는 경우엔 번호를 알려줄 것이 이 줄뿐이라 남긴다. */}
+          단, 이미지를 빼고 인쇄하는 경우엔 번호를 알려줄 것이 이 줄뿐이라 남긴다.
+          이때 break-after-avoid로 "16번"만 단 끝에 남고 해설은 다음 단에서
+          시작하는 일을 막는다 (인쇄본은 카드가 단 경계에서 잘려도 그냥 잇는다). */}
       <div
         className={`flex items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-4 py-2.5 dark:border-zinc-700 dark:bg-zinc-800/50 ${
           hideImagesInPrint
-            ? "print:border-b-0 print:bg-transparent print:py-1"
+            ? "print:border-b-0 print:bg-transparent print:py-1 print:break-after-avoid"
             : "print:hidden"
         }`}
       >
