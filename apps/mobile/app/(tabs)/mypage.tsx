@@ -21,6 +21,12 @@ import {
   type WrongNoteSubjectSummary,
 } from "../../src/lib/wrong-notes";
 import { computeStreakDays, streakTier } from "../../src/lib/streak";
+import {
+  emptyAttendanceSummary,
+  getAttendanceSummary,
+  type AttendanceSummary,
+} from "../../src/lib/attendance";
+import { AttendanceCard } from "../../src/components/attendance-card";
 import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
 import { useAuth } from "../../src/providers/auth-provider";
 import { useColors, type Colors } from "../../src/theme/colors";
@@ -38,6 +44,7 @@ export default function MyPageScreen() {
   const [attempts, setAttempts] = useState<MyAttempt[]>([]);
   const [bookmarks, setBookmarks] = useState<ExamPaper[]>([]);
   const [wrong, setWrong] = useState<WrongNoteSubjectSummary[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceSummary>(emptyAttendanceSummary);
 
   // 화면에 들어올 때마다 새로고침(CBT 채점 후 돌아오면 기록·오답이 갱신돼야 함).
   useFocusEffect(
@@ -45,12 +52,20 @@ export default function MyPageScreen() {
       if (!session) return;
       let alive = true;
       setLoading(true);
-      Promise.all([getMyAttempts(), getMyBookmarks(), getWrongNoteGroupsCached()])
-        .then(([a, b, wrongResult]) => {
+      Promise.all([
+        getMyAttempts(),
+        getMyBookmarks(),
+        getWrongNoteGroupsCached(),
+        // 출석 조회가 실패해도(마이그레이션 전이면 테이블이 없다) 나머지 화면은
+        // 그려져야 한다 — 여기서 던지면 기록·오답까지 같이 빈 화면이 된다.
+        getAttendanceSummary().catch(() => emptyAttendanceSummary()),
+      ])
+        .then(([a, b, wrongResult, att]) => {
           if (!alive) return;
           setAttempts(a);
           setBookmarks(b);
           setWrong(toSubjectSummaries(wrongResult.groups));
+          setAttendance(att);
         })
         .catch(() => {})
         .finally(() => alive && setLoading(false));
@@ -140,6 +155,9 @@ export default function MyPageScreen() {
           valueColor={unresolvedTotal > 0 ? colors.danger : colors.success}
         />
       </View>
+
+      {/* 월간 출석(→ 멤버십 일수). 웹 마이페이지와 같은 자리에 둔다. */}
+      <AttendanceCard summary={attendance} />
 
       {/* 탭 */}
       <View style={{ flexDirection: "row", gap: 6 }}>
