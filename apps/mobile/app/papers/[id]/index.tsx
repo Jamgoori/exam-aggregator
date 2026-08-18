@@ -118,8 +118,9 @@ export default function PaperDetailScreen() {
       await postComment(paperId, content);
       setDraft("");
       setComments(await getComments(paperId));
-    } catch {
-      Alert.alert("댓글", "등록에 실패했어요.");
+    } catch (e) {
+      // 서버가 돌려준 사유(비속어 차단 등)를 그대로 보여준다 — 뭉뚱그리면 왜 막혔는지 모른다.
+      Alert.alert("댓글", e instanceof Error ? e.message : "등록에 실패했어요.");
     } finally {
       setPosting(false);
     }

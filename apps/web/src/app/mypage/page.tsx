@@ -44,7 +44,7 @@ import {
 } from "@/lib/wrong-notes";
 import type { ExamPaper, Subject } from "@gongmoa/core";
 
-const TAB_KEYS: MyPageTabKey[] = ["bookmarks", "history", "wrong-notes", "attendance"];
+const TAB_KEYS: MyPageTabKey[] = ["wrong-notes", "history", "attendance", "bookmarks"];
 
 type MyAttempt = {
   id: string;

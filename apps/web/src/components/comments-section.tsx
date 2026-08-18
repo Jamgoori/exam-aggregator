@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { postComment } from "@/app/papers/actions";
 import { CommentRow } from "@/components/comment-row";
 import { EditRow } from "@/components/comment-edit-row";
 import { ReplyForm } from "@/components/comment-reply-form";
-import { CommentGuestFields } from "@/components/comment-guest-fields";
 import { buildCommentTree, canReplyTo, COMMENT_CONTENT_MAX } from "@gongmoa/core";
 import type { Comment, CommentNode } from "@gongmoa/core";
 
@@ -27,12 +27,11 @@ export function CommentsSection({
   isAdmin?: boolean;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   // 작성 폼 상태
-  const [nickname, setNickname] = useState("");
-  const [password, setPassword] = useState("");
   const [content, setContent] = useState("");
 
   // 편집/답글 작성 중인 댓글
@@ -47,17 +46,10 @@ export function CommentsSection({
     e.preventDefault();
     setError(null);
     startTransition(async () => {
-      const result = await postComment({
-        paperId,
-        content,
-        nickname: loggedIn ? undefined : nickname,
-        password: loggedIn ? undefined : password,
-      });
+      const result = await postComment({ paperId, content });
       if (result.error) {
         setError(result.error);
       } else {
-        setNickname("");
-        setPassword("");
         setContent("");
         router.refresh();
       }
@@ -103,7 +95,7 @@ export function CommentsSection({
   // 한 댓글과 그 아래 답글들을 재귀로 그린다. 답글 폼은 깊이 한도에 닿지 않은
   // 댓글에만 붙는다(서버도 같은 한도로 거절한다).
   function renderNode(node: CommentNode) {
-    const replyable = canReplyTo(node.depth);
+    const replyable = loggedIn && canReplyTo(node.depth);
     return (
       <>
         {renderRow(node, {
@@ -124,7 +116,6 @@ export function CommentsSection({
             <ReplyForm
               paperId={paperId}
               parentId={node.id}
-              loggedIn={loggedIn}
               onDone={() => {
                 setReplyingToId(null);
                 router.refresh();
@@ -141,35 +132,40 @@ export function CommentsSection({
     <section className="flex flex-col gap-5">
       <h2 className="text-lg font-semibold">댓글 {comments.length}개</h2>
 
-      <form onSubmit={submitNew} className="flex flex-col gap-3">
-        {!loggedIn && (
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <CommentGuestFields
-              nickname={nickname}
-              password={password}
-              onNicknameChange={setNickname}
-              onPasswordChange={setPassword}
-            />
-          </div>
-        )}
-        <textarea
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          maxLength={COMMENT_CONTENT_MAX}
-          placeholder="이 시험에 대한 의견을 남겨주세요"
-          required
-          rows={3}
-          className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700"
-        />
-        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-        <button
-          type="submit"
-          disabled={pending}
-          className="self-end rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {pending ? "등록 중..." : "댓글 등록"}
-        </button>
-      </form>
+      {/* 댓글은 로그인한 사람만 — 비회원 작성 경로는 서버 액션에서도 막혀 있다. */}
+      {!loggedIn ? (
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-zinc-200 px-4 py-6 dark:border-zinc-700">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            댓글은 로그인 후 남길 수 있어요
+          </p>
+          <Link
+            href={`/login?next=${encodeURIComponent(pathname || "/")}`}
+            className="rounded bg-zinc-800 px-4 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 dark:bg-zinc-700 dark:hover:bg-zinc-600"
+          >
+            로그인하기
+          </Link>
+        </div>
+      ) : (
+        <form onSubmit={submitNew} className="flex flex-col gap-3">
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            maxLength={COMMENT_CONTENT_MAX}
+            placeholder="이 시험에 대한 의견을 남겨주세요"
+            required
+            rows={3}
+            className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700"
+          />
+          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+          <button
+            type="submit"
+            disabled={pending}
+            className="self-end rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {pending ? "등록 중..." : "댓글 등록"}
+          </button>
+        </form>
+      )}
 
       <div className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-700">
         {tree.length === 0 && (

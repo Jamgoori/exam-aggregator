@@ -8,6 +8,7 @@
 // 클라이언트 값을 믿지 않고 서버가 user_metadata 에서 읽어 채운다.
 import { corsHeaders, json } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
+import { profanityError } from "../_shared/profanity.ts";
 
 // @gongmoa/core 의 COMMENT_CONTENT_MAX 와 같은 값(모노레포 밖이라 import 하지 않고 고정).
 // DB 에도 comments_content_len(1~2000) 제약이 있어 최종 방어선은 스키마다.
@@ -37,6 +38,9 @@ Deno.serve(async (req) => {
     const parentId = body.parentId ? String(body.parentId) : null;
     if (!paperId || !content) return json({ error: "내용을 입력해 주세요." }, 400);
     if (content.length > CONTENT_MAX) return json({ error: "내용이 너무 길어요." }, 400);
+    // 비속어 차단. 웹 서버 액션(app/papers/actions.ts)과 같은 목록을 쓴다.
+    const badWord = profanityError(content);
+    if (badWord) return json({ error: badWord }, 400);
 
     // 답글 깊이 제한(웹 papers/actions.ts 와 같은 규칙). 클라이언트가 보낸 parentId 라
     // 부모를 따라 올라가며 깊이를 세고 한도에 닿았으면 거절한다.
@@ -88,6 +92,8 @@ Deno.serve(async (req) => {
     const content = String(body.content ?? "").trim();
     if (!commentId || !content) return json({ error: "내용을 입력해 주세요." }, 400);
     if (content.length > CONTENT_MAX) return json({ error: "내용이 너무 길어요." }, 400);
+    const badWord = profanityError(content);
+    if (badWord) return json({ error: badWord }, 400);
 
     // service_role 은 RLS 를 우회하므로 소유자 확인을 여기서 명시적으로 한다.
     const { data: row } = await admin

@@ -64,11 +64,17 @@ export default function PrivacyPage() {
             설정값
           </li>
         </ul>
-        <p className="mt-2 font-medium text-zinc-800 dark:text-zinc-200">비회원 댓글 작성 시</p>
+        {/* 댓글이 회원 전용으로 바뀌어 비회원 항목은 더 이상 수집하지 않는다. 예전에
+            달린 댓글이 아직 남아 있으므로 보유 사실은 그대로 밝혀 둔다. */}
+        <p className="mt-2 font-medium text-zinc-800 dark:text-zinc-200">
+          비회원 댓글(현재는 작성 불가)
+        </p>
         <ul className="list-disc pl-5">
           <li>
-            닉네임, 댓글 내용, 댓글 관리용 비밀번호(복호화할 수 없는 bcrypt 해시로만 저장),{" "}
-            <strong>IP 주소</strong>(도배 등 어뷰징 방지 목적)
+            댓글은 로그인한 회원만 작성할 수 있어 새로 수집하는 항목은 없습니다. 기능
+            변경 전에 작성된 비회원 댓글은 닉네임, 댓글 내용, 댓글 관리용 비밀번호(복호화할
+            수 없는 bcrypt 해시로만 저장), <strong>IP 주소</strong>(도배 등 어뷰징 방지
+            목적)를 그대로 보유합니다.
           </li>
         </ul>
         <p className="mt-2 font-medium text-zinc-800 dark:text-zinc-200">자동으로 수집</p>
@@ -106,10 +112,10 @@ export default function PrivacyPage() {
             아래 11항의 연락처로 요청할 수 있습니다.
           </li>
           <li>
-            회원 댓글: 탈퇴 시 함께 삭제됩니다. 비회원 댓글은 작성자가 비밀번호로 직접
-            삭제하거나 운영자가 삭제할 때까지 보유합니다.
+            회원 댓글: 탈퇴 시 함께 삭제됩니다. 기능 변경 전에 작성된 비회원 댓글은
+            작성자가 비밀번호로 직접 삭제하거나 운영자가 삭제할 때까지 보유합니다.
           </li>
-          <li>비회원 댓글의 IP 주소: 해당 댓글이 보관되는 동안 함께 보관됩니다.</li>
+          <li>기존 비회원 댓글의 IP 주소: 해당 댓글이 보관되는 동안 함께 보관됩니다.</li>
           {/* 무료 체험 재사용 방지 원장(trial_consumptions). 탈퇴해도 남는 값이라
               "탈퇴 시 모두 삭제"만 적어두면 사실과 다르다. 원문이 아니라 복원할 수
               없는 해시라는 점까지 밝혀 둔다. */}
@@ -245,7 +251,7 @@ export default function PrivacyPage() {
         <ul className="list-disc pl-5">
           <li>모든 통신 구간의 HTTPS 암호화</li>
           <li>데이터베이스 행 수준 접근 제어(RLS)로 본인 데이터 외 접근 차단</li>
-          <li>비회원 댓글 비밀번호는 복호화할 수 없는 해시(bcrypt)로만 저장</li>
+          <li>기존 비회원 댓글 비밀번호는 복호화할 수 없는 해시(bcrypt)로만 저장</li>
           <li>관리자 권한 키는 서버 환경에서만 사용하고 외부에 노출하지 않음</li>
         </ul>
       </Section>

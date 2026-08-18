@@ -38,7 +38,8 @@ export default function MyPageScreen() {
   const { session } = useAuth();
   const router = useRouter();
 
-  // 기본 탭·순서를 웹 mypage-tabs 와 맞춘다(오답노트 → 내 시험 기록 → 즐겨찾기).
+  // 기본 탭·순서·라벨을 웹 mypage-tabs 와 맞춘다(오답노트 → 시험기록 → 즐겨찾기).
+  // 출석체크는 웹과 달리 탭이 아니라 위쪽 카드로 항상 보인다.
   const [tab, setTab] = useState<Tab>("wrong");
   const [loading, setLoading] = useState(true);
   const [attempts, setAttempts] = useState<MyAttempt[]>([]);
@@ -162,7 +163,7 @@ export default function MyPageScreen() {
       {/* 탭 */}
       <View style={{ flexDirection: "row", gap: 6 }}>
         <TabButton label="오답노트" active={tab === "wrong"} onPress={() => setTab("wrong")} />
-        <TabButton label="내 시험 기록" active={tab === "history"} onPress={() => setTab("history")} />
+        <TabButton label="시험기록" active={tab === "history"} onPress={() => setTab("history")} />
         <TabButton label="즐겨찾기" active={tab === "bookmarks"} onPress={() => setTab("bookmarks")} />
       </View>
 

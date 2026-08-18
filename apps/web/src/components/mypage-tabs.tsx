@@ -3,10 +3,13 @@
 import { useState, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 
+// 순서는 쓰는 빈도순(오답노트 → 시험기록 → 출석체크 → 즐겨찾기).
+// 라벨은 전부 네 글자로 맞춰 뒀다 — 좁은 폰 화면에서도 네 개가 한 줄에 들어가야
+// 가로 스크롤 없이 탭 전체가 보인다("내 시험 기록"이 길어서 줄이 넘어갔었다).
 const TABS = [
-  { key: "attendance", label: "출석체크" },
   { key: "wrong-notes", label: "오답노트" },
-  { key: "history", label: "내 시험 기록" },
+  { key: "history", label: "시험기록" },
+  { key: "attendance", label: "출석체크" },
   { key: "bookmarks", label: "즐겨찾기" },
 ] as const;
 
@@ -69,14 +72,16 @@ export function MyPageTabs({
 
   return (
     <>
-      <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-3 dark:border-zinc-700">
+      {/* 모바일에서는 네 칸을 같은 너비로 나눠 한 줄에 넣고(줄바꿈·가로 스크롤 없음),
+          넓은 화면에서는 글자 길이만큼만 차지하는 알약 모양으로 돌아간다. */}
+      <div className="flex gap-1 border-b border-zinc-200 pb-3 sm:gap-2 dark:border-zinc-700">
         {TABS.map((t) => (
           <button
             key={t.key}
             type="button"
             onClick={() => selectTab(t.key)}
             aria-current={activeTab === t.key ? "page" : undefined}
-            className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+            className={`min-w-0 flex-1 rounded-full px-2 py-1.5 text-xs font-medium whitespace-nowrap sm:flex-none sm:px-4 sm:text-sm ${
               activeTab === t.key
                 ? "bg-blue-600 text-white"
                 : "border border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
@@ -87,14 +92,14 @@ export function MyPageTabs({
         ))}
       </div>
 
-      <div className={activeTab === "attendance" ? "contents" : "hidden"}>
-        {attendance}
-      </div>
       <div className={activeTab === "wrong-notes" ? "contents" : "hidden"}>
         {wrongNotes}
       </div>
       <div className={activeTab === "history" ? "contents" : "hidden"}>
         {history}
+      </div>
+      <div className={activeTab === "attendance" ? "contents" : "hidden"}>
+        {attendance}
       </div>
       <div className={activeTab === "bookmarks" ? "contents" : "hidden"}>
         {bookmarks}

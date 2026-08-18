@@ -17,6 +17,7 @@ export * from "./comment-constraints";
 export * from "./comments";
 export * from "./suggestions";
 export * from "./nickname";
+export * from "./profanity";
 export * from "./search";
 export * from "./streak";
 export * from "./attendance";

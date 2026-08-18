@@ -6,19 +6,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionUser } from "@/lib/supabase/session";
 import { recordQuestionResults } from "@/lib/question-status";
 import { recordAttendance } from "@/lib/attendance";
-import { getClientIp } from "@/lib/client-ip";
 import {
   canReplyTo,
-  COMMENT_MAX_DEPTH,
-  NICKNAME_MAX,
-  validateNickname,
-} from "@gongmoa/core";
-import {
   COMMENT_CONTENT_MAX,
-  COMMENT_PW_MIN,
-  COMMENT_PW_MAX,
-  getPaperSlug,
+  COMMENT_MAX_DEPTH,
   formatDuration,
+  getPaperSlug,
+  NICKNAME_MAX,
+  profanityError,
 } from "@gongmoa/core";
 import { MIN_ATTEMPT_SECONDS, sanitizeSelectedChoice } from "@/lib/cbt-attempt";
 
@@ -40,40 +35,6 @@ async function revalidatePaperPath(paperId: string) {
 
 export type CommentResult = { error?: string; success?: boolean };
 
-// 비회원 댓글 도배 방지 기준
-const GUEST_COOLDOWN_MS = 10_000; // 같은 IP에서 연속 작성 시 최소 간격
-const GUEST_HOURLY_LIMIT = 20; // 같은 IP에서 1시간 내 허용하는 최대 개수
-
-// 비회원 댓글만 대상으로 IP 기반 도배 방지. 계정 없이도 작성 가능한 경로라
-// 로그인한 회원 댓글보다 스팸에 취약해서 이 경로에만 적용한다.
-async function checkGuestRateLimit(
-  admin: ReturnType<typeof createAdminClient>,
-  ip: string | null,
-): Promise<string | null> {
-  if (!ip) return null; // IP를 알 수 없는 환경(로컬 등)에서는 건너뜀
-
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const { data } = await admin
-    .from("comments")
-    .select("created_at")
-    .eq("ip_address", ip)
-    .is("user_id", null)
-    .gte("created_at", oneHourAgo)
-    .order("created_at", { ascending: false })
-    .limit(GUEST_HOURLY_LIMIT);
-
-  if (!data || data.length === 0) return null;
-
-  const lastCommentAt = new Date(data[0].created_at).getTime();
-  if (Date.now() - lastCommentAt < GUEST_COOLDOWN_MS) {
-    return "잠시 후 다시 시도해주세요.";
-  }
-  if (data.length >= GUEST_HOURLY_LIMIT) {
-    return "짧은 시간 동안 너무 많은 댓글을 남겼어요. 잠시 후 다시 시도해주세요.";
-  }
-  return null;
-}
-
 // UUID 형식 검증 (임의 문자열이 쿼리에 들어가지 않도록 1차 방어)
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
@@ -83,20 +44,12 @@ function validateContent(content: string): string | null {
   if (!content) return "내용을 입력해주세요.";
   if (content.length > COMMENT_CONTENT_MAX)
     return `내용은 ${COMMENT_CONTENT_MAX}자 이하로 입력해주세요.`;
-  return null;
-}
-
-function validatePassword(pw: string): string | null {
-  if (pw.length < COMMENT_PW_MIN || pw.length > COMMENT_PW_MAX)
-    return `비밀번호는 ${COMMENT_PW_MIN}~${COMMENT_PW_MAX}자로 입력해주세요.`;
-  return null;
+  return profanityError(content);
 }
 
 export async function postComment(input: {
   paperId: string;
   content: string;
-  nickname?: string;
-  password?: string;
   parentId?: string;
 }): Promise<CommentResult> {
   const paperId = String(input.paperId ?? "");
@@ -142,49 +95,25 @@ export async function postComment(input: {
     parentId = parent.id as string;
   }
 
+  // 회원 전용. 예전에는 닉네임+비밀번호로 비회원도 쓸 수 있었지만, 책임 없는 글이
+  // 쌓이는 자리가 되어(도배·비방) 로그인한 사람만 쓰게 바꿨다. 이미 달려 있는 비회원
+  // 댓글은 그대로 보이고, 비밀번호로 수정·삭제하는 길도 남겨둔다(authorizeComment).
   const { user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 댓글을 남길 수 있어요." };
 
-  if (user) {
-    // 회원: 세션의 닉네임 사용, 비밀번호 불필요
-    const nickname =
-      (user.user_metadata?.nickname as string | undefined) ??
-      user.email?.split("@")[0] ??
-      "회원";
+  const nickname =
+    (user.user_metadata?.nickname as string | undefined) ??
+    user.email?.split("@")[0] ??
+    "회원";
 
-    const { error } = await admin.from("comments").insert({
-      paper_id: paperId,
-      user_id: user.id,
-      nickname: nickname.slice(0, NICKNAME_MAX),
-      content,
-      parent_id: parentId,
-    });
-    if (error) return { error: "댓글 등록에 실패했어요." };
-  } else {
-    // 비회원: 닉네임 + 비밀번호 필요
-    const nicknameResult = validateNickname(String(input.nickname ?? ""));
-    if (nicknameResult.error !== null) return { error: nicknameResult.error };
-    const nickname = nicknameResult.nickname;
-    const password = String(input.password ?? "");
-
-    const pwError = validatePassword(password);
-    if (pwError) return { error: pwError };
-
-    const ip = await getClientIp();
-    const rateLimitError = await checkGuestRateLimit(admin, ip);
-    if (rateLimitError) return { error: rateLimitError };
-
-    const passwordHash = await bcrypt.hash(password, 10);
-    const { error } = await admin.from("comments").insert({
-      paper_id: paperId,
-      user_id: null,
-      nickname,
-      content,
-      password_hash: passwordHash,
-      ip_address: ip,
-      parent_id: parentId,
-    });
-    if (error) return { error: "댓글 등록에 실패했어요." };
-  }
+  const { error } = await admin.from("comments").insert({
+    paper_id: paperId,
+    user_id: user.id,
+    nickname: nickname.slice(0, NICKNAME_MAX),
+    content,
+    parent_id: parentId,
+  });
+  if (error) return { error: "댓글 등록에 실패했어요." };
 
   await revalidatePaperPath(paperId);
   return { success: true };
