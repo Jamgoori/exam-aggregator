@@ -33,7 +33,7 @@ export function MobileNav({
         onClick={() => setOpen(true)}
         aria-expanded={open}
         aria-label="메뉴 열기"
-        className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:outline-none md:hidden dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+        className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:outline-none dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
       >
         <Menu size={20} />
       </button>
@@ -88,7 +88,7 @@ function MobileNavDrawer({
       role="dialog"
       aria-modal="true"
       aria-label="사이트 메뉴"
-      className="animate-modal-fade-in fixed inset-0 z-50 flex justify-end bg-zinc-900/40 backdrop-blur-sm md:hidden dark:bg-black/60"
+      className="animate-modal-fade-in fixed inset-0 z-50 flex justify-end bg-zinc-900/40 backdrop-blur-sm dark:bg-black/60"
       onClick={onClose}
     >
       <div
