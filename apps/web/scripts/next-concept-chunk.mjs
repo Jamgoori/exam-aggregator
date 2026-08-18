@@ -178,7 +178,6 @@ async function main() {
   }
 
   pending.sort((a, b) => b.remaining - a.remaining || a.name.localeCompare(b.name, "ko"));
-  const subject = pending[0];
 
   // question_text 를 함께 준다. 독해 문항은 keyword_title 이 지문 주제라
   // ("조선 후기 상업의 발달") 제목만으로는 기능형 개념을 못 고른다 — 발문을 봐야
@@ -189,22 +188,23 @@ async function main() {
   // 하는데, 정렬을 걸면 조인 위에서 깊이 훑느라 느려진다 (2026-08-16 실측: 같은
   // 조회가 정렬 있으면 60건에 8초 초과, 없으면 0.3초). 일반 모드는 미분류 해설
   // 아무거나 60건이면 되고, 붙은 것은 다음 회차의 대상에서 빠지므로 순서가 필요 없다.
-  const fetchRange = async (from, to, ordered = false) => {
+  const fetchRange = async (target, from, to, ordered = false) => {
     let query = supabase
       .from("question_explanations")
       .select(select)
       .is("concept_id", null)
       .not("keyword_title", "is", null)
-      .eq("questions.exam_papers.subject_id", subject.id);
+      .eq("questions.exam_papers.subject_id", target.id);
     if (ordered) query = query.order("question_id");
     const { data, error } = await query.range(from, to);
     if (error) {
-      console.error(`해설 조회 실패 (${subject.name}): ${error.message}`);
-      process.exit(1);
+      console.error(`해설 조회 실패 (${target.name}): ${error.message}`);
+      return null;
     }
     return data ?? [];
   };
 
+  let subject = pending[0];
   let rows;
   if (mine) {
     // 목록 초안용 표본은 앞에서부터 자르면 편향된다 — question_id 순서는 사실상
@@ -217,7 +217,7 @@ async function main() {
     rows = [];
     for (let b = 0; b < blocks && rows.length < limit; b++) {
       const from = Math.floor(Math.random() * span);
-      for (const r of await fetchRange(from, from + per - 1, true)) {
+      for (const r of (await fetchRange(subject, from, from + per - 1, true)) ?? []) {
         if (seen.has(r.question_id)) continue;
         seen.add(r.question_id);
         rows.push(r);
@@ -225,7 +225,34 @@ async function main() {
     }
     rows = rows.slice(0, limit);
   } else {
-    rows = await fetchRange(0, limit - 1);
+    // 어느 과목을 볼지는 추정치가 아니라 **실제로 한 청크가 차는지**로 정한다.
+    //
+    // planned 추정치는 크게 빗나간다 (2026-08-17 실측: 국어 추정 2,204 vs 실제
+    // 미분류 10건). 그 10건은 exam_papers.subject_id 가 국어로 잘못 붙은 문항이라
+    // 정본 목록에 붙을 데가 없고, 추정치만 믿으면 배치가 영원히 그 과목만 집어
+    // 아무 일도 못 한다 — 루틴에서 실제로 그렇게 갇혔다.
+    //
+    // 한 청크를 채우는 과목이 나오면 바로 쓴다. 아무도 못 채우면 그중 제일 많이
+    // 나온 과목을 쓴다(끝물이라 그런 것이니 그대로 처리하면 된다).
+    const TRIES = 5;
+    let best = null;
+    for (const candidate of pending.slice(0, TRIES)) {
+      const got = await fetchRange(candidate, 0, limit - 1);
+      if (!got || got.length === 0) continue;
+      if (!best || got.length > best.rows.length) best = { subject: candidate, rows: got };
+      if (got.length >= limit) break;
+    }
+    if (!best) {
+      console.log(
+        JSON.stringify({
+          done: true,
+          reason: "후보 과목에서 미분류 해설을 못 가져왔다 (조회 실패거나 모두 처리됨)",
+        }),
+      );
+      return;
+    }
+    subject = best.subject;
+    rows = best.rows;
   }
 
   const items = rows.map((r) => ({
