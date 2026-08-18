@@ -4,6 +4,8 @@
 // (목록/상세)과 서버 액션이 같이 쓴다. 판단이 두 곳에 따로 적히면 "목록에는 제목이
 // 보이는데 상세는 막힌다" 같은 어긋남이 생기고, 반대로 어긋나면 남의 비밀글이 샌다.
 
+import { profanityError } from "./profanity";
+
 export const SUGGESTION_TITLE_MAX = 100;
 export const SUGGESTION_CONTENT_MAX = 2000;
 export const SUGGESTION_ANSWER_MAX = 2000;
@@ -85,6 +87,10 @@ export function validateSuggestionInput(input: {
   if (content.length > SUGGESTION_CONTENT_MAX)
     return { error: `내용은 ${SUGGESTION_CONTENT_MAX}자 이하로 입력해주세요.` };
 
+  // 제목·본문 어디에 있든 막는다 — 목록에는 제목만 보이므로 제목을 빼두면 그쪽으로 샌다.
+  const profanity = profanityError(title) ?? profanityError(content);
+  if (profanity) return { error: profanity };
+
   return { title, content };
 }
 
@@ -94,6 +100,8 @@ export function validateSuggestionAnswer(answer: string): SuggestionInputError |
   if (!trimmed) return { error: "답변 내용을 입력해주세요." };
   if (trimmed.length > SUGGESTION_ANSWER_MAX)
     return { error: `답변은 ${SUGGESTION_ANSWER_MAX}자 이하로 입력해주세요.` };
+  const profanity = profanityError(trimmed);
+  if (profanity) return { error: profanity };
   return { answer: trimmed };
 }
 
@@ -135,5 +143,7 @@ export function validateSuggestionCommentContent(
   if (!trimmed) return { error: "댓글 내용을 입력해주세요." };
   if (trimmed.length > SUGGESTION_COMMENT_MAX)
     return { error: `댓글은 ${SUGGESTION_COMMENT_MAX}자 이하로 입력해주세요.` };
+  const profanity = profanityError(trimmed);
+  if (profanity) return { error: profanity };
   return { content: trimmed };
 }

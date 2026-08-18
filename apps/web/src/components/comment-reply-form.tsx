@@ -2,25 +2,21 @@
 
 import { useState, useTransition } from "react";
 import { postComment } from "@/app/papers/actions";
-import { CommentGuestFields } from "@/components/comment-guest-fields";
 import { COMMENT_CONTENT_MAX } from "@gongmoa/core";
 
-// 최상위 댓글 아래에 인라인으로 열리는 답글 작성 폼.
+// 최상위 댓글 아래에 인라인으로 열리는 답글 작성 폼. 댓글과 마찬가지로 로그인한
+// 사람만 쓸 수 있어(호출부가 답글 버튼 자체를 감춘다) 닉네임·비밀번호 입력이 없다.
 export function ReplyForm({
   paperId,
   parentId,
-  loggedIn,
   onDone,
   onCancel,
 }: {
   paperId: string;
   parentId: string;
-  loggedIn: boolean;
   onDone: () => void;
   onCancel: () => void;
 }) {
-  const [nickname, setNickname] = useState("");
-  const [password, setPassword] = useState("");
   const [content, setContent] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -29,13 +25,7 @@ export function ReplyForm({
     e.preventDefault();
     setError(null);
     startTransition(async () => {
-      const result = await postComment({
-        paperId,
-        parentId,
-        content,
-        nickname: loggedIn ? undefined : nickname,
-        password: loggedIn ? undefined : password,
-      });
+      const result = await postComment({ paperId, parentId, content });
       if (result.error) setError(result.error);
       else onDone();
     });
@@ -43,16 +33,6 @@ export function ReplyForm({
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-2">
-      {!loggedIn && (
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <CommentGuestFields
-            nickname={nickname}
-            password={password}
-            onNicknameChange={setNickname}
-            onPasswordChange={setPassword}
-          />
-        </div>
-      )}
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
