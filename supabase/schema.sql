@@ -1888,3 +1888,38 @@ $$;
 
 revoke all on function increment_suggestion_view(uuid) from public, anon, authenticated;
 grant execute on function increment_suggestion_view(uuid) to service_role;
+
+-- 건의 하나 아래 댓글. 답글 트리 없이 평평하다(packages/core/src/suggestions.ts
+-- 참고 — 로그인 회원만 쓸 수 있어 답글 깊이 제한 같은 comments 테이블의 복잡함이
+-- 필요 없다).
+--
+-- 비밀글의 댓글도 원글과 같은 기준으로 가려야 하므로 이 테이블에도 정책을 두지
+-- 않는다. suggestions 와 마찬가지로 서버(service_role)가 먼저 원글 접근 권한
+-- (canReadSuggestion)을 확인한 뒤에만 댓글을 읽거나 쓰게 한다.
+create table if not exists suggestion_comments (
+  id uuid primary key default gen_random_uuid(),
+  suggestion_id uuid not null references suggestions(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  -- 작성 시점 닉네임을 그대로 박아둔다 (suggestions·comments 와 같은 이유).
+  nickname text not null,
+  content text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz
+);
+
+do $$ begin
+  alter table suggestion_comments add constraint suggestion_comments_content_len
+    check (char_length(content) between 1 and 1000);
+exception when duplicate_object then null; end $$;
+
+-- 상세 화면은 항상 한 건의의 댓글을 작성순으로 전부 읽는다.
+create index if not exists suggestion_comments_suggestion_idx
+  on suggestion_comments(suggestion_id, created_at);
+-- 도배 방지(시간당 작성 수) 조회용.
+create index if not exists suggestion_comments_user_idx
+  on suggestion_comments(user_id, created_at desc);
+
+alter table suggestion_comments enable row level security;
+-- suggestions 와 같은 이유로 정책을 두지 않는다 — 원글 접근 권한 확인 없이 행을
+-- 열어주면 비밀글의 댓글만 따로 새는 경로가 생긴다.
+revoke all on suggestion_comments from anon, authenticated;

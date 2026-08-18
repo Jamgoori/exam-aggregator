@@ -3,8 +3,14 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Lock, Pin } from "lucide-react";
 import { SuggestionAnswerForm } from "@/components/suggestion-answer-form";
+import { SuggestionComments } from "@/components/suggestion-comments";
 import { SuggestionDeleteButton } from "@/components/suggestion-delete-button";
-import { countSuggestionView, fetchSuggestion, getSuggestionViewer } from "@/lib/suggestions";
+import {
+  countSuggestionView,
+  fetchSuggestion,
+  fetchSuggestionComments,
+  getSuggestionViewer,
+} from "@/lib/suggestions";
 
 export const metadata: Metadata = {
   title: "건의게시판",
@@ -67,7 +73,10 @@ export default async function SuggestionDetailPage({
   }
 
   const { suggestion } = result;
-  await countSuggestionView(suggestion.id, viewer, suggestion.authorId);
+  const [, comments] = await Promise.all([
+    countSuggestionView(suggestion.id, viewer, suggestion.authorId),
+    fetchSuggestionComments(suggestion.id, viewer),
+  ]);
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
@@ -157,6 +166,14 @@ export default async function SuggestionDetailPage({
           initialAnswer={suggestion.answer}
         />
       )}
+
+      <div className="border-t border-zinc-200 pt-6 dark:border-zinc-700">
+        <SuggestionComments
+          suggestionId={suggestion.id}
+          comments={comments}
+          loggedIn={viewer.loggedIn}
+        />
+      </div>
     </div>
   );
 }

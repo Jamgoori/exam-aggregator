@@ -197,3 +197,14 @@ export type Suggestion = {
   created_at: string;
   updated_at: string | null;
 };
+
+// 건의 하나에 달린 댓글. 답글 트리 없이 평평한 목록이다.
+export type SuggestionComment = {
+  id: string;
+  suggestion_id: string;
+  user_id: string;
+  nickname: string;
+  content: string;
+  created_at: string;
+  updated_at: string | null;
+};

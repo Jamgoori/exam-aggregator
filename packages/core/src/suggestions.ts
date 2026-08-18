@@ -7,6 +7,7 @@
 export const SUGGESTION_TITLE_MAX = 100;
 export const SUGGESTION_CONTENT_MAX = 2000;
 export const SUGGESTION_ANSWER_MAX = 2000;
+export const SUGGESTION_COMMENT_MAX = 1000;
 
 // 목록에서 남의 비밀글 자리에 제목 대신 넣는 문구. 제목까지 가리는 이유는,
 // 사람들이 제목에 "○○○입니다, 결제 오류 문의" 처럼 개인정보를 그대로 적기 때문이다.
@@ -94,4 +95,45 @@ export function validateSuggestionAnswer(answer: string): SuggestionInputError |
   if (trimmed.length > SUGGESTION_ANSWER_MAX)
     return { error: `답변은 ${SUGGESTION_ANSWER_MAX}자 이하로 입력해주세요.` };
   return { answer: trimmed };
+}
+
+// ── 댓글 ─────────────────────────────────────────────────────────────────────
+// 건의 하나 아래에 다는 평범한(중첩 없는) 댓글. 로그인 회원만 쓸 수 있어 답글
+// 트리·깊이 제한 같은 comments.ts 의 복잡함은 필요 없다 — 여긴 "이 건의에 대한
+// 짧은 의견"이 쌓이는 자리다.
+//
+// 비밀글의 댓글도 원글과 같은 기준으로 가려야 한다(별도 판단을 두면 "본문은 못
+// 보는데 댓글은 보인다"가 생긴다). 그래서 댓글 목록 자체에는 권한 함수를 따로
+// 두지 않고, 상세 화면이 canReadSuggestion 으로 원글 접근을 이미 막은 뒤에만
+// 댓글 조회·작성으로 이어지게 한다(apps/web/src/lib/suggestions.ts,
+// app/suggestions/actions.ts).
+
+export type SuggestionCommentOwnership = {
+  user_id: string;
+};
+
+// 수정은 작성자 본인만 — 원글과 같은 이유로 관리자에게도 열지 않는다.
+export function canEditSuggestionComment(
+  comment: SuggestionCommentOwnership,
+  viewer: SuggestionViewer,
+): boolean {
+  return viewer.userId !== null && viewer.userId === comment.user_id;
+}
+
+// 삭제는 본인 + 관리자(스팸·욕설 정리).
+export function canDeleteSuggestionComment(
+  comment: SuggestionCommentOwnership,
+  viewer: SuggestionViewer,
+): boolean {
+  return viewer.isAdmin || canEditSuggestionComment(comment, viewer);
+}
+
+export function validateSuggestionCommentContent(
+  content: string,
+): SuggestionInputError | { content: string } {
+  const trimmed = String(content ?? "").trim();
+  if (!trimmed) return { error: "댓글 내용을 입력해주세요." };
+  if (trimmed.length > SUGGESTION_COMMENT_MAX)
+    return { error: `댓글은 ${SUGGESTION_COMMENT_MAX}자 이하로 입력해주세요.` };
+  return { content: trimmed };
 }

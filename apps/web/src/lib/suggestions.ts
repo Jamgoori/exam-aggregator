@@ -3,7 +3,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionUser } from "@/lib/supabase/session";
 import {
   canDeleteSuggestion,
+  canDeleteSuggestionComment,
   canEditSuggestion,
+  canEditSuggestionComment,
   canReadSuggestion,
   suggestionListTitle,
   type SuggestionViewer,
@@ -177,4 +179,42 @@ export async function countSuggestionView(id: string, viewer: SuggestionViewer, 
   if (viewer.isAdmin || viewer.userId === authorId) return;
   const admin = createAdminClient();
   await admin.rpc("increment_suggestion_view", { p_suggestion_id: id });
+}
+
+export type SuggestionCommentItem = {
+  id: string;
+  nickname: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string | null;
+  canEdit: boolean;
+  canDelete: boolean;
+};
+
+// 댓글은 상세 화면이 fetchSuggestion 으로 원글 접근 권한(canReadSuggestion)을 이미
+// 확인한 뒤에만 호출된다 — 비밀글의 댓글에 별도 판단을 두지 않고 원글 판단에
+// 얹혀가는 것이 목적이라, 여기서는 그 확인을 다시 하지 않는다.
+export async function fetchSuggestionComments(
+  suggestionId: string,
+  viewer: SuggestionViewer,
+): Promise<SuggestionCommentItem[]> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("suggestion_comments")
+    .select("id, user_id, nickname, content, created_at, updated_at")
+    .eq("suggestion_id", suggestionId)
+    .order("created_at", { ascending: true });
+
+  return (data ?? []).map((row) => {
+    const ownership = { user_id: row.user_id as string };
+    return {
+      id: row.id as string,
+      nickname: row.nickname as string,
+      content: row.content as string,
+      createdAt: row.created_at as string,
+      updatedAt: row.updated_at as string | null,
+      canEdit: canEditSuggestionComment(ownership, viewer),
+      canDelete: canDeleteSuggestionComment(ownership, viewer),
+    };
+  });
 }

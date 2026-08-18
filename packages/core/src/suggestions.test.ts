@@ -2,13 +2,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   canDeleteSuggestion,
+  canDeleteSuggestionComment,
   canEditSuggestion,
+  canEditSuggestionComment,
   canPinSuggestion,
   canReadSuggestion,
   SECRET_TITLE_PLACEHOLDER,
   suggestionListTitle,
   validateSuggestionAnswer,
+  validateSuggestionCommentContent,
   validateSuggestionInput,
+  SUGGESTION_COMMENT_MAX,
   SUGGESTION_CONTENT_MAX,
   SUGGESTION_TITLE_MAX,
 } from "./suggestions";
@@ -99,5 +103,30 @@ test("빈 답변은 거절한다 (답변 완료 배지만 붙는 글 방지)", (
   assert.ok("error" in validateSuggestionAnswer("   "));
   assert.deepEqual(validateSuggestionAnswer(" 확인 후 반영했습니다. "), {
     answer: "확인 후 반영했습니다.",
+  });
+});
+
+const authorComment = { user_id: "u-author" };
+
+test("댓글 수정은 작성자 본인만 — 관리자도 남의 댓글 내용은 못 고친다", () => {
+  assert.equal(canEditSuggestionComment(authorComment, author), true);
+  assert.equal(canEditSuggestionComment(authorComment, admin), false);
+  assert.equal(canEditSuggestionComment(authorComment, stranger), false);
+  assert.equal(canEditSuggestionComment(authorComment, guest), false);
+});
+
+test("댓글 삭제는 본인과 관리자", () => {
+  assert.equal(canDeleteSuggestionComment(authorComment, author), true);
+  assert.equal(canDeleteSuggestionComment(authorComment, admin), true);
+  assert.equal(canDeleteSuggestionComment(authorComment, stranger), false);
+});
+
+test("빈 댓글은 거절하고, 길이 제한을 넘으면 거절한다", () => {
+  assert.ok("error" in validateSuggestionCommentContent("   "));
+  assert.ok(
+    "error" in validateSuggestionCommentContent("가".repeat(SUGGESTION_COMMENT_MAX + 1)),
+  );
+  assert.deepEqual(validateSuggestionCommentContent(" 좋은 생각이네요! "), {
+    content: "좋은 생각이네요!",
   });
 });

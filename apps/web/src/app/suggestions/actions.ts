@@ -6,10 +6,14 @@ import { getSessionUser } from "@/lib/supabase/session";
 import { getSuggestionViewer } from "@/lib/suggestions";
 import {
   canDeleteSuggestion,
+  canDeleteSuggestionComment,
   canEditSuggestion,
+  canEditSuggestionComment,
   canPinSuggestion,
+  canReadSuggestion,
   NICKNAME_MAX,
   validateSuggestionAnswer,
+  validateSuggestionCommentContent,
   validateSuggestionInput,
   type SuggestionViewer,
 } from "@gongmoa/core";
@@ -19,6 +23,8 @@ export type SuggestionResult = { error?: string; success?: boolean; id?: string 
 // 한 계정이 짧은 시간에 게시판을 도배하는 것만 막는 느슨한 상한. 정상적인 건의는
 // 하루에 몇 건을 넘지 않는다 (문항 오류 신고와 같은 기준).
 const HOURLY_LIMIT = 10;
+// 댓글은 원글보다 가볍게 자주 오가므로 더 넉넉히 잡는다.
+const COMMENT_HOURLY_LIMIT = 30;
 
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
@@ -203,4 +209,121 @@ export async function answerSuggestion(input: {
 
   revalidateSuggestion(id);
   return { success: true, id };
+}
+
+export async function createSuggestionComment(input: {
+  suggestionId: string;
+  content: string;
+}): Promise<SuggestionResult> {
+  const suggestionId = String(input.suggestionId ?? "");
+  if (!isUuid(suggestionId)) return { error: "잘못된 접근입니다." };
+
+  const validated = validateSuggestionCommentContent(input.content);
+  if ("error" in validated) return { error: validated.error };
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  const admin = createAdminClient();
+
+  const { data: post } = await admin
+    .from("suggestions")
+    .select("user_id, is_secret")
+    .eq("id", suggestionId)
+    .maybeSingle();
+  if (!post) return { error: "글을 찾을 수 없어요." };
+
+  // 댓글은 원글을 볼 수 있는 사람만 달 수 있다 — 여기서 다시 확인하지 않으면
+  // 비밀글의 id를 알아낸 사람이 본문은 못 봐도 댓글로 흔적을 남길 수 있다.
+  const { data: isAdminData } = await supabase.rpc("is_admin");
+  const viewer: SuggestionViewer = { userId: user.id, isAdmin: isAdminData === true };
+  if (!canReadSuggestion({ user_id: post.user_id as string, is_secret: post.is_secret as boolean }, viewer)) {
+    return { error: "잘못된 접근입니다." };
+  }
+
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { count } = await admin
+    .from("suggestion_comments")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .gte("created_at", oneHourAgo);
+  if ((count ?? 0) >= COMMENT_HOURLY_LIMIT) {
+    return { error: "짧은 시간 동안 너무 많이 작성했어요. 잠시 후 다시 시도해주세요." };
+  }
+
+  const nickname =
+    (user.user_metadata?.nickname as string | undefined) ??
+    user.email?.split("@")[0] ??
+    "회원";
+
+  const { error } = await admin.from("suggestion_comments").insert({
+    suggestion_id: suggestionId,
+    user_id: user.id,
+    nickname: nickname.slice(0, NICKNAME_MAX),
+    content: validated.content,
+  });
+  if (error) return { error: "댓글 등록에 실패했어요." };
+
+  revalidateSuggestion(suggestionId);
+  return { success: true, id: suggestionId };
+}
+
+export async function updateSuggestionComment(input: {
+  commentId: string;
+  content: string;
+}): Promise<SuggestionResult> {
+  const commentId = String(input.commentId ?? "");
+  if (!isUuid(commentId)) return { error: "잘못된 접근입니다." };
+
+  const validated = validateSuggestionCommentContent(input.content);
+  if ("error" in validated) return { error: validated.error };
+
+  const viewer = await getSuggestionViewer();
+  if (!viewer.loggedIn) return { error: "로그인 후 이용할 수 있어요." };
+
+  const admin = createAdminClient();
+  const { data: comment } = await admin
+    .from("suggestion_comments")
+    .select("suggestion_id, user_id")
+    .eq("id", commentId)
+    .maybeSingle();
+  if (!comment) return { error: "댓글을 찾을 수 없어요." };
+
+  if (!canEditSuggestionComment({ user_id: comment.user_id as string }, viewer)) {
+    return { error: "권한이 없어요." };
+  }
+
+  const { error } = await admin
+    .from("suggestion_comments")
+    .update({ content: validated.content, updated_at: new Date().toISOString() })
+    .eq("id", commentId);
+  if (error) return { error: "수정에 실패했어요." };
+
+  revalidateSuggestion(comment.suggestion_id as string);
+  return { success: true, id: comment.suggestion_id as string };
+}
+
+export async function deleteSuggestionComment(commentId: string): Promise<SuggestionResult> {
+  if (!isUuid(commentId)) return { error: "잘못된 접근입니다." };
+
+  const viewer = await getSuggestionViewer();
+  if (!viewer.loggedIn) return { error: "로그인 후 이용할 수 있어요." };
+
+  const admin = createAdminClient();
+  const { data: comment } = await admin
+    .from("suggestion_comments")
+    .select("suggestion_id, user_id")
+    .eq("id", commentId)
+    .maybeSingle();
+  if (!comment) return { error: "댓글을 찾을 수 없어요." };
+
+  if (!canDeleteSuggestionComment({ user_id: comment.user_id as string }, viewer)) {
+    return { error: "권한이 없어요." };
+  }
+
+  const { error } = await admin.from("suggestion_comments").delete().eq("id", commentId);
+  if (error) return { error: "삭제에 실패했어요." };
+
+  revalidateSuggestion(comment.suggestion_id as string);
+  return { success: true };
 }
