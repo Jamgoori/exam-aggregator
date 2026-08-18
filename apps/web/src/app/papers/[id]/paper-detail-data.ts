@@ -1,6 +1,8 @@
 import "server-only";
 import { cache } from "react";
+import { cacheLife, cacheTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createPublicClient } from "@/lib/supabase/public";
 import { resolvePaperId } from "@/lib/paper-slug-map";
 import { compareLevels } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
@@ -33,14 +35,42 @@ const RELATED_FETCH_LIMIT = RELATED_PAPERS_LIMIT * 5;
 export const getPaper = cache(async (param: string) => {
   const id = await resolvePaperId(param);
   if (!id) return null;
-  const supabase = await createClient();
+  return fetchPaperById(id);
+});
+
+/**
+ * 문제지 한 장. **쿠키 클라이언트로 읽지 않는다** — 문제지는 로그인 여부와 무관하게
+ * 모두에게 같은 공개 자료이고(RLS: `public read exam_papers`), 여기서 cookies() 를
+ * 건드리는 순간 이 값을 쓰는 generateMetadata 까지 동적이 되기 때문이다.
+ *
+ * **왜 그게 SEO 문제인가:** generateMetadata 가 동적이면 <title>·description·
+ * canonical 이 정적 셸의 <head> 에 실리지 못하고 렌더링 뒤에 스트리밍으로 딸려온다.
+ * Next 는 이때 UA 를 보고 갈라지는데(htmlLimitedBots), Googlebot 은 "JS 를 실행하니
+ * 스트리밍해도 된다"는 쪽으로 분류돼 **HTML 에 제목도 정본도 없는 응답**을 받는다
+ * (실측: Googlebot UA 로 받으면 <title>·canonical 이 0개, 같은 주소를 Yeti·Bingbot·
+ * 브라우저로 받으면 정상). 렌더링 대기열에 들어간 페이지는 색인이 늦거나 밀리고,
+ * 문제지 3,800장이 "발견됨 - 현재 색인되지 않음"에 쌓인 이유가 이것이다.
+ *
+ * 공개 클라이언트로 읽고 캐시에 담으면 metadata 가 셸에 함께 프리렌더돼
+ * (시험 페이지 /exams/[exam] 이 이미 이렇게 나간다) 모든 크롤러가 첫 HTML 에서
+ * 제목과 정본을 본다. 조회 자체도 문제지당 한 번으로 줄어든다.
+ */
+async function fetchPaperById(id: string): Promise<ExamPaper | null> {
+  "use cache";
+  // 업로드된 문제지는 내용이 거의 바뀌지 않는다. 관리자가 제목·직류를 고치면
+  // 홈 데이터와 같은 태그를 달아 revalidateTag("home-data") 에 묻어간다
+  // (주소 표 getSlugMap 도 같은 태그로 함께 갱신된다).
+  cacheLife({ revalidate: 3600 });
+  cacheTag("home-data");
+
+  const supabase = createPublicClient();
   const { data } = await supabase
     .from("exam_papers")
     .select("*, subjects(*), exam_types(*)")
     .eq("id", id)
     .single();
   return data as ExamPaper | null;
-});
+}
 
 // 상세페이지 상단(제목·버튼·평점·댓글)에 필요한 데이터만 모아서 돌려준다.
 // 하단 "같은 과목 목록"은 getRelatedPapersData로 분리해 Suspense로 스트리밍한다 —

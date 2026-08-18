@@ -7,6 +7,12 @@ import { FileQuestion } from "lucide-react";
 export default function NotFound() {
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col items-center gap-4 px-4 py-32 text-center">
+      {/* 이 화면이 항상 404 로 나가지는 않는다 — PPR 구조에서는 셸이 이미 흘러간 뒤라
+          라우트 안에서 부른 notFound() 가 200 으로 나간다(실측: /subjects/한국사 처럼
+          없는 slug 가 200). 그대로 두면 구글에게는 "내용이 같은 200 페이지"가 slug 수
+          만큼 생기는 셈이라, 레이아웃이 걸어 둔 index,follow 를 여기서 덮어 색인만은
+          막는다. 상태 코드 자체를 고치는 것은 별건이다. */}
+      <meta name="robots" content="noindex, follow" />
       <FileQuestion size={48} className="text-zinc-300 dark:text-zinc-600" />
       <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
         페이지를 찾을 수 없습니다

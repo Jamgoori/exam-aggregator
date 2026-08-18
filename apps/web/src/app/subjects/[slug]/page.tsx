@@ -2,6 +2,7 @@ import { cache } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createPublicClient } from "@/lib/supabase/public";
 import { ExamCard } from "@/components/exam-card";
 import { Pagination } from "@/components/pagination";
 import { levelColor, compareLevels } from "@/lib/level-colors";
@@ -24,10 +25,14 @@ import type { Metadata } from "next";
 
 const PAGE_SIZE = 24;
 
-// generateMetadata와 페이지 본문이 같은 slug로 중복 조회하지 않도록 캐싱
+// generateMetadata와 페이지 본문이 같은 slug로 중복 조회하지 않도록 캐싱.
+//
+// 과목 정보는 로그인 여부와 무관한 공개 자료라 쿠키를 읽는 서버 클라이언트를 쓸
+// 이유가 없다. cookies() 를 건드리면 이 값을 쓰는 generateMetadata 까지 동적이 되어
+// <title>·canonical 이 정적 셸의 <head> 밖으로 밀려난다(문제지 상세의
+// paper-detail-data.ts 주석에 같은 내용의 실측이 있다).
 const getSubject = cache(async (slug: string) => {
-  const supabase = await createClient();
-  return getSubjectBySlug(supabase, slug);
+  return getSubjectBySlug(createPublicClient(), slug);
 });
 
 export async function generateMetadata({
