@@ -32,7 +32,6 @@ import {
   membershipDaysLeft,
   trialDaysLeft,
   DUE_QUEUE_LIMIT,
-  type MembershipSource,
 } from "@gongmoa/core";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@gongmoa/core";
@@ -111,12 +110,12 @@ function formatExpiry(iso: string, now: Date): string {
 // 제목 옆의 작은 알약은 장식으로 읽혀 그냥 지나치는데, 멤버십 잔여일은 지나치면
 // 안 되는 값이다 — 모르고 있다가 끊기면 그건 서비스 잘못이 된다.
 //
-// 남은 일수만으로는 모자라서 세 가지를 함께 적는다:
-//   · 며칠 남았나(숫자)
-//   · 언제까지인가(날짜) — "42일 남음"만 있으면 달력을 열어 직접 세야 한다.
-//   · 무엇으로 열린 기간인가(체험·출석 보상) — 체험인 걸 모르면 끝나고 나서야
-//     "결제한 줄 알았다"가 된다. 반대로 출석 보상을 체험이라 부르면 거짓말이 된다.
-//     (요금제 페이지 CurrentStatus 와 같은 구분이다.)
+// 적는 건 둘뿐이다: 며칠 남았나(숫자)와 언제까지인가(날짜). "42일 남음"만 있으면
+// 달력을 열어 직접 세야 한다.
+//
+// 기간의 출처(무료 체험·출석 보상·결제)는 일부러 적지 않는다. 사용자가 이 칸에서
+// 알고 싶은 건 "언제까지 쓰나" 하나이고, 출처는 그 답을 바꾸지 않는다 — 궁금하면
+// 눌러서 요금제 페이지(CurrentStatus)에서 볼 수 있다.
 //
 // 만료가 가까우면(D-7) 색을 바꾼다. 끊기기 전에 한 번은 눈에 걸려야 한다는 게
 // 이 칸의 존재 이유다 — 평상시엔 조용하고, 급할 때만 목소리를 낸다.
@@ -126,34 +125,33 @@ function MembershipTile({
   admin,
   premium,
   daysLeft,
-  source,
   expiryLabel,
 }: {
   admin: boolean;
   premium: boolean;
   // 며칠 남았는지(출처 무관). 무기한이거나 무료 회원이면 null.
   daysLeft: number | null;
-  source: MembershipSource;
   // "9월 29일" — 페이지 본문에서 이미 만들어 넘긴다(위 formatExpiry 주석 참고).
   expiryLabel: string | null;
 }) {
   const soon = daysLeft != null && daysLeft <= MEMBERSHIP_SOON_DAYS;
 
   // 관리자는 멤버십과 무관하게 모든 기능을 쓴다 — 만료가 있는 것처럼 보이면 거짓말이다.
-  const { value, note } = admin
+  //
+  // note 가 null 이면 아랫줄을 아예 안 그린다. 무료 회원에게 "출석체크로 받으세요"
+  // 같은 권유를 붙이지 않는 건, 이 칸이 상태를 알려주는 자리이지 파는 자리가
+  // 아니기 때문이다 — 출석으로 늘리는 길은 출석 탭·홈 팝업이 이미 안내한다.
+  const { value, note }: { value: string; note: string | null } = admin
     ? { value: "무제한", note: "관리자 계정" }
     : premium && daysLeft != null && expiryLabel
-      ? {
-          value: `${daysLeft}일`,
-          note: `${sourceLabel(source)}${expiryLabel}까지`,
-        }
+      ? { value: `${daysLeft}일`, note: `${expiryLabel}까지` }
       : premium
-        ? { value: "무제한", note: "기간 제한 없음" }
-        : { value: "무료 회원", note: "출석체크로 무료 획득" };
+        ? { value: "무제한", note: null }
+        : { value: "무료 회원", note: null };
 
   return (
     <Link
-      href={premium || admin ? "/membership" : "/mypage?tab=attendance"}
+      href="/membership"
       className={`flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border px-4 py-3 transition-colors ${
         soon
           ? "border-amber-300 bg-amber-50/50 hover:border-amber-400 dark:border-amber-800 dark:bg-amber-950/20"
@@ -178,25 +176,19 @@ function MembershipTile({
           <span className="text-xs text-zinc-500 dark:text-zinc-500">남음</span>
         )}
       </div>
-      <span
-        className={`text-[11px] ${
-          soon
-            ? "font-medium text-amber-700 dark:text-amber-400"
-            : "text-zinc-400 dark:text-zinc-600"
-        }`}
-      >
-        {note}
-      </span>
+      {note && (
+        <span
+          className={`text-[11px] ${
+            soon
+              ? "font-medium text-amber-700 dark:text-amber-400"
+              : "text-zinc-400 dark:text-zinc-600"
+          }`}
+        >
+          {note}
+        </span>
+      )}
     </Link>
   );
-}
-
-// 기간의 출처를 앞에 붙이는 꼬리표. 결제는 굳이 말하지 않는다 — 돈을 낸 사람에게
-// "결제"라고 다시 알리는 건 정보가 아니라 잡음이다.
-function sourceLabel(source: MembershipSource): string {
-  if (source === "trial") return "무료 체험 · ";
-  if (source === "attendance") return "출석 보상 · ";
-  return "";
 }
 
 export default async function MyPage({
@@ -406,7 +398,6 @@ export default async function MyPage({
           admin={admin}
           premium={premium}
           daysLeft={daysLeft}
-          source={membership.source}
           expiryLabel={membershipExpiry}
         />
       </div>
