@@ -1,8 +1,10 @@
 import { cache } from "react";
+import { cacheLife, cacheTag } from "next/cache";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createPublicClient } from "@/lib/supabase/public";
+import { getSubjectIndex } from "@/lib/subject-index";
 import { ExamCard } from "@/components/exam-card";
 import { Pagination } from "@/components/pagination";
 import { levelColor, compareLevels } from "@/lib/level-colors";
@@ -25,41 +27,79 @@ import type { Metadata } from "next";
 
 const PAGE_SIZE = 24;
 
-// generateMetadata와 페이지 본문이 같은 slug로 중복 조회하지 않도록 캐싱.
-//
-// 과목 정보는 로그인 여부와 무관한 공개 자료라 쿠키를 읽는 서버 클라이언트를 쓸
-// 이유가 없다. cookies() 를 건드리면 이 값을 쓰는 generateMetadata 까지 동적이 되어
-// <title>·canonical 이 정적 셸의 <head> 밖으로 밀려난다(문제지 상세의
-// paper-detail-data.ts 주석에 같은 내용의 실측이 있다).
-const getSubject = cache(async (slug: string) => {
-  return getSubjectBySlug(createPublicClient(), slug);
-});
+// generateMetadata와 페이지 본문이 같은 slug로 중복 조회하지 않도록 감싼다.
+const getSubject = cache(async (slug: string) => fetchSubjectBySlug(slug));
 
+/**
+ * 과목 한 건. **쿠키 클라이언트로 읽지 않고, 캐시에 담는다.** 둘 다 필요하다.
+ *
+ * - cookies() 를 건드리면(createClient) 이 값을 쓰는 generateMetadata 가 동적이 된다.
+ * - 캐시하지 않으면 조회 자체가 "요청 시점에만 알 수 있는 값"이라 역시 동적이 된다.
+ *
+ * 둘 중 하나라도 남아 있으면 제목·정본이 프리렌더된 <head> 에 박히지 못하고 렌더링
+ * 뒤 스트리밍으로 밀린다 — 실측(2026-08-18): 공개 클라이언트로 바꾸기만 하고 캐시를
+ * 안 걸었더니 프리렌더 산출물(.next/server/app/subjects/korean-history.html)의 <head>
+ * 에 <title> 이 아예 없었고, 캐시를 걸자 들어갔다.
+ *
+ * 과목 정보는 로그인 여부와 무관한 공개 자료이고(RLS: public read) 이름·slug 가 거의
+ * 바뀌지 않는다. 관리자가 고치면 홈 데이터와 같은 태그로 함께 갱신된다.
+ */
+async function fetchSubjectBySlug(slug: string) {
+  "use cache";
+  cacheLife({ revalidate: 3600 });
+  cacheTag("home-data");
+
+  return getSubjectBySlug(createPublicClient(), slug);
+}
+
+// 과목 주소를 전부 미리 알려준다(자료가 있는 과목만 — getSubjectIndex 가 빈 과목을
+// 이미 걸러 준다).
+//
+// **왜 필요한가.** generateStaticParams 가 없으면 Next 는 주소를 모르는 채로 만든
+// "fallback 셸" 하나를 모든 과목에 돌려쓴다. 주소를 모르니 아래 generateMetadata 를
+// 돌릴 수 없어 그 셸에는 제목·정본이 아예 들어가지 못하는데, CDN 은 그 셸을 캐시해
+// 크롤러에게도 그대로 내준다.
+//
+// 실측(2026-08-18, 프로덕션 /papers/2019-국가직-9급-영어):
+//
+//     Yeti(네이버)  x-vercel-cache=BYPASS  <title> <head> 안  ✅
+//     Bingbot       x-vercel-cache=BYPASS  <title> <head> 안  ✅
+//     Googlebot     x-vercel-cache=HIT     <title> 없음       ❌
+//
+// Next 는 UA 가 htmlLimitedBots 에 걸리면 메타데이터를 <head> 에 담아 블로킹 렌더하고
+// (next.config.ts 에서 Googlebot 을 그 목록에 넣어 뒀다), 그 UA 목록은 빌드 산출물의
+// 캐시 우회 규칙으로도 나간다. 그런데 Vercel 은 네이버·빙에는 그 우회를 적용하면서
+// Googlebot 에는 적용하지 않는다 — 함수까지 가지 못하니 설정만으로는 못 고친다.
+// 캐시되는 산출물 자체에 메타데이터가 박혀 있어야 하고, 그러려면 이 함수가 필요하다.
+//
+// 문제지 상세(3,800장)에는 같은 처리를 하지 않았다. 프리렌더 산출물이 장당 305KB
+// (PPR postponed 데이터가 194KB)라 전부 만들면 1.1GB 가 되고, 힙 8GB 로도 빌드가
+// OOM 으로 죽는다. 과목은 200장 남짓이라 19MB 로 끝난다.
+export async function generateStaticParams() {
+  const { entries } = await getSubjectIndex();
+  return entries.map((e) => ({ slug: e.slug }));
+}
+
+// **searchParams 를 읽지 않는다.** 여기서 ?page= 를 읽으면 metadata 가 요청마다
+// 달라지는 값이 되어 셸에 미리 박힐 수 없고, 그러면 위의 generateStaticParams 를
+// 붙여도 제목·정본이 다시 스트리밍으로 밀린다 — 크롤러가 못 보는 그 상태로 돌아간다.
+//
+// 그래서 정본은 언제나 파라미터 없는 주소다. 2페이지 이후가 1페이지를 정본으로
+// 가리키게 되는 것은 감수한다: 문제지 3,800장이 전부 사이트맵에 실려 있어 발견
+// 경로가 페이지네이션에 걸려 있지 않고(예전 주석이 걱정하던 부분이다), 실제로
+// 검색 결과에 떠야 하는 것은 1페이지다. 급수·직렬 탭(?level=·?examTypes=)도 같은
+// 이유로 파라미터 없는 주소로 모인다.
 export async function generateMetadata({
   params,
-  searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ level?: string; examTypes?: string; page?: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const { page } = await searchParams;
   const subject = await getSubject(slug);
   if (!subject) return {};
 
-  // 급수·직렬 탭(?level=·?examTypes=)은 같은 목록을 걸러 보여줄 뿐이라 정본을
-  // 파라미터 없는 주소로 모은다. 반면 ?page= 는 내용이 실제로 다른 페이지다 —
-  // 2페이지 이후까지 1페이지를 정본으로 가리키면 크롤러가 그 페이지들을 중복으로
-  // 보고 덜 방문하게 되고, 거기서만 링크되는 문제지가 발견되지 않는다.
-  // 그래서 페이지 번호만 정본에 남긴다.
-  const pageNum = Math.max(1, Number(page) || 1);
-  const canonical =
-    pageNum > 1 ? `/subjects/${slug}?page=${pageNum}` : `/subjects/${slug}`;
-
-  const title =
-    pageNum > 1
-      ? `${subject.name} 기출문제 모음 (${pageNum}페이지)`
-      : `${subject.name} 기출문제 모음`;
+  const canonical = `/subjects/${slug}`;
+  const title = `${subject.name} 기출문제 모음`;
   const description = `${subject.name} 과목의 공무원 기출문제를 국가직·지방직 등 시행처별, 연도별·급수별로 모아 정답과 함께 무료로 제공합니다.`;
 
   return {
