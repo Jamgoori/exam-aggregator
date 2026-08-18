@@ -12,6 +12,7 @@ import { createClient } from "@/lib/supabase/server";
 import { HomeExamBrowser } from "@/components/home-exam-browser";
 import { ReviewNudgeModal } from "@/components/review-nudge-modal";
 import { BetaNoticeModal } from "@/components/beta-notice-modal";
+import { AttendancePromoModal } from "@/components/attendance-promo-modal";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
@@ -99,6 +100,13 @@ export default async function Home({
           전부 무료라는 말이 먼저 닿아야 하므로 비회원에게도 띄운다.
           문제지·풀이 화면이 아니라 홈에만 두는 이유는 beta-notice-modal.tsx 주석 참고. */}
       <BetaNoticeModal />
+      {/* 출석 이벤트 광고(이미지 팝업). 로그인 여부와 상관없이 띄운다 — 비회원에게는
+          가입할 이유 자체이고, 회원에게는 오늘 안 오면 놓치는 것이 된다. 다만 가는
+          곳은 갈린다: 회원은 출석 현황으로, 비회원은 가입으로 보낸다(로그인 화면으로
+          보내면 계정이 없는 사람이 막다른 길을 만난다).
+          홈 팝업 셋(개발 중 안내·복습 유도·이 광고)이 한 화면에 겹치지 않게 하는
+          규칙은 lib/home-popup.ts 참고. */}
+      <AttendancePromoModal href={userId ? "/mypage?tab=attendance" : "/signup"} />
       <HomeExamBrowser
         heroText={
           <>

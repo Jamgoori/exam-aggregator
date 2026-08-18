@@ -13,10 +13,11 @@ export const ATTENDANCE_MIN_QUESTIONS = 10;
 
 // packages/core/src/attendance.ts 의 ATTENDANCE_MILESTONES 와 반드시 같은 값.
 export const ATTENDANCE_MILESTONES: { days: number; grantDays: number }[] = [
-  { days: 7, grantDays: 1 },
-  { days: 14, grantDays: 1 },
-  { days: 21, grantDays: 1 },
-  { days: 28, grantDays: 2 },
+  { days: 5, grantDays: 1 },
+  { days: 10, grantDays: 1 },
+  { days: 15, grantDays: 1 },
+  { days: 20, grantDays: 1 },
+  { days: 25, grantDays: 2 },
 ];
 
 // "YYYY-MM-DD" (KST). _shared/membership.ts 의 kstToday 와 같은 계산이다.

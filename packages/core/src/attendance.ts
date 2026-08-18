@@ -32,20 +32,30 @@ export type AttendanceMilestone = {
 
 // 한 달 안에서만 유효하다(매월 1일 KST 리셋).
 //
-// 마지막 단계가 28일인 것은 "월 개근"을 일부러 피한 것이다. 이유 둘:
-//   1. 21일에서 개근(30·31일)까지 9~10일을 더 채워 2일을 받는 구조면 곡선의 마지막
-//      구간이 가장 가혹해져, 대부분 21일에서 멈추고 최고 단계가 장식이 된다.
-//      28일이면 "2~3일 빠져도 최고 단계"라 실제로 노리게 된다.
-//   2. 달마다 일수가 달라(2월 28일 / 1월 31일) 개근의 난이도가 달라진다. 28일 고정은
-//      모든 달이 같은 기준이다. 어느 달이든 28일은 존재하므로 항상 도달 가능하다.
+// 5일 간격으로 다섯 단계다. 7일 간격(7·14·21·28)이었던 것을 5일로 좁힌 이유는
+// **첫 보상까지의 거리**다. 처음 온 사람이 7일을 채워야 아무 일도 안 일어나는 구조는
+// 대부분 3~4일에서 이탈하고, 그 사람은 보상을 한 번도 못 본 채로 판단을 끝낸다.
+// 5일이면 첫 주 안에 실제로 한 번 받아보게 되고, 그 다음부터는 "10일까지 5일 남았다"가
+// 계속 짧은 목표로 이어진다.
+//
+// 마지막 단계가 25일인 것은 "월 개근"을 일부러 피한 것이다. 이유 둘:
+//   1. 20일에서 개근(30·31일)까지 10~11일을 더 채워 2일을 받는 구조면 곡선의 마지막
+//      구간이 가장 가혹해져, 대부분 20일에서 멈추고 최고 단계가 장식이 된다.
+//      25일이면 "닷새쯤 빠져도 최고 단계"라 실제로 노리게 된다.
+//   2. 달마다 일수가 달라(2월 28일 / 1월 31일) 개근의 난이도가 달라진다. 25일 고정은
+//      모든 달이 같은 기준이다. 어느 달이든 25일은 존재하므로 항상 도달 가능하다.
+//
+// 마지막만 2일인 것은 앞의 네 단계와 같은 1일이면 25일째가 20일째와 구별되지 않기
+// 때문이다. 끝에 한 번 크게 주는 쪽이 마지막 구간을 버티게 한다.
 export const ATTENDANCE_MILESTONES: readonly AttendanceMilestone[] = [
-  { days: 7, grantDays: 1 },
-  { days: 14, grantDays: 1 },
-  { days: 21, grantDays: 1 },
-  { days: 28, grantDays: 2 },
+  { days: 5, grantDays: 1 },
+  { days: 10, grantDays: 1 },
+  { days: 15, grantDays: 1 },
+  { days: 20, grantDays: 1 },
+  { days: 25, grantDays: 2 },
 ];
 
-// 한 달에 받을 수 있는 멤버십 일수의 합(= 5일). 화면 문구가 이 숫자를 직접 적지
+// 한 달에 받을 수 있는 멤버십 일수의 합(= 6일). 화면 문구가 이 숫자를 직접 적지
 // 않게 여기서 계산한다 — 단계를 손볼 때 안내만 옛 값으로 남는 걸 막는다.
 export const ATTENDANCE_MONTHLY_MAX_DAYS = ATTENDANCE_MILESTONES.reduce(
   (sum, m) => sum + m.grantDays,
@@ -95,6 +105,29 @@ export function attendanceProgress(attendedDays: number): AttendanceProgress {
     next,
     daysToNext: next ? next.days - attendedDays : null,
   };
+}
+
+// 어느 날짜에서 어느 단계를 달성했는지 — "YYYY-MM-DD" → 그 날 열린 단계.
+//
+// 달력이 축하를 그리려면 "5일째 출석한 날이 며칠이었나"를 알아야 하는데, DB 에는
+// 그게 없다. attendance_grants 에는 단계와 지급일만 남고, 지급은 채점 직후가 아니라
+// 재시도로 밀릴 수도 있어 지급 시각을 달성일로 쓰면 엉뚱한 칸에 축하가 붙는다.
+// 그래서 출석한 날짜들을 날짜순으로 세어 n번째 날을 단계와 맞춘다 — 이 계산이
+// 정본이고, 웹·앱이 같은 칸에 축하를 그린다.
+//
+// 누적 규칙이라 순서가 곧 등수다: 정렬한 뒤 5·10·15·20·25번째 날짜가 달성일이다.
+export function attendanceMilestoneDates(
+  attendedDates: readonly string[],
+): Map<string, AttendanceMilestone> {
+  // 같은 날짜가 두 번 들어오면 등수가 밀려 축하가 하루 당겨진다(호출부가 Set 을
+  // 풀어 넘기는 경우가 많아 실제로는 드물지만, 여기서 막는 편이 싸다).
+  const sorted = [...new Set(attendedDates)].sort();
+  const byDate = new Map<string, AttendanceMilestone>();
+  for (const milestone of ATTENDANCE_MILESTONES) {
+    const date = sorted[milestone.days - 1];
+    if (date) byDate.set(date, milestone);
+  }
+  return byDate;
 }
 
 // ── KST 날짜 키 ──────────────────────────────────────────────────────────────
