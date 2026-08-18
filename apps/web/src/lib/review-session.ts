@@ -9,6 +9,7 @@ import {
 } from "@/lib/wrong-notes";
 import { representativePaperIds } from "@/lib/dedup-papers";
 import { recordQuestionResults } from "@/lib/question-status";
+import { recordAttendance } from "@/lib/attendance";
 import { resolveStatusTargets, statusTargetKey } from "@/lib/status-targets";
 import { sanitizeSelectedChoice } from "@/lib/cbt-attempt";
 import {
@@ -816,6 +817,15 @@ export async function submitReviewSessionForUser(
     }
   } catch {
     // 무시: 상태 갱신 실패가 채점을 막지 않는다.
+  }
+
+  // 출석 도장. byPaper 가 아니라 gradedRows 로 센다 — 중복 시험지는 한 문항이 여러
+  // paper_id 로 되짚어져(byPaper) 같은 문항이 두 번 들어 있다. 그걸로 세면 실제로 푼
+  // 것보다 많은 문항을 푼 셈이 되어 출석 기준이 헐거워진다.
+  try {
+    await recordAttendance(userId, gradedRows.length);
+  } catch {
+    // 무시: 출석 기록 실패가 채점을 막지 않는다.
   }
 
   const view = await getReviewSessionView(supabase, userId, sessionId);

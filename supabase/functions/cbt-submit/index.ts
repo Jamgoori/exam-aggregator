@@ -11,6 +11,7 @@ import {
 } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
 import { recordQuestionResults } from "../_shared/status.ts";
+import { recordAttendance } from "../_shared/attendance.ts";
 
 type QuestionResult = {
   question_number: number;
@@ -118,6 +119,14 @@ Deno.serve(async (req) => {
     await recordQuestionResults(admin, userId, paperId, questionResults, "cbt");
   } catch {
     // 무시: 상태 갱신 실패가 채점을 막지 않는다.
+  }
+
+  // 출석 도장(월간 카드 → 멤버십 일수). 채점된 문항 수로만 센다 — 접속이 아니라
+  // 푼 것이 출석이다. 같은 이유로 부가 처리이고, 실패해도 채점을 되돌리지 않는다.
+  try {
+    await recordAttendance(admin, userId, questionResults.length);
+  } catch {
+    // 무시: 출석 기록 실패가 채점을 막지 않는다.
   }
 
   // 같은 시작 시각으로 재제출(replay)해 회독을 늘리는 걸 막기 위해 시작 기록 삭제.

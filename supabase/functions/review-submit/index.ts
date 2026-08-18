@@ -5,6 +5,7 @@ import { corsHeaders, json, sanitizeSelectedChoice } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
 import { fetchQuestionMedia } from "../_shared/media.ts";
 import { recordQuestionResults } from "../_shared/status.ts";
+import { recordAttendance } from "../_shared/attendance.ts";
 import { resolveStatusTargets, statusTargetKey } from "../_shared/status-targets.ts";
 
 type ItemRow = {
@@ -128,6 +129,15 @@ Deno.serve(async (req) => {
     }
   } catch {
     // 무시
+  }
+
+  // 출석 도장. byPaper 가 아니라 graded 로 센다 — 중복 시험지는 한 문항이 여러
+  // paper_id 로 되짚어져(byPaper) 같은 문항이 두 번 들어 있다. 그걸로 세면 실제로 푼
+  // 것보다 많은 문항을 푼 셈이 되어 출석 기준이 헐거워진다.
+  try {
+    await recordAttendance(admin, userId, graded.length);
+  } catch {
+    // 무시: 출석 기록 실패가 채점을 막지 않는다.
   }
 
   // 결과 뷰: 이미지 + 정답/선택/제목/출처.
