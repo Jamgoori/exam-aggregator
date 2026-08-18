@@ -1,3 +1,5 @@
+import { isChoseongQuery, matchesChoseong } from "./hangul";
+
 // 시행처마다 다른 과목 표기 — 웹·모바일 공유(순수 함수).
 //
 // DB `subjects` 는 과목 하나에 행 하나다. 그래서 같은 과목을 시행처가 다르게
@@ -48,6 +50,57 @@ function namesFor(
   return (
     (level ? SUBJECT_NAME_BY_EXAM_TYPE[`${examTypeName} ${level}`] : undefined) ??
     SUBJECT_NAME_BY_EXAM_TYPE[examTypeName]
+  );
+}
+
+// DB 이름 → 그 과목을 달리 부르는 표기들(중복 없이). 위 표를 뒤집어 만든다 —
+// 표에 한 줄 넣으면 여기도 따라오게 해서 두 목록이 어긋나지 않게.
+const ALIASES_BY_STORED_NAME: Record<string, string[]> = (() => {
+  const collected: Record<string, Set<string>> = {};
+  for (const names of Object.values(SUBJECT_NAME_BY_EXAM_TYPE)) {
+    for (const [stored, printed] of Object.entries(names)) {
+      if (printed === stored) continue;
+      (collected[stored] ??= new Set()).add(printed);
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(collected).map(([stored, set]) => [stored, [...set]]),
+  );
+})();
+
+// 그 과목을 부르는 이름 전부 — DB 이름이 언제나 첫 번째다.
+export function getSubjectNameVariants(subjectName: string): string[] {
+  return [subjectName, ...(ALIASES_BY_STORED_NAME[subjectName] ?? [])];
+}
+
+// 검색 추천처럼 "사용자가 방금 친 검색어" 옆에 과목 이름을 놓는 자리에서 쓸 표기.
+//
+// 홈 검색창에 "행정법"을 치면 추천에 "행정법총론"이 떴다. 매칭 자체는 맞다(접두
+// 매칭이라 총론이 걸린다). 문제는 방금 친 이름이 그대로 있는데 화면이 다른 이름을
+// 돌려주니, 찾는 과목이 없어서 비슷한 걸 보여준 것처럼 읽힌다는 것이다.
+//
+// 시행처별 표기(getSubjectDisplayName)와는 다른 함수인 이유: 이 자리에는 시행처가
+// 없다. 판단 근거는 검색어 하나뿐이라, 그 과목을 부르는 이름들 중 검색어와 맞는
+// 것을 고른다 — "행정법"으로 찾으면 "행정법", "행정법총론"으로 찾으면 "행정법총론".
+// 어느 쪽을 눌러도 가는 곳은 같은 과목 페이지이고, 거기서는 DB 이름이 정본이다
+// (docs/agents/subject-names.md — 여러 시행처가 섞이는 화면에는 표기를 걸지 않는다).
+export function getSubjectNameForQuery(subjectName: string, rawQuery: string): string {
+  const query = rawQuery.trim();
+  const variants = getSubjectNameVariants(subjectName);
+  if (!query || variants.length === 1) return subjectName;
+
+  // 매칭 규칙은 과목 매칭(search.ts matchSubjectIds)과 같은 것을 쓴다 — 검색어로
+  // 시작하거나, 초성 검색이면 초성이 포함되거나.
+  const choseong = isChoseongQuery(query);
+  const lower = query.toLowerCase();
+  const matched = variants.filter((name) =>
+    choseong ? matchesChoseong(name, query) : name.toLowerCase().startsWith(lower),
+  );
+  if (matched.length === 0) return subjectName;
+
+  // 여럿이 걸리면 짧은 쪽 — 친 글자에 군더더기가 가장 적게 붙은 이름이다.
+  return matched.reduce((shortest, name) =>
+    name.length < shortest.length ? name : shortest,
   );
 }
 

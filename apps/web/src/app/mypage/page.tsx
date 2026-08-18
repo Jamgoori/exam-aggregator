@@ -1,5 +1,5 @@
 // 홈 → 마이페이지 이동이 항상 즉시(스켈레톤 셸) 뜨는지 빌드가 검증하게 한다.
-// tab 쿼리스트링이 실제로 쓰이는 세 가지 모양(없음/history/wrong-notes)을
+// tab 쿼리스트링이 실제로 쓰이는 네 가지 모양(없음/history/wrong-notes/bookmarks)을
 // 샘플로 선언해야 검증이 "선언 안 된 검색 파라미터 접근"으로 막지 않는다.
 export const unstable_instant = {
   prefetch: "static",
@@ -7,6 +7,7 @@ export const unstable_instant = {
     { searchParams: { tab: null } },
     { searchParams: { tab: "history" } },
     { searchParams: { tab: "wrong-notes" } },
+    { searchParams: { tab: "bookmarks" } },
   ],
 };
 

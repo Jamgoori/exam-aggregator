@@ -20,6 +20,7 @@ import {
   type LightPaper,
   type PaperWire,
 } from "@/lib/paper-search";
+import { getSubjectNameForQuery } from "@gongmoa/core";
 import type { Subject } from "@gongmoa/core";
 import type { ExamPaper } from "@gongmoa/core";
 
@@ -289,8 +290,15 @@ export function HomeExamBrowser({
     return matchedSubjectIds
       .map((id) => subjectsById.get(id))
       .filter((s): s is Subject => !!s)
-      .slice(0, 6);
-  }, [isSearching, matchedSubjectIds, subjectsById]);
+      .slice(0, 6)
+      // 보여주는 이름은 방금 친 검색어에 맞춘다 — "행정법"을 쳤는데 추천이
+      // "행정법총론"으로 뜨면 찾는 과목이 없어서 비슷한 걸 내준 것처럼 읽힌다.
+      // 링크(slug)는 그대로라 눌러 가는 과목 페이지는 달라지지 않는다.
+      .map((s) => {
+        const name = getSubjectNameForQuery(s.name, subjectQuery);
+        return name === s.name ? s : { ...s, name };
+      });
+  }, [isSearching, matchedSubjectIds, subjectsById, subjectQuery]);
   const filtered = useMemo(
     () =>
       filterPapers(allPapers, {

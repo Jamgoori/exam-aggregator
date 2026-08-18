@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getPaperDisplayTitle, stripTrackFromTitle } from "./paper-title";
-import { applyExamTypeSubjectName, getSubjectDisplayName } from "./subject-label";
+import {
+  applyExamTypeSubjectName,
+  getSubjectDisplayName,
+  getSubjectNameForQuery,
+} from "./subject-label";
 import { compareLevels, LEVEL_ORDER } from "./levels";
 import { roundTierName, streakTierName } from "./tiers";
 import { subjectColorIndex, SUBJECT_PALETTE_SIZE } from "./subject-color";
@@ -182,6 +186,28 @@ test("상위 개념 이름으로 검색하면 총론·개론까지 함께 나온
 
 test("초성 검색", () => {
   assert.deepEqual(matchSubjectIds(SUBJECTS, "ㅎㅈㅂ"), ["3"]);
+});
+
+// 검색 추천은 걸린 과목의 DB 이름이 아니라 "방금 친 이름"을 보여준다 — "행정법"을
+// 쳤는데 "행정법총론"이 뜨면 찾는 과목이 없어서 비슷한 걸 내준 것처럼 읽힌다.
+test("추천 이름은 검색어에 맞춘 표기로 고른다", () => {
+  assert.equal(getSubjectNameForQuery("행정법총론", "행정법"), "행정법");
+  assert.equal(getSubjectNameForQuery("행정학개론", "행정학"), "행정학");
+  assert.equal(getSubjectNameForQuery("행정법총론", "행정"), "행정법");
+});
+
+test("총론·개론까지 친 사람에게는 그 이름 그대로 보여준다", () => {
+  assert.equal(getSubjectNameForQuery("행정법총론", "행정법총론"), "행정법총론");
+  assert.equal(getSubjectNameForQuery("행정학개론", "행정학개"), "행정학개론");
+});
+
+test("추천 이름 — 초성 검색과 다른 표기가 없는 과목", () => {
+  // 초성으로 찾아도 짧은 표기가 있으면 그쪽을 쓴다.
+  assert.equal(getSubjectNameForQuery("행정법총론", "ㅎㅈㅂ"), "행정법");
+  // 별칭이 없는 과목·빈 검색어·어느 표기와도 안 맞는 검색어는 DB 이름 그대로.
+  assert.equal(getSubjectNameForQuery("국어", "국어"), "국어");
+  assert.equal(getSubjectNameForQuery("행정법총론", "   "), "행정법총론");
+  assert.equal(getSubjectNameForQuery("행정법총론", "총론"), "행정법총론");
 });
 
 test("빈 검색어는 빈 결과", () => {
