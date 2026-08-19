@@ -139,9 +139,17 @@ console.log(`이미 크롭된 문제지 ${targets.length}개 검사 (scale ${SCA
 //                 크롭에 남았다는 신호다(2026-08-19 추가). 이 선은 보기 싫은 데서
 //                 끝나지 않는다 — 위아래로 이어지는 "잉크"라 세로 여백 제거와
 //                 머리글 제거를 통째로 무력화한다.
-// 세로 실선으로 볼 열 채움 비율. 낮은 배율(scale 0.4)에서는 얇은 선이 회색으로
-// 번져 몇 행이 문턱을 못 넘을 수 있어 1.0 이 아니라 조금 여유를 둔다.
-const RULE_COVER = 0.85;
+// 세로 실선으로 볼 열 채움 비율. **이미지 높이가 아니라 잉크 높이로 나눈다** —
+// finalizeQuestionImage 가 위아래로 덧댄 흰 여백(8pt×배율) 때문에 이미지 높이로
+// 나누면 짧은 이미지일수록 과소평가되고, 그걸 맞추려 문턱을 낮추면 **지문 상자
+// 테두리가 무더기로 걸린다**(실측 보정: 2016 법원직 9급 영어·2013 지방직 9급 영어의
+// 상자 테두리가 이미지 높이 기준 0.87~0.88 → 수정 전후가 똑같은데도 "실선 남음"
+// 으로 걸렸다. 40장 스모크에서 9장이 이 오검출이었다).
+//
+// 지면 테두리가 크롭에 남으면 그 선은 크롭 영역을 위에서 아래까지 관통하므로
+// 잉크 높이 기준으로 정확히 1.0 이 된다. 반면 지문 상자는 위에 발문, 아래에
+// 선지가 있어 1.0 이 될 수 없다(실측 0.94). 0.98 이 이 둘을 가른다.
+const RULE_COVER = 0.98;
 
 async function measureGeometry(images) {
   let widths = new Set();
@@ -157,14 +165,22 @@ async function measureGeometry(images) {
     let edgeL = 0;
     let edgeR = 0;
     const colCover = new Array(width).fill(0);
+    let inkTop = -1;
+    let inkBottom = -1;
     for (let y = 0; y < height; y++) {
       const row = y * width;
+      let rowHasInk = false;
       for (let x = 0; x < width; x++) {
         if (data[row + x] < 245) {
           if (x < l) l = x;
           if (x > r) r = x;
           colCover[x]++;
+          rowHasInk = true;
         }
+      }
+      if (rowHasInk) {
+        if (inkTop < 0) inkTop = y;
+        inkBottom = y;
       }
       if (data[row] < 245) edgeL++;
       if (data[row + width - 1] < 245) edgeR++;
@@ -172,7 +188,8 @@ async function measureGeometry(images) {
     if (r < 0) continue;
     maxSkew = Math.max(maxSkew, Math.abs(l - (width - 1 - r)));
     edgeInkMax = Math.max(edgeInkMax, edgeL / height, edgeR / height);
-    ruleColsMax = Math.max(ruleColsMax, colCover.filter((c) => c / height >= RULE_COVER).length);
+    const inkHeight = inkBottom - inkTop + 1;
+    ruleColsMax = Math.max(ruleColsMax, colCover.filter((c) => c / inkHeight >= RULE_COVER).length);
   }
   return {
     widthCount: widths.size,
