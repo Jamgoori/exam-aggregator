@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { GraduationCap } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { MobileNav } from "@/components/mobile-nav";
@@ -27,6 +28,7 @@ export function SiteHeader({
   user: { nickname: string; isAdmin: boolean; isPremium: boolean } | null | "pending";
 }) {
   const pending = user === "pending";
+  const pathname = usePathname();
 
   return (
     <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/85 backdrop-blur-md print:hidden dark:border-zinc-700 dark:bg-zinc-950/85">
@@ -34,6 +36,19 @@ export function SiteHeader({
         <Link
           href="/"
           aria-label="공모아 홈"
+          // 홈에서 페이지네이션으로 여러 페이지째 보고 있을 때 이 로고를 눌러도,
+          // HomeExamBrowser의 페이지 상태는 history.replaceState로만 URL과
+          // 동기화될 뿐 Next 라우터가 모르는 값이라 같은 "/"로의 Link는 아무
+          // 리렌더도 트리거하지 않아 이전 페이지에 그대로 머물렀다. 이미 홈에
+          // 있을 때는 라우팅 대신 커스텀 이벤트로 그 상태를 직접 1페이지로
+          // 되돌린다.
+          onClick={(e) => {
+            if (pathname === "/") {
+              e.preventDefault();
+              window.history.replaceState(null, "", "/");
+              window.dispatchEvent(new Event("gongmoa:home-reset"));
+            }
+          }}
           className="mr-1 flex shrink-0 items-center gap-2 rounded-lg focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:outline-none"
         >
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-600/25">

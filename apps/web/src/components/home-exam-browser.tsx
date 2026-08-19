@@ -397,6 +397,17 @@ export function HomeExamBrowser({
     if (el) el.style.minHeight = "";
   }, [safePage]);
 
+  // 상단 로고(홈 버튼)를 이미 홈에 있는 상태에서 누르면 site-header가 쏘는
+  // 이벤트. 이 컴포넌트의 page는 Next 라우터가 모르는 클라이언트 상태라
+  // "/"로의 Link만으로는 리렌더되지 않으므로 직접 1페이지로 되돌린다.
+  useEffect(() => {
+    function handleHomeReset() {
+      setPage(1);
+    }
+    window.addEventListener("gongmoa:home-reset", handleHomeReset);
+    return () => window.removeEventListener("gongmoa:home-reset", handleHomeReset);
+  }, []);
+
   // 주소창 URL은 공유/새로고침용으로만 갱신한다 — 여기서 서버를 다시 부르지
   // 않도록 Next 라우터 대신 history API를 직접 쓴다.
   useEffect(() => {
