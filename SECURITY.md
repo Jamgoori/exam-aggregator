@@ -18,10 +18,12 @@
 | 8 | 비회원 댓글 비밀번호 무제한 대입 + 대상 식별 오라클 | 낮음 | ✅ |
 | 9 | `question_memos` 길이·범위 제약 없음(저장소 소모) | 낮음 | ✅ 코드 / 🔧 SQL 적용 |
 | 10 | 크론 워밍업이 사실상 무인증 공개 | 낮음 | ✅ 완화 / 🔧 `CRON_SECRET` 설정 |
-| 11 | 의존성 취약점 (next · pdfjs-dist · sharp) | 중~높음 | 🔧 |
-| 12 | 관리자 업로드가 브라우저가 준 content-type 을 그대로 사용 | 낮음 | 🔧 판단 필요 |
-| 13 | CSP 헤더 없음 | 정보 | 🔧 선택 |
-| 14 | 결제 · RLS · 페이월 · 채점 · 시크릿 · XSS · CI | — | 🟢 |
+| 11 | 공용 기기에서 이전 사용자의 오답노트가 다음 사용자에게 노출 | 중 | ✅ |
+| 12 | `difficulty_ratings` 가 전체 사용자 UUID 를 anon 에 공개 | 낮음 | 🔧 판단 필요 |
+| 13 | 의존성 취약점 (next · pdfjs-dist · sharp) | 중~높음 | 🔧 |
+| 14 | 관리자 업로드가 브라우저가 준 content-type 을 그대로 사용 | 낮음 | 🔧 판단 필요 |
+| 15 | CSP 헤더 없음 | 정보 | 🔧 선택 |
+| 16 | 결제 · RLS · 페이월 · 채점 · 시크릿 · XSS · CI | — | 🟢 |
 
 ---
 
@@ -33,7 +35,7 @@
    바뀌어 있어서, SQL 을 안 돌려도 기능이 깨지지는 않는다 — 구멍만 남는다.)
 2. **`CRON_SECRET` 설정** — Vercel 프로젝트 환경변수에 `openssl rand -hex 32` 값. 넣으면
    Vercel 크론이 자동으로 헤더에 실어 보내므로 크론 설정은 손댈 게 없다.
-3. **의존성 올리기** — 아래 11번.
+3. **의존성 올리기** — 아래 13번.
 4. **이전 점검 미결** — `apps/mobile/SECURITY.md` 의 3(닉네임 트리거 SQL 적용)·4(EXPO_TOKEN 폐기).
 
 ---
@@ -195,7 +197,45 @@ next=/%09/evil.com → 검사 통과 → new URL(...) 이 탭을 지워 //evil.c
 일시정지 방지"가 조용히 죽는다. 대신 켜는 비용을 없앴다: `.env.local.example` 에 생성 명령과
 함께 항목 추가(+ `TOSS_WEBHOOK_IPS`, `GEO_BLOCK*` 도 같이), 토큰 비교를 상수시간으로.
 
-## 11. 의존성 — 🔧
+## 11. 공용 기기의 오답노트 캐시 유출 — ✅ (`54087b5`)
+
+설정 화면의 로그아웃이 `signOut()` 을 기다리지 않고 곧바로 마이페이지로 넘어가는데,
+`signOut` 은 **캐시를 먼저 지우고 세션을 나중에** 끊었다. 그 사이 마이페이지가 포커스를
+받아 `if (!session) return;` 을 통과하고(아직 유효하다) 오답노트를 다시 조회해, 방금 지운
+자리에 개인 데이터를 다시 써 놓는다.
+
+오프라인 캐시 키가 사용자별로 나뉘어 있지 않아서(`wrong-notes` 하나), 같은 기기에서 다음
+사람이 로그인한 뒤 오프라인으로 열면 `fetchWithCache` 가 조회 실패 → `readCache` 폴백으로
+이전 사용자의 과목·문제지 제목·문항번호·점수·극복 여부를 그대로 그린다. 루팅 없이 앱 UI
+만으로 남의 학습 이력이 보인다.
+
+**조치**: (1) 세션을 먼저 끊고 캐시를 나중에 지우도록 순서 반전, (2) `signOut` 을 기다린 뒤
+화면 전환, (3) 개인 캐시 키에 사용자 id 를 넣어 파일이 남아 있어도 다른 계정에서는 열리지
+않게. 키를 만들 때 `getUser()`(네트워크 호출) 가 아니라 `getSession()`(로컬 SecureStore)을
+쓴다 — 정작 이 캐시가 필요한 오프라인에서 먼저 실패하면 안 된다.
+
+## 12. `difficulty_ratings` 가 사용자 UUID 를 공개 — 🔧 판단 필요
+
+`create policy "public read ratings" ... using (true)` 이고 `comments` 와 달리 컬럼 단위
+grant 가 없어, `user_id` 가 anon 에게 그대로 열려 있다. 앱 번들에서 추출한 anon 키만으로
+로그인 없이
+
+```
+GET /rest/v1/difficulty_ratings?select=user_id,paper_id,score
+```
+
+전체 사용자 UUID ↔ 문제지 ↔ 평점 매핑을 덤프할 수 있고, `comments` 는 anon 에게
+`user_id`·`nickname` 을 명시적으로 허용하므로 UUID ↔ 닉네임 대응표까지 만들 수 있다.
+"닉네임 X 가 어떤 급수·직렬을 준비하는가" 수준의 프로파일링이 가능하다.
+
+**고치지 않았다 — 결정이 필요하다.** `comments` 처럼 컬럼 grant 를 좁히는 게 정석이지만,
+Postgres 는 `WHERE` 절에 쓰는 컬럼에도 SELECT 권한을 요구한다. 지금 웹·앱 모두 "내 평점"을
+`user_id` 로 찾으므로(`apps/mobile/src/lib/paper-detail.ts` 는 전체 행을 받아 클라이언트에서
+`find` 까지 한다) 컬럼을 잠그면 그 경로가 같이 깨진다. 제대로 하려면 평균·표본수는
+`avg_score_by_round` 처럼 `security definer` 함수로 내주고 행 조회는 본인 것만 열어야 하는데,
+표시 로직까지 손대는 변경이라 앱을 띄워 확인할 수 있는 자리에서 하는 게 맞다고 봤다.
+
+## 13. 의존성 — 🔧
 
 `npm audit` 기준 critical 1 / high 30. 대부분 Expo CLI 빌드 툴체인(런타임 노출 없음)이지만
 아래 셋은 프로덕션 직접 의존이다.
@@ -212,7 +252,7 @@ next=/%09/evil.com → 검사 통과 → new URL(...) 이 탭을 지워 //evil.c
 빌드·실동작 확인이 따라야 하는데 여기서는 실제 앱을 띄워 확인할 수 없어, 검증 없이 밀어넣는
 쪽이 더 위험하다고 판단했다.
 
-## 12. 관리자 업로드 content-type — 🔧 판단 필요
+## 14. 관리자 업로드 content-type — 🔧 판단 필요
 
 `uploadExamPaper` 가 `contentType: file.type || "application/pdf"` 로 **브라우저가 준 값**을
 그대로 쓴다. `optimizePdf` 는 파싱 실패 시 원본 버퍼를 그대로 통과시키므로, 비-PDF 바이트가
@@ -221,11 +261,11 @@ next=/%09/evil.com → 검사 통과 → new URL(...) 이 탭을 지워 //evil.c
 PDF 로 다루므로 `"application/pdf"` 로 고정하는 게 맞다고 본다 — 다만 관리자 신뢰 경계 안이라
 판단을 남겨둔다.
 
-## 13. CSP — 🔧 선택
+## 15. CSP — 🔧 선택
 
 `next.config.ts` 에 `X-Content-Type-Options`·`X-Frame-Options`·`Referrer-Policy`·
 `Permissions-Policy` 는 있는데 `Content-Security-Policy` 가 없다. 현재 XSS 싱크는 전부
-안전하지만(14번) 심층 방어로 권장. HSTS 는 Vercel 이 붙인다.
+안전하지만(아래 🟢) 심층 방어로 권장. HSTS 는 Vercel 이 붙인다.
 
 ---
 
