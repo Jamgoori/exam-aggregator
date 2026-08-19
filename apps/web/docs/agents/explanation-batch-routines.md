@@ -128,6 +128,29 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
   마치고 정상 종료**하도록 프롬프트에 명시돼 있다(같은 방향 세션끼리 겹치는 걸
   막는 장치). 루틴 프롬프트를 다시 만들 일이 있으면 이 규칙을 꼭 유지할 것 —
   뺐다가 겹침 사고가 실제로 재발한 적 있다.
+- **unverified 급증 분류 (2026-08-19)**: `npm run unverified-report`
+  (`scripts/unverified-report.mjs`, 읽기 전용·service role). 미검증 해설을 원인별로
+  갈라 **어디에 몰렸고 언제부터 늘었는지**를 먼저 판정하는 도구다. 급증의 원인은
+  최소 다섯 가지(정답표 오염·책형 불일치·정답 미등록·정답 배열 길이 불일치·모델
+  오답)인데 `/admin/explanations` 목록만 봐서는 구분이 안 돼서 만들었다.
+  - 버킷: `voided`(전항정답/복수정답 — 정상이라 집계에서 뺀다) / `no_answers`
+    (정답표 미등록) / `short_answers`(정답 배열이 문항 번호에 못 미침 — track·책형
+    사고 서명) / `real`(진짜 불일치). `real`만 문제지 단위로 묶어 판정한다.
+  - 문제지 판정은 `answer-keys-tracks.md`의 "오독의 서명"을 그대로 옮긴 것이다:
+    문항의 절반 이상이 어긋나면 `책형_의심`, 3건 이상이 중간 구간에 몰리면
+    `오독_의심`, 그냥 3건 이상이면 `몰림`, 1~2건이면 `산발`. 정답표가 의심되면
+    출력 끝에 나오는 `audit-answer-keys.mjs` 명령으로 넘어간다.
+  - 상위 문제지에 대해 **크롭 결손도 함께 본다.** 해설봇은 문항 이미지를 보고 답을
+    고르므로, 이미지가 비거나 잘린 문제지는 정답표가 멀쩡해도 unverified가 난다 —
+    정답표를 뒤지기 전에 이쪽을 배제하려는 것이다.
+  - **시간축은 `created_at` 기준이라 재생성분을 못 잡는다.** 이 테이블에는
+    `updated_at`이 없고 `save-explanations.mjs`는 upsert라, 기존 해설이 재생성되며
+    unverified로 뒤집혀도 날짜는 처음 만든 그날에 머문다(정답표를 고친 뒤 verified
+    전량 재계산을 한 경우도 같다). **일자별 표는 밋밋한데 총량만 늘었다면 그건 신규
+    생성이 아니라 재계산·재생성 물량**이라는 뜻이니 그쪽을 볼 것.
+  - `/admin/explanations` 화면 위쪽에도 같은 기준의 "문제지별 몰림" 요약이 붙는다
+    (미검증 전량 기준, voided 제외). 터미널 없이 모양만 볼 때는 그걸로 충분하다.
+
 - **`question_explanations` RLS**: 해설봇 계정
   (`explanation-bot@exam-aggregator.internal`, uid
   `5a3f5fc5-fd81-4728-91ae-c90cb2934d17`)이 이 테이블에 쓸 수 있도록 admins 등록
