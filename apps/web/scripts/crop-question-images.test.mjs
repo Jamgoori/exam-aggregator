@@ -31,6 +31,8 @@ import {
 const SCALE = 3;
 // finalizeQuestionImage 가 사방에 덧대는 흰 여백(8pt × scale).
 const PAD_PX = Math.round(8 * SCALE);
+// 세로 실선으로 볼 열 채움 비율(잉크 높이 기준). regression-check-crop.mjs 와 같은 값.
+const RULE_COVER = 0.98;
 
 // 이미지의 잉크 구조. blocks 는 위아래로 떨어진 잉크 덩어리(=본문 줄) 수라,
 // 군더더기(머리글·괘선)가 붙으면 늘고 내용이 깎이면 준다.
@@ -58,14 +60,18 @@ async function profile(buffer) {
       lastInk = y;
     }
   }
+  // 열 채움은 **잉크 높이**로 나눈다. 이미지 높이로 나누면 finalizeQuestionImage 가
+  // 덧댄 위아래 여백 때문에 짧은 이미지일수록 과소평가되고, 그걸 맞추려 문턱을
+  // 낮추면 지문 상자 테두리가 걸린다(실측: 상자는 0.94, 지면 테두리는 1.0).
+  const inkHeight = firstInk < 0 ? 1 : lastInk - firstInk + 1;
   return {
     width,
     height,
     blocks,
     firstInk,
     lastInk,
-    // 이미지 높이의 대부분을 세로로 채우는 열 = 지면 테두리·칼럼 구분선.
-    ruleColumns: colCover.filter((c) => c / height >= 0.85).length,
+    // 크롭을 위에서 아래까지 관통하는 열 = 지면 테두리·칼럼 구분선.
+    ruleColumns: colCover.filter((c) => c / inkHeight >= RULE_COVER).length,
   };
 }
 
@@ -155,6 +161,21 @@ test("지면 테두리·칼럼 구분선이 이미지에 남지 않는다", asyn
     const p = await profile(c.image);
     assert.equal(p.ruleColumns, 0, `${c.number}번에 세로 실선이 남았다`);
   }
+});
+
+test("실선 검사가 실제로 실선을 잡는다 (양성 대조군)", async () => {
+  // 위 검사가 "0건"인 게 검사가 무딘 탓이 아님을 확인한다 — 멀쩡한 결과 이미지에
+  // 지면 테두리를 흉내 낸 세로줄을 그려 넣으면 반드시 걸려야 한다.
+  const { width, height } = await sharp(framed[0].image).metadata();
+  const rule = Buffer.from(
+    `<svg width="${width}" height="${height}"><rect x="2" y="0" width="2" height="${height}" fill="black"/></svg>`,
+  );
+  const withRule = await sharp(framed[0].image)
+    .composite([{ input: rule, top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+  const p = await profile(withRule);
+  assert.ok(p.ruleColumns > 0, "세로 실선을 못 잡는다 — 검사가 무디다");
 });
 
 test("위아래 군더더기 없이 잉크가 이미지를 꽉 채운다", async () => {

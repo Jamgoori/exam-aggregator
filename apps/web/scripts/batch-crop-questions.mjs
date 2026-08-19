@@ -147,7 +147,10 @@ async function runPool(items, concurrency, worker) {
       results[index] = await worker(items[index]);
       done++;
       const r = results[index];
-      const label = `${r.paper.year}년 ${r.paper.round}회 ${r.paper.title}`;
+      // id 를 같이 남긴다 — 몇 시간짜리 백필이 중간에 끊겼을 때 "로그에 남은
+      // (연도, 회차, 제목)" 으로 대조하는 건 제목이 겹치거나 표기가 다르면
+      // 어긋난다. id 면 남은 목록을 그대로 빼서 이어 돌릴 수 있다.
+      const label = `${r.paper.year}년 ${r.paper.round}회 ${r.paper.title} id=${r.paper.id}`;
       if (r.error) {
         console.error(`[${done}/${items.length}] 실패: ${label} - ${r.error}`);
       } else {
