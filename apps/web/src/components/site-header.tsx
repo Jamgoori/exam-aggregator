@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { GraduationCap } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { MobileNav } from "@/components/mobile-nav";
@@ -28,7 +27,6 @@ export function SiteHeader({
   user: { nickname: string; isAdmin: boolean; isPremium: boolean } | null | "pending";
 }) {
   const pending = user === "pending";
-  const pathname = usePathname();
 
   return (
     <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/85 backdrop-blur-md print:hidden dark:border-zinc-700 dark:bg-zinc-950/85">
@@ -41,9 +39,13 @@ export function SiteHeader({
           // 동기화될 뿐 Next 라우터가 모르는 값이라 같은 "/"로의 Link는 아무
           // 리렌더도 트리거하지 않아 이전 페이지에 그대로 머물렀다. 이미 홈에
           // 있을 때는 라우팅 대신 커스텀 이벤트로 그 상태를 직접 1페이지로
-          // 되돌린다.
+          // 되돌린다. usePathname()은 안 쓴다 — pending(인증 확정 전) 상태의
+          // 이 헤더는 layout의 Suspense 폴백으로 정적 셸에 그대로 구워지는데,
+          // 그 경로에서 라우터 훅을 호출하면(값을 안 써도) 정적 셸 자체가
+          // 사라진다(위 pending 관련 주석 참고). 클릭 시점에 window.location만
+          // 읽으면 이 문제를 피한다.
           onClick={(e) => {
-            if (pathname === "/") {
+            if (window.location.pathname === "/") {
               e.preventDefault();
               window.history.replaceState(null, "", "/");
               window.dispatchEvent(new Event("gongmoa:home-reset"));
