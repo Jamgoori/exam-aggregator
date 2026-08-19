@@ -17,6 +17,7 @@ import {
   srsGuessed,
   srsStateFromRow,
   type ReviewPickStrategy,
+  attendanceQuestionCount,
 } from "@gongmoa/core";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -722,7 +723,7 @@ export async function submitReviewSessionForUser(
   const admin = createAdminClient();
   const { data: session } = await admin
     .from("review_sessions")
-    .select("id, user_id, submitted_at")
+    .select("id, user_id, submitted_at, created_at")
     .eq("id", sessionId)
     .maybeSingle();
   if (!session || session.user_id !== userId) return { error: "세션을 찾을 수 없어요." };
@@ -822,8 +823,21 @@ export async function submitReviewSessionForUser(
   // 출석 도장. byPaper 가 아니라 gradedRows 로 센다 — 중복 시험지는 한 문항이 여러
   // paper_id 로 되짚어져(byPaper) 같은 문항이 두 번 들어 있다. 그걸로 세면 실제로 푼
   // 것보다 많은 문항을 푼 셈이 되어 출석 기준이 헐거워진다.
+  //
+  // 세는 것은 "채점된 문항"이 아니라 **답을 고른 문항**이고, 세션이 너무 빨리 끝났으면
+  // 아예 세지 않는다(attendanceQuestionCount). CBT 와 달리 이 경로에는 최소 응시시간이
+  // 없어서, 세션을 만들자마자 빈 답안으로 제출하는 것만으로 도장이 찍혔다 — 그 도장은
+  // 멤버십 일수로 환전된다. 경과 시간은 반드시 서버가 기록한 created_at 으로 잰다.
   try {
-    await recordAttendance(userId, gradedRows.length);
+    const elapsedSeconds =
+      (Date.now() - new Date(session.created_at as string).getTime()) / 1000;
+    await recordAttendance(
+      userId,
+      attendanceQuestionCount({
+        answeredCount: gradedRows.filter((r) => r.selected_choice !== null).length,
+        elapsedSeconds,
+      }),
+    );
   } catch {
     // 무시: 출석 기록 실패가 채점을 막지 않는다.
   }

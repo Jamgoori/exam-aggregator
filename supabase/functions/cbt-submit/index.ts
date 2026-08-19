@@ -11,7 +11,7 @@ import {
 } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
 import { recordQuestionResults } from "../_shared/status.ts";
-import { recordAttendance } from "../_shared/attendance.ts";
+import { attendanceQuestionCount, recordAttendance } from "../_shared/attendance.ts";
 
 type QuestionResult = {
   question_number: number;
@@ -121,10 +121,19 @@ Deno.serve(async (req) => {
     // 무시: 상태 갱신 실패가 채점을 막지 않는다.
   }
 
-  // 출석 도장(월간 카드 → 멤버십 일수). 채점된 문항 수로만 센다 — 접속이 아니라
-  // 푼 것이 출석이다. 같은 이유로 부가 처리이고, 실패해도 채점을 되돌리지 않는다.
+  // 출석 도장(월간 카드 → 멤버십 일수). 접속이 아니라 푼 것이 출석이라, 채점된 문항이
+  // 아니라 **답을 고른 문항**만 센다 — 빈 답안을 제출해도 문항 수만큼 도장이 찍히면
+  // 최소 응시시간(90초)만 기다렸다 제출하는 스크립트가 멤버십 일수를 받아간다.
+  // 부가 처리이고, 실패해도 채점을 되돌리지 않는다.
   try {
-    await recordAttendance(admin, userId, questionResults.length);
+    await recordAttendance(
+      admin,
+      userId,
+      attendanceQuestionCount({
+        answeredCount: questionResults.filter((q) => q.selected_choice !== null).length,
+        elapsedSeconds: durationSeconds,
+      }),
+    );
   } catch {
     // 무시: 출석 기록 실패가 채점을 막지 않는다.
   }

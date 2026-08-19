@@ -63,6 +63,12 @@ export async function createReviewSession(input: {
 
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  // 과목 섞어풀기 자체는 무료지만 onlyDue(복습)는 "오늘의 복습"과 같은 간격 반복
+  // 기능이라 멤버십을 확인한다 — 전 과목판인 createReviewAll 과 같은 기준이다.
+  // 여기만 빠져 있어서, 화면 요청에 onlyDue: true 만 붙이면 과목별 복습이 무료로 열렸다.
+  if (input?.onlyDue && !(await isPremium(supabase, user.id))) {
+    return { error: REVIEW_LOCKED };
+  }
 
   return createReviewSessionForUser(supabase, user.id, {
     subjectSlug: slug,

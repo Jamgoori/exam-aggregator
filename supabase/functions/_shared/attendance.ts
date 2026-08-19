@@ -11,6 +11,24 @@
 // packages/core/src/attendance.ts 의 ATTENDANCE_MIN_QUESTIONS 와 반드시 같은 값.
 export const ATTENDANCE_MIN_QUESTIONS = 10;
 
+// packages/core/src/attendance.ts 의 ATTENDANCE_MIN_SECONDS_PER_QUESTION 과 반드시 같은 값.
+export const ATTENDANCE_MIN_SECONDS_PER_QUESTION = 2;
+
+// packages/core/src/attendance.ts 의 attendanceQuestionCount 와 반드시 같은 규칙.
+// 답을 고르지 않은 문항은 세지 않고, 너무 빨리 끝난 세션은 0 이다 — 출석은 멤버십
+// 일수로 환전되므로, 빈 답안 즉시 제출로 도장이 찍히면 안 된다.
+export function attendanceQuestionCount(input: {
+  answeredCount: number;
+  elapsedSeconds: number;
+}): number {
+  const answered = Math.floor(input.answeredCount);
+  if (!Number.isFinite(answered) || answered <= 0) return 0;
+  if (!Number.isFinite(input.elapsedSeconds)) return 0;
+  return input.elapsedSeconds >= answered * ATTENDANCE_MIN_SECONDS_PER_QUESTION
+    ? answered
+    : 0;
+}
+
 // packages/core/src/attendance.ts 의 ATTENDANCE_MILESTONES 와 반드시 같은 값.
 export const ATTENDANCE_MILESTONES: { days: number; grantDays: number }[] = [
   { days: 5, grantDays: 1 },
