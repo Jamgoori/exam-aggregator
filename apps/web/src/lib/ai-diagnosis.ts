@@ -1,4 +1,5 @@
 import "server-only";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { createClient } from "@/lib/supabase/server";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -186,7 +187,12 @@ export async function requestTodayDiagnosis(
     return { error: eligibility.hint ?? "아직 진단을 받을 수 있는 조건이 아니에요." };
   }
 
-  const { error } = await supabase
+  // 쓰기는 service_role 로 한다. ai_diagnoses 에는 insert 정책이 없다 — 예전처럼
+  // 클라이언트가 직접 넣을 수 있으면 여기 위의 멤버십·자격 검사를 건너뛰고 요청 행을
+  // 만들 수 있고, 생성 배치가 그 행을 유료 리포트로 채워 준다(schema.sql 참고).
+  // 이 함수에 닿기 전에 호출부(mypage/actions.ts requestDiagnosis)가 isPremium 을,
+  // 바로 위에서 자격(getDiagnosisEligibility)을 이미 확인했다.
+  const { error } = await createAdminClient()
     .from("ai_diagnoses")
     .insert({ user_id: userId, diagnosis_date: kstToday(), report: null });
   // 동시에 두 번 눌러 unique 충돌이 나도 "이미 요청됨"으로 본다.

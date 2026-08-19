@@ -522,7 +522,10 @@ export async function submitQuestionReport(input: {
     return { error: "짧은 시간 동안 신고가 너무 많아요. 잠시 후 다시 시도해주세요." };
   }
 
-  const { error } = await supabase.from("question_reports").insert({
+  // 쓰기는 service_role 로 한다. question_reports 에는 insert 정책이 없다 — 예전처럼
+  // 사용자 세션 클라이언트로 넣으면 바로 위의 시간당 상한과 문항 번호 상한이 화면을
+  // 거치지 않는 요청에는 한 번도 평가되지 않는다(schema.sql 참고).
+  const { error } = await createAdminClient().from("question_reports").insert({
     user_id: user.id,
     paper_id: paperId,
     question_number: questionNumber,
