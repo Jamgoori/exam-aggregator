@@ -5,6 +5,7 @@ import { getSessionUser } from "@/lib/supabase/session";
 import {
   createReviewSessionForUser,
   createReviewSessionFromItems,
+  filterQuestionsAnsweredByUser,
   createConceptReviewSessionForUser,
   createAllReviewSessionForUser,
   createDueReviewSessionForUser,
@@ -422,7 +423,15 @@ export async function createReviewFromWrong(input: {
   const items = Array.isArray(input?.items) ? input.items : [];
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  return createReviewSessionFromItems(supabase, user.id, items);
+
+  // items 는 클라이언트가 만든 값이라 그대로 넘기지 않는다. 채점이 끝나면 세션 뷰가
+  // 문항별 공식 정답을 실어 돌려주므로, 임의의 (문제지, 문항) 을 넣는 것만으로
+  // 관리자 전용 RLS 로 잠가 둔 paper_answers 가 새어 나간다
+  // (filterQuestionsAnsweredByUser 주석 참고). 내가 푼 적 있는 문항만 남긴다.
+  const owned = await filterQuestionsAnsweredByUser(supabase, items);
+  if (owned.length === 0) return { error: "다시 풀 문항이 없어요." };
+
+  return createReviewSessionFromItems(supabase, user.id, owned);
 }
 
 export type SubmitReviewResult = { error?: string; view?: ReviewSessionView };
