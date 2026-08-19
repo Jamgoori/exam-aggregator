@@ -1,5 +1,16 @@
-// 사용법: npm run regression-check-crop -- [--baseline <git-ref>] [--concurrency 8] [--limit N] [--out report.json]
+// 사용법: npm run regression-check-crop -- [--baseline <git-ref>] [--concurrency 8] [--limit N] [--offset N] [--out report.json]
 //         (--baseline 을 생략하면 HEAD — 머지 후에는 반드시 수정 직전 커밋을 줄 것)
+//
+// --offset/--limit 으로 대상을 잘라 **여러 프로세스로 나눠 돌릴 수 있다.** 한
+// 프로세스는 동시성을 아무리 올려도 코어를 다 못 쓴다(실측: 4코어에서 동시성 16
+// 으로도 CPU 25%, 처리량 100건/5분39초 — 다운로드도 병목이 아니었다. pdf.js
+// 파싱이 프로세스 안에서 사실상 직렬화된다). 전수 3,658장이 단일 프로세스로 3시간
+// 반 걸리던 게 4등분하면 1시간 아래로 떨어진다:
+//   for i in 0 1 2 3; do
+//     node scripts/regression-check-crop.mjs --baseline <ref> \
+//       --offset $((i*915)) --limit 915 --out report-$i.json &
+//   done
+// 리포트가 나뉘므로 합쳐서 판정할 것(각 리포트의 results 를 이어붙이면 된다).
 //
 // docs/agents/crop-question-images.md가 요구하는 "크롭 로직 수정 시 기존 크롭
 // 완료분 전체 회귀 검사"를 자동화한다. 지정한 git ref(기본 HEAD)의
@@ -44,6 +55,7 @@ const args = parseArgs(process.argv.slice(2));
 const baselineRef = typeof args.baseline === "string" ? args.baseline : "HEAD";
 const concurrency = args.concurrency ? Number(args.concurrency) : 8;
 const limit = args.limit ? Number(args.limit) : undefined;
+const offset = args.offset ? Number(args.offset) : 0;
 const outPath = typeof args.out === "string" ? args.out : "crop-regression-report.json";
 const SCALE = 0.4;
 
@@ -124,8 +136,14 @@ const cropped = new Set(imageRows.map((r) => qToPaper.get(r.question_id)).filter
 
 let targets = papers.filter((p) => cropped.has(p.id) && p.file_path);
 targets.sort((a, b) => a.id.localeCompare(b.id));
+const totalTargets = targets.length;
+if (offset) targets = targets.slice(offset);
 if (limit) targets = targets.slice(0, limit);
-console.log(`이미 크롭된 문제지 ${targets.length}개 검사 (scale ${SCALE}, 동시성 ${concurrency})\n`);
+console.log(
+  `이미 크롭된 문제지 ${totalTargets}개 중 ${targets.length}개 검사` +
+    `${offset || limit ? ` (offset ${offset}${limit ? `, limit ${limit}` : ""})` : ""}` +
+    ` (scale ${SCALE}, 동시성 ${concurrency})\n`,
+);
 
 // 문항 수만 보면 크롭이 반쪽이어도 통과한다 — 실측 사고: 2026 국회직 8급
 // 행정법총론은 25/25로 멀쩡히 통과했지만 좌측 칼럼은 본문 오른쪽이 잘리고 우측
