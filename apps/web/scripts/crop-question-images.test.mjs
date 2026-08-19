@@ -20,12 +20,14 @@ import {
   FIXTURE_QUESTION_COUNT,
   FIXTURE_MERGED_SETS,
   FIXTURE_STRIP_SET,
+  TIGHT_QUESTION_LINES,
 } from "./lib/make-crop-fixture.mjs";
 import {
   extractQuestionsFromPdf,
   findVerticalRuleXs,
   computeColumnTextBounds,
   computeHeaderInkBottomByPage,
+  computeFooterInkTopByPage,
 } from "./crop-question-images.mjs";
 
 const SCALE = 3;
@@ -139,6 +141,25 @@ test("computeHeaderInkBottomByPage: 되풀이되는 본문 줄을 머리글로 �
   assert.deepEqual(computeHeaderInkBottomByPage(pages), [800, 800]);
 });
 
+test("computeFooterInkTopByPage: 그 페이지만 여백이 좁아도 꼬리말을 놓치지 않는다", () => {
+  const line = (y, text, height = 10) => ({ col: "L", y, x: 40, right: 280, height, text });
+  // 줄간격 중앙값이 제대로 잡히도록 본문을 충분히 채운다(성글면 medianLineLead 가
+  // 본문↔꼬리말 간격을 줄간격으로 오인해 덩어리 판정이 무너진다).
+  const body = (n, until) =>
+    Array.from({ length: n }, (_, i) => line(until + (n - 1 - i) * 13, `본문 ${i}쪽줄`));
+  // 1·2쪽은 꼬리말 위 여백이 넉넉하고, 3쪽만 마지막 선지가 꼬리말 가까이 내려온다.
+  const page = (tight) => ({
+    pageHeightPt: 842,
+    markers: [{ number: 1, x: 40, y: 700, height: 10 }],
+    groups: [],
+    lines: [...body(20, tight ? 60 : 300), line(34, "국어 23 - 1", 15)],
+  });
+  const got = computeFooterInkTopByPage([page(false), page(false), page(true)]);
+  // 세 쪽 모두 같은 값이어야 한다. 3쪽이 null 이면 그 쪽 마지막 문항 크롭이 지면
+  // 바닥까지 내려가 꼬리말이 이미지에 그대로 남는다.
+  assert.deepEqual(got, [49, 49, 49]);
+});
+
 test("문항 수와 세트 병합", () => {
   assert.equal(framed.length, FIXTURE_QUESTION_COUNT);
   const byNumber = new Map(framed.map((c) => [c.number, c]));
@@ -201,6 +222,8 @@ test("문항마다 기대한 줄(잉크 덩어리) 수가 그대로 나온다", 
   const expected = new Map([
     [1, 6], [2, 6], [3, 14], [4, 14], [5, 6], [6, 6],
     [7, 14], [8, 14], [9, 7], [10, 7], [11, 6],
+    // 12번은 꼬리말 바로 위까지 내려오는 문항 — 꼬리말이 남으면 줄 수가 늘어난다.
+    [12, TIGHT_QUESTION_LINES], [13, 6],
   ]);
   for (const c of framed) {
     const p = await profile(c.image);
