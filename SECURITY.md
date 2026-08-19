@@ -23,7 +23,7 @@
 | 12 | DB 전체 덤프 기본 경로가 gitignore 에 안 걸림 | 중 | ✅ |
 | 13 | 통합본 분리 스크립트의 경로 조작(PDF 안 문자열 → 파일 경로) | 낮음 | ✅ |
 | 14 | `difficulty_ratings` 가 전체 사용자 UUID 를 anon 에 공개 | 낮음 | 🔧 판단 필요 |
-| 15 | 의존성 취약점 (next · pdfjs-dist · sharp) | 중~높음 | 🔧 |
+| 15 | 의존성 취약점 (next · pdfjs-dist · sharp) | 중~높음 | ✅ |
 | 16 | 관리자 업로드가 브라우저가 준 content-type 을 그대로 사용 | 낮음 | 🔧 판단 필요 |
 | 17 | CSP 헤더 없음 | 정보 | 🔧 선택 |
 | 18 | 결제 · RLS · 페이월 · 채점 · 시크릿 · XSS · CI | — | 🟢 |
@@ -38,8 +38,7 @@
    바뀌어 있어서, SQL 을 안 돌려도 기능이 깨지지는 않는다 — 구멍만 남는다.)
 2. **`CRON_SECRET` 설정** — Vercel 프로젝트 환경변수에 `openssl rand -hex 32` 값. 넣으면
    Vercel 크론이 자동으로 헤더에 실어 보내므로 크론 설정은 손댈 게 없다.
-3. **의존성 올리기** — 아래 15번.
-4. **이전 점검 미결** — `apps/mobile/SECURITY.md` 의 3(닉네임 트리거 SQL 적용)·4(EXPO_TOKEN 폐기).
+3. **이전 점검 미결** — `apps/mobile/SECURITY.md` 의 3(닉네임 트리거 SQL 적용)·4(EXPO_TOKEN 폐기).
 
 ---
 
@@ -304,22 +303,25 @@ Postgres 는 `WHERE` 절에 쓰는 컬럼에도 SELECT 권한을 요구한다. �
 `avg_score_by_round` 처럼 `security definer` 함수로 내주고 행 조회는 본인 것만 열어야 하는데,
 표시 로직까지 손대는 변경이라 앱을 띄워 확인할 수 있는 자리에서 하는 게 맞다고 봤다.
 
-## 15. 의존성 — 🔧
+## 15. 의존성 — ✅
 
-`npm audit` 기준 critical 1 / high 30. 대부분 Expo CLI 빌드 툴체인(런타임 노출 없음)이지만
-아래 셋은 프로덕션 직접 의존이다.
+프로덕션 직접 의존 셋을 올렸다. 올린 뒤 `npx next build` 성공(exit 0, 경고 0, 251쪽 생성),
+typecheck·테스트(283+88) 통과.
 
-| 패키지 | 현재 | 권고 | 내용 |
+| 패키지 | 이전 | 현재 | 닫힌 것 |
 |---|---|---|---|
-| `next` | 16.2.9 | **16.3.1** (minor, 비파괴) | 미들웨어/프록시 우회, 서버액션 SSRF·DoS, 캐시 혼동 등 |
-| `pdfjs-dist` | 6.1.200 | **≥ 6.2.108** | 악성 PDF 열람 시 임의 JS 실행 |
-| `sharp` | 0.34.5 | 0.35.3 (semver major) | libvips CVE 4건 |
+| `next` | 16.2.9 | **16.3.1** | 미들웨어/프록시 우회, 서버액션 SSRF·DoS, 캐시 혼동, 이미지 최적화 DoS 등 9건 |
+| `pdfjs-dist` | 6.1.200 | **6.2.108** | 악성 PDF 열람 시 임의 JS 실행 |
+| `sharp` | 0.34.5 | **0.35.3** | libvips CVE 4건(CVE-2026-33327/33328/35590/35591) |
 
-`pdfjs-dist` 의 실제 노출도는 낮다 — 렌더하는 PDF 가 관리자 업로드본뿐이다
-(`papers/[id]/cbt/page.tsx` → Storage public URL). `next` 는 이 앱이 프록시(미들웨어)를
-쓰므로 우선순위가 가장 높다. **이 브랜치에서는 올리지 않았다** — 프레임워크 minor 업그레이드는
-빌드·실동작 확인이 따라야 하는데 여기서는 실제 앱을 띄워 확인할 수 없어, 검증 없이 밀어넣는
-쪽이 더 위험하다고 판단했다.
+`eslint-config-next` 도 `next` 와 같은 버전으로 함께 올렸고(원래 서로 핀으로 묶여 있다),
+루트 `optionalDependencies` 의 `@img/sharp-linux-x64` 도 0.35.3 으로 맞췄다 — README 에
+적힌 대로 상위 패키지가 쓰는 버전과 **정확히 같아야** Vercel 리눅스 빌드가 깨지지 않는다.
+
+**남은 33건은 전부 Expo/React Native 툴체인**이다(`tar` critical, `postcss`·`@xmldom/xmldom`
+high 등이 `expo` → `@expo/cli` 경로의 전이 의존성). 웹 런타임에는 노출되지 않고, 닫으려면
+Expo SDK 메이저 업그레이드(현재 56 → 57)가 필요해 별도 작업으로 남긴다. 그때까지는
+`uploads/incoming` 에 넣는 PDF 출처를 공식 배포처로 제한하는 것이 실질적인 완화다.
 
 ## 16. 관리자 업로드 content-type — 🔧 판단 필요
 

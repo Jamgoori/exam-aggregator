@@ -19,7 +19,7 @@
     "turbo": "^2.10.6"
   },
   "optionalDependencies": {
-    "@img/sharp-linux-x64": "0.34.5",
+    "@img/sharp-linux-x64": "0.35.3",
     "@tailwindcss/oxide-linux-x64-gnu": "4.3.3",
     "lightningcss-linux-x64-gnu": "1.32.0"
   }
