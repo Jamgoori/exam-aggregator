@@ -158,7 +158,14 @@ PDF**를 만든다(지면 테두리·칼럼 구분선, 첫 줄에 붙은 머리�
 - **`npm run regression-check-crop`(실측 전수 대조)을 못 돌렸다.** 이 작업 세션에
   Supabase 자격증명이 없어 실제 문제지를 받을 수 없었다. **배치 재크롭 전에 반드시
   먼저 돌릴 것** — 특히 "세트 병합 증가"가 의도한 것인지, 새로 추가된 "세로 실선
-  남음"이 0인지 확인.
+  남음"이 0인지 확인. 이 수정은 master 에 8ff2ffb 로 머지됐으므로 **baseline 을
+  반드시 그 직전 커밋으로 줄 것**(기본값 HEAD 로 돌리면 baseline 과 작업본이 같은
+  코드라 아무 신호도 안 나온다):
+
+  ```
+  npm run regression-check-crop -- --baseline 6ce57f9 --limit 40   # 스모크
+  npm run regression-check-crop -- --baseline 6ce57f9              # 전수
+  ```
 - **이미 올라간 이미지는 저절로 안 고쳐진다.** 아래 "로직 수정 후 기존 이미지 백필"
   절차대로 `--paper-ids`로 다시 돌려야 한다. 이번 수정은 조판 특성(테두리 유무,
   머리글 위치)을 타므로 시험유형이 아니라 **전체를 대상으로 보는 게 맞다.**
@@ -197,6 +204,13 @@ npm run regression-check-crop                      # HEAD 대비 전수 검사
 npm run regression-check-crop -- --limit 40        # 빠른 스모크
 npm run regression-check-crop -- --baseline <ref>  # 특정 커밋 대비
 ```
+
+**이 검사는 읽기 전용이라 관리자 키가 필요 없다**(2026-08-19). 대상 테이블
+(`exam_papers`·`questions`·`question_images`)이 전부 `public read` 정책이고
+`exam-papers` 버킷도 public 이라 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` 로 돌아간다
+— 업로드하는 `batch-crop-questions` 만 `SUPABASE_SERVICE_ROLE_KEY` 가 필요하다.
+**`--baseline` 기본값이 HEAD 라는 데 주의할 것**: 수정을 머지한 뒤에 그냥 돌리면
+baseline 과 작업본이 같은 코드라 아무 신호도 안 나온다.
 
 **개수가 줄어든 문제지 0건 + 세트 병합이 줄어든 문제지 0건 + 문제지 안에서 폭이
 갈린 문제지 0건**이어야 통과한다(하나라도 있으면 exit 1). 늘어난 건(인식 개선,

@@ -1,4 +1,5 @@
 // 사용법: npm run regression-check-crop -- [--baseline <git-ref>] [--concurrency 8] [--limit N] [--out report.json]
+//         (--baseline 을 생략하면 HEAD — 머지 후에는 반드시 수정 직전 커밋을 줄 것)
 //
 // docs/agents/crop-question-images.md가 요구하는 "크롭 로직 수정 시 기존 크롭
 // 완료분 전체 회귀 검사"를 자동화한다. 지정한 git ref(기본 HEAD)의
@@ -6,7 +7,12 @@
 // **인식 문항 수가 줄어든 문제지가 0건**인지 확인한다.
 //
 // 렌더 배율을 낮춰(scale 0.4) 돌리므로 이미지 품질은 보지 않는다 — 개수/에러
-// 회귀만 잡는 용도다. 업로드·DB 반영은 일절 하지 않는다.
+// 회귀만 잡는 용도다. 업로드·DB 반영은 일절 하지 않으므로 **읽기 전용 키**
+// (NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)로 돌아간다 — 관리자 키가 필요 없다.
+//
+// baseline 기본값이 HEAD 라는 데 주의할 것: 수정을 이미 머지한 뒤에 그냥 돌리면
+// baseline 과 작업본이 같은 코드라 아무 신호도 안 나온다. 머지 후 검증은 반드시
+// `--baseline <수정 직전 커밋>` 으로 돌릴 것.
 //
 // 주의: "개수 일치 = 성공"이 아니다. 이 검사를 통과해도 세트 병합/크롭 경계 같은
 // 시각적 회귀는 못 잡으니, 문서의 나머지 절차(스크린샷 육안 확인)를 반드시 병행할 것.
@@ -42,12 +48,22 @@ const outPath = typeof args.out === "string" ? args.out : "crop-regression-repor
 const SCALE = 0.4;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!supabaseUrl || !serviceRoleKey) {
-  console.error(".env.local에 NEXT_PUBLIC_SUPABASE_URL과 SUPABASE_SERVICE_ROLE_KEY가 필요합니다.");
+// 이 스크립트는 **읽기만 한다** — 업로드도 DB 반영도 하지 않는다. 그래서 RLS를
+// 우회하는 관리자 키가 필요 없다: 대상 테이블(exam_papers·questions·question_images)은
+// 전부 `public read` 정책이고 `exam-papers` 버킷도 public 이라 브라우저에 이미
+// 나가 있는 publishable 키로 충분하다. 관리자 키를 다른 사람·다른 환경에 넘기지
+// 않고도 회귀 검사를 돌릴 수 있게 읽기 전용 키를 먼저 받는다(관리자 키만 있는
+// 환경에서도 그대로 동작하도록 폴백은 남긴다).
+const readKey =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!supabaseUrl || !readKey) {
+  console.error(
+    ".env.local에 NEXT_PUBLIC_SUPABASE_URL과 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY" +
+      "(또는 SUPABASE_SERVICE_ROLE_KEY)가 필요합니다.",
+  );
   process.exit(1);
 }
-const supabase = createClient(supabaseUrl, serviceRoleKey);
+const supabase = createClient(supabaseUrl, readKey);
 
 // baseline 코드를 git에서 꺼내 임시 파일로 떨군다. 모노레포 전환 전 경로(scripts/)도
 // 같이 시도해 오래된 ref와도 비교할 수 있게 한다.
