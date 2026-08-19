@@ -13,6 +13,7 @@
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { PDFDocument } from "pdf-lib";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { safeOutPath } from "./lib/safe-filename.mjs";
 import path from "node:path";
 
 const START_RE = /(?<!\d)(?:문\s*)?1\s*[.。](?!\d)/;
@@ -95,8 +96,16 @@ async function split(filePath, subjectNames, boundaries, outDir) {
     copiedPages.forEach((p) => outDoc.addPage(p));
     const outBytes = await outDoc.save();
 
-    const fileName = `${subjectNames[i]}.pdf`;
-    const outPath = path.join(outDir, fileName);
+    // 과목명은 PDF 에서 뽑거나 인자로 받은 값이라 경로 문자가 섞일 수 있다
+    // (lib/safe-filename.mjs).
+    const outPath = safeOutPath(outDir, subjectNames[i]);
+    if (!outPath) {
+      console.warn(
+        `  ! 건너뜀: 과목명 "${subjectNames[i]}" 이 파일 이름으로 쓸 수 없다.`,
+      );
+      continue;
+    }
+    const fileName = path.basename(outPath);
     await writeFile(outPath, outBytes);
     console.log(
       `${fileName}: p${start + 1}~p${end} (${pageIndices.length}쪽) -> ${outPath}`,

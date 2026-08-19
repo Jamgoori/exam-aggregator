@@ -23,6 +23,39 @@
 // 조건으로 잡으면 복습 위주로 도는 사용자가 영원히 출석하지 못한다.
 export const ATTENDANCE_MIN_QUESTIONS = 10;
 
+// 출석으로 인정할 최소 소요 시간(답을 고른 문항 하나당 초).
+//
+// CBT 채점은 서버가 기록한 시작 시각으로 최소 응시시간(90초)을 강제하는데, 섞어풀기
+// 채점에는 그런 하한이 아예 없었다. 세션을 만들자마자 빈 답안으로 제출하는 것만으로
+// 그날 출석이 찍혔고, 출석은 grant_attendance_membership 을 통해 **실제 멤버십 일수로
+// 환전된다** — 문제를 한 문항도 풀지 않고 매달 유료 기간을 받아가는 경로였다.
+//
+// 문항 수에 비례한 하한을 쓴다. 5문항 세션과 50문항 세션에 같은 초를 요구하면 짧은
+// 세션이 억울하게 막힌다. 문항당 2초는 "문제를 읽지도 않았다"의 경계다 — 실제로 푸는
+// 사람은 기출 한 문항에 수십 초를 쓴다. 여기 걸려서 진짜 사용자의 도장이 빠지는 쪽이
+// 훨씬 나쁘므로 넉넉하게 잡는다.
+export const ATTENDANCE_MIN_SECONDS_PER_QUESTION = 2;
+
+// 이번 채점에서 출석으로 셀 문항 수. 0 이면 출석을 남기지 않는다.
+//
+// 두 가지를 본다:
+//  · 답을 고르지 않은 문항은 세지 않는다. "채점된 문항"이 아니라 "푼 문항"이 출석이라,
+//    빈 답안을 문항 수만 채워 보내는 것으로는 도장이 찍히지 않아야 한다.
+//  · 답을 골랐더라도 세션 전체가 너무 빨리 끝났으면 0 이다. 답안 배열을 즉석에서
+//    만들어 보내는 스크립트를 여기서 끊는다.
+export function attendanceQuestionCount(input: {
+  // 실제로 답을 고른 문항 수(선택 안 한 문항 제외).
+  answeredCount: number;
+  // 세션 시작(또는 응시 시작)부터 제출까지 서버가 잰 시간. 클라이언트가 보낸 값이 아니어야 한다.
+  elapsedSeconds: number;
+}): number {
+  const answered = Math.floor(input.answeredCount);
+  if (!Number.isFinite(answered) || answered <= 0) return 0;
+  if (!Number.isFinite(input.elapsedSeconds)) return 0;
+  const required = answered * ATTENDANCE_MIN_SECONDS_PER_QUESTION;
+  return input.elapsedSeconds >= required ? answered : 0;
+}
+
 export type AttendanceMilestone = {
   // 이 단계를 여는 그 달의 출석 일수.
   days: number;

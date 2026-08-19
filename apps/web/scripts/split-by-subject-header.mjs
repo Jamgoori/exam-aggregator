@@ -17,6 +17,7 @@
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { PDFDocument } from "pdf-lib";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { safeOutPath } from "./lib/safe-filename.mjs";
 import path from "node:path";
 
 // "채용시험" 뒤에 과목명이 오는 해가 대부분이지만, 8급 시험은 "8급시험"으로만
@@ -198,7 +199,14 @@ async function main() {
     const copiedPages = await outDoc.copyPages(srcDoc, pageIndices);
     copiedPages.forEach((p) => outDoc.addPage(p));
     const outBytes = await outDoc.save();
-    const outPath = path.join(outDir, `${subject}.pdf`);
+    // 과목명은 페이지 머리글에서 뽑은 값이라 경로 문자가 섞일 수 있다(lib/safe-filename.mjs).
+    const outPath = safeOutPath(outDir, subject);
+    if (!outPath) {
+      console.warn(
+        `  ! 건너뜀: 과목명 "${subject}" 이 파일 이름으로 쓸 수 없다(PDF 에서 뽑은 값이라 경로 문자가 섞일 수 있다).`,
+      );
+      continue;
+    }
     await writeFile(outPath, outBytes);
     console.log(`저장: ${outPath} (출처: ${info.file}, p${info.start}~p${info.end})`);
   }

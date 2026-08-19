@@ -17,6 +17,7 @@ import {
   srsGuessed,
   srsStateFromRow,
   type ReviewPickStrategy,
+  attendanceQuestionCount,
 } from "@gongmoa/core";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -352,12 +353,63 @@ export async function createAllReviewSessionForUser(
   });
 }
 
+// 넘어온 (문제지, 문항) 목록에서 **이 사용자가 실제로 풀어 본 문항만** 남긴다.
+//
+// 왜 필요한가: createReviewSessionFromItems 는 목록을 그대로 믿고 service_role 로 세션을
+// 만들고, 채점이 끝나면 getReviewSessionView 가 각 문항의 공식 정답(correctChoice)을
+// 실어 돌려준다. paper_answers 는 "정답이 그대로 노출되면 채점 의미가 없으므로"
+// 관리자 전용 RLS 로 잠가 둔 값인데(schema.sql), 목록이 검증되지 않으면 아무 문제지의
+// 1~50번을 넣고 빈 답안으로 제출하는 것만으로 그 잠금이 통째로 풀린다 — 번호만 바꿔
+// 반복하면 전 문제지 정답표가 그대로 빠져나간다.
+//
+// 그래서 "내가 푼 적 있는 문항"으로 좁힌다. 그 문항을 풀려면 CBT 를 실제로 응시해야
+// 하고(서버가 시작 시각을 기록하고 최소 응시시간을 강제한다), 그 사람에게 자기가 푼
+// 문항의 정답을 보여주는 것은 이 기능의 원래 목적 그대로다.
+//
+// user_question_status 는 select-own RLS 라 **사용자 세션 클라이언트로** 조회하면
+// 스코프가 자동으로 본인 행에 묶인다 — service_role 로 읽고 user_id 를 손으로 맞추는
+// 것보다 실수할 여지가 적다.
+const FROM_ITEMS_INPUT_MAX = 200;
+
+export async function filterQuestionsAnsweredByUser(
+  supabase: Supabase,
+  items: { paperId: string; questionNumber: number }[],
+): Promise<{ paperId: string; questionNumber: number }[]> {
+  // 조회 크기를 먼저 묶는다. 세션은 어차피 MAX_LIMIT 로 잘리고, 실제 결과 화면이
+  // 넘기는 건 한 문제지의 오답(많아야 수십 개)이다.
+  const clean = items
+    .filter(
+      (it) =>
+        typeof it?.paperId === "string" &&
+        it.paperId.length > 0 &&
+        Number.isInteger(it?.questionNumber),
+    )
+    .slice(0, FROM_ITEMS_INPUT_MAX);
+  if (clean.length === 0) return [];
+
+  const { data } = await supabase
+    .from("user_question_status")
+    .select("paper_id, question_number")
+    .in("paper_id", [...new Set(clean.map((it) => it.paperId))]);
+
+  const mine = new Set(
+    (data ?? []).map((r) => `${r.paper_id as string}#${r.question_number as number}`),
+  );
+  return clean.filter((it) => mine.has(`${it.paperId}#${it.questionNumber}`));
+}
+
 // 채점 결과에서 "틀린 문항만 다시 풀기": 넘겨받은 (문제지, 문항) 목록으로 새 세션을
 // 만든다. 정답·이미지는 채점/렌더 시점에 서버가 다시 조회하므로 목록엔 정답이 없다.
 //
 // keepOrder를 켜면 넘어온 순서를 그대로 쓴다. 복습 큐는 이미 우선순위와 과목
 // 섞기까지 계산해서 넘기므로(review-queue.ts), 여기서 다시 섞으면 그 편성이 통째로
 // 버려진다.
+//
+// ⚠ 이 함수는 items 를 **검증하지 않고 그대로 믿는다**(service_role 로 넣는다). 채점 후
+// 응답에는 문항별 공식 정답이 실리므로, 클라이언트가 보낸 목록을 여기로 바로 넘기면
+// 관리자 전용인 paper_answers 가 통째로 새어 나간다. 사용자 입력에서 온 목록은 반드시
+// filterQuestionsAnsweredByUser 를 먼저 통과시킬 것. 서버가 사용자 데이터로 직접 만든
+// 목록(복습 큐·과목 오답노트)만 그대로 넘겨도 된다.
 export async function createReviewSessionFromItems(
   supabase: Supabase,
   userId: string,
@@ -722,7 +774,7 @@ export async function submitReviewSessionForUser(
   const admin = createAdminClient();
   const { data: session } = await admin
     .from("review_sessions")
-    .select("id, user_id, submitted_at")
+    .select("id, user_id, submitted_at, created_at")
     .eq("id", sessionId)
     .maybeSingle();
   if (!session || session.user_id !== userId) return { error: "세션을 찾을 수 없어요." };
@@ -822,8 +874,21 @@ export async function submitReviewSessionForUser(
   // 출석 도장. byPaper 가 아니라 gradedRows 로 센다 — 중복 시험지는 한 문항이 여러
   // paper_id 로 되짚어져(byPaper) 같은 문항이 두 번 들어 있다. 그걸로 세면 실제로 푼
   // 것보다 많은 문항을 푼 셈이 되어 출석 기준이 헐거워진다.
+  //
+  // 세는 것은 "채점된 문항"이 아니라 **답을 고른 문항**이고, 세션이 너무 빨리 끝났으면
+  // 아예 세지 않는다(attendanceQuestionCount). CBT 와 달리 이 경로에는 최소 응시시간이
+  // 없어서, 세션을 만들자마자 빈 답안으로 제출하는 것만으로 도장이 찍혔다 — 그 도장은
+  // 멤버십 일수로 환전된다. 경과 시간은 반드시 서버가 기록한 created_at 으로 잰다.
   try {
-    await recordAttendance(userId, gradedRows.length);
+    const elapsedSeconds =
+      (Date.now() - new Date(session.created_at as string).getTime()) / 1000;
+    await recordAttendance(
+      userId,
+      attendanceQuestionCount({
+        answeredCount: gradedRows.filter((r) => r.selected_choice !== null).length,
+        elapsedSeconds,
+      }),
+    );
   } catch {
     // 무시: 출석 기록 실패가 채점을 막지 않는다.
   }

@@ -5,7 +5,8 @@
 // paper_answers 등 RLS로 막힌 테이블도 service_role이라 전부 받아진다.
 
 import { createClient } from "@supabase/supabase-js";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 // schema.sql의 create table 순서대로. 복원 시 참고가 되도록 의존(FK) 순서에 가깝게 둔다.
 const TABLES = [
@@ -60,7 +61,13 @@ async function main() {
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const outPath = process.argv[2] ?? `db-backup-${stamp}.json`;
+  // 기본 출력은 이미 gitignore 된 backups/ 안이다. 예전 기본값(현재 작업 디렉터리의
+  // db-backup-<stamp>.json)은 어떤 무시 규칙에도 걸리지 않아서, apps/web 에서 백업을
+  // 돌린 뒤 `git add -A` 한 번이면 전체 DB 덤프가 그대로 커밋된다. 이 덤프에는 RLS 로
+  // 감춰 둔 paper_answers(정답표 전량)와 comments.password_hash, profiles 가 들어 있다.
+  // git 히스토리에 한 번 들어가면 파일을 지워도 과거 커밋에서 복원된다.
+  const outPath = process.argv[2] ?? path.join("backups", `db-backup-${stamp}.json`);
+  await mkdir(path.dirname(outPath), { recursive: true });
 
   const dump = { _meta: { created_at: new Date().toISOString(), tables: {} } };
   let total = 0;
@@ -74,7 +81,8 @@ async function main() {
   dump._meta.total_rows = total;
 
   const json = JSON.stringify(dump);
-  await writeFile(outPath, json);
+  // 소유자만 읽을 수 있게. 개인정보와 정답표가 들어 있는 파일이다.
+  await writeFile(outPath, json, { mode: 0o600 });
   console.log(
     `\n백업 완료 → ${outPath} (총 ${total}행, ${(json.length / 1024 / 1024).toFixed(2)} MB)`,
   );

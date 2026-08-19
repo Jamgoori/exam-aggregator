@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createRateLimiter } from "@/lib/rate-limit";
 import { getSessionUser } from "@/lib/supabase/session";
 import { recordQuestionResults } from "@/lib/question-status";
 import { recordAttendance } from "@/lib/attendance";
@@ -12,7 +13,8 @@ import {
   COMMENT_MAX_DEPTH,
   formatDuration,
   getPaperSlug,
-  NICKNAME_MAX,
+  attendanceQuestionCount,
+  authorNickname,
   profanityError,
 } from "@gongmoa/core";
 import { MIN_ATTEMPT_SECONDS, sanitizeSelectedChoice } from "@/lib/cbt-attempt";
@@ -101,15 +103,14 @@ export async function postComment(input: {
   const { user } = await getSessionUser();
   if (!user) return { error: "로그인 후 댓글을 남길 수 있어요." };
 
-  const nickname =
-    (user.user_metadata?.nickname as string | undefined) ??
-    user.email?.split("@")[0] ??
-    "회원";
+  // 이메일 로컬파트로 떨어지지 않는다 — 그 값은 닉네임 정책(금칙어·중복)을 지나간 적이
+  // 없어서 "관리자" 같은 이름이 그대로 박힌다(core 의 authorNickname 주석 참고).
+  const nickname = authorNickname(user.user_metadata?.nickname);
 
   const { error } = await admin.from("comments").insert({
     paper_id: paperId,
     user_id: user.id,
-    nickname: nickname.slice(0, NICKNAME_MAX),
+    nickname,
     content,
     parent_id: parentId,
   });
@@ -119,8 +120,26 @@ export async function postComment(input: {
   return { success: true };
 }
 
+// 레거시 비회원 댓글의 비밀번호 대입 제한.
+//
+// 이 경로는 **로그인 없이** 부를 수 있고, 한 번 부를 때마다 서버가 bcrypt 비교를 한 번
+// 한다. 상한이 없으면 (1) 짧은 비밀번호가 자동화로 뚫려 남의 댓글이 지워지거나 스팸으로
+// 바뀌고, (2) 인증 없이 서버 CPU 를 태우는 증폭 경로가 된다. 비회원 댓글 작성은 이미
+// 닫혔지만 수정·삭제 경로는 기존 글을 위해 남아 있어 계속 유효하다.
+//
+// 정상 사용자는 자기가 정한 비밀번호를 몇 번 안에 맞춘다 — 그래서 웹훅과 달리 빡빡하게
+// 잡는다. 댓글 단위로 세므로 여러 댓글을 훑는 것도 각각 막힌다.
+// (인스턴스마다 각자 세는 한계는 rate-limit.ts 머리말 참고.)
+const GUEST_PASSWORD_ATTEMPTS = createRateLimiter({ limit: 5, windowMs: 10 * 60_000 });
+
 // 댓글 소유권 확인: 회원 댓글이면 세션 user_id 일치(또는 관리자),
 // 비회원 댓글이면 비밀번호 일치. 통과 시 admin 클라이언트와 대상 행을 반환.
+//
+// 실패 문구는 한 가지로 통일한다. "권한이 없어요"와 "비밀번호가 일치하지 않아요"로
+// 갈리면, 로그인하지 않은 사람에게 "이 댓글은 비밀번호로 뚫리는 비회원 댓글이다"를
+// 알려주는 셈이라 대입 대상을 골라 준다.
+const NO_PERMISSION = "권한이 없어요.";
+
 async function authorizeComment(commentId: string, password?: string) {
   if (!isUuid(commentId)) return { error: "잘못된 접근입니다." as string };
 
@@ -144,15 +163,20 @@ async function authorizeComment(commentId: string, password?: string) {
   if (!isAdmin) {
     if (comment.user_id) {
       // 회원 댓글: 본인만
-      if (user?.id !== comment.user_id) return { error: "권한이 없어요." };
+      if (user?.id !== comment.user_id) return { error: NO_PERMISSION };
     } else {
       // 비회원 댓글: 비밀번호 확인
-      if (!comment.password_hash) return { error: "권한이 없어요." };
+      if (!comment.password_hash) return { error: NO_PERMISSION };
+      // 대입 제한을 bcrypt **앞에** 둔다 — 뒤에 두면 한도를 넘긴 요청도 해시 비교
+      // 비용을 그대로 치른다(막으려던 증폭이 그대로 남는다).
+      if (!GUEST_PASSWORD_ATTEMPTS.take(commentId)) {
+        return { error: "잠시 후 다시 시도해주세요." };
+      }
       const ok = await bcrypt.compare(
         String(password ?? ""),
         comment.password_hash,
       );
-      if (!ok) return { error: "비밀번호가 일치하지 않아요." };
+      if (!ok) return { error: NO_PERMISSION };
     }
   }
 
@@ -392,10 +416,18 @@ export async function submitCbtAttempt(input: {
     // 무시: 상태 갱신 실패가 채점을 막지 않는다.
   }
 
-  // 출석 도장(월간 카드 → 멤버십 일수). 채점된 문항 수로만 센다 — 접속이 아니라
-  // 푼 것이 출석이다. 같은 이유로 부가 처리이고, 실패해도 채점을 되돌리지 않는다.
+  // 출석 도장(월간 카드 → 멤버십 일수). 접속이 아니라 푼 것이 출석이라, 채점된 문항이
+  // 아니라 **답을 고른 문항**만 센다 — 빈 답안을 제출해도 문항 수만큼 도장이 찍히면
+  // 최소 응시시간(90초)만 기다렸다 제출하는 스크립트가 멤버십 일수를 받아간다.
+  // 부가 처리이고, 실패해도 채점을 되돌리지 않는다.
   try {
-    await recordAttendance(user.id, questionResults.length);
+    await recordAttendance(
+      user.id,
+      attendanceQuestionCount({
+        answeredCount: questionResults.filter((q) => q.selected_choice !== null).length,
+        elapsedSeconds: durationSeconds,
+      }),
+    );
   } catch {
     // 무시: 출석 기록 실패가 채점을 막지 않는다.
   }
@@ -490,7 +522,10 @@ export async function submitQuestionReport(input: {
     return { error: "짧은 시간 동안 신고가 너무 많아요. 잠시 후 다시 시도해주세요." };
   }
 
-  const { error } = await supabase.from("question_reports").insert({
+  // 쓰기는 service_role 로 한다. question_reports 에는 insert 정책이 없다 — 예전처럼
+  // 사용자 세션 클라이언트로 넣으면 바로 위의 시간당 상한과 문항 번호 상한이 화면을
+  // 거치지 않는 요청에는 한 번도 평가되지 않는다(schema.sql 참고).
+  const { error } = await createAdminClient().from("question_reports").insert({
     user_id: user.id,
     paper_id: paperId,
     question_number: questionNumber,

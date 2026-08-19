@@ -113,14 +113,21 @@ export async function signInWithApple() {
 }
 
 export async function signOut() {
-  // 오프라인 캐시에 남은 개인 데이터(오답노트 등)를 기기에서 지운다.
-  await clearCache();
-  // 네이티브 SDK 세션과 Supabase 세션 둘 다 정리한다.
+  // 순서가 중요하다: **세션을 먼저 끊고** 그 다음에 캐시를 지운다.
+  //
+  // 반대로 하면(예전 순서) 캐시를 지우는 동안에도 세션이 살아 있어서, 그 사이에 화면이
+  // 다시 조회하면 방금 지운 자리에 개인 데이터가 그대로 다시 쓰인다. 실제로 설정 화면의
+  // 로그아웃이 signOut 을 기다리지 않고 마이페이지로 넘어가는 바람에, 마이페이지가 아직
+  // 유효한 세션으로 오답노트를 다시 받아 캐시에 남겼다 — 공용 기기에서 다음 사람이
+  // 오프라인으로 열면 그 화면이 그대로 보였다.
+  await supabase.auth.signOut();
+  // 네이티브 SDK 세션도 정리한다.
   await Promise.allSettled([
     GoogleSignin.signOut(),
     // kakao logout 은 선택 — 실패해도 Supabase 세션만 끊으면 로그아웃된 상태다.
   ]);
-  await supabase.auth.signOut();
+  // 오프라인 캐시에 남은 개인 데이터(오답노트 등)를 기기에서 지운다.
+  await clearCache();
 }
 
 export { statusCodes };

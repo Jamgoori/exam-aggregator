@@ -17,6 +17,7 @@
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { PDFDocument } from "pdf-lib";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { safeOutPath } from "./lib/safe-filename.mjs";
 import path from "node:path";
 
 // "【형 사 법】 (공통) ·········· 1" — 과목명 안의 공백은 자간이라 제거한다.
@@ -198,7 +199,14 @@ async function splitFile(filePath, outDir, dry, seen) {
     for (let p = e.startPdf; p <= e.endPdf; p++) indices.push(p - 1);
     const pages = await outDoc.copyPages(srcDoc, indices);
     pages.forEach((p) => outDoc.addPage(p));
-    const outPath = path.join(outDir, `${e.subject}.pdf`);
+    // 과목명은 PDF 표지에서 뽑은 값이라 경로 문자가 섞일 수 있다(lib/safe-filename.mjs).
+    const outPath = safeOutPath(outDir, e.subject);
+    if (!outPath) {
+      console.warn(
+        `  ! 건너뜀: 과목명 "${e.subject}" 이 파일 이름으로 쓸 수 없다(PDF 에서 뽑은 값이라 경로 문자가 섞일 수 있다).`,
+      );
+      continue;
+    }
     await writeFile(outPath, await outDoc.save());
     seen.add(e.subject);
     written++;
