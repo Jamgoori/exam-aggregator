@@ -94,6 +94,7 @@ export function parsePageItems(rawItems) {
     ...parsePairedTables(items),
     ...parseStripTables(items),
     ...parseInlinePairTables(items),
+    ...parseBareColumnTables(items),
   ];
 }
 
@@ -553,7 +554,10 @@ function parsePairedTables(items) {
   // "정답" 헤더마다 왼쪽에서 가장 가까운 "번호"(계리직은 "문항/번호" 두 줄이라
   // y가 어긋난다)가 짝이다. 쌍의 번호 열 아래 숫자가 문항 번호, 정답 열 아래
   // 원문자/숫자가 정답이다.
-  const numHeaders = items.filter((it) => it.str === "번호" || it.str === "문항번호");
+  // 소방 2026 정답표는 같은 조판에 머리글만 "문번"이다.
+  const numHeaders = items.filter((it) =>
+    ["번호", "문항번호", "문번"].includes(it.str),
+  );
   const ansHeaders = items.filter((it) => it.str === "정답");
   const pairs = [];
   for (const a of ansHeaders) {
@@ -603,12 +607,19 @@ function parsePairedTables(items) {
     const rowGap =
       rowYs.length > 1 ? (rowYs[0] - rowYs[rowYs.length - 1]) / (rowYs.length - 1) : 22;
 
+    // 소방 2026 제목줄은 "과목 | 소방학개론 | 구분 | 공개채용"이라, "구분" 오른쪽
+    // 값(공통·공개채용)이 오른쪽 쌍의 과목명으로 잘못 붙는다. 그 칸은 통째로 뺀다.
+    const divisionCells = items.filter((it) => it.str === "구분");
+    const isDivisionValue = (it) =>
+      divisionCells.some((d) => Math.abs(it.y - d.y) <= 4 && it.x > d.x);
+
     // 과목 헤더: 블록 헤더 위 ~ 4행 높이 안의 텍스트 조각을 쌍 중심에 붙인다.
     const headerParts = items.filter(
       (it) =>
         it.y > hy + 2 &&
         it.y <= hy + rowGap * 4 &&
-        !["번호", "정답", "문항", "문항번호"].includes(it.str) &&
+        !["번호", "정답", "문항", "문항번호", "문번", "과목", "구분"].includes(it.str) &&
+        !isDivisionValue(it) &&
         !TRACK_HEADING.test(it.str) &&
         !/책형|정답표|공무원|시행/.test(it.str) &&
         !/^[<>①②③④⑤◉ㆍ\d\s]+$/.test(it.str),
@@ -683,23 +694,45 @@ function parsePairedTables(items) {
       return cells;
     });
 
-    const qns = [...allQns].sort((a, b) => a - b);
-    if (qns.length === 0) continue;
+    if (allQns.size === 0) continue;
+    // 소방 2026처럼 과목명이 표 전체에 한 번만 찍히고 오른쪽 쌍 위에는 "구분 공통"
+    // 같은 딴 칸 제목만 오는 판형이 있다. 과목명을 못 얻은 쌍은 같은 블록에서
+    // 과목명을 얻은 가장 가까운 쌍에서 물려받는다.
+    const rawHeaders = headerByPair.map((parts) =>
+      normalizeSubjectName(
+        parts.sort((a, b) => b.y - a.y || a.x - b.x).map((p) => p.str).join(""),
+        // "< ① 책형 >" 조각이나 표 장식 기호(㉯ 등)가 붙은 경우 정리. 원문자류를
+        // 통째로 걷어내야 국가직 5급처럼 오른쪽 쌍 제목이 기호 하나뿐인 판형에서
+        // 아래 과목명 물려받기가 걸린다.
+      ).replace(/[<>◉ㆍ①-⓿㈀-㋿]/g, ""),
+    );
     perPair.forEach((cells, k) => {
       if (cells.size === 0) return;
-      const header = normalizeSubjectName(
-        headerByPair[k]
-          .sort((a, b) => b.y - a.y || a.x - b.x)
-          .map((p) => p.str)
-          .join(""),
-      ).replace(/[<>①②③④⑤◉ㆍ]/g, ""); // "< ① 책형 >" 조각이 붙은 경우 정리
+      let header = rawHeaders[k];
+      if (!header) {
+        let best = -1;
+        for (let j = 0; j < rawHeaders.length; j++) {
+          if (!rawHeaders[j]) continue;
+          if (best < 0 || Math.abs(j - k) < Math.abs(best - k)) best = j;
+        }
+        if (best >= 0) header = rawHeaders[best];
+      }
+      // 쌍마다 자기가 실제로 덮는 문항 범위로 표를 낸다. 한 과목이 여러 쌍에
+      // 나뉘어 실린 판형(소방 2026: 1~20 | 21~25)에서 호출 쪽이 범위가 안 겹치는
+      // 표들을 한 과목으로 합칠 수 있게 하기 위한 것.
+      const pairQns = [...cells.keys()].sort((a, b) => a - b);
       columns.push({
         header,
-        values: qns.map((q) => cells.get(q) ?? null),
+        values: pairQns.map((q) => cells.get(q)),
         trackHint,
+        rowNumbers: pairQns,
       });
     });
-    if (columns.length > 0) tables.push({ columns, rowNumbers: qns, warnings });
+    for (const c of columns) {
+      const rowNumbers = c.rowNumbers;
+      delete c.rowNumbers;
+      tables.push({ columns: [c], rowNumbers, warnings });
+    }
   }
   return tables;
 }
@@ -852,6 +885,128 @@ function parseInlinePairTables(items) {
     });
   }
   return tables;
+}
+
+// ---- 레이아웃 F: 맨숫자 문항 열 헤더 × 과목 행 (소방) ----
+// 전치형(레이아웃 B)과 같은 모양이지만 열 헤더가 "1번"이 아니라 맨숫자 "1"이라
+// COL_LABEL에 안 걸린다. 소방은 여기에 더해 두 가지가 섞인다.
+//  - 문항이 25개를 넘으면 머리글이 "1~25" / "26~40" 두 줄로 접히고, 과목마다
+//    답도 두 줄로 접힌다 (경채 소방관계법규·선택과목 40문항).
+//  - 2018~2021은 한 과목이 A형·B형 두 줄이다 (두 줄 다 후보로 낸다).
+const BARE_COL_STOPWORDS = new Set([
+  "연번", "과목명", "책형", "구분", "출제", "문항", "출제문항", "공개", "채용",
+  "공개채용", "경력채용", "공통", "정답", "비고",
+]);
+
+function parseBareColumnTables(items) {
+  // 같은 y에 1씩 증가하는 맨숫자가 8개 이상 늘어서 있으면 문항 번호 머리글 줄이다.
+  const bands = new Map();
+  for (const it of items) {
+    if (!/^\d{1,2}$/.test(it.str)) continue;
+    const key = [...bands.keys()].find((y) => Math.abs(y - it.y) <= 3) ?? it.y;
+    if (!bands.has(key)) bands.set(key, []);
+    bands.get(key).push({ q: Number(it.str), x: it.x + it.w / 2 });
+  }
+  const headers = [];
+  for (const [y, arr] of bands) {
+    const sorted = arr.sort((a, b) => a.x - b.x);
+    let run = [];
+    for (const m of sorted) {
+      if (run.length === 0 || m.q === run[run.length - 1].q + 1) run.push(m);
+      else if (run.length >= 8) break;
+      else run = [m];
+    }
+    if (run.length >= 8) headers.push({ y, cols: run });
+  }
+  if (headers.length === 0) return [];
+  headers.sort((a, b) => b.y - a.y);
+
+  const allCols = headers.flatMap((h) => h.cols);
+  const spacing =
+    headers[0].cols.length > 1
+      ? (headers[0].cols[headers[0].cols.length - 1].x - headers[0].cols[0].x) /
+        (headers[0].cols.length - 1)
+      : 25;
+  const xMin = Math.min(...allCols.map((c) => c.x)) - spacing * 0.6;
+  const yTop = headers[headers.length - 1].y;
+
+  // 왼쪽 여백에 "구분"(공개채용/경력채용) 열이 따로 있는 판형(소방 2025)에서는
+  // 그 칸 글자가 과목명으로 잡히지 않게, 과목명 열이 시작되는 x부터만 읽는다.
+  const divisionHead = items.find((it) => it.str === "구분" && it.x + it.w / 2 < xMin);
+  const subjectHead = items.find((it) => it.str === "과목명" && it.x + it.w / 2 < xMin);
+  const xLabelMin =
+    divisionHead && subjectHead && subjectHead.x > divisionHead.x
+      ? (divisionHead.x + divisionHead.w + subjectHead.x) / 2
+      : -Infinity;
+
+  // 머리글 아래 y 밴드로 나누고, 왼쪽 여백 글자에서 과목명·책형을 뽑는다.
+  const rowBands = new Map();
+  for (const it of items) {
+    if (it.y >= yTop - 2) continue;
+    const key = [...rowBands.keys()].find((y) => Math.abs(y - it.y) <= 3) ?? it.y;
+    if (!rowBands.has(key)) rowBands.set(key, []);
+    rowBands.get(key).push(it);
+  }
+
+  const labels = [];
+  const dataRows = [];
+  for (const [y, rowItems] of rowBands) {
+    const left = rowItems.filter(
+      (it) => it.x + it.w / 2 < xMin && it.x + it.w / 2 >= xLabelMin,
+    );
+    const formPart = left.find((it) => /^[A-Za-z가-힣]형$/.test(it.str));
+    const text = normalizeSubjectName(
+      left
+        .filter((it) => it !== formPart && !/^\d+$/.test(it.str))
+        .sort((a, b) => a.x - b.x)
+        .map((it) => it.str)
+        .join(""),
+    );
+    if (text.length >= 2 && !BARE_COL_STOPWORDS.has(text)) labels.push({ y, text });
+
+    const cells = rowItems
+      .filter((it) => it.x + it.w / 2 >= xMin)
+      .map((it) => ({ x: it.x + it.w / 2, v: cellValue(it.str) }))
+      .filter((c) => c.v !== null);
+    if (cells.length >= 8) dataRows.push({ y, cells, form: formPart?.str ?? null });
+  }
+  if (labels.length === 0 || dataRows.length === 0) return [];
+
+  // 각 답 줄을 y가 가장 가까운 과목 라벨에 붙인다 (라벨이 두 줄 사이에 낀 판형 대응).
+  const bySubject = new Map();
+  for (const row of dataRows) {
+    const near = labels.reduce((a, b) => (Math.abs(b.y - row.y) < Math.abs(a.y - row.y) ? b : a));
+    if (!bySubject.has(near.text)) bySubject.set(near.text, []);
+    bySubject.get(near.text).push(row);
+  }
+
+  // 머리글 줄이 여러 개면, 한 과목의 n번째 답 줄이 n번째 머리글 줄에 대응한다.
+  // 책형이 붙은 판형은 머리글이 한 줄뿐이라 A형·B형 둘 다 0번 머리글을 본다.
+  const tables = headers.map((h) => ({ columns: [], rowNumbers: h.cols.map((c) => c.q), warnings: [] }));
+  const tol = Math.min(spacing / 2, 14);
+  for (const [subject, rows] of bySubject) {
+    rows.sort((a, b) => b.y - a.y);
+    rows.forEach((row, idx) => {
+      const hi = Math.min(idx, headers.length - 1);
+      const values = headers[hi].cols.map((c) => {
+        const hit = row.cells.reduce(
+          (a, b) => (Math.abs(b.x - c.x) < Math.abs(a.x - c.x) ? b : a),
+          { x: -Infinity, v: null },
+        );
+        return Math.abs(hit.x - c.x) <= tol ? hit.v : null;
+      });
+      if (values.some((v) => v !== null)) {
+        tables[hi].columns.push({
+          header: subject,
+          values,
+          levelHint: null,
+          formHint: row.form,
+          trackHint: null,
+        });
+      }
+    });
+  }
+  return tables.filter((t) => t.columns.length > 0);
 }
 
 // 헤더가 이 과목을 가리키는지 판정한다.

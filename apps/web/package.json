@@ -27,6 +27,7 @@
     "split-combined-pdf": "node scripts/split-combined-pdf.mjs",
     "split-by-subject-header": "node scripts/split-by-subject-header.mjs",
     "split-by-toc": "node scripts/split-by-toc.mjs",
+    "split-fire": "node scripts/split-fire-paper.mjs",
     "test": "TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --test src/lib/*.test.ts"
   },
   "dependencies": {

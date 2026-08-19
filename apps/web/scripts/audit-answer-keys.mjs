@@ -130,13 +130,29 @@ async function main() {
     };
     report.push(entry);
 
+    // 공용(track null) 정답표는 그 시험의 모든 직류를 커버하는 게 기본이지만,
+    // 그 직류 전용 정답표가 따로 있으면(소방 경채 등) 거기까지 덮지는 않는다 —
+    // 소방은 같은 해 공채·경채가 과목명만 같고 문제가 달라, 안 걸러내면 경채
+    // 문제지가 공채 정답표와도 대조돼 가짜 diff가 난다.
+    const ownKeyTracks = new Set(
+      (keys ?? [])
+        .filter(
+          (k) =>
+            k.track &&
+            k.exam_type_id === key.exam_type_id &&
+            k.year === key.year &&
+            k.round === key.round &&
+            k.level === key.level,
+        )
+        .map((k) => k.track),
+    );
     const candidates = papers.filter(
       (p) =>
         p.exam_type_id === key.exam_type_id &&
         p.year === key.year &&
         p.round === key.round &&
         (key.level ? p.level === key.level : p.level === null) &&
-        (!key.track || p.track === key.track),
+        (key.track ? p.track === key.track : !ownKeyTracks.has(p.track)),
     );
     if (candidates.length === 0) continue;
 

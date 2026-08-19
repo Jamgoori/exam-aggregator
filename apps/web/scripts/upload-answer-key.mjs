@@ -49,6 +49,8 @@ const TRACK_KEYWORDS = {
   // 경찰 간부후보(경위 공채)는 같은 해 순경 공채와 정답표가 별개다. track을 안 붙이면
   // (exam_type_id, year, level, round, track) unique upsert에서 서로 덮어쓴다.
   간부후보: "간부후보",
+  // 소방은 같은 날 공채(track null)와 경채가 따로 치러지고 정답표도 별개다.
+  경채: "경채",
 };
 
 async function main() {
