@@ -130,6 +130,9 @@ const RULE_MAX_TRIM_PT = 80;
 // (실측상 머리글 한 줄이 10~13pt, 괘선이 1pt 미만).
 const TOP_JUNK_MAX_PT = 18;
 
+// 꼬리말로 인정할 잉크 덩어리의 최대 높이(픽셀 단계). 꼬리말은 한두 줄이다.
+const FOOTER_JUNK_MAX_PT = 34;
+
 // 위쪽 크롭 경계를 여백 안 어디에 놓을지(0=우리 잉크 바로 위, 1=윗것 잉크 바로 아래).
 const TOP_GAP_BIAS = 0.75;
 
@@ -994,6 +997,7 @@ async function makePageContext(page, markerData, scale, opts) {
     footerInkTopY = null,
     columnCropX = null,
     headerInkBottomY = null,
+    footerBaselineY = null,
   } = opts ?? {};
   const { markers, groups, lines = [], pageWidthPt, pageHeightPt } = markerData;
   const { left, right, half } = splitIntoColumns(markers, pageWidthPt, columnMode, columnSplitX);
@@ -1083,11 +1087,24 @@ async function makePageContext(page, markerData, scale, opts) {
     return cleaned ?? raw;
   }
 
-  // extractRegion + dropTopJunk. anchor 는 이 크롭의 첫 본문(마커 또는 안내문).
+  // 크롭 맨 아래에 딸려 온 되풀이 꼬리말을 픽셀로 걷어낸다. 좌표 경계
+  // (bottomForLastInColumn)가 잉크 윗선 추정이 뒤집혀 포기한 경우를 받아낸다.
+  // 꼬리말이 애초에 안 들어왔으면 그 자리에 잉크가 없어 아무 일도 하지 않는다.
+  async function dropFooterJunk(raw, regionTopPt) {
+    if (!raw || footerBaselineY === null) return raw;
+    const baselinePx = Math.round((regionTopPt - footerBaselineY) * scale);
+    if (baselinePx <= 0) return raw;
+    return (
+      (await dropInkBelowBaseline(raw, baselinePx, Math.round(FOOTER_JUNK_MAX_PT * scale))) ?? raw
+    );
+  }
+
+  // extractRegion + dropTopJunk + dropFooterJunk. anchor 는 이 크롭의 첫 본문.
   async function extractRegionBelow(colDef, topPt, bottomPt, anchor) {
     const raw = await extractRegion(colDef, topPt, bottomPt);
     if (!raw) return null;
-    return dropTopJunk(raw, topPt, anchor.y);
+    const deheaded = await dropTopJunk(raw, topPt, anchor.y);
+    return dropFooterJunk(deheaded, topPt);
   }
 
   // 반환값은 "다음 것의 baseline"이 아니라 **그 잉크가 시작되는 위쪽 y**다.
@@ -1203,7 +1220,7 @@ async function makePageContext(page, markerData, scale, opts) {
 
   return {
     markers, groups, lines, pageWidthPt, pageHeightPt,
-    columnDefs, extractRegion, extractRegionBelow, dropTopJunk,
+    columnDefs, extractRegion, extractRegionBelow, dropTopJunk, dropFooterJunk,
     findBottomBoundary, nextInkTop, cutAboveInk, topBoundaryFor,
     columnTopPt, headerBandPx, columnBottomPt, columnMode,
   };
@@ -1220,12 +1237,13 @@ async function cropQuestionsFromPage(
   columnCropX = null,
   headerInkBottomY = null,
   excludeNumbers = new Set(),
+  footerBaselineY = null,
 ) {
   const { markers, groups, lines = [] } = markerData;
   if (markers.length === 0) return { results: [], pendingStrips: carriedStrips };
 
   const ctx = await makePageContext(page, markerData, scale, {
-    columnMode, columnSplitX, footerInkTopY, columnCropX, headerInkBottomY,
+    columnMode, columnSplitX, footerInkTopY, columnCropX, headerInkBottomY, footerBaselineY,
   });
   const { columnDefs, extractRegion, extractRegionBelow, findBottomBoundary, topBoundaryFor } = ctx;
 
@@ -1393,7 +1411,7 @@ async function cropQuestionsFromPage(
       // 밑에서** 시작한다 — 마커 위쪽도 이 문항의 내용이므로 위쪽 잉크를 걷어내면
       // 안 된다. 그 자리의 머리글은 이미 안내문 스트립 쪽에서 걷어냈다.
       let raw = override
-        ? await extractRegion(colDef, top, bottom)
+        ? await ctx.dropFooterJunk(await extractRegion(colDef, top, bottom), top)
         : await extractRegionBelow(colDef, top, bottom, marker);
       if (!raw) {
         console.warn(`문제 ${marker.number}: 잘라낼 영역이 비어있어 건너뜀`);
@@ -1461,6 +1479,17 @@ function medianLineLead(lines) {
 // 오른쪽 칼럼 크롭에도 들어오므로, 페이지 값은 **칼럼과 무관하게 그 페이지 전체**
 // 에 적용해야 한다(실측: 이걸 칼럼별로만 적용했더니 15·19번에 쪽번호가 남았다).
 export function computeFooterInkTopByPage(pageDataList) {
+  return detectFooters(pageDataList).map((f) => f?.inkTop ?? null);
+}
+
+// 꼬리말의 **baseline**(픽셀 단계에서 쓸 기준). 잉크 윗선(l.y + l.height)은 큰 글자
+// 꼬리말에서 실제 글리프 높이를 과대평가해 본문 아래선과 겹치는데, baseline 은
+// 글리프 안쪽이라 겹칠 일이 없다.
+export function computeFooterBaselineByPage(pageDataList) {
+  return detectFooters(pageDataList).map((f) => f?.baseline ?? null);
+}
+
+function detectFooters(pageDataList) {
   const empty = pageDataList.map(() => null);
   if (pageDataList.length < 2) return empty;
   const buckets = new Map();
@@ -1483,19 +1512,55 @@ export function computeFooterInkTopByPage(pageDataList) {
       if (block[0].y >= zoneTop) continue;
       for (const l of block) {
         const key = Math.round(l.y / FOOTER_Y_TOLERANCE_PT);
-        if (!buckets.has(key)) buckets.set(key, { perPage: new Map() });
+        if (!buckets.has(key)) buckets.set(key, { perPage: new Map(), texts: new Set() });
         const b = buckets.get(key);
-        b.perPage.set(i, Math.max(b.perPage.get(i) ?? -Infinity, l.y + l.height));
+        const prev = b.perPage.get(i);
+        const cand = { inkTop: l.y + l.height, baseline: l.y };
+        if (!prev || cand.inkTop > prev.inkTop) b.perPage.set(i, cand);
+        // 확정된 꼬리말의 문구를 모아둔다 — 아래 "구멍 메우기"의 기준이다.
+        const t = normalizeRunningText(l.text ?? "");
+        if (t) b.texts.add(t);
       }
     }
   }
   // 문서 절반 이상의 페이지에 같은 자리로 나타나야 되풀이 꼬리말로 인정한다.
   const minPages = Math.max(2, Math.ceil(pageDataList.length / 2));
   const result = empty;
+  const confirmed = []; // { text, y }
   for (const b of buckets.values()) {
     if (b.perPage.size < minPages) continue;
-    for (const [pageIdx, inkTop] of b.perPage) {
-      if (result[pageIdx] === null || inkTop > result[pageIdx]) result[pageIdx] = inkTop;
+    for (const [pageIdx, cand] of b.perPage) {
+      if (result[pageIdx] === null || cand.inkTop > result[pageIdx].inkTop) result[pageIdx] = cand;
+    }
+    for (const text of b.texts) {
+      for (const cand of b.perPage.values()) confirmed.push({ text, y: cand.baseline });
+    }
+  }
+
+  // 구멍 메우기: 꼬리말이 분명히 있는데도 **그 페이지에서만** 앞 여백 조건
+  // (FOOTER_GAP_RATIO)에 걸려 값이 안 잡히는 페이지가 있다. 마지막 문항의 선택지가
+  // 꼬리말 가까이까지 내려오면 그렇다(실측: 2019 법원직 9급 한국사 3쪽 — 꼬리말
+  // "1교시 ①책형 전체 23-15"가 y=33.6인데 바로 위 선택지가 y=50.9라 간격이 줄간격의
+  // 1.3배뿐. 1·2·4쪽은 2.4배라 잡혔다). 그러면 그 페이지의 마지막 문항 크롭이
+  // 지면 바닥까지 내려가 **꼬리말이 그대로 이미지에 남는다**(사용자 제보 "전체 19-6").
+  //
+  // 여백으로는 못 가르지만, **다른 페이지에서 이미 확정된 꼬리말과 글자 내용·위치가
+  // 같은 줄**이 이 페이지에도 있으면 그건 꼬리말이 맞다. 위치만 보고 다른 페이지 값을
+  // 그대로 가져다 쓰면 안 된다 — 그 y가 이 페이지에선 본문 한복판일 수 있어 문항이
+  // 통째로 사라진다(실측: 2015 국가직 9급 수학 3번). 그래서 **이 페이지에 실제로 그
+  // 문구가 그 자리에 있을 때만** 값을 채운다.
+  for (let i = 0; i < pageDataList.length; i++) {
+    if (result[i] !== null) continue;
+    const lines = pageDataList[i].lines ?? [];
+    for (const l of lines) {
+      const t = normalizeRunningText(l.text ?? "");
+      if (!t) continue;
+      const hit = confirmed.find(
+        (c) => c.text === t && Math.abs(c.y - l.y) <= FOOTER_Y_TOLERANCE_PT,
+      );
+      if (!hit) continue;
+      const cand = { inkTop: l.y + l.height, baseline: l.y };
+      if (result[i] === null || cand.inkTop > result[i].inkTop) result[i] = cand;
     }
   }
   return result;
@@ -1613,6 +1678,46 @@ async function dropInkAboveBaseline(rawPng, baselinePx, maxBlockPx = Infinity) {
   }
   if (y === 0) return rawPng;
   return sharp(rawPng).extract({ left: 0, top: y, width, height: height - y }).png().toBuffer();
+}
+
+// dropInkAboveBaseline 의 아래쪽 대칭 — **꼬리말 baseline 을 품은 잉크 덩어리와
+// 그 아래를 걷어낸다.**
+//
+// 왜 좌표만으로 안 되는가: 꼬리말 잉크 윗선을 `l.y + l.height` 로 잡는데, 큰 글자
+// 꼬리말은 height 가 글리프 실제 높이를 **과대평가**해서 그 값이 바로 위 본문 줄의
+// 아래선보다 위로 올라간다(실측: 2019 법원직 9급 한국사 — 꼬리말 baseline 33.6,
+// height 15 라 잉크 윗선 48.6 인데 위 선택지 줄의 디센더가 48.2. 사이 여백이
+// 음수로 계산된다). 그러면 bottomForLastInColumn 이 "경계가 뒤집혔다"며 포기하고
+// 지면 바닥까지 자른다 — 꼬리말이 그대로 남는 두 번째 원인이다.
+//
+// baseline 은 글리프 안쪽이라 이런 뒤집힘이 없다. baseline 이 속한 덩어리가 곧
+// 꼬리말이므로 그 덩어리를 통째로 걷어내면 된다. 덩어리가 maxBlockPx 보다 두꺼우면
+// 본문과 붙어버린 것이므로 **손대지 않는다**(본문을 깎느니 꼬리말을 남긴다).
+async function dropInkBelowBaseline(rawPng, baselinePx, maxBlockPx) {
+  const { data, info } = await sharp(rawPng)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  if (baselinePx < 0 || baselinePx >= height) return rawPng;
+  const hasInk = new Uint8Array(height);
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x] < 245) {
+        hasInk[y] = 1;
+        break;
+      }
+    }
+  }
+  if (!hasInk[baselinePx]) return rawPng; // 그 자리에 잉크가 없다 = 꼬리말이 안 들어옴
+  let top = baselinePx;
+  while (top > 0 && hasInk[top - 1]) top--;
+  let bottom = baselinePx;
+  while (bottom + 1 < height && hasInk[bottom + 1]) bottom++;
+  if (bottom - top + 1 > maxBlockPx) return rawPng; // 본문과 한 덩어리 — 손대지 않는다
+  if (top <= 0) return rawPng; // 이미지가 통째로 꼬리말일 리 없다
+  return sharp(rawPng).extract({ left: 0, top: 0, width, height: top }).png().toBuffer();
 }
 
 function planCrossPageSets(pageDataList, columnMode) {
@@ -1995,6 +2100,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
   );
 
   const footerInkTopByPage = computeFooterInkTopByPage(pageMarkerData.map((d) => d.data));
+  const footerBaselineByPage = computeFooterBaselineByPage(pageMarkerData.map((d) => d.data));
   const headerInkBottomByPage = computeHeaderInkBottomByPage(pageMarkerData.map((d) => d.data));
 
   const cropped = [];
@@ -2016,6 +2122,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
           footerInkTopY: footerInkTopByPage[pageIdx],
           columnCropX,
           headerInkBottomY: headerInkBottomByPage[pageIdx],
+          footerBaselineY: footerBaselineByPage[pageIdx],
         }),
       );
     }
@@ -2129,6 +2236,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
       columnCropX,
       headerInkBottomByPage[p - 1],
       handledNumbers,
+      footerBaselineByPage[p - 1],
     );
     carriedStrips = pendingStrips;
     cropped.push(...pageResults);

@@ -149,9 +149,11 @@ function columnCursor(page, font, x, topY) {
 // 한 문항이 만드는 잉크 줄(=이미지에서 잉크 덩어리) 수.
 export const LINES_PER_QUESTION = 6;
 
-function question(cursor, number) {
+function question(cursor, number, { bodyLines = 1 } = {}) {
   cursor.line(`${number}. Which of the following best describes ${topic(number)}?`);
-  cursor.line(`   A further remark on ${topic(number + 1)}.`);
+  for (let i = 0; i < bodyLines; i++) {
+    cursor.line(`   Remark ${i + 1} on ${topic(number + i + 1)}.`);
+  }
   for (let c = 1; c <= 4; c++) cursor.line(`(${c}) ${topic(number + c)}`, { indent: 6 });
   cursor.gap(9);
 }
@@ -210,10 +212,28 @@ export async function buildFixturePdf({ frame = true, header = true, footer = tr
   const p2R = columnCursor(p2, font, L.rightTextX, L.bodyTopY);
   question(p2R, 11);
 
+  // 3쪽: 마지막 문항이 **꼬리말 가까이까지** 내려오는 지면. 꼬리말 감지는 "바로 위
+  // 본문과 줄간격의 2.1배 넘게 떨어져 있을 것"을 요구하는데, 이런 지면에서는 그
+  // 조건이 그 페이지에서만 깨져 꼬리말이 이미지에 그대로 남았다(실측: 2019 법원직
+  // 9급 한국사 3쪽 — 1·2·4쪽은 2.4배라 잡혔는데 3쪽만 1.3배). 다른 페이지에서
+  // 확정된 꼬리말과 글자·위치가 같으면 값을 채우는 로직을 이 지면이 검사한다.
+  const p3 = pdf.addPage([PAGE_W, PAGE_H]);
+  drawFrame(p3, font, frameOpts(3));
+  const p3L = columnCursor(p3, font, L.leftTextX, L.bodyTopY);
+  question(p3L, 12, { bodyLines: TIGHT_BODY_LINES });
+  const p3R = columnCursor(p3, font, L.rightTextX, L.bodyTopY);
+  question(p3R, 13);
+
   return Buffer.from(await pdf.save());
 }
 
-export const FIXTURE_QUESTION_COUNT = 11;
+// 3쪽 좌단 문항의 부연 줄 수 — 마지막 줄이 꼬리말 바로 위(줄간격의 2.1배 미만)에
+// 오도록 맞춘 값이다.
+const TIGHT_BODY_LINES = 51;
+// 그 문항이 만드는 잉크 줄 수(발문 1 + 부연 + 선지 4).
+export const TIGHT_QUESTION_LINES = 1 + TIGHT_BODY_LINES + 4;
+
+export const FIXTURE_QUESTION_COUNT = 13;
 // 한 이미지로 묶여야 하는 세트.
 export const FIXTURE_MERGED_SETS = [
   [3, 4],
