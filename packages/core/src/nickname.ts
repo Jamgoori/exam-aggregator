@@ -85,3 +85,28 @@ export function validateNickname(
 
   return { nickname, error: null };
 }
+
+// 글(댓글·건의·건의 댓글)에 박제되는 작성자 표시 이름.
+//
+// 예전에는 `user_metadata.nickname ?? email.split("@")[0] ?? "회원"` 이었다. 문제는 그
+// 이메일 로컬파트가 **닉네임 정책을 한 번도 통과하지 않는다**는 것이다 — DB 트리거
+// (schema.sql 의 sync_nickname_from_auth)는 user_metadata 가 바뀔 때만 도는데, 닉네임을
+// 한 번도 설정하지 않은 계정(소셜 로그인 후 온보딩을 건너뛴 경우)은 그 트리거를 지나간
+// 적이 없다. 그래서 `관리자@…` 같은 주소로 가입하면 금칙어 검사를 건너뛴 "관리자" 가
+// 공개 댓글에 그대로 붙었다(운영진 사칭). `<피해자닉네임>@…` 이면 profiles 의
+// lower(nickname) 유니크 인덱스도 우회해 같은 이름으로 글을 쓸 수 있었다.
+//
+// 덤으로, 이메일 로컬파트는 개인정보다 — 닉네임을 설정하지 않았다는 이유로 남의 메일
+// 주소 앞부분을 공개 글에 박아 둘 이유가 없다.
+//
+// 그래서 이메일로는 떨어지지 않는다. 검증을 통과한 닉네임이 없으면 중립 기본값을 쓴다.
+export const FALLBACK_NICKNAME = "회원";
+
+export function authorNickname(metadataNickname: unknown): string {
+  if (typeof metadataNickname !== "string") return FALLBACK_NICKNAME;
+  const trimmed = metadataNickname.trim();
+  // 상한만 다시 건다(comments_nickname_len 제약과 같은 값). 그 밖의 정책은 이 값을
+  // 쓰기 전에 트리거가 이미 강제했으므로 여기서 다시 판정하지 않는다 — 다시 판정하면
+  // 트리거 이전에 만들어진 계정의 이름이 조용히 "회원" 으로 바뀐다.
+  return trimmed ? trimmed.slice(0, NICKNAME_MAX) : FALLBACK_NICKNAME;
+}

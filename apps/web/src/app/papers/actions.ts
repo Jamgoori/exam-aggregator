@@ -12,7 +12,7 @@ import {
   COMMENT_MAX_DEPTH,
   formatDuration,
   getPaperSlug,
-  NICKNAME_MAX,
+  authorNickname,
   profanityError,
 } from "@gongmoa/core";
 import { MIN_ATTEMPT_SECONDS, sanitizeSelectedChoice } from "@/lib/cbt-attempt";
@@ -101,15 +101,14 @@ export async function postComment(input: {
   const { user } = await getSessionUser();
   if (!user) return { error: "로그인 후 댓글을 남길 수 있어요." };
 
-  const nickname =
-    (user.user_metadata?.nickname as string | undefined) ??
-    user.email?.split("@")[0] ??
-    "회원";
+  // 이메일 로컬파트로 떨어지지 않는다 — 그 값은 닉네임 정책(금칙어·중복)을 지나간 적이
+  // 없어서 "관리자" 같은 이름이 그대로 박힌다(core 의 authorNickname 주석 참고).
+  const nickname = authorNickname(user.user_metadata?.nickname);
 
   const { error } = await admin.from("comments").insert({
     paper_id: paperId,
     user_id: user.id,
-    nickname: nickname.slice(0, NICKNAME_MAX),
+    nickname,
     content,
     parent_id: parentId,
   });

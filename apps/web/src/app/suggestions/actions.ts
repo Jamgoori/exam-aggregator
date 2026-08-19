@@ -11,7 +11,7 @@ import {
   canEditSuggestionComment,
   canPinSuggestion,
   canReadSuggestion,
-  NICKNAME_MAX,
+  authorNickname,
   validateSuggestionAnswer,
   validateSuggestionCommentContent,
   validateSuggestionInput,
@@ -84,16 +84,15 @@ export async function createSuggestion(input: {
   // 이름으로 글을 쓸 수 있다. 화면에 보이는 닉네임의 원본은
   // auth.users.raw_user_meta_data.nickname 이고(schema.sql 참고) profiles 는
   // 중복 판별용 그림자 원장이라, 댓글과 같은 순서로 읽는다.
-  const nickname =
-    (user.user_metadata?.nickname as string | undefined) ??
-    user.email?.split("@")[0] ??
-    "회원";
+  // 이메일 로컬파트로 떨어지지 않는다 — 그 값은 닉네임 정책(금칙어·중복)을 지나간 적이
+  // 없어서 "관리자" 같은 이름이 그대로 박힌다(core 의 authorNickname 주석 참고).
+  const nickname = authorNickname(user.user_metadata?.nickname);
 
   const { data, error } = await admin
     .from("suggestions")
     .insert({
       user_id: user.id,
-      nickname: nickname.slice(0, NICKNAME_MAX),
+      nickname,
       title: validated.title,
       content: validated.content,
       is_secret: isSecret,
@@ -251,15 +250,14 @@ export async function createSuggestionComment(input: {
     return { error: "짧은 시간 동안 너무 많이 작성했어요. 잠시 후 다시 시도해주세요." };
   }
 
-  const nickname =
-    (user.user_metadata?.nickname as string | undefined) ??
-    user.email?.split("@")[0] ??
-    "회원";
+  // 이메일 로컬파트로 떨어지지 않는다 — 그 값은 닉네임 정책(금칙어·중복)을 지나간 적이
+  // 없어서 "관리자" 같은 이름이 그대로 박힌다(core 의 authorNickname 주석 참고).
+  const nickname = authorNickname(user.user_metadata?.nickname);
 
   const { error } = await admin.from("suggestion_comments").insert({
     suggestion_id: suggestionId,
     user_id: user.id,
-    nickname: nickname.slice(0, NICKNAME_MAX),
+    nickname,
     content: validated.content,
   });
   if (error) return { error: "댓글 등록에 실패했어요." };
