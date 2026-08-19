@@ -53,7 +53,7 @@ export const PRIMARY_NAV: NavItem[] = [
     // 맨 아래("시험으로 찾기")와 푸터에서 여전히 닿는다. 과목축 하나만 메뉴에 남기는
     // 게 "국어 기출문제"처럼 과목명으로 찾아오는 절대다수 검색 흐름과 더 맞는다.
     match: (p) => p.startsWith("/subjects"),
-    hint: "국어·영어·한국사·전공",
+    hint: "국어·영어·전공",
   },
   {
     href: "/mypage?tab=wrong-notes",
