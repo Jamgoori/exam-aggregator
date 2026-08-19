@@ -88,6 +88,109 @@ const PAGE_MARGIN_X = 6;
 // 마지막 문제(다음 마커가 없는 경우)는 페이지 하단까지 넉넉히 잘라서 잘림을 방지
 const BOTTOM_MARGIN = 4;
 
+// 지면 테두리·칼럼 구분선 같은 **세로 실선**을 찾을 때 쓰는 값들 (2026-08-19).
+//
+// 많은 시험지 조판이 지면 전체를 감싸는 테두리 사각형과 좌우 단 사이 구분선을
+// 긋는데, 칼럼 크롭 영역(PAGE_MARGIN_X..칼럼 경계)이 그 선까지 포함해 **문항
+// 이미지 좌·우에 실선이 그대로 남았다**. 보기 싫은 것으로 끝나지 않는다 —
+// 그 선은 이미지 위에서 아래까지 이어지는 "잉크"라서
+//   - finalizeQuestionImage 의 세로 여백 제거가 아무것도 못 걷어내고(칼럼 끝까지
+//     자른 마지막 문항이 지면 바닥까지의 빈 공간을 그대로 안고 나온다),
+//   - dropRunningHeader / dropInkAboveBaseline 의 "잉크 덩어리" 판정이 지면 전체를
+//     한 덩어리로 보게 만들어 **머리글 제거가 통째로 무력화**된다.
+// (실측 재현: scripts/lib/make-crop-fixture.mjs 의 합성 조판 — 마지막 문항이
+// 내용 100pt + 빈 공간 290pt 로 나왔고, 머리글 괘선이 모든 문항 위에 남았다.)
+//
+// 그래서 크롭 x 경계 자체를 실선 안쪽으로 당긴다. 오검출이 나면 본문이 잘리므로
+// 조건을 세 개 모두 만족할 때만 실선으로 인정한다:
+//   (1) 얇을 것 — 본문 글리프 획보다 굵은 세로줄은 실선이 아니다
+//   (2) 지면 높이의 대부분을 차지할 것 — 지문 상자 테두리는 여기서 걸러진다
+//   (3) 그 칼럼 본문 텍스트의 x 범위 **밖**일 것 — 상자·표 테두리는 본문 범위
+//       안에 있으므로 절대 걸리지 않는다
+const RULE_MAX_WIDTH_PT = 2.5;
+const RULE_MIN_PAGE_COVER = 0.8;
+// 실선을 잘라낼 때 남길 여유. 안티에일리어싱으로 번진 픽셀이 남지 않도록 조금
+// 더 안쪽으로 당긴다.
+const RULE_CLEARANCE_PT = 1.5;
+// 본문 x 범위에서 이만큼은 확실히 떨어져 있어야 실선으로 인정한다. 표·상자
+// 테두리는 자기 내용 바로 옆(수 pt)에 붙지만, 지면 테두리·칼럼 구분선은 본문에서
+// 한참 떨어져 있다.
+const RULE_TEXT_MARGIN_PT = 6;
+// 본문 x 범위를 잴 때 머리글·꼬리말 줄은 뺀다 — 지면 폭 전체에 걸치는 머리글이
+// 섞이면 칼럼 구분선이 "본문 범위 안"으로 잡혀 (3) 조건이 무력해진다. 다만
+// 머리글 감지가 빗나가 본문 줄까지 걷어내 버리면 범위가 실제보다 좁아져 본문을
+// 자를 수 있으므로, 걸러낸 줄이 이보다 적으면 거르지 않은 전체를 쓴다.
+const RULE_MIN_BODY_LINES = 3;
+// 한 번에 당길 수 있는 최대 거리. 이보다 깊이 들어온 "실선"은 본문 요소일 수
+// 있으므로 믿지 않는다.
+const RULE_MAX_TRIM_PT = 80;
+
+// 첫 본문 baseline 위에 남은 잉크 덩어리 중 이 높이 이하만 "머리글 잔해·괘선"으로
+// 보고 걷어낸다. 지문 상자처럼 큰 덩어리는 절대 건드리지 않기 위한 상한이다
+// (실측상 머리글 한 줄이 10~13pt, 괘선이 1pt 미만).
+const TOP_JUNK_MAX_PT = 18;
+
+// 위쪽 크롭 경계를 여백 안 어디에 놓을지(0=우리 잉크 바로 위, 1=윗것 잉크 바로 아래).
+const TOP_GAP_BIAS = 0.75;
+
+// 렌더된 지면에서 세로 실선의 x 구간(px)을 찾는다. greyData 는 greyscale raw.
+// 반환: [{ x0, x1 }] — 둘 다 포함(inclusive) 픽셀 인덱스.
+export function findVerticalRuleXs(greyData, width, height, { maxWidthPx, minCover }) {
+  const cover = new Array(width).fill(0);
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) if (greyData[row + x] < 245) cover[x]++;
+  }
+  const need = height * minCover;
+  const rules = [];
+  let x = 0;
+  while (x < width) {
+    if (cover[x] < need) {
+      x++;
+      continue;
+    }
+    let end = x;
+    while (end + 1 < width && cover[end + 1] >= need) end++;
+    if (end - x + 1 <= maxWidthPx) rules.push({ x0: x, x1: end });
+    x = end + 1;
+  }
+  return rules;
+}
+
+// 렌더된 지면 한 장에서 세로 실선을 찾는다(findVerticalRuleXs 의 sharp 래퍼).
+async function findPageVerticalRules(pageImage, scale) {
+  const { data, info } = await sharp(pageImage)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return findVerticalRuleXs(data, info.width, info.height, {
+    maxWidthPx: Math.max(1, Math.round(RULE_MAX_WIDTH_PT * scale)),
+    minCover: RULE_MIN_PAGE_COVER,
+  });
+}
+
+// 한 칼럼 본문 텍스트가 실제로 걸쳐 있는 x 범위. 머리글·꼬리말은 뺀다.
+//
+// colKeys 가 배열도 되는 이유: 줄의 col 은 언제나 "지면 절반 기준 좌/우"로 붙는데,
+// 1단 조판에서는 그 절반 오른쪽 본문도 같은 칼럼(전체 폭)에 속한다. 1단인데
+// "L" 줄만 재면 본문 범위가 지면 절반에서 끊겨, 오른쪽 절반의 세로선이 전부
+// "본문 밖"으로 잡혀 **본문이 잘릴 수 있다**. 1단에서는 두 키를 함께 넘긴다.
+export function computeColumnTextBounds(lines, colKeys, headerInkBottomY, footerInkTopY) {
+  const keys = Array.isArray(colKeys) ? colKeys : [colKeys];
+  const inCol = lines.filter((l) => keys.includes(l.col) && typeof l.x === "number");
+  const body = inCol.filter(
+    (l) =>
+      (headerInkBottomY === null || headerInkBottomY === undefined || l.y < headerInkBottomY) &&
+      (footerInkTopY === null || footerInkTopY === undefined || l.y > footerInkTopY),
+  );
+  const use = body.length >= RULE_MIN_BODY_LINES ? body : inCol;
+  if (use.length < RULE_MIN_BODY_LINES) return null;
+  return {
+    minX: Math.min(...use.map((l) => l.x)),
+    maxX: Math.max(...use.map((l) => l.right)),
+  };
+}
+
 async function renderPageToPng(page, scale) {
   const viewport = page.getViewport({ scale });
   const canvas = createCanvas(viewport.width, viewport.height);
@@ -147,7 +250,7 @@ function findAnnotationLines(items, half) {
     // 한 줄 안에서 가장 큰 글자 높이를 그 줄의 높이로 본다 — 크롭 경계를 잡을 때
     // 이 줄의 잉크가 baseline 위로 얼마나 올라오는지 가늠하는 데 쓴다.
     if (item.height > line.height) line.height = item.height;
-    line.parts.push({ x, str: item.str, idx });
+    line.parts.push({ x, right: x + (item.width ?? 0), str: item.str, idx });
   });
 
   // 같은 칼럼 안에서 위→아래(y 내림차순) 순서로 줄을 늘어놓는다 — 안내문이
@@ -168,7 +271,20 @@ function findAnnotationLines(items, half) {
       text,
       indices: sorted.map((p) => p.idx),
     });
-    if (text.trim()) allLines.push({ y: line.y, col: line.col, height: line.height, text: text.trim() });
+    const inked = sorted.filter((p) => p.str.trim());
+    if (inked.length > 0) {
+      allLines.push({
+        y: line.y,
+        col: line.col,
+        height: line.height,
+        text: text.trim(),
+        // 줄이 실제로 걸쳐 있는 x 범위. 지면 테두리·칼럼 구분선 같은 세로 실선을
+        // 본문과 가르는 데 쓴다(본문 x 범위 밖에 있는 얇고 긴 세로줄만 실선으로
+        // 본다 — computeColumnTextBounds/findVerticalRuleXs 참고).
+        x: Math.min(...inked.map((p) => p.x)),
+        right: Math.max(...inked.map((p) => p.right)),
+      });
+    }
   }
   for (const arr of linesByCol.values()) arr.sort((a, b) => b.y - a.y);
 
@@ -699,6 +815,31 @@ const GROUP_MIN_GAP_PT = 150;
 // 문제 사이 간격이 큰 경우에 공통지문형을 놓친다(실측: 2026 군무원 9급 국어
 // [23~24] — 지문 427.7pt인데 23→24 간격이 207.8pt라 2.5배에 못 미쳐 탈락했다).
 const GROUP_STRONG_GAP_PT = 300;
+// 안내문과 첫 문항 사이에 본문 줄이 이만큼 있으면 그건 지문이다 — pt 문턱값보다
+// 훨씬 곧은 신호다. 지시문 재사용형은 안내문 바로 아래에 첫 마커가 오므로 사이에
+// 줄이 없다(실측 간격 12~21pt).
+//
+// 왜 필요한가: 비율 조건(GROUP_GAP_RATIO)은 **세트의 뒷 문항이 길면 실패한다** —
+// 지문 높이를 "문항 사이 간격"과 견주는데, 문항이 길면 그 간격이 같이 커지기
+// 때문이다. 그러면 공통지문형인데도 병합이 안 되고 지시문 재사용형으로 빠져
+// **지문이 멤버마다 통째로 복제된다**(사용자 제보: [문14~15] 훈민정음 지문이
+// 14번·15번 두 이미지에 각각 다 들어간 채 세트로 묶이지도 않았다).
+// GROUP_STRONG_GAP_PT(300pt) 완화도 지문이 그만큼 크지 않으면 못 잡는다.
+//
+// 이 조건은 **추가로만** 본다 — 기존 판정이 병합으로 가던 걸 되돌리지 않는 순수
+// 완화다. 잘못 걸려도(지시문이 여러 줄로 접힌 세트 등) 결과는 "안내문+문항들이
+// 한 장에 묶인 이미지"라 내용이 빠지지 않는다.
+const GROUP_MIN_PASSAGE_LINES = 3;
+
+// 같은 칼럼에서 두 y 사이에 있는 본문 줄 수.
+function countLinesBetween(lines, colKey, topY, bottomY) {
+  return (lines ?? []).filter((l) => l.col === colKey && l.y < topY && l.y > bottomY).length;
+}
+
+// 안내문과 첫 멤버 사이에 지문이 끼어 있는가(줄 수 기준).
+function annotationHasPassage(lines, colKey, annotationY, firstMemberY) {
+  return countLinesBetween(lines, colKey, annotationY, firstMemberY) >= GROUP_MIN_PASSAGE_LINES;
+}
 
 // 세트를 칼럼 넘어 이어붙일 때 두 조각 사이에 둘 흰 여백(pt).
 const SEGMENT_GAP_PT = 14;
@@ -871,6 +1012,48 @@ async function makePageContext(page, markerData, scale, opts) {
           { key: "R", markers: right, xLeftPt: cropX + COLUMN_GAP, xRightPt: pageWidthPt - PAGE_MARGIN_X },
         ];
 
+  // 지면 테두리·칼럼 구분선을 크롭 영역 밖으로 밀어낸다(위 RULE_* 주석 참고).
+  // 지면을 한 번만 훑어 세로 실선 x를 구하고, 칼럼마다 **본문 x 범위 밖**에 있는
+  // 실선만 골라 경계를 그 안쪽으로 당긴다. 실선이 없거나 본문 범위를 모르면
+  // 예전 경계를 그대로 둔다 — 손대지 않는 쪽으로만 틀리게 하려는 것이다.
+  const pageRules = await findPageVerticalRules(pageImage, scale);
+  // 1단 조판은 한 칼럼이 지면 전체 폭이므로 좌·우 줄을 함께 봐야 한다.
+  const boundsKeys = columnMode === "single" ? ["L", "R"] : null;
+  for (const colDef of columnDefs) {
+    const bounds = computeColumnTextBounds(
+      lines,
+      boundsKeys ?? colDef.key,
+      headerInkBottomY,
+      footerInkTopY,
+    );
+    if (!bounds) continue;
+    for (const rule of pageRules) {
+      const rx0 = rule.x0 / scale;
+      const rx1 = rule.x1 / scale;
+      // 본문 왼쪽 바깥의 실선 → 왼쪽 경계를 실선 오른쪽으로 당긴다.
+      if (
+        rx1 < bounds.minX - RULE_TEXT_MARGIN_PT &&
+        rx1 >= colDef.xLeftPt &&
+        rx1 - colDef.xLeftPt <= RULE_MAX_TRIM_PT
+      ) {
+        colDef.xLeftPt = Math.max(colDef.xLeftPt, rx1 + RULE_CLEARANCE_PT);
+      }
+      // 본문 오른쪽 바깥의 실선 → 오른쪽 경계를 실선 왼쪽으로 당긴다.
+      if (
+        rx0 > bounds.maxX + RULE_TEXT_MARGIN_PT &&
+        rx0 <= colDef.xRightPt &&
+        colDef.xRightPt - rx0 <= RULE_MAX_TRIM_PT
+      ) {
+        colDef.xRightPt = Math.min(colDef.xRightPt, rx0 - RULE_CLEARANCE_PT);
+      }
+    }
+    // 경계가 뒤집히면(있을 수 없지만) 손대지 않은 것으로 되돌린다.
+    if (colDef.xRightPt - colDef.xLeftPt < 1) {
+      colDef.xLeftPt = PAGE_MARGIN_X;
+      colDef.xRightPt = pageWidthPt - PAGE_MARGIN_X;
+    }
+  }
+
   // (top, bottom)은 PDF 좌표(pt, y가 클수록 위)를 받아 이미지 좌표(y가 아래로
   // 갈수록 커짐)로 뒤집어 잘라낸다. 영역이 비면 null.
   async function extractRegion(colDef, topPt, bottomPt) {
@@ -882,6 +1065,29 @@ async function makePageContext(page, markerData, scale, opts) {
     const height = bottomPx - topPx;
     if (width <= 0 || height <= 0) return null;
     return sharp(pageImage).extract({ left: leftPx, top: topPx, width, height }).png().toBuffer();
+  }
+
+  // 크롭 맨 위에 남은 **남의 잉크**를 픽셀로 걷어낸다. 위쪽 경계를 여백 한가운데로
+  // 옮겨도(topBoundaryFor) 좌표만으로는 못 없애는 게 남는다 — 머리글 바로 아래
+  // 가로 괘선처럼 **텍스트가 아닌 그림 요소**는 lines 에 없어서 여백 계산에
+  // 안 잡히기 때문이다(사용자 제보 스크린샷의 "상단 실선"이 이것이다).
+  //
+  // 기준은 이 크롭의 첫 본문(마커/안내문) baseline 이다. baseline 은 그 줄의
+  // 글리프 안쪽이라 첫 본문 줄이 속한 덩어리는 반드시 baseline 아래까지 이어진다 —
+  // 어긋나면 덩어리를 남기는 쪽으로만 틀리므로 본문이 깎이지 않는다.
+  async function dropTopJunk(raw, regionTopPt, anchorY) {
+    if (!raw) return raw;
+    const baselinePx = Math.round((regionTopPt - anchorY) * scale);
+    if (baselinePx <= 0) return raw;
+    const cleaned = await dropInkAboveBaseline(raw, baselinePx, Math.round(TOP_JUNK_MAX_PT * scale));
+    return cleaned ?? raw;
+  }
+
+  // extractRegion + dropTopJunk. anchor 는 이 크롭의 첫 본문(마커 또는 안내문).
+  async function extractRegionBelow(colDef, topPt, bottomPt, anchor) {
+    const raw = await extractRegion(colDef, topPt, bottomPt);
+    if (!raw) return null;
+    return dropTopJunk(raw, topPt, anchor.y);
   }
 
   // 반환값은 "다음 것의 baseline"이 아니라 **그 잉크가 시작되는 위쪽 y**다.
@@ -906,6 +1112,40 @@ async function makePageContext(page, markerData, scale, opts) {
     const aboveInkBottom = above.y - above.height * 0.3;
     if (aboveInkBottom <= inkTopY) return inkTopY + BOUNDARY_PAD;
     return (aboveInkBottom + inkTopY) / 2;
+  }
+
+  // 크롭의 **위쪽** 경계. 예전에는 어디서나 `thing.y + height + TOP_PAD`(고정
+  // 패딩)를 썼는데, 바로 위에 다른 잉크가 붙어 있는 조판에서 그 잉크를 한복판에서
+  // 관통해 **윗동강이 그대로 남았다** — 특히 첫 본문 줄에 바싹 붙은 쪽 머리글이
+  // 그렇다(실측: 법원직 조판은 머리글과 첫 문항이 13.9pt 차이라, 머리글 글자의
+  // 아래 절반이 모든 첫 문항 이미지 위에 남았다. 사용자 제보 스크린샷의
+  // "25문]"·"㉮책형" 잔해가 이것이다).
+  //
+  // 그래서 아래쪽 경계(cutAboveInk)와 같은 규칙을 위쪽에도 적용한다 — 윗 잉크와
+  // 우리 잉크 사이 **여백의 한가운데**. 다만 위쪽은 고정 패딩이 이미 잘 동작하던
+  // 수천 장이 있으므로 **더 위로는 절대 안 가게 상한으로만** 쓴다: 여유가 넉넉하면
+  // (일반적인 문항 간격 30pt+) 예전과 똑같이 `+TOP_PAD`가 이긴다.
+  function topBoundaryFor(colKey, thing) {
+    const inkTopY = nextInkTop(thing);
+    const padded = Math.min(pageHeightPt, inkTopY + TOP_PAD);
+    const above = lines
+      .filter((l) => l.col === colKey && l.y > inkTopY)
+      .sort((a, b) => a.y - b.y)[0];
+    if (!above) return padded;
+    const aboveInkBottom = above.y - above.height * 0.3;
+    // 여백 안에서 **위쪽에 치우쳐** 자른다. 아래쪽 경계(cutAboveInk)는 한가운데를
+    // 고르지만, 위쪽은 틀리는 방향의 대가가 다르다:
+    //   - 너무 위에서 자르면 윗것의 얇은 잔해가 남는데, 그건 아래 픽셀 단계
+    //     (dropTopJunk)가 걷어낸다.
+    //   - 너무 아래에서 자르면 **우리 첫 줄 글자의 윗동강이 깎여** 되돌릴 수 없다
+    //     (l.height 는 실제 글리프 높이를 과소평가하므로 inkTopY 자체가 살짝
+    //     낮게 잡힌다).
+    // 그래서 여백의 위쪽 3/4 지점을 쓴다.
+    const ceiling =
+      aboveInkBottom > inkTopY
+        ? inkTopY + (aboveInkBottom - inkTopY) * TOP_GAP_BIAS
+        : above.y; // 여백이 없으면 윗줄 baseline 까지 — 디센더만 남고 그건 걷어낸다
+    return Math.min(padded, ceiling);
   }
 
   // 칼럼에 다음 것이 없는 마지막 문항. 예전에는 무조건 페이지 바닥까지 잘라
@@ -963,7 +1203,8 @@ async function makePageContext(page, markerData, scale, opts) {
 
   return {
     markers, groups, lines, pageWidthPt, pageHeightPt,
-    columnDefs, extractRegion, findBottomBoundary, nextInkTop, cutAboveInk,
+    columnDefs, extractRegion, extractRegionBelow, dropTopJunk,
+    findBottomBoundary, nextInkTop, cutAboveInk, topBoundaryFor,
     columnTopPt, headerBandPx, columnBottomPt, columnMode,
   };
 }
@@ -980,21 +1221,24 @@ async function cropQuestionsFromPage(
   headerInkBottomY = null,
   excludeNumbers = new Set(),
 ) {
-  const { markers, groups, lines = [], pageWidthPt, pageHeightPt } = markerData;
+  const { markers, groups, lines = [] } = markerData;
   if (markers.length === 0) return { results: [], pendingStrips: carriedStrips };
 
   const ctx = await makePageContext(page, markerData, scale, {
     columnMode, columnSplitX, footerInkTopY, columnCropX, headerInkBottomY,
   });
-  const { columnDefs, extractRegion, findBottomBoundary } = ctx;
+  const { columnDefs, extractRegion, extractRegionBelow, findBottomBoundary, topBoundaryFor } = ctx;
 
-  const mergedSets = []; // { numbers, segments: [{ colDef, top, bottom }] }
+  const mergedSets = []; // { numbers, segments: [{ colDef, anchor, top, bottom }] }
   const mergedNumbers = new Set();
   const stripRegions = []; // { colDef, top, bottom, memberNumbers }
   const topOverrideByNumber = new Map();
 
   // 안내문과 첫 문제 사이에 지문이 끼어 있는 "공통지문형"인지 판정한다.
-  function looksLikeCommonPassage(gapBeforeFirst, gapsBetween) {
+  function looksLikeCommonPassage(colKey, g, firstMember, gapsBetween) {
+    const gapBeforeFirst = g.y - firstMember.y;
+    // 사이에 본문 줄이 여러 개면 그건 지문이다(GROUP_MIN_PASSAGE_LINES 주석 참고).
+    if (annotationHasPassage(lines, colKey, g.y, firstMember.y)) return true;
     if (gapBeforeFirst < GROUP_MIN_GAP_PT) return false;
     if (gapBeforeFirst >= GROUP_STRONG_GAP_PT) return true;
     if (gapsBetween.length === 0) return false;
@@ -1008,10 +1252,11 @@ async function cropQuestionsFromPage(
     return gaps;
   }
 
-  function segmentFor(colDef, topPt, lastMarker) {
+  function segmentFor(colDef, anchor, lastMarker) {
     return {
       colDef,
-      top: Math.min(pageHeightPt, topPt),
+      anchor,
+      top: topBoundaryFor(colDef.key, anchor),
       bottom: findBottomBoundary(colDef, lastMarker.y),
     };
   }
@@ -1023,14 +1268,13 @@ async function cropQuestionsFromPage(
     const below = colDef.markers.filter((m) => m.y < g.y);
     const members = below.filter((m) => m.number >= g.start && m.number <= g.end);
     const wanted = g.end - g.start + 1;
-    const annotationTop = Math.min(pageHeightPt, g.y + g.height + TOP_PAD);
 
     // (1) 그룹 전원이 안내문과 같은 칼럼에 있는 표준형 — 한 사각형으로 잘라낸다.
     if (members.length === wanted && members.length >= 2) {
-      if (looksLikeCommonPassage(g.y - members[0].y, gapsAmong(members))) {
+      if (looksLikeCommonPassage(g.col, g, members[0], gapsAmong(members))) {
         mergedSets.push({
           numbers: members.map((m) => m.number),
-          segments: [segmentFor(colDef, annotationTop, members[members.length - 1])],
+          segments: [segmentFor(colDef, g, members[members.length - 1])],
         });
         for (const m of members) mergedNumbers.add(m.number);
         continue;
@@ -1058,18 +1302,14 @@ async function cropQuestionsFromPage(
       if (
         contiguous &&
         continuesAtTopOfRight &&
-        looksLikeCommonPassage(g.y - members[0].y, gapsAmong(members))
+        looksLikeCommonPassage(g.col, g, members[0], gapsAmong(members))
       ) {
         const lastRight = rightMembers[rightMembers.length - 1];
         mergedSets.push({
           numbers: covered,
           segments: [
-            segmentFor(colDef, annotationTop, members[members.length - 1]),
-            segmentFor(
-              rightCol,
-              rightMembers[0].y + rightMembers[0].height + TOP_PAD,
-              lastRight,
-            ),
+            segmentFor(colDef, g, members[members.length - 1]),
+            segmentFor(rightCol, rightMembers[0], lastRight),
           ],
         });
         for (const n of covered) mergedNumbers.add(n);
@@ -1096,11 +1336,16 @@ async function cropQuestionsFromPage(
     } else {
       // 안내문과 첫 문제 사이가 먼데(지문이 낀 것) 병합 조건을 못 채운 경우
       // (그룹 일부만 이 칼럼에 있는 등): 지문까지 스트립에 담아 전원 앞에 붙인다.
-      stripBottom = firstBelow.y + firstBelow.height + TOP_PAD;
+      // 스트립의 아래 경계와 첫 문제의 위 경계는 **같은 값**이어야 한다 — 어긋나면
+      // 그 사이의 잉크(지문 상자 아랫변 등)가 어느 쪽에도 안 담겨 사라진다. 아래
+      // 문항 크롭이 같은 topBoundaryFor(colDef.key, marker)를 쓰므로 여기서 따로
+      // topOverride 를 걸 필요는 없다.
+      stripBottom = topBoundaryFor(colDef.key, firstBelow);
     }
     stripRegions.push({
       colDef,
-      top: Math.min(pageHeightPt, g.y + TOP_PAD),
+      anchor: g,
+      top: topBoundaryFor(colDef.key, g),
       bottom: stripBottom,
       memberNumbers,
     });
@@ -1108,7 +1353,7 @@ async function cropQuestionsFromPage(
 
   const stripByNumber = new Map(carriedStrips);
   for (const s of stripRegions) {
-    const buffer = await extractRegion(s.colDef, s.top, s.bottom);
+    const buffer = await extractRegionBelow(s.colDef, s.top, s.bottom, s.anchor);
     if (!buffer) continue;
     for (const n of s.memberNumbers) stripByNumber.set(n, buffer);
   }
@@ -1122,7 +1367,7 @@ async function cropQuestionsFromPage(
     // 흰 띠로 남는다.
     const pieces = [];
     for (const seg of set.segments) {
-      const raw = await extractRegion(seg.colDef, seg.top, seg.bottom);
+      const raw = await extractRegionBelow(seg.colDef, seg.top, seg.bottom, seg.anchor);
       if (!raw) continue;
       pieces.push(set.segments.length > 1 ? await trimVerticalWhitespace(raw) : raw);
     }
@@ -1140,12 +1385,16 @@ async function cropQuestionsFromPage(
   for (const colDef of columnDefs) {
     for (const marker of colDef.markers) {
       if (mergedNumbers.has(marker.number) || excludeNumbers.has(marker.number)) continue;
-      const top =
-        topOverrideByNumber.get(marker.number) ??
-        Math.min(pageHeightPt, marker.y + marker.height + TOP_PAD);
+      const override = topOverrideByNumber.get(marker.number);
+      const top = override ?? topBoundaryFor(colDef.key, marker);
       const bottom = findBottomBoundary(colDef, marker.y);
 
-      let raw = await extractRegion(colDef, top, bottom);
+      // topOverride 가 걸린 문항(안내문 바로 아래 첫 문제)은 크롭이 **안내문 바로
+      // 밑에서** 시작한다 — 마커 위쪽도 이 문항의 내용이므로 위쪽 잉크를 걷어내면
+      // 안 된다. 그 자리의 머리글은 이미 안내문 스트립 쪽에서 걷어냈다.
+      let raw = override
+        ? await extractRegion(colDef, top, bottom)
+        : await extractRegionBelow(colDef, top, bottom, marker);
       if (!raw) {
         console.warn(`문제 ${marker.number}: 잘라낼 영역이 비어있어 건너뜀`);
         continue;
@@ -1331,7 +1580,12 @@ async function dropRunningHeader(rawPng, headerBandPx, scale) {
 // 그래서 **덩어리 단위**로 본다: baseline은 그 줄의 글리프 안쪽이므로 본문 첫 줄이
 // 속한 덩어리는 반드시 baseline 아래까지 이어진다. 경계가 어긋나면 덩어리를 통째로
 // 남기는(=손대지 않는) 쪽으로만 틀리므로 본문이 깎이는 일이 없다.
-async function dropInkAboveBaseline(rawPng, baselinePx) {
+// maxBlockPx: 이 높이를 넘는 덩어리를 만나면 걷어내지 않고 거기서 멈춘다. 칼럼
+// 맨 위부터 담는 조각(세트/칼럼 넘김)은 위에 본문이 있을 수 없어 상한이 필요
+// 없지만, 일반 문항 크롭은 **바로 위에 앞 문항의 지문 상자가 걸쳐 있을 수 있어**
+// 상한 없이 돌리면 그 상자를 통째로 지운다. 머리글 한 줄·괘선만 걷어내도록
+// TOP_JUNK_MAX_PT 를 넘겨 쓴다.
+async function dropInkAboveBaseline(rawPng, baselinePx, maxBlockPx = Infinity) {
   const { data, info } = await sharp(rawPng)
     .greyscale()
     .raw()
@@ -1354,6 +1608,7 @@ async function dropInkAboveBaseline(rawPng, baselinePx) {
     let end = y;
     while (end < height && hasInk[end]) end++;
     if (end - 1 >= baselinePx) break; // 첫 본문 줄이 속한 덩어리
+    if (end - y > maxBlockPx) break; // 머리글이라기엔 너무 큰 덩어리 — 손대지 않는다
     y = end;
   }
   if (y === 0) return rawPng;
@@ -1408,9 +1663,17 @@ function planCrossPageSets(pageDataList, columnMode) {
       if (endSlot - startSlot + 1 > CROSS_PAGE_SET_MAX_SEGMENTS) continue;
 
       // 안내문 바로 아래에 첫 문항이 붙어 있으면 공통지문형이 아니라 "지시문
-      // 재사용형"이다 — 그건 페이지 단위의 스트립 처리가 맞다.
+      // 재사용형"이다 — 그건 페이지 단위의 스트립 처리가 맞다. 다만 사이에 본문
+      // 줄이 여러 개면(지문 상자 등) 간격이 문턱값에 못 미쳐도 공통지문형이다.
       const first = members[0];
-      if (first.pageIdx === p && first.col === g.col && g.y - first.marker.y < GROUP_MIN_GAP_PT) continue;
+      if (
+        first.pageIdx === p &&
+        first.col === g.col &&
+        g.y - first.marker.y < GROUP_MIN_GAP_PT &&
+        !annotationHasPassage(pageDataList[p].lines, g.col, g.y, first.marker.y)
+      ) {
+        continue;
+      }
 
       plans.push({
         numbers: members.map((m) => m.marker.number),
@@ -1451,8 +1714,21 @@ export function computeHeaderInkBottomByPage(pageDataList) {
     const data = pageDataList[i];
     const lines = data.lines ?? [];
     const zoneBottom = data.pageHeightPt * (1 - FOOTER_ZONE_RATIO);
+    // 머리글은 반드시 **본문보다 위**에 있다. 글자 내용만으로 판정하면 본문 줄이
+    // 머리글로 오인될 수 있다 — 짧고 정형화된 선지("① 옳다")나 문제지 내내 똑같은
+    // 안내문("※ 다음 글을 읽고 물음에 답하시오.")도 여러 페이지에 같은 문구로
+    // 나오기 때문이다. 그렇게 잡히면 아래 result 가 **최솟값**을 취하는 탓에
+    // 머리글 띠가 본문 한복판까지 내려오고, dropRunningHeader 가 그 위의 본문
+    // 덩어리를 머리글로 보고 걷어낸다(실측 재현: 합성 픽스처에서 선지 한 줄이
+    // 머리글로 잡혀 띠가 본문 한가운데인 y=705까지 내려왔다).
+    // 마커·안내문은 반드시 본문이므로 그중 가장 위에 있는 것의 y 가 본문 시작선이
+    // 된다(planColumnSpills 의 bodyTopY 와 같은 기준). 마커도 안내문도 없는
+    // 페이지에서는 기준을 못 세우니 예전처럼 위쪽 구역 전체를 후보로 둔다.
+    const things = [...(data.markers ?? []), ...(data.groups ?? [])];
+    const bodyTopY = things.length > 0 ? Math.max(...things.map((t) => t.y)) : null;
     for (const l of lines) {
       if (l.y <= zoneBottom) continue; // 지면 위쪽 구역만
+      if (bodyTopY !== null && l.y <= bodyTopY) continue; // 본문 줄
       const key = normalizeRunningText(l.text ?? "");
       if (!key) continue;
       if (!buckets.has(key)) buckets.set(key, new Map());
@@ -1758,16 +2034,19 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
       const isFirst = s === 0;
       const isLast = s === plan.slots.length - 1;
       const top = isFirst
-        ? Math.min(ctx.pageHeightPt, plan.annotation.y + plan.annotation.height + TOP_PAD)
+        ? ctx.topBoundaryFor(plan.annotation.col, plan.annotation)
         : ctx.columnTopPt;
       const bottom = isLast
         ? ctx.findBottomBoundary(colDef, plan.lastMember.marker.y)
         : ctx.columnBottomPt;
       const raw = await ctx.extractRegion(colDef, top, bottom);
       if (!raw) continue; // 빈 칼럼(조판상 비어 있는 칼럼)은 그냥 건너뛴다
-      // 첫 조각은 안내문에서 시작하므로 머리글이 애초에 안 들어온다. 이어지는
-      // 조각은 칼럼 맨 위부터라 머리글을 걷어내야 한다.
-      const deheaded = isFirst ? raw : await dropRunningHeader(raw, ctx.headerBandPx, scale);
+      // 첫 조각은 안내문에서 시작한다 — 그래도 안내문 바로 위에 붙은 머리글·괘선이
+      // 딸려 올 수 있으므로 안내문 baseline 기준으로 걷어낸다. 이어지는 조각은
+      // 칼럼 맨 위부터라 되풀이 머리글 제거를 그대로 쓴다.
+      const deheaded = isFirst
+        ? await ctx.dropTopJunk(raw, top, plan.annotation.y)
+        : await dropRunningHeader(raw, ctx.headerBandPx, scale);
       if (!deheaded) continue;
       const trimmed = await trimVerticalWhitespace(deheaded);
       if (trimmed) pieces.push(trimmed);
@@ -1803,10 +2082,11 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     const baseColDef = baseCtx.columnDefs.find((c) => c.key === plan.base.col);
     if (!baseColDef) continue;
     const marker = plan.base.marker;
-    const baseRaw = await baseCtx.extractRegion(
+    const baseRaw = await baseCtx.extractRegionBelow(
       baseColDef,
-      Math.min(baseCtx.pageHeightPt, marker.y + marker.height + TOP_PAD),
+      baseCtx.topBoundaryFor(plan.base.col, marker),
       baseCtx.findBottomBoundary(baseColDef, marker.y),
+      marker,
     );
     if (!baseRaw) continue;
     const pieces = [await trimVerticalWhitespace(baseRaw)];
