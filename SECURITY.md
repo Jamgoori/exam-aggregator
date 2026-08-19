@@ -4,10 +4,11 @@
 전체 검토. 앱 단독 점검은 `apps/mobile/SECURITY.md` 에 따로 있다(그쪽 미결 항목은 아래
 "이전 점검에서 남은 것" 참고).
 
-상태: ✅ 이 브랜치에서 코드로 수정 · 🔧 **운영에서 사람이 해야 함** · 🟢 확인했고 문제 없음
+상태: ✅ 이 브랜치에서 코드로 수정 · 🔧 **운영에서 사람이 해야 함** · ⚠️ 위험 수용(소유자 결정) · 🟢 확인했고 문제 없음
 
 | # | 항목 | 위험도 | 상태 |
 |---|---|---|---|
+| 0 | 세션 시작 훅이 서드파티 스크립트를 `curl \| bash` (공급망 RCE) | **높음** | ⚠️ 위험 수용 |
 | 1 | 임의 문항 주입 → 전 문제지 공식 정답표 유출 | **높음** | ✅ |
 | 2 | AI 진단(유료) 요청 행을 무료 계정이 직접 생성 | **높음** | ✅ 코드 / 🔧 SQL 적용 |
 | 3 | 문제를 안 풀고 출석 도장 → 멤버십 일수 환전 | 중 | ✅ |
@@ -19,11 +20,13 @@
 | 9 | `question_memos` 길이·범위 제약 없음(저장소 소모) | 낮음 | ✅ 코드 / 🔧 SQL 적용 |
 | 10 | 크론 워밍업이 사실상 무인증 공개 | 낮음 | ✅ 완화 / 🔧 `CRON_SECRET` 설정 |
 | 11 | 공용 기기에서 이전 사용자의 오답노트가 다음 사용자에게 노출 | 중 | ✅ |
-| 12 | `difficulty_ratings` 가 전체 사용자 UUID 를 anon 에 공개 | 낮음 | 🔧 판단 필요 |
-| 13 | 의존성 취약점 (next · pdfjs-dist · sharp) | 중~높음 | 🔧 |
-| 14 | 관리자 업로드가 브라우저가 준 content-type 을 그대로 사용 | 낮음 | 🔧 판단 필요 |
-| 15 | CSP 헤더 없음 | 정보 | 🔧 선택 |
-| 16 | 결제 · RLS · 페이월 · 채점 · 시크릿 · XSS · CI | — | 🟢 |
+| 12 | DB 전체 덤프 기본 경로가 gitignore 에 안 걸림 | 중 | ✅ |
+| 13 | 통합본 분리 스크립트의 경로 조작(PDF 안 문자열 → 파일 경로) | 낮음 | ✅ |
+| 14 | `difficulty_ratings` 가 전체 사용자 UUID 를 anon 에 공개 | 낮음 | 🔧 판단 필요 |
+| 15 | 의존성 취약점 (next · pdfjs-dist · sharp) | 중~높음 | 🔧 |
+| 16 | 관리자 업로드가 브라우저가 준 content-type 을 그대로 사용 | 낮음 | 🔧 판단 필요 |
+| 17 | CSP 헤더 없음 | 정보 | 🔧 선택 |
+| 18 | 결제 · RLS · 페이월 · 채점 · 시크릿 · XSS · CI | — | 🟢 |
 
 ---
 
@@ -35,10 +38,47 @@
    바뀌어 있어서, SQL 을 안 돌려도 기능이 깨지지는 않는다 — 구멍만 남는다.)
 2. **`CRON_SECRET` 설정** — Vercel 프로젝트 환경변수에 `openssl rand -hex 32` 값. 넣으면
    Vercel 크론이 자동으로 헤더에 실어 보내므로 크론 설정은 손댈 게 없다.
-3. **의존성 올리기** — 아래 13번.
+3. **의존성 올리기** — 아래 15번.
 4. **이전 점검 미결** — `apps/mobile/SECURITY.md` 의 3(닉네임 트리거 SQL 적용)·4(EXPO_TOKEN 폐기).
 
 ---
+
+## 0. 세션 시작 훅의 `curl | bash` — ⚠️ 위험 수용 (소유자 결정, 2026-08-19)
+
+**고치지 않았다. 소유자가 현 상태를 유지하기로 했다.** 아래는 무엇을 받아들인 것인지에
+대한 기록이다.
+
+`.claude/settings.json`(머신 로컬이 아니라 **레포에 커밋된** 설정)이 SessionStart 훅으로
+`.claude/hooks/session-start.sh` 를 등록해 두었고, 그 스크립트 마지막 줄은:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/JuliusBrussee/caveman/main/install.sh \
+  | bash -s -- --non-interactive || true
+```
+
+제3자 개인 계정의 저장소, `main` 브랜치(언제든 내용이 바뀐다), 커밋 SHA 고정 없음,
+체크섬 검증 없음, 파이프 실행, 그리고 `|| true` 라 실패해도 흔적이 남지 않는다. 실행 주체가
+레포 자신의 설정이라 승인 프롬프트도 없다.
+
+**받아들인 위험**: 그 저장소가 탈취되거나(계정 탈취, 유지보수자 이탈 후 저장소명 선점,
+악성 PR 머지) 내용이 바뀌면, 이 레포에서 원격 세션이 뜨는 순간 임의 코드가 컨테이너 안에서
+실행된다. 이번 점검 중 실제로 확인한 바로 그 세션 환경변수에는
+
+- `SUPABASE_SERVICE_ROLE_KEY` (RLS 를 통째로 우회하는 키 — DB 전체 읽기·쓰기)
+- `EXPLANATION_BOT_PASSWORD`
+
+가 들어 있다. 즉 공급망 한 번 뚫리면 DB 전량 유출·변조와 배치 봇 계정 탈취까지 그대로
+이어진다. 워킹트리의 git 자격증명도 같은 자리에 있다.
+
+`EXPLANATION_BOT_EMAIL` 이 설정된 배치 세션은 curl 앞에서 early return 하므로 실행되지
+않는다 — 위험한 건 그 변수가 없는 **일반 원격 세션**이다.
+
+나중에 닫고 싶어지면 셋 중 하나다:
+1. 커밋된 `.claude/settings.json` 에서 훅을 빼고, 필요하면 개인 머신의
+   `.claude/settings.local.json`(이미 gitignore 대상)으로 옮긴다 — 그러면 이 레포의 원격
+   세션에는 붙지 않는다.
+2. `main` 대신 특정 커밋 SHA 로 고정하고 내려받은 스크립트를 sha256 과 대조한 뒤 실행한다.
+3. 원격 세션 환경에서 `SUPABASE_SERVICE_ROLE_KEY` 를 빼서 폭발 반경만이라도 줄인다.
 
 ## 1. 임의 문항 주입 → 전 문제지 정답표 유출 — ✅ (`f21739b`)
 
@@ -214,7 +254,36 @@ next=/%09/evil.com → 검사 통과 → new URL(...) 이 탭을 지워 //evil.c
 않게. 키를 만들 때 `getUser()`(네트워크 호출) 가 아니라 `getSession()`(로컬 SecureStore)을
 쓴다 — 정작 이 캐시가 필요한 오프라인에서 먼저 실패하면 안 된다.
 
-## 12. `difficulty_ratings` 가 사용자 UUID 를 공개 — 🔧 판단 필요
+## 12. DB 전체 덤프가 커밋될 수 있던 기본 경로 — ✅ (`3341469`)
+
+`backup-db.mjs` 는 인자를 안 주면 현재 작업 디렉터리에 `db-backup-<stamp>.json` 을 쓴다.
+사용법 주석대로 `apps/web` 에서 돌리면 `apps/web/` 바로 아래인데, `.gitignore` 는
+`/backups/` 와 `.env*` 만 무시하므로 이 파일은 추적 대상이다 — `git add -A` 한 번이면
+전체 DB 덤프가 커밋된다.
+
+덤프에는 RLS 로 클라이언트에 완전히 막아 둔 `paper_answers`(정답표 전량),
+`comments.password_hash`, `profiles` 가 들어 있다. 한 번 히스토리에 들어가면 파일을 지워도
+과거 커밋에서 복원된다.
+
+**조치**: 기본 경로를 이미 무시 중인 `backups/` 안으로, `db-backup-*.json` 패턴도 함께
+무시(예전 기본값으로 이미 만들어 둔 파일까지 덮게), 파일 권한 0600.
+
+## 13. 통합본 분리 스크립트의 경로 조작 — ✅ (`3341469`)
+
+`split-by-toc` · `split-by-subject-header` · `split-combined-pdf` 세 스크립트가 표지 목차·
+페이지 머리글에서 뽑은 과목명을 `path.join(outDir, name + ".pdf")` 로 바로 쓴다. 공백만
+지우고 있어서 `../` 가 그대로 살아남는다. 목차에 `【../../../어딘가】` 가 심긴 PDF 를 돌리면
+출력 폴더 밖에 파일이 생성·덮어쓰기된다. 확장자가 `.pdf` 로 고정이라 코드 실행까지는 못
+가지만 원본 기출 PDF 를 덮어쓰는 무결성 훼손은 가능하다. 기출 통합본은 카페·블로그
+재배포본을 받아 돌리는 경우가 많아 "우리가 만든 PDF 만 들어온다"를 전제할 수 없다.
+
+**조치**: `scripts/lib/safe-filename.mjs` 를 세 곳에서 공유한다. **거르지 않고 씻는다** —
+화이트리스트로 거부하면 못 보던 표기(한자·특수 괄호)가 섞인 정상 과목이 조용히 통째로
+빠지는데, 분리 결과에서 파일 하나가 없어지는 건 알아채기 어렵고 그대로 업로드까지 간다.
+`basename` 으로 경로 성분을 걷어내고 금지 문자·선행 점을 지운 뒤, 조립한 경로가 정말
+`outDir` 안인지 한 번 더 확인한다. 씻고도 남는 게 없으면 그 항목만 경고와 함께 건너뛴다.
+
+## 14. `difficulty_ratings` 가 사용자 UUID 를 공개 — 🔧 판단 필요
 
 `create policy "public read ratings" ... using (true)` 이고 `comments` 와 달리 컬럼 단위
 grant 가 없어, `user_id` 가 anon 에게 그대로 열려 있다. 앱 번들에서 추출한 anon 키만으로
@@ -235,7 +304,7 @@ Postgres 는 `WHERE` 절에 쓰는 컬럼에도 SELECT 권한을 요구한다. �
 `avg_score_by_round` 처럼 `security definer` 함수로 내주고 행 조회는 본인 것만 열어야 하는데,
 표시 로직까지 손대는 변경이라 앱을 띄워 확인할 수 있는 자리에서 하는 게 맞다고 봤다.
 
-## 13. 의존성 — 🔧
+## 15. 의존성 — 🔧
 
 `npm audit` 기준 critical 1 / high 30. 대부분 Expo CLI 빌드 툴체인(런타임 노출 없음)이지만
 아래 셋은 프로덕션 직접 의존이다.
@@ -252,7 +321,7 @@ Postgres 는 `WHERE` 절에 쓰는 컬럼에도 SELECT 권한을 요구한다. �
 빌드·실동작 확인이 따라야 하는데 여기서는 실제 앱을 띄워 확인할 수 없어, 검증 없이 밀어넣는
 쪽이 더 위험하다고 판단했다.
 
-## 14. 관리자 업로드 content-type — 🔧 판단 필요
+## 16. 관리자 업로드 content-type — 🔧 판단 필요
 
 `uploadExamPaper` 가 `contentType: file.type || "application/pdf"` 로 **브라우저가 준 값**을
 그대로 쓴다. `optimizePdf` 는 파싱 실패 시 원본 버퍼를 그대로 통과시키므로, 비-PDF 바이트가
@@ -261,7 +330,7 @@ Postgres 는 `WHERE` 절에 쓰는 컬럼에도 SELECT 권한을 요구한다. �
 PDF 로 다루므로 `"application/pdf"` 로 고정하는 게 맞다고 본다 — 다만 관리자 신뢰 경계 안이라
 판단을 남겨둔다.
 
-## 15. CSP — 🔧 선택
+## 17. CSP — 🔧 선택
 
 `next.config.ts` 에 `X-Content-Type-Options`·`X-Frame-Options`·`Referrer-Policy`·
 `Permissions-Policy` 는 있는데 `Content-Security-Policy` 가 없다. 현재 XSS 싱크는 전부
