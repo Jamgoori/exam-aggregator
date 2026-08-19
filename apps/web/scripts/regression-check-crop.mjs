@@ -119,10 +119,19 @@ console.log(`이미 크롭된 문제지 ${targets.length}개 검사 (scale ${SCA
 //   maxSkew     — 좌우 잉크 여백 차. 크면 내용이 한쪽으로 치우쳤다는 뜻
 //   edgeInkMax  — 이미지 좌우 맨 끝 열에 잉크가 닿은 비율. 높으면 칼럼 경계에서
 //                 잘렸거나 옆 칼럼을 물고 있다는 신호
+//   ruleCols    — 이미지 높이를 세로로 꽉 채우는 열의 수. 지면 테두리·칼럼 구분선이
+//                 크롭에 남았다는 신호다(2026-08-19 추가). 이 선은 보기 싫은 데서
+//                 끝나지 않는다 — 위아래로 이어지는 "잉크"라 세로 여백 제거와
+//                 머리글 제거를 통째로 무력화한다.
+// 세로 실선으로 볼 열 채움 비율. 낮은 배율(scale 0.4)에서는 얇은 선이 회색으로
+// 번져 몇 행이 문턱을 못 넘을 수 있어 1.0 이 아니라 조금 여유를 둔다.
+const RULE_COVER = 0.85;
+
 async function measureGeometry(images) {
   let widths = new Set();
   let maxSkew = 0;
   let edgeInkMax = 0;
+  let ruleColsMax = 0;
   for (const buf of images) {
     const { data, info } = await sharp(buf).greyscale().raw().toBuffer({ resolveWithObject: true });
     const { width, height } = info;
@@ -131,12 +140,14 @@ async function measureGeometry(images) {
     let r = -1;
     let edgeL = 0;
     let edgeR = 0;
+    const colCover = new Array(width).fill(0);
     for (let y = 0; y < height; y++) {
       const row = y * width;
       for (let x = 0; x < width; x++) {
         if (data[row + x] < 245) {
           if (x < l) l = x;
           if (x > r) r = x;
+          colCover[x]++;
         }
       }
       if (data[row] < 245) edgeL++;
@@ -145,9 +156,16 @@ async function measureGeometry(images) {
     if (r < 0) continue;
     maxSkew = Math.max(maxSkew, Math.abs(l - (width - 1 - r)));
     edgeInkMax = Math.max(edgeInkMax, edgeL / height, edgeR / height);
+    ruleColsMax = Math.max(ruleColsMax, colCover.filter((c) => c / height >= RULE_COVER).length);
   }
-  return { widthCount: widths.size, maxSkew, edgeInk: Number(edgeInkMax.toFixed(3)) };
+  return {
+    widthCount: widths.size,
+    maxSkew,
+    edgeInk: Number(edgeInkMax.toFixed(3)),
+    ruleCols: ruleColsMax,
+  };
 }
+
 
 async function run(extract, buf, expectedCount, withGeometry) {
   try {
@@ -222,6 +240,7 @@ const EDGE_INK_LIMIT = 0.05; // 가장자리 열의 5% 넘게 잉크가 닿으�
 const mixedWidth = results.filter((r) => (r.geom?.widthCount ?? 1) > 1);
 const skewed = results.filter((r) => (r.geom?.maxSkew ?? 0) > SKEW_LIMIT_PX);
 const edgeCut = results.filter((r) => (r.geom?.edgeInk ?? 0) > EDGE_INK_LIMIT);
+const ruled = results.filter((r) => (r.geom?.ruleCols ?? 0) > 0);
 console.log(`\n--- 이미지 기하 (개수만으로 못 잡는 것들) ---`);
 console.log(`문제지 안에서 폭이 갈림: ${mixedWidth.length}건  ← 0이어야 정상`);
 for (const r of mixedWidth.slice(0, 10)) console.log(`  ${r.year} ${r.title} (폭 ${r.geom.widthCount}종) id=${r.id}`);
@@ -229,6 +248,8 @@ console.log(`좌우 치우침 > ${SKEW_LIMIT_PX}px: ${skewed.length}건`);
 for (const r of skewed.slice(0, 10)) console.log(`  ${r.year} ${r.title} (${r.geom.maxSkew}px) id=${r.id}`);
 console.log(`가장자리 잉크 > ${EDGE_INK_LIMIT * 100}%(잘림/옆칼럼 침범 의심): ${edgeCut.length}건`);
 for (const r of edgeCut.slice(0, 15)) console.log(`  ${r.year} ${r.title} (${(r.geom.edgeInk * 100).toFixed(1)}%) id=${r.id}`);
+console.log(`세로 실선 남음(지면 테두리·칼럼 구분선): ${ruled.length}건`);
+for (const r of ruled.slice(0, 15)) console.log(`  ${r.year} ${r.title} (${r.geom.ruleCols}열) id=${r.id}`);
 
 console.log(`\n리포트: ${outPath}`);
 process.exit(regressions.length > 0 || setDown.length > 0 || mixedWidth.length > 0 ? 1 : 0);
