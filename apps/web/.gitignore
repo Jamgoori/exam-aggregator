@@ -49,7 +49,10 @@ next-env.d.ts
 .vercel
 
 # 해설 백업 JSON (deploy-law-explanations.mjs가 생성 — 해설 본문 포함이라 커밋 금지)
+# + DB 전체 덤프(backup-db.mjs 기본 출력). paper_answers 정답표 전량과
+#   comments.password_hash·profiles 가 들어 있어 커밋되면 히스토리에서 되살아난다.
 /backups/
+db-backup-*.json
 
 # Claude Code 머신 로컬 설정 (배치 루틴 환경이 세션마다 생성 — 커밋 금지)
 .claude/settings.local.json
