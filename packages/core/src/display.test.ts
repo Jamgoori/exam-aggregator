@@ -78,6 +78,23 @@ test("7급·국회직 8급·경찰·경력경쟁도 문제지 표기로 되돌�
     assert.equal(getPaperDisplayTitle(input, null), expected);
 });
 
+test("소방은 직류(track)에 따라 과목 표기가 갈린다", () => {
+  // 간부후보·승진(소방위) 문제지는 "행정법"으로 인쇄된다. 공채·경채는 총론 그대로.
+  assert.equal(
+    getPaperDisplayTitle("2026 소방 (간부후보) 행정법총론", "간부후보"),
+    "2026 소방 간부후보 행정법",
+  );
+  assert.equal(
+    getPaperDisplayTitle("2026 소방 (간부후보) 행정학개론", "간부후보"),
+    "2026 소방 간부후보 행정학",
+  );
+  assert.equal(
+    getPaperDisplayTitle("2025 소방 (소방위 승진) 행정법총론", "소방위 승진"),
+    "2025 소방 소방위 승진 행정법",
+  );
+  assert.equal(getPaperDisplayTitle("2026 소방 행정법총론", null), "2026 소방 행정법총론");
+});
+
 test("군무원이라도 표기가 같은 과목은 그대로 둔다", () => {
   assert.equal(getPaperDisplayTitle("2026 군무원 9급 국어", null), "2026 군무원 9급 국어");
 });
@@ -100,6 +117,12 @@ test("과목 표시 이름은 시행처를 알 때만 바뀐다", () => {
 
 test("급수 규칙이 시행처 규칙을 이긴다", () => {
   assert.equal(getSubjectDisplayName("행정법총론", "국가직", "7급"), "행정법");
+  // 소방은 직류마다 갈린다 - 공채·경채는 총론, 간부후보·승진(소방위)은 행정법.
+  assert.equal(getSubjectDisplayName("행정법총론", "소방", null, "간부후보"), "행정법");
+  assert.equal(getSubjectDisplayName("행정학개론", "소방", null, "간부후보"), "행정학");
+  assert.equal(getSubjectDisplayName("행정법총론", "소방", null, "소방위 승진"), "행정법");
+  assert.equal(getSubjectDisplayName("행정법총론", "소방", null, "경채"), "행정법총론");
+  assert.equal(getSubjectDisplayName("행정법총론", "소방"), "행정법총론");
   assert.equal(getSubjectDisplayName("행정법총론", "국가직", "9급"), "행정법총론");
   // 급수를 안 넘기면 시행처 규칙만 본다 — 국가직은 시행처 단위 규칙이 없으니 그대로.
   assert.equal(getSubjectDisplayName("행정법총론", "국가직"), "행정법총론");

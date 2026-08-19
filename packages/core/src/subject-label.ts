@@ -33,6 +33,12 @@ import { isChoseongQuery, matchesChoseong } from "./hangul";
 //
 // 어긋난 조합은 이 6종이 전부였다(표본 1,163장 중 1,087장 일치). 새로 넣을 때는
 // 반드시 같은 방식으로 문제지를 직접 확인할 것 — 파일명은 축약형인 경우가 많다.
+//
+// 소방처럼 **같은 시행처 안에서 직류(track)마다 갈리는** 경우가 있어 키에
+// "시행처 (직류)" 형태도 받는다. 소방 공채·경채 문제지는 머리글이 【행정법총론】
+// 이지만, 간부후보생 선발시험은 【행 정 법】·【행정학】, 승진시험 소방위는
+// 【행정법】이다 (2026-08-19 문제지 직접 확인). 시행처 전체에 거는 규칙으로 두면
+// 공채 문제지까지 "행정법"으로 바뀐다.
 const SUBJECT_NAME_BY_EXAM_TYPE: Record<string, Record<string, string>> = {
   군무원: { 행정법총론: "행정법", 행정학개론: "행정학" },
   "국가직 7급": { 행정법총론: "행정법", 행정학개론: "행정학" },
@@ -40,14 +46,18 @@ const SUBJECT_NAME_BY_EXAM_TYPE: Record<string, Record<string, string>> = {
   "국회직 8급": { 행정법총론: "행정법", 행정학개론: "행정학" },
   경찰: { 행정법총론: "행정법", 행정학개론: "행정학" },
   "경력경쟁 9급": { 행정법총론: "행정법", 행정학개론: "행정학" },
+  "소방 (간부후보)": { 행정법총론: "행정법", 행정학개론: "행정학" },
+  "소방 (소방위 승진)": { 행정법총론: "행정법" },
 };
 
-// 급수까지 적힌 규칙이 시행처만 적힌 규칙을 이긴다.
+// 직류까지 적힌 규칙 > 급수까지 적힌 규칙 > 시행처만 적힌 규칙.
 function namesFor(
   examTypeName: string,
   level: string | null | undefined,
+  track?: string | null,
 ): Record<string, string> | undefined {
   return (
+    (track ? SUBJECT_NAME_BY_EXAM_TYPE[`${examTypeName} (${track})`] : undefined) ??
     (level ? SUBJECT_NAME_BY_EXAM_TYPE[`${examTypeName} ${level}`] : undefined) ??
     SUBJECT_NAME_BY_EXAM_TYPE[examTypeName]
   );
@@ -111,9 +121,10 @@ export function getSubjectDisplayName(
   subjectName: string,
   examTypeName: string | null | undefined,
   level?: string | null,
+  track?: string | null,
 ): string {
   if (!examTypeName) return subjectName;
-  return namesFor(examTypeName, level)?.[subjectName] ?? subjectName;
+  return namesFor(examTypeName, level, track)?.[subjectName] ?? subjectName;
 }
 
 // 제목 안의 과목명을 그 시행처 표기로 되돌린다.
@@ -127,7 +138,10 @@ export function getSubjectDisplayName(
 export function applyExamTypeSubjectName(title: string): string {
   const [, examTypeName, third] = title.trim().split(/\s+/);
   const level = /^\d+급$/.test(third ?? "") ? third : null;
-  const names = examTypeName ? namesFor(examTypeName, level) : undefined;
+  // 직류는 제목에서 괄호로 감싸 들어온다("2026 소방 (간부후보) 행정법총론").
+  // 소방처럼 직류마다 과목 표기가 갈리는 시행처를 위해 여기서 같이 읽는다.
+  const track = title.match(/\(([^)]+)\)/)?.[1] ?? null;
+  const names = examTypeName ? namesFor(examTypeName, level, track) : undefined;
   if (!names) return title;
 
   // 과목명은 제목 맨 뒤에 붙는다. 중간에 우연히 같은 글자가 있어도 건드리지 않는다.

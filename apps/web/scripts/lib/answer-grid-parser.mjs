@@ -31,7 +31,13 @@ export function normalizeSubjectName(name) {
 
 const ROW_LABEL = /^문\s*(\d{1,3})$/;
 const DIGIT = /^[1-5]$/;
-const CIRCLED = { "①": 1, "②": 2, "③": 3, "④": 4, "⑤": 5 };
+// 원문자는 판본마다 글리프가 다르다. 소방간부후보 2022 정답표는 산세리프 계열
+// ➀~➄(U+2780~)를 쓴다 — 같은 값으로 읽는다.
+const CIRCLED = {
+  "①": 1, "②": 2, "③": 3, "④": 4, "⑤": 5,
+  "➀": 1, "➁": 2, "➂": 3, "➃": 4, "➄": 5,
+  "❶": 1, "❷": 2, "❸": 3, "❹": 4, "❺": 5,
+};
 // 셀 값: 맨숫자 1~5 또는 원문자 ①~⑤. "②, ③"(복수정답 병기)는 값으로 안 읽는다
 // — 해당 셀은 null로 남고, DB의 voided_questions가 그 자리를 대조에서 빼준다.
 function cellValue(str) {
@@ -934,9 +940,11 @@ function parseBareColumnTables(items) {
   // 그 칸 글자가 과목명으로 잡히지 않게, 과목명 열이 시작되는 x부터만 읽는다.
   const divisionHead = items.find((it) => it.str === "구분" && it.x + it.w / 2 < xMin);
   const subjectHead = items.find((it) => it.str === "과목명" && it.x + it.w / 2 < xMin);
+  // 두 머리글의 왼쪽 끝 중간을 경계로 쓴다. 머리글 오른쪽 끝을 쓰면 과목명 첫
+  // 글자가 잘리는 판형이 있다 (승진시험 2025: 구분 66, 과목명 128, 과목명 첫 글자 101).
   const xLabelMin =
     divisionHead && subjectHead && subjectHead.x > divisionHead.x
-      ? (divisionHead.x + divisionHead.w + subjectHead.x) / 2
+      ? (divisionHead.x + subjectHead.x) / 2
       : -Infinity;
 
   // 머리글 아래 y 밴드로 나누고, 왼쪽 여백 글자에서 과목명·책형을 뽑는다.
@@ -948,37 +956,64 @@ function parseBareColumnTables(items) {
     rowBands.get(key).push(it);
   }
 
-  const labels = [];
+  const bandInfos = [];
   const dataRows = [];
   for (const [y, rowItems] of rowBands) {
     const left = rowItems.filter(
       (it) => it.x + it.w / 2 < xMin && it.x + it.w / 2 >= xLabelMin,
     );
     const formPart = left.find((it) => /^[A-Za-z가-힣]형$/.test(it.str));
-    const text = normalizeSubjectName(
-      left
-        .filter((it) => it !== formPart && !/^\d+$/.test(it.str))
-        .sort((a, b) => a.x - b.x)
-        .map((it) => it.str)
-        .join(""),
-    );
-    if (text.length >= 2 && !BARE_COL_STOPWORDS.has(text)) labels.push({ y, text });
+    const words = left.filter((it) => it !== formPart && !/^\d+$/.test(it.str));
 
     const cells = rowItems
       .filter((it) => it.x + it.w / 2 >= xMin)
       .map((it) => ({ x: it.x + it.w / 2, v: cellValue(it.str) }))
       .filter((c) => c.v !== null);
-    if (cells.length >= 8) dataRows.push({ y, cells, form: formPart?.str ?? null });
+    const isData = cells.length >= 8;
+    bandInfos.push({ y, words, isData });
+    if (isData) dataRows.push({ y, cells, form: formPart?.str ?? null });
   }
-  if (labels.length === 0 || dataRows.length === 0) return [];
+  if (dataRows.length === 0) return [];
 
-  // 각 답 줄을 y가 가장 가까운 과목 라벨에 붙인다 (라벨이 두 줄 사이에 낀 판형 대응).
+  // 과목명 칸이 몇 글자씩 쪼개져 답 줄 위아래 밴드에 걸쳐 있는 판형(간부후보 2025의
+  // "자 연 과 학 / 개 론")이 있다. 답 줄 자체의 왼쪽 글자가 차지하는 x 범위를 기준으로
+  // 삼아, 그 범위 밖의 딴 칸("필수/선택" 구분 열)은 빼고 이웃 밴드 글자를 이어 붙인다.
+  const dataWordXs = bandInfos
+    .filter((b) => b.isData)
+    .flatMap((b) => b.words.map((w) => w.x + w.w / 2));
+  const wordXMin = dataWordXs.length > 0 ? Math.min(...dataWordXs) - 2 : -Infinity;
+
+  const ys = dataRows.map((r) => r.y).sort((a, b) => b - a);
+  const rowGap =
+    ys.length > 1 ? Math.abs(ys[0] - ys[ys.length - 1]) / (ys.length - 1) : 24;
+  const reach = Math.max(6, rowGap * 0.6);
+
+  const labelOf = (rowY) =>
+    normalizeSubjectName(
+      bandInfos
+        .filter((b) => Math.abs(b.y - rowY) <= reach && (!b.isData || b.y === rowY))
+        .sort((a, b) => b.y - a.y)
+        .flatMap((b) =>
+          b.words
+            .filter((w) => w.x + w.w / 2 >= wordXMin)
+            .sort((p, q) => p.x - q.x)
+            .map((w) => w.str),
+        )
+        .join(""),
+    );
+
+  // 이름을 못 얻은 줄은 바로 위 줄의 이어지는 답 줄(26~40번 등)로 본다.
   const bySubject = new Map();
-  for (const row of dataRows) {
-    const near = labels.reduce((a, b) => (Math.abs(b.y - row.y) < Math.abs(a.y - row.y) ? b : a));
-    if (!bySubject.has(near.text)) bySubject.set(near.text, []);
-    bySubject.get(near.text).push(row);
+  let lastSubject = null;
+  for (const row of [...dataRows].sort((a, b) => b.y - a.y)) {
+    let text = labelOf(row.y);
+    if (text.length < 2 || BARE_COL_STOPWORDS.has(text)) text = lastSubject;
+    if (!text) continue;
+    lastSubject = text;
+    if (!bySubject.has(text)) bySubject.set(text, []);
+    bySubject.get(text).push(row);
   }
+  if (bySubject.size === 0) return [];
 
   // 머리글 줄이 여러 개면, 한 과목의 n번째 답 줄이 n번째 머리글 줄에 대응한다.
   // 책형이 붙은 판형은 머리글이 한 줄뿐이라 A형·B형 둘 다 0번 머리글을 본다.
@@ -1002,6 +1037,9 @@ function parseBareColumnTables(items) {
           levelHint: null,
           formHint: row.form,
           trackHint: null,
+          // 같은 과목이 한 쪽에 여러 번 나오는 판형(승진시험 2025: 직급 3개가 한
+          // 쪽)에서 호출 쪽이 위아래 순서로 가를 수 있도록 행 위치를 같이 준다.
+          y: row.y,
         });
       }
     });

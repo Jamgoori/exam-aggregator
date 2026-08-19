@@ -210,7 +210,7 @@ export default async function PaperDetailPage({
                     8급·경찰·군무원의 행정법총론 → 행정법). 위 "…기출문제" 링크와
                     아래 "…기출문제 목록"은 여러 시행처가 모이는 과목 페이지로
                     가는 길이라 DB 이름을 그대로 쓴다. */}
-                {getSubjectDisplayName(subject.name, examType?.name, paper.level)}
+                {getSubjectDisplayName(subject.name, examType?.name, paper.level, paper.track)}
               </span>
             )}
           </div>

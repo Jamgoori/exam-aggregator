@@ -21,9 +21,11 @@ import { PDFDocument } from "pdf-lib";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-// 소방 공채·경채에 나오는 과목 전량. 여기에 없는 이름은 머리글로 인정하지 않는다
-// (본문 【보 기】·【별표 4】 같은 대괄호 표기가 과목으로 오인되는 걸 막는다).
+// 소방 공채·경채·간부후보·승진시험에 나오는 과목 전량. 여기에 없는 이름은
+// 머리글로 인정하지 않는다 (본문 【보 기】·【별표 4】나 표지의 【인문사회계열 :
+// 필수과목】이 과목으로 오인되는 걸 막는다).
 const FIRE_SUBJECTS = [
+  // 공채·경채
   "국어",
   "한국사",
   "영어",
@@ -37,6 +39,23 @@ const FIRE_SUBJECTS = [
   "응급처치학개론",
   "화학개론",
   "컴퓨터일반",
+  // 간부후보생 (필수: 헌법·한국사·행정법/자연과학개론, 선택: 계열별 5과목)
+  "헌법",
+  "행정법",
+  "행정학",
+  "민법총칙",
+  "형사소송법",
+  "경제학",
+  "자연과학개론",
+  "물리학개론",
+  "건축공학개론",
+  "전기공학개론",
+  // 승진시험 (소방교·소방장·소방위)
+  "소방법령Ⅰ",
+  "소방법령Ⅱ",
+  "소방법령Ⅲ",
+  "소방법령Ⅳ",
+  "소방전술",
 ];
 
 function parseArgs(argv) {
@@ -68,12 +87,23 @@ async function readPageTexts(buffer) {
   return texts;
 }
 
+// 저작권 워터마크가 글자마다 겹쳐 찍힌 판본(간부후보 2019 인문)은 텍스트 추출이
+// "행정학행정학행정학행정학"처럼 같은 이름을 그대로 반복해 낸다. 반복이면 한 벌만 남긴다.
+function undupe(name) {
+  for (let len = 1; len <= name.length / 2; len++) {
+    if (name.length % len !== 0) continue;
+    const unit = name.slice(0, len);
+    if (unit.repeat(name.length / len) === name) return unit;
+  }
+  return name;
+}
+
 // 본문 【 과목명 】 머리글로 과목 시작 페이지(1-base)를 찾는다.
 function findHeaderStarts(pageTexts) {
   const starts = [];
   pageTexts.forEach((text, idx) => {
-    for (const m of text.matchAll(/【\s*([^】]{2,12}?)\s*】/g)) {
-      const name = squeeze(m[1]);
+    for (const m of text.matchAll(/【\s*([^】]{2,40}?)\s*】/g)) {
+      const name = undupe(squeeze(m[1]).replace(/^【+/, ""));
       if (FIRE_SUBJECTS.includes(name) && !starts.some((s) => s.subject === name)) {
         starts.push({ subject: name, page: idx + 1 });
       }
@@ -212,11 +242,19 @@ async function main() {
         (e) =>
           e.isFile() &&
           e.name.toLowerCase().endsWith(".pdf") &&
-          !/정답|답안/.test(e.name),
+          !/정답|답안/.test(e.name) &&
+          // DB는 전 시험 A책형 기준이라 B형 이후 판은 대상에서 뺀다
+          // (간부후보 2019~2021은 A형·B형 두 벌이 같이 배포된다).
+          !/[B-Z]형/.test(e.name),
       )
       .map((e) => path.join(args.dir, e.name));
   }
 
+  // 같은 폴더의 여러 문제지가 같은 과목을 담고 있을 수 있다 (간부후보: 인문·자연
+  // 두 벌이 헌법·한국사·소방학개론을 공통으로 싣는다). 먼저 전부 분석해 두고,
+  // 같은 과목이 두 번 나오면 본문 텍스트를 대조해 같을 때만 한 벌로 합친다.
+  const taken = new Map(); // 과목명 → { file, text }
+  const plans = [];
   for (const file of files) {
     const buffer = await readFile(file);
     const pageTexts = await readPageTexts(buffer);
@@ -237,10 +275,38 @@ async function main() {
       console.log("  -> 경고가 있어 건너뜁니다.");
       continue;
     }
-    if (args.dry) continue;
-    await writeSections(buffer, sections, outDir);
-    console.log(`  -> ${outDir}에 ${sections.length}개 저장`);
+
+    const keep = [];
+    for (const s of sections) {
+      // 대조 전에 쪽마다 붙는 러닝 헤더("인문사회계열 - 필수1 / 24")를 떼어낸다.
+      // 같은 문제지라도 계열 표기와 총 쪽수가 달라 그대로 비교하면 항상 어긋난다.
+      const text = pageTexts
+        .slice(s.from - 1, s.to)
+        .map((t) => t.replace(/^.*?\d+\s*\/\s*\d+/, "").replace(/\s+/g, ""))
+        .join("\n");
+      const prev = taken.get(s.subject);
+      if (!prev) {
+        taken.set(s.subject, { file: path.basename(file), text });
+        keep.push(s);
+      } else if (prev.text === text) {
+        console.log(`  = ${s.subject}: [${prev.file}]와 같은 문제지 - 한 벌만 남김`);
+      } else {
+        console.log(
+          `  ! ${s.subject}: [${prev.file}]와 내용이 달라 건너뜁니다 - 사람이 확인할 것`,
+        );
+      }
+    }
+    plans.push({ buffer, sections: keep });
   }
+
+  if (args.dry) return;
+  let saved = 0;
+  for (const plan of plans) {
+    if (plan.sections.length === 0) continue;
+    await writeSections(plan.buffer, plan.sections, outDir);
+    saved += plan.sections.length;
+  }
+  console.log(`\n-> ${outDir}에 ${saved}개 저장`);
 }
 
 main().catch((err) => {
