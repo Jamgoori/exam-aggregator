@@ -160,11 +160,28 @@ export async function getWrongNoteGroups(): Promise<WrongNoteSubjectGroup[]> {
 
 // 오프라인에서도 오답노트를 열어볼 수 있게 마지막 집계 결과를 캐시한다. 문항 이미지는
 // expo-image 가 자체 디스크 캐시를 갖고 있어 한 번 본 문항은 오프라인에서도 뜬다.
+//
+// 캐시 키에 사용자 id 를 넣는다. 오답노트는 개인 학습 이력이라 계정 간에 절대 섞이면
+// 안 되는데, 키가 하나뿐이면 공용 기기에서 A 가 남긴 파일을 B 가 오프라인으로 열었을 때
+// 그대로 그려진다. 로그아웃 순서(auth.ts)로 그런 파일이 남을 창을 이미 줄였지만, 이미
+// 떠 있던 조회가 늦게 도착하는 경우까지 순서만으로는 못 막는다 — 키를 나눠 두면 남아
+// 있어도 다른 계정에서는 열리지 않는다.
 export async function getWrongNoteGroupsCached(): Promise<{
   groups: WrongNoteSubjectGroup[];
   fromCache: boolean;
 }> {
-  const { data, fromCache } = await fetchWithCache("wrong-notes", getWrongNoteGroups);
+  // getUser() 가 아니라 getSession() 이다 — getUser 는 인증 서버에 물어보는 네트워크
+  // 호출이라, 정작 이 캐시가 필요한 오프라인 상황에서 먼저 실패해 캐시 폴백까지 못 간다.
+  // getSession 은 기기에 저장된 세션(SecureStore)을 그대로 읽는다.
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.user) throw new Error("로그인 후 이용할 수 있어요.");
+
+  const { data, fromCache } = await fetchWithCache(
+    `wrong-notes:${session.user.id}`,
+    getWrongNoteGroups,
+  );
   return { groups: data, fromCache };
 }
 
