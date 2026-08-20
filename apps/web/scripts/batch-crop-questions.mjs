@@ -280,11 +280,30 @@ async function main() {
   );
 
   const errors = results.filter((r) => r.error);
-  const warnings = results.filter((r) => !r.error && r.warning);
-  const ok = results.filter((r) => !r.error && !r.warning);
+  // 업로드/DB 단계에서 일부 문항만 실패한 문제지. 개수 불일치(warning)와 달리
+  // 크롭 자체는 정상이라 예전에는 이 목록이 수집만 되고 요약에 아예 안 나왔다 —
+  // "19/20개"라고 찍힌 한 줄이 유일한 흔적이라 수백 줄 로그에 묻혔고, 요약은
+  // 그 문제지를 "성공"으로 셌다(실측: 2026-08-20 소방 배치에서 2021 소방
+  // 행정법총론이 20문항 중 19장만 올라간 채 "실패 0"으로 보고됐다). 이 문서가
+  // 거듭 경고하는 "개수만 보고 성공으로 믿지 말 것"이 바로 이 구멍이다.
+  const partial = results.filter((r) => !r.error && r.uploadErrors?.length);
+  const warnings = results.filter((r) => !r.error && !r.uploadErrors?.length && r.warning);
+  const ok = results.filter((r) => !r.error && !r.uploadErrors?.length && !r.warning);
 
   console.log(`\n=== 요약 ===`);
-  console.log(`성공: ${ok.length}개, 주의: ${warnings.length}개, 실패: ${errors.length}개 (총 ${targets.length}개)`);
+  console.log(
+    `성공: ${ok.length}개, 주의: ${warnings.length}개, 부분 업로드 실패: ${partial.length}개, 실패: ${errors.length}개 (총 ${targets.length}개)`,
+  );
+
+  if (partial.length > 0) {
+    console.log(`\n[부분 업로드 실패 - 일부 문항 이미지가 안 올라갔다. 해당 id로 재실행할 것]`);
+    for (const r of partial) {
+      console.log(
+        `  - ${r.paper.year}년 ${r.paper.round}회 ${r.paper.title} (id=${r.paper.id}): ${r.uploaded}/${r.cropped}개만 업로드`,
+      );
+      for (const e of r.uploadErrors) console.log(`      ${e}`);
+    }
+  }
 
   if (warnings.length > 0) {
     console.log(`\n[주의 - 문항 수 불일치, 확인 필요]`);

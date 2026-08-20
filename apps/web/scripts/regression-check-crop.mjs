@@ -218,16 +218,46 @@ async function measureGeometry(images) {
 }
 
 
+// 문항 번호 → 이미지 높이(px). **개수·세트 수만 보는 검사의 사각지대를 메운다** —
+// "발문 한 줄이 통째로 지워졌다"/"꼬리말이 빠졌다"는 개수가 아니라 높이로만
+// 드러난다(실측: 2024 소방 간부후보 행정법총론 3번이 25/25 를 통과한 채 발문
+// 한 줄을 잃은 상태로 올라가 있었다). metadata()는 PNG 헤더만 읽어 값싸다.
+async function measureHeights(out) {
+  const heights = {};
+  for (const c of out) heights[c.number] = (await sharp(c.image).metadata()).height;
+  return heights;
+}
+
 async function run(extract, buf, expectedCount, withGeometry) {
   try {
     const out = await extract(buf, { scale: SCALE, expectedCount });
-    const base = { count: out.length, sets: out.filter((c) => c.groupNumbers).length, error: null };
+    const base = {
+      count: out.length,
+      sets: out.filter((c) => c.groupNumbers).length,
+      error: null,
+      heights: await measureHeights(out),
+    };
     if (!withGeometry) return base;
     const unique = [...new Set(out.map((c) => c.image))];
     return { ...base, geom: await measureGeometry(unique) };
   } catch (err) {
-    return { count: null, sets: 0, error: err.message };
+    return { count: null, sets: 0, error: err.message, heights: {} };
   }
+}
+
+// 높이 차 문턱(px). SCALE 0.4 에서 본문 한 줄은 약 9px 라 3px 면 반올림 잡음만
+// 걸러내고 "줄이 하나 붙었다/빠졌다"는 확실히 잡는다.
+const HEIGHT_DELTA_PX = 3;
+function diffHeights(oldH = {}, newH = {}) {
+  let taller = 0;
+  let shorter = 0;
+  for (const [num, o] of Object.entries(oldH)) {
+    const n = newH[num];
+    if (n == null) continue;
+    if (n > o + HEIGHT_DELTA_PX) taller++;
+    else if (n < o - HEIGHT_DELTA_PX) shorter++;
+  }
+  return { taller, shorter };
 }
 
 const results = [];
@@ -251,6 +281,7 @@ async function worker() {
         old: oldR.count, oldErr: oldR.error, oldSets: oldR.sets,
         new: newR.count, newErr: newR.error, newSets: newR.sets,
         geom: newR.geom,
+        height: diffHeights(oldR.heights, newR.heights),
       };
     } catch (err) {
       rec = { ...rec, fatal: err.message };
@@ -283,6 +314,24 @@ for (const r of improvements) {
 console.log(`세트 병합 감소: ${setDown.length}건  ← 0이어야 정상 (지문이 문항마다 복제된다는 뜻)`);
 for (const r of setDown) console.log(`  [세트감소] ${r.year} ${r.title}: ${r.oldSets} -> ${r.newSets} id=${r.id}`);
 console.log(`세트 병합 증가: ${setUp.length}건`);
+const taller = results.filter((r) => (r.height?.taller ?? 0) > 0);
+const shorter = results.filter((r) => (r.height?.shorter ?? 0) > 0);
+console.log(
+  `\n--- 이미지 높이 변화 (개수 검사가 못 보는 "내용이 붙었다/빠졌다") ---`,
+);
+console.log(`높아진 문항이 있는 문제지: ${taller.length}건 (문항 ${taller.reduce((s, r) => s + r.height.taller, 0)}개)`);
+for (const r of taller.slice(0, 15)) console.log(`  [높아짐] ${r.year} ${r.title}: ${r.height.taller}문항 id=${r.id}`);
+console.log(`낮아진 문항이 있는 문제지: ${shorter.length}건 (문항 ${shorter.reduce((s, r) => s + r.height.shorter, 0)}개)`);
+for (const r of shorter.slice(0, 15)) console.log(`  [낮아짐] ${r.year} ${r.title}: ${r.height.shorter}문항 id=${r.id}`);
+console.log(
+  `높이 변화는 exit 코드에 넣지 않는다. 두 가지 이유가 있다:\n` +
+    `  (1) 머리글·꼬리말 제거처럼 **낮아지는 게 옳은** 수정이 있다.\n` +
+    `  (2) 이 검사는 scale ${SCALE} 로 돌아 1px 가 ${(1 / SCALE).toFixed(1)}pt 나 된다 — 픽셀 격자 계산을\n` +
+    `      건드리는 수정은 낮은 배율에서만 경계 판정이 뒤집혀 **운영 배율(3)에서는 전혀 안 바뀌는데도**\n` +
+    `      여기서는 높이 차로 잡힌다(실측: 2026-08-20 dropTopJunk 격자 정렬 수정 — 여기서 걸린 문제지를\n` +
+    `      scale 3 으로 다시 재니 높이 차가 0 이었다).\n` +
+    `  → 걸린 문제지는 반드시 **scale 3 으로 baseline 과 다시 대조**한 뒤 판단할 것(ruleCols 와 같은 규칙).`,
+);
 console.log(`검사 실패: ${fatals.length}건`);
 
 // 개수가 맞아도 이미지가 반쪽일 수 있어 기하도 본다(measureGeometry 주석 참고).

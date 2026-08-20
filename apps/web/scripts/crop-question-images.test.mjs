@@ -28,6 +28,8 @@ import {
   computeColumnTextBounds,
   computeHeaderInkBottomByPage,
   computeFooterInkTopByPage,
+  normalizeFullwidthDigits,
+  dropInkAboveBaseline,
 } from "./crop-question-images.mjs";
 
 const SCALE = 3;
@@ -100,6 +102,60 @@ test("findVerticalRuleXs: 얇고 긴 세로줄만 실선으로 잡는다", () =>
   assert.deepEqual(rules, [{ x0: 3, x1: 4 }]);
 });
 
+test("normalizeFullwidthDigits: 전각 번호 마커가 반각과 똑같이 걸린다", () => {
+  // 실측(2022 소방 간부후보 전기공학개론): 한 문제지 안에서 1·9~25번은 반각인데
+  // 2~8번만 전각이라 그 7개가 통째로 사라졌다.
+  assert.equal(normalizeFullwidthDigits("２. 다음은"), "2. 다음은");
+  assert.equal(normalizeFullwidthDigits("１０."), "10.");
+  // 숫자만 바꾼다 — 다른 전각 글자는 그대로 둔다.
+  assert.equal(normalizeFullwidthDigits("＜보기＞ ７"), "＜보기＞ 7");
+  // 반각뿐이면 원본 문자열을 그대로 돌려준다(불필요한 복사 방지).
+  const plain = "9. 다음 중";
+  assert.equal(normalizeFullwidthDigits(plain), plain);
+  // 전역 플래그 정규식을 재사용해도 lastIndex 때문에 결과가 흔들리지 않는다.
+  for (let i = 0; i < 3; i++) assert.equal(normalizeFullwidthDigits("３."), "3.");
+});
+
+test("dropInkAboveBaseline: baseline 바로 위에서 끝나는 첫 본문 줄을 지우지 않는다", async () => {
+  // 한글 글리프는 디센더 없이 baseline 위에 얹혀서, 본문 첫 줄 잉크가 baseline
+  // 행보다 한 px 위에서 끝날 수 있다. 여유(slack) 없이 "baseline 행까지 닿는가"만
+  // 보면 **발문 한 줄이 통째로 지워진다**(실측: 2024 소방 간부후보 행정법총론 3번 —
+  // 덩어리 37..71 행, baseline 행 72). 폰트에 기대지 않도록 래스터를 직접 만든다.
+  const width = 20;
+  const height = 100;
+  const band = (y0, y1) => ({ y0, y1 });
+  const render = async (bands) => {
+    const buf = Buffer.alloc(width * height, 255);
+    for (const b of bands) buf.fill(0, b.y0 * width, b.y1 * width);
+    return sharp(buf, { raw: { width, height, channels: 1 } }).png().toBuffer();
+  };
+  const inkRows = async (png) => {
+    const { data, info } = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true });
+    const rows = [];
+    for (let y = 0; y < info.height; y++)
+      for (let x = 0; x < info.width; x++)
+        if (data[y * info.width + x] < 245) { rows.push(y); break; }
+    return { first: rows[0], last: rows[rows.length - 1], height: info.height };
+  };
+
+  // 머리글(10..20) + 본문 첫 줄(40..71). baseline 행은 72 — 본문 줄이 1px 못 미친다.
+  const png = await render([band(10, 21), band(40, 72)]);
+  const slack = 3;
+  const cleaned = await dropInkAboveBaseline(png, 72, 54, slack);
+  const got = await inkRows(cleaned);
+  // 머리글만 걷히고 본문 첫 줄은 남아야 한다.
+  assert.equal(got.height, height - 40, "본문 첫 줄 위쪽만 잘려야 한다");
+  assert.equal(got.first, 0, "본문 첫 줄이 남아 맨 위에 와야 한다");
+
+  // 여유가 0이면 예전 동작 그대로 본문 첫 줄이 지워진다(이 테스트가 지키는 회귀).
+  const noSlack = await dropInkAboveBaseline(png, 72, 54, 0);
+  assert.equal(noSlack, null, "여유 없이는 본문 줄까지 걷어내 빈 조각이 된다");
+
+  // 여유가 머리글까지 살려주면 안 된다 — 머리글은 baseline 에서 한참 위에서 끝난다.
+  const headerOnly = await dropInkAboveBaseline(await render([band(10, 21), band(80, 95)]), 90, 54, slack);
+  assert.equal((await inkRows(headerOnly)).height, height - 80, "머리글은 그대로 걷힌다");
+});
+
 test("computeColumnTextBounds: 머리글·꼬리말을 뺀 본문 x 범위", () => {
   const lines = [
     { col: "L", y: 800, x: 40, right: 500, text: "머리글" },
@@ -158,6 +214,36 @@ test("computeFooterInkTopByPage: 그 페이지만 여백이 좁아도 꼬리말�
   // 세 쪽 모두 같은 값이어야 한다. 3쪽이 null 이면 그 쪽 마지막 문항 크롭이 지면
   // 바닥까지 내려가 꼬리말이 이미지에 그대로 남는다.
   assert.deepEqual(got, [49, 49, 49]);
+});
+
+test("computeFooterInkTopByPage: 어느 페이지도 여백 조건을 못 넘어도 쪽 꼬리말은 잡는다", () => {
+  // 실측(2026 소방 소방학개론): 지면 한가운데 정렬된 꼬리말("1 / 24")이 legacy 전략의
+  // 칼럼 경계(폭/2)에서는 좌측 칼럼에 붙는데, 그 칼럼 마지막 본문 줄과의 간격이
+  // 늘 1.47배뿐이라 **6쪽 전부** 엄격 조건(2.1배)에 걸려 null 이 됐다. 그러면
+  // 마지막 문항 크롭이 지면 바닥까지 내려가 쪽번호와 빈 공간이 그대로 남는다.
+  const line = (y, text, height = 10) => ({ col: "L", y, x: 40, right: 280, height, text });
+  const body = (n, until) =>
+    Array.from({ length: n }, (_, i) => line(until + (n - 1 - i) * 13, `본문 ${i} 줄 내용`));
+  // 본문 마지막 줄 y=53, 꼬리말 y=34 → 간격 19 = 줄간격(13)의 1.46배. 2.1배에 못 미친다.
+  const page = (no) => ({
+    pageHeightPt: 842,
+    markers: [{ number: 1, x: 40, y: 700, height: 10 }],
+    groups: [],
+    lines: [...body(20, 53), line(34, `${no} / 24`, 15)],
+  });
+  assert.deepEqual(computeFooterInkTopByPage([page(1), page(2), page(3)]), [49, 49, 49]);
+
+  // **안전장치**: 원문까지 똑같이 되풀이되는 줄은 꼬리말이 아니다. 짧고 정형화된
+  // 선지가 매 쪽 같은 자리에 오는 조판에서 이걸 꼬리말로 보면 그 문항이 통째로
+  // 사라진다(이 문서가 기록한 2017 국가직 9급 국어 사고). 쪽번호는 페이지마다
+  // 바뀌지만 되풀이 본문 줄은 안 바뀐다는 차이로 가른다.
+  const samePage = () => ({
+    pageHeightPt: 842,
+    markers: [{ number: 1, x: 40, y: 700, height: 10 }],
+    groups: [],
+    lines: [...body(20, 53), line(34, "① 옳지 않다", 15)],
+  });
+  assert.deepEqual(computeFooterInkTopByPage([samePage(), samePage(), samePage()]), [null, null, null]);
 });
 
 test("문항 수와 세트 병합", () => {
