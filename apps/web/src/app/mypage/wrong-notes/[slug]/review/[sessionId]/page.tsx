@@ -1,3 +1,4 @@
+import { preload } from "react-dom";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getReviewSessionView } from "@/lib/review-session";
@@ -34,6 +35,15 @@ export default async function ReviewSessionPage({
     slug === "all"
       ? "/mypage?tab=wrong-notes"
       : `/mypage/wrong-notes/${slug}?view=questions`;
+
+  // 풀이 화면은 언제나 첫 문항부터 보여준다. 그 이미지는 <head>의 preload로 걸어
+  // HTML을 읽는 순간 받기 시작하게 한다(JS 번들을 받아 하이드레이션이 끝날 때까지
+  // 기다리면 그만큼 늦게 뜬다). 나머지 문항은 ReviewSolver가 뒤에서 이어 받는다.
+  if (!view.submitted) {
+    for (const src of view.items[0]?.images ?? []) {
+      preload(src, { as: "image", fetchPriority: "high" });
+    }
+  }
 
   return <ReviewSolver initial={view} backHref={backHref} subjectSlug={slug} />;
 }

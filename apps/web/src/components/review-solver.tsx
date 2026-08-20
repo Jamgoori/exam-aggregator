@@ -23,6 +23,7 @@ import { CbtDrawingToolbar, PEN_COLORS } from "@/components/cbt-drawing-toolbar"
 import { clearReviewFabCache } from "@/components/review-fab";
 import { ReviewScheduleSection } from "@/components/review-schedule-section";
 import { DEFAULT_PEN_WIDTH, type DrawTool } from "@/components/pdf-canvas-viewer";
+import { useQuestionImagePreload } from "@/components/question-image-preload";
 import {
   MAX_ZOOM,
   MIN_ZOOM,
@@ -132,19 +133,14 @@ export function ReviewSolver({
   });
 
   // 넘길 때마다 이미지를 새로 받으면 번호만 먼저 바뀌고 문제 사진이 늦게 뜬다. CBT
-  // 문제별 풀기와 같이 들어오자마자 전 문항 이미지를 브라우저 캐시에 받아둬서, 쓸어넘김
-  // 이동이 캐시에서 바로 그려지게 한다(이미 받은 이미지는 브라우저가 재요청하지 않는다).
-  const preloadedRef = useRef(false);
-  useEffect(() => {
-    if (submitted || preloadedRef.current) return;
-    preloadedRef.current = true;
-    for (const it of view.items) {
-      for (const src of it.images) {
-        const img = new Image();
-        img.src = src;
-      }
-    }
-  }, [submitted, view.items]);
+  // 문제별 풀기와 같은 큐로, 지금 보고 있는 문항부터 순서대로 미리 받아둔다(한꺼번에
+  // 다 요청하면 눈앞의 문항이 나머지와 대역폭을 나눠 쓰느라 오히려 늦게 뜬다).
+  const imagesByItem = useMemo(() => view.items.map((it) => it.images), [view.items]);
+  useQuestionImagePreload({
+    enabled: !submitted,
+    imagesByItem,
+    currentIndex: index,
+  });
 
   // 문제 폭·쓸어넘김·핀치는 CBT 문제별 풀기와 같은 훅을 쓴다. 훅은 채점 후 조기
   // 반환(ReviewResult)보다 위에서 불러야 호출 순서가 항상 같다.
@@ -374,6 +370,10 @@ export function ReviewSolver({
                 key={i}
                 src={src}
                 alt={`문제 ${index + 1} 이미지 ${i + 1}`}
+                // 지금 보고 있는 문항 이미지는 화면에서 제일 급한 자원이다. 뒤에서
+                // 미리 받아두는 나머지 문항(fetchPriority=low)에 밀리지 않게 명시한다.
+                fetchPriority="high"
+                decoding="async"
                 className="w-full"
                 onLoad={(e) => handleImageLoad(i, e.currentTarget)}
               />
