@@ -17,6 +17,7 @@ import { createClient } from "@supabase/supabase-js";
 import sharp from "sharp";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { QUESTION_IMAGE_UPLOAD_OPTIONS } from "./lib/question-image-upload.mjs";
 
 const NARROW_RATIO_THRESHOLD = 0.8;
 const RANGE_BYTES = 100; // VP8/VP8L/VP8X 헤더는 항상 30바이트 이내에 다 들어있다
@@ -227,7 +228,7 @@ async function main() {
 
       const { error: uploadError } = await supabase.storage
         .from("exam-papers")
-        .upload(c.path, padded, { contentType: "image/webp", upsert: true });
+        .upload(c.path, padded, QUESTION_IMAGE_UPLOAD_OPTIONS);
       if (uploadError) throw new Error(uploadError.message);
 
       totalBefore += buf.length;
