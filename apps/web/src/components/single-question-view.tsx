@@ -154,6 +154,10 @@ export function SingleQuestionView({
                 key={i}
                 src={src}
                 alt={`${firstNumber}번 문제 이미지 ${i + 1}`}
+                // 지금 보고 있는 문항 이미지는 화면에서 제일 급한 자원이다. 뒤에서
+                // 미리 받아두는 나머지 문항(fetchPriority=low)에 밀리지 않게 명시한다.
+                fetchPriority="high"
+                decoding="async"
                 className="w-full"
                 onLoad={(e) => handleImageLoad(i, e.currentTarget)}
               />

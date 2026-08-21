@@ -10,6 +10,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import sharp from "sharp";
+import { QUESTION_IMAGE_UPLOAD_OPTIONS } from "./lib/question-image-upload.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -59,7 +60,7 @@ async function migrateOne(supabase, row, dryRun) {
 
   const { error: uploadError } = await supabase.storage
     .from("exam-papers")
-    .upload(newPath, webpBuffer, { contentType: "image/webp", upsert: true });
+    .upload(newPath, webpBuffer, QUESTION_IMAGE_UPLOAD_OPTIONS);
   if (uploadError) {
     return { error: `업로드 실패: ${uploadError.message}`, id: row.id, path: oldPath };
   }

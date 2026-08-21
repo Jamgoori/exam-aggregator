@@ -29,6 +29,7 @@ import {
   type CbtSubmitResult,
 } from "@/app/papers/actions";
 import { CbtDrawingToolbar, PEN_COLORS } from "@/components/cbt-drawing-toolbar";
+import { useQuestionImagePreload } from "@/components/question-image-preload";
 import { OmrPanel } from "@/components/cbt-omr-panel";
 import { CbtResultModal } from "@/components/cbt-result-modal";
 import { CbtViewModeLock } from "@/components/cbt-view-mode-lock";
@@ -42,6 +43,7 @@ import {
 } from "@/components/question-view-gestures";
 import { SingleQuestionView } from "@/components/single-question-view";
 import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
+import { resolveInitialCbtViewMode, type CbtViewMode } from "@/lib/cbt-view-mode";
 import { formatDuration } from "@gongmoa/core";
 
 // pdf.js는 브라우저 전용 API(Worker, canvas 등)에 의존해서 서버에서 미리 렌더링하면
@@ -213,27 +215,6 @@ function useLeaveConfirmation(active: boolean) {
   }, [active]);
 }
 
-// 문제별 보기에서 다음/이전 문항으로 넘어갈 때마다 이미지를 새로 받느라, 상단 번호는
-// 바로 바뀌는데 문제 사진은 뒤늦게 뜨는 문제가 있었다. 문제별 보기를 처음 켜는
-// 순간 모든 문항 이미지를 미리 브라우저 캐시에 받아둬서, 이후 이동은 캐시에서 바로
-// 그려지게 한다(이미 받아둔 이미지는 브라우저가 재요청하지 않는다).
-function useQuestionImagePreload(
-  viewMode: "full" | "single",
-  questionImages: Record<number, string[]>,
-) {
-  const preloadedImagesRef = useRef(false);
-  useEffect(() => {
-    if (viewMode !== "single" || preloadedImagesRef.current) return;
-    preloadedImagesRef.current = true;
-    for (const images of Object.values(questionImages)) {
-      for (const src of images) {
-        const img = new Image();
-        img.src = src;
-      }
-    }
-  }, [viewMode, questionImages]);
-}
-
 // 시험지 배율 상태와 그걸 조절하는 세 가지 입력(버튼 클릭, 모바일 핀치, 트랙패드
 // 핀치/Ctrl+휠)을 묶은 훅. 앞의 둘은 오답 다시 풀기와 공유하는 useContentZoom이
 // 담당하고, 여기서는 전체보기(PDF)에만 필요한 Ctrl+휠을 얹는다.
@@ -306,12 +287,9 @@ export function CbtSolver({
   } = useFullscreen(solverRootRef);
 
   const hasQuestionImages = Object.keys(questionImages).length > 0;
-  // 사이트 기본값은 "문제별 풀기"다. 계정에 "전체보기"가 명시적으로 잠겨 있으면
-  // 그걸 따르고, 그 외에는(잠긴 게 없거나 "문제별 풀기"로 잠겨 있으면) 문제별
-  // 풀기로 시작한다. 다만 이 문제지에 문항별 이미지가 아직 없으면 그 탭 자체가
-  // 막혀 있으니 전체보기로 시작한다.
-  const [viewMode, setViewMode] = useState<"full" | "single">(
-    defaultViewMode === "full" ? "full" : hasQuestionImages ? "single" : "full",
+  const [viewMode, setViewMode] = useState<CbtViewMode>(
+    // 서버(cbt/page.tsx)도 같은 함수로 판단해 첫 문항 이미지를 preload 한다.
+    resolveInitialCbtViewMode(defaultViewMode, hasQuestionImages),
   );
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
@@ -342,10 +320,24 @@ export function CbtSolver({
     return groups;
   }, [questionImages, totalQuestions]);
 
+  // 미리받기 큐에 넘길 "문항 순서대로의 이미지 목록"(0-based 인덱스 = 문제번호 - 1).
+  const imagesByQuestionIndex = useMemo(
+    () =>
+      Array.from({ length: totalQuestions }, (_, i) => questionImages[i + 1] ?? []),
+    [questionImages, totalQuestions],
+  );
+
   const { countdown, elapsedSeconds, started, startError, startedAtRef, resetTimer, requestStart } =
     useCbtTimer(paperId, !result);
   useLeaveConfirmation(!result);
-  useQuestionImagePreload(viewMode, questionImages);
+  // 문항 이미지는 지금 보고 있는 문제부터 순서대로 미리 받아둔다. 예전에는 문제별
+  // 보기를 켜는 순간 전 문항을 한꺼번에 요청했는데, 그러면 눈앞의 1번 문제가 나머지
+  // 수십~수백 장과 대역폭을 나눠 쓰느라 오히려 늦게 떴다.
+  useQuestionImagePreload({
+    enabled: viewMode === "single",
+    imagesByItem: imagesByQuestionIndex,
+    currentIndex: currentQuestionIndex,
+  });
 
   const registerClearDrawing = useCallback((clear: () => void) => {
     clearDrawingRef.current = clear;

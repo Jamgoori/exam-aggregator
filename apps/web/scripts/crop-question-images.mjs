@@ -17,6 +17,7 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { QUESTION_IMAGE_UPLOAD_OPTIONS } from "./lib/question-image-upload.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -2426,7 +2427,7 @@ async function main() {
     if (!uploadedPaths.has(storagePath)) {
       const { error: uploadError } = await supabase.storage
         .from("exam-papers")
-        .upload(storagePath, c.image, { contentType: "image/webp", upsert: true });
+        .upload(storagePath, c.image, QUESTION_IMAGE_UPLOAD_OPTIONS);
       if (uploadError) {
         console.error(`문제 ${c.number}: 업로드 실패 - ${uploadError.message}`);
         continue;

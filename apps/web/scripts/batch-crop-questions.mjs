@@ -9,6 +9,7 @@
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
 import { extractQuestionsFromPdf } from "./crop-question-images.mjs";
+import { QUESTION_IMAGE_UPLOAD_OPTIONS } from "./lib/question-image-upload.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -90,7 +91,7 @@ async function cropOnePaper(supabase, paper, { dryRun, scale }) {
     if (!uploadedPaths.has(storagePath)) {
       const { error: uploadError } = await supabase.storage
         .from("exam-papers")
-        .upload(storagePath, c.image, { contentType: "image/webp", upsert: true });
+        .upload(storagePath, c.image, QUESTION_IMAGE_UPLOAD_OPTIONS);
       if (uploadError) {
         uploadErrors.push(`${c.number}번 업로드 실패: ${uploadError.message}`);
         continue;
