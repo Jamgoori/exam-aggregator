@@ -10,9 +10,7 @@ export const unstable_instant = {
 
 import { createClient } from "@/lib/supabase/server";
 import { HomeExamBrowser } from "@/components/home-exam-browser";
-import { ReviewNudgeModal } from "@/components/review-nudge-modal";
-import { BetaNoticeModal } from "@/components/beta-notice-modal";
-import { AttendancePromoModal } from "@/components/attendance-promo-modal";
+import { HomePopupSlider } from "@/components/home-popup-slider";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
@@ -90,26 +88,16 @@ export default async function Home({
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
-      {/* 하루 한 번, 오늘 복습이 남아 있을 때만 뜬다. 비회원은 서버 액션이 항상 빈
-          결과를 돌려주므로 컴포넌트가 조용히 아무것도 렌더링하지 않는다 — 로그인
-          여부로 미리 걸러내지 않는 이유는 다른 홈 팝업들과 마찬가지로 마운트 자체는
-          모두에게 허용하기 위해서다. 판정과 조회는 전부 컴포넌트가 마운트된 뒤에
-          한다 — 홈 서버 렌더에 복습 요약을 넣으면 모두가 매번 무거운 조회를
-          하게 된다. */}
-      <ReviewNudgeModal />
-      {/* "아직 개발 중이고, 멤버십 기능은 지금 전부 무료" 안내. 로그인 여부와
-          상관없이 홈에 들어온 모두에게 방문당 한 번 뜨고, "다음부터 보지 않기"를
-          누르면 영영 안 뜬다. 처음 온 사람일수록 화면이 자주 바뀌는 이유와 지금은
-          전부 무료라는 말이 먼저 닿아야 하므로 비회원에게도 띄운다.
-          문제지·풀이 화면이 아니라 홈에만 두는 이유는 beta-notice-modal.tsx 주석 참고. */}
-      <BetaNoticeModal />
-      {/* 출석 이벤트 광고(이미지 팝업). 로그인 여부와 상관없이 띄운다 — 비회원에게는
-          가입할 이유 자체이고, 회원에게는 오늘 안 오면 놓치는 것이 된다. 다만 가는
-          곳은 갈린다: 회원은 출석 현황으로, 비회원은 가입으로 보낸다(로그인 화면으로
+      {/* 홈에 뜰 수 있는 안내(개발 중 안내·복습 유도·출석 이벤트 광고)를 한 판에 담아
+          좌우로 넘겨 보는 슬라이드. 판을 띄울지, 어떤 장이 실릴지는 전부 마운트된 뒤에
+          정한다 — 복습 요약처럼 무거운 조회를 홈 서버 렌더에 끼워 넣으면 팝업을 볼 일
+          없는 사람까지 매번 그 값을 치른다. 로그인 여부로 미리 걸러내지도 않는다:
+          개발 중 안내와 출석 광고는 비회원에게 더 필요하고(가입할 이유 자체다), 복습
+          유도는 서버 액션이 비회원에게 빈 결과를 돌려주므로 저절로 빠진다.
+          출석 광고가 가는 곳만 갈린다 — 회원은 출석 현황, 비회원은 가입(로그인 화면으로
           보내면 계정이 없는 사람이 막다른 길을 만난다).
-          홈 팝업 셋(개발 중 안내·복습 유도·이 광고)이 한 화면에 겹치지 않게 하는
-          규칙은 lib/home-popup.ts 참고. */}
-      <AttendancePromoModal href={userId ? "/mypage?tab=attendance" : "/signup"} />
+          장을 싣고 넘기고 기록하는 규칙은 lib/home-popup.ts 참고. */}
+      <HomePopupSlider attendanceHref={userId ? "/mypage?tab=attendance" : "/signup"} />
       <HomeExamBrowser
         heroText={
           <>

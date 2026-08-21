@@ -5,6 +5,7 @@ import {
   ATTENDANCE_MONTHLY_MAX_DAYS,
 } from "@gongmoa/core";
 import { loadOgFonts } from "@/lib/og-font";
+import { PROMO_SIZE } from "@/lib/attendance-promo-size";
 
 // 홈 팝업에 뜨는 출석 이벤트 광고 — HTML 이 아니라 **PNG 한 장**이다.
 //
@@ -13,7 +14,7 @@ import { loadOgFonts } from "@/lib/og-font";
 // 테마마다 조금씩 다른 그림이 나오고, 그 변형을 다 맞추려면 팝업 하나에 반응형
 // 규칙이 잔뜩 붙는다. 한 장으로 그려 두면 어디서든 같은 광고가 뜬다.
 //
-// 대신 이미지는 검색·번역·화면낭독기가 못 읽으므로, 팝업 쪽(attendance-promo-modal)이
+// 대신 이미지는 검색·번역·화면낭독기가 못 읽으므로, 팝업 쪽(attendance-promo-slide)이
 // 같은 내용을 alt 로 들고 있어야 한다.
 //
 // 숫자(단계·최소 문항 수·월 최대 일수)는 여기서도 직접 적지 않는다. 광고가 옛 규칙을
@@ -22,10 +23,8 @@ import { loadOgFonts } from "@/lib/og-font";
 // 그리는 방식은 OG 카드(lib/og-card.tsx)와 같다: satori 라 flexbox 만 쓰고(grid 없음),
 // 한글은 Google Fonts 서브셋을 받아 넣는다.
 
-// 세로형. 카카오·토스류 이벤트 팝업이 쓰는 4:5 비율에 가깝게 잡되, 바닥의 잔칙·출처
-// 문구를 뺀 만큼 낮췄다(예전 900 → 792). 실제로는 CSS 로 360px 폭에 놓이므로 2배로
-// 그려 고해상도 화면에서도 글자가 뭉개지지 않게 한다.
-export const PROMO_SIZE = { width: 720, height: 792 };
+// 크기는 팝업 쪽과 나눠 쓰는 값이라 별도 모듈에 있다(lib/attendance-promo-size.ts).
+export { PROMO_SIZE };
 export const PROMO_CONTENT_TYPE = "image/png";
 
 const INK = "#0f172a";
