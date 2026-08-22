@@ -135,13 +135,18 @@ function narrowToCitation(sentence, caseNo) {
   const at = sentence.indexOf(caseNo);
   if (at === -1) return sentence;
 
-  // 1) 이 인용을 감싸는 괄호 찾기
+  // 1) 이 인용을 감싸는 괄호 찾기.
+  //    단, "헌법재판소(2015헌바123)는 석유판매업 …" 처럼 괄호 안이 사건번호뿐이면
+  //    좁혀 봐야 대조할 말이 안 남는다 — 그대로 두면 판정이 보류돼 오기를 놓친다
+  //    (2026-08-22 실측: 이미 확인된 오기가 이 경로로 조용히 통과했다).
   const open = sentence.lastIndexOf("(", at);
   if (open !== -1) {
     const close = sentence.indexOf(")", at);
     if (close !== -1 && !sentence.slice(open, at).includes(")")) {
+      const inside = sentence.slice(open + 1, close);
       const lead = sentence.slice(Math.max(0, open - 40), open);
-      return `${lead} ${sentence.slice(open + 1, close)}`;
+      const narrowed = `${lead} ${inside}`;
+      if (contentTokens(narrowed).length >= 3) return narrowed;
     }
   }
 
@@ -694,9 +699,12 @@ async function main() {
       if (topic.ratio !== null && topic.ratio < TOPIC_MIN_HIT) {
         // 적중률이 바닥이면 대개 진짜 다른 사건이고, 임계값 언저리면 해설이 결정문
         // 표현을 안 쓰고 풀어 쓴 경우가 섞인다. 사람이 위에서부터 보게 나눠 둔다.
+        // 경계 1/3 은 "특징어 여섯 중 넷이 그 결정문에 없다"는 뜻이고, 확인된 오기
+        // (2015헌바123)가 딱 여기 걸린다. 표본이 늘면 다시 볼 값이다.
         findings.push({
           ...o,
-          verdict: topic.ratio <= 0.25 ? "주제 불일치 의심(강)" : "주제 불일치 의심(약)",
+          hitRatio: Number(topic.ratio.toFixed(2)),
+          verdict: topic.ratio <= 0.34 ? "주제 불일치 의심(강)" : "주제 불일치 의심(약)",
           detail: `결정문에 없는 말: ${topic.missing.join(", ")} (적중 ${(topic.ratio * 100).toFixed(0)}%) — 실제 사건: ${info.caseNos ?? o.caseNo}${info.title ? ` [${info.title}]` : ""}`,
         });
       }
@@ -705,6 +713,8 @@ async function main() {
 
   if (useCache) saveCache(cachePath, cache);
 
+  // 같은 등급 안에서는 적중률이 낮은 것부터 — 사람이 위에서부터 보면 된다.
+  findings.sort((a, b) => (a.hitRatio ?? 1) - (b.hitRatio ?? 1));
   const bySeverity = {
     "없는 사건번호": [],
     "선고일 불일치": [],
