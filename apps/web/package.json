@@ -22,6 +22,8 @@
     "batch-crop-questions": "node --env-file=.env.local scripts/batch-crop-questions.mjs",
     "regression-check-crop": "node --env-file=.env.local scripts/regression-check-crop.mjs",
     "test-crop": "node --test scripts/crop-question-images.test.mjs",
+    "audit-citations": "node --env-file=.env.local scripts/audit-explanation-citations.mjs",
+    "test-citations": "node --test scripts/audit-explanation-citations.test.mjs",
     "migrate-question-images": "node --env-file=.env.local scripts/migrate-question-images-to-webp.mjs",
     "backfill-question-image-width": "node --env-file=.env.local scripts/backfill-question-image-width.mjs",
     "migrate-pdfs": "node --env-file=.env.local scripts/migrate-pdfs-optimize.mjs",
