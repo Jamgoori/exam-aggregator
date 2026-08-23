@@ -9,24 +9,64 @@
 "실행 전 Read 검증"은 2026-07-15 사고(무인 모드 보안 분류기가 `.mjs` 실행을 차단해
 세션 대부분이 저장 0건으로 끝남)에 대한 대응이고, 빼면 같은 사고가 재발한다.
 
-- **현재 등록**: `개념 재분류 배치 (전범위·상주)` (`trig_01CznQsPTFTDvxT18ZbbLbfV`,
-  UTC `30 0-22/2` = KST 09:30 부터 2시간마다). 상주 세션
-  `session_0148Ga4RiSGaP4FijPfhtUGB` 에 물려 있고, 2026-08-19 에 청크 1개를 받아
-  저장까지 하는 것을 확인했다. 이전 웹 UI 루틴(`개념 재분류 배치`,
-  `trig_01MAnb9nucVAvNrUhzWNJYgm`, UTC `2 */2`)도 여전히 돈다 — **둘 중 하나만 켠다**
-- **세션이 루틴을 만들 때 걸리는 것 둘 (2026-08-19 실측).** 둘 다 프롬프트로는 못 푼다.
-  1. **레포.** 이 레포는 private 이라 익명 `git clone` 이 막힌다. 세션이
-     `create_trigger` 로 만든 "매 firing 새 세션" 루틴은 세션에 레포 소스가 붙지 않아
-     빈 컨테이너에서 클론부터 실패한다 — 그렇게 만든 루틴이 6번 firing 동안 한 건도
-     못 붙이고 끝났다. 그래서 `create_session` + `source_url` 로 레포가 붙은 상주
-     세션을 만들고 `persistent_session_id` 로 루틴을 문다
-  2. **실행 권한.** 상주 세션이라도 기본 프리셋이면 `save-concepts.mjs` 실행이 보안
-     분류기에 막힌다(청크를 받아 분류까지 하고 저장에서 멈춘다). 세션을 만들 때
-     `extra_allowed_tools: ["Bash", ...]` 로 Bash 를 사전 승인해야 한다 — 웹 UI 루틴이
-     안 막히던 이유가 이것이다(그 세션은 `allowed_tools` 에 Bash 가 박혀 있다).
-     레포 `.claude/settings.json` 에 `permissions.allow` 를 넣어 푸는 길은 **세션이
-     자기 권한을 넓히는 편집이라 분류기가 막는다** — 소유자만 할 수 있다
-- **동시에 켜 두지 말 것**: 두 루틴이 겹치면 같은 청크를 중복으로 읽는다
+## 현재 도는 루틴 넷 (2026-08-22 기준)
+
+| 루틴 | 주기(UTC) | 하는 일 | 만든 곳 |
+|---|---|---|---|
+| 개념 재분류 배치 `trig_01MAnb9nucVAvNrUhzWNJYgm` | `2 */2` | 해설을 읽고 `concept_id` 를 붙인다 | 웹 UI |
+| 개념 목록 설계 (신규 과목) `trig_01Ei1itTGbxYonn9x9Ukhidv` | `30 */4` | 목록 없는 과목 5개씩 축을 세운다 | 세션 |
+| 개념 목록 보수 (빈칸 메우기) `trig_018V9bWUkTD5RrCxHyqoe4m9` | `50 5` | 빈칸·과점 신호를 보고 개념을 보탠다 | 세션 |
+| 개념 분류 감사 `trig_01S39rTez2fDaHiV84UeTGTa` | `40 21` | 표본을 읽고 오분류만 보고(쓰기 없음) | 웹 UI |
+
+상주 세션에 물려 있던 `trig_01CznQsPTFTDvxT18ZbbLbfV` 는 2026-08-21 에 지웠다(웹 UI
+루틴과 중복이었다).
+
+**넷을 동시에 켜 두는 것이 정상이다.** 쓰는 표가 갈린다 — 설계·보수는 `concepts`/
+`concept_aliases` 만, 재분류 배치는 `question_explanations.concept_id` 만, 감사는
+아무것도 안 쓴다. 재분류 배치**끼리** 둘 이상 띄우지만 않으면 된다.
+
+- **웹 UI 로 만든 루틴은 세션이 못 고친다.** 재분류 배치와 감사가 그렇다 —
+  `update_trigger` 가 "created via http_api" 로 거부한다. 대신 재분류 배치의 문안이
+  규칙을 `scripts/concept-reclassify-prompt.md` 에서 읽으므로, 동작을 바꿀 일은 그
+  파일을 고치면 다음 세션부터 반영된다. 세션이 만든 루틴 둘은 세션이 고칠 수 있다
+
+### 세션이 만든 루틴은 레포를 못 받는다 (2026-08-19 · 08-22 두 번 겪음)
+
+이 레포는 private 이라 익명 `git clone` 이 막힌다. 세션이 `create_trigger` 로 만든
+"매 firing 새 세션" 루틴은 세션에 레포 소스가 붙지 않아 빈 컨테이너에서 클론부터
+실패한다. 08-19 에 그렇게 만든 루틴이 6번, 08-22 에 또 다른 둘이 합쳐 7번 firing 동안
+**한 건도 산출하지 못하고** 끝났다. **두 번째는 이 문서에 이미 적혀 있었는데 안 읽고
+같은 방식으로 만들어서 났다.**
+
+길이 셋이다:
+
+1. **레포를 안 쓴다 (권장, 2026-08-22 검증됨).** 필요한 건 환경변수 둘
+   (`NEXT_PUBLIC_SUPABASE_URL`·`SUPABASE_SERVICE_ROLE_KEY`)뿐이고, DB 는 PostgREST 로
+   직접 다룬다(`curl` 또는 python `urllib`). 클론도 npm 설치도 없다. 개념 등록을
+   `concepts`/`concept_aliases` INSERT 로 하게 되므로 `apply-concepts` 백필 오염도
+   같이 사라진다 — `docs/agents/concept-dictionary.md` 참조. 설계·보수 루틴이 이 방식
+2. **레포가 붙은 상주 세션**(`create_session` + `source_url`)에 `persistent_session_id`
+   로 문다. 이때 `extra_allowed_tools: ["Bash", ...]` 로 Bash 를 사전 승인해야 한다 —
+   기본 프리셋이면 청크를 받아 분류까지 하고 `save-concepts.mjs` 실행에서 막힌다.
+   레포 `.claude/settings.json` 으로 푸는 길은 세션이 자기 권한을 넓히는 편집이라
+   분류기가 막는다(소유자만 가능). 회차마다 문맥이 쌓이는 부담도 있다
+3. 소유자가 **웹 UI** 에서 만든다. 레포를 고를 수 있지만 세션이 문안을 못 고치게 된다
+
+**루틴을 만들었으면 반드시 한 번 수동 발사해서 DB 에 숫자가 늘어나는 것까지 보고**
+"됐다"고 말한다. 08-22 에 그 확인을 건너뛰어 26시간을 날렸다.
+
+### PostgREST 로 다룰 때 함정 셋
+
+- **조회는 keyset 페이지네이션.** `limit=1000` 만 쓰면 조용히 잘린다
+- **조인이 걸린 쿼리는 `Prefer: count=exact` 가 개수를 안 준다.** 그리고 에러가 나면
+  리스트가 아닌 객체가 돌아오는데, 리스트로 착각하면 같은 페이지를 무한 반복한다.
+  매 페이지 응답이 리스트인지 확인할 것
+- 조인 경로는 `question_explanations.question_id` → `questions.id` /
+  `questions.paper_id` → `exam_papers.id` / `exam_papers.subject_id`. 컬럼 이름이
+  **`paper_id`** 다 (`exam_paper_id` 가 아니다)
+
+## 재분류 배치 운영 메모
+
 - **의존성**: 레포 루트에서 설치한다 (npm 워크스페이스)
 - **환경**: `수파` (`env_01TbPw8D7vxQrgib2ifuRhp5`). 봇 계정 자격 증명
   (`EXPLANATION_BOT_EMAIL`/`EXPLANATION_BOT_PASSWORD`)이 여기 있다 — 해설 배치
@@ -125,8 +165,11 @@ cd apps/web
 
 - 이번 세션에 붙인 문항 수, 과목별 내역
 - **표본 재판정 결과** — 총 표본 수와 불일치 건수, 청크 전체를 다시 본 횟수
-- `proposed`(`?` 제안) 이름을 **횟수와 함께 모아서** — 소유자가 3회 이상 나온 것만
-  정본에 넣는다. 루틴은 사전을 못 고친다(봇에 `concepts` 쓰기 권한이 없다)
+- `proposed`(`?` 제안) 이름을 **횟수와 함께 모아서**. 다만 **소유자에게 승인을
+  요청하지 말 것** — 소유자는 과목 내용을 모르고, 세션 보고서는 컨테이너와 함께
+  사라진다. 사전을 고치는 것은 "개념 목록 보수" 루틴의 일이고, 그쪽은 세션 보고서가
+  아니라 **DB 에 남은 미매칭 해설**을 증거로 판단한다. 그러므로 마땅한 칸이 없으면
+  억지로 붙이지 말고 **미매칭으로 남기는 것이 그 자체로 제안이다**
 - 끝까지 안 붙은 `unmatched` 문항 id
 
 **금지선.** `keyword_title` 을 UPDATE 하지 말 것(화면에 그대로 보여주는 값). 이미 붙은
