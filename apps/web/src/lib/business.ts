@@ -34,3 +34,7 @@ export const BUSINESS_EMAIL = "lks2354@gmail.com";
 // 아예 없는 것보다 나쁘다 — "표기하려다 만" 상태로 보인다.
 export const hasBusinessInfo: boolean =
   BUSINESS_INFO.name !== "" && BUSINESS_INFO.registrationNumber !== "";
+
+// 카카오톡 오픈채팅방(공모아). 사이트 곳곳의 "오픈채팅" 버튼이 여기로 보낸다 —
+// 주소가 바뀌면(방 재개설 등) 이 한 줄만 고치면 된다.
+export const KAKAO_OPEN_CHAT_URL = "https://open.kakao.com/o/pxBckoKi";

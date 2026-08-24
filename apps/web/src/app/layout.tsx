@@ -6,6 +6,7 @@ import { SiteHeaderGate } from "@/components/site-header-gate";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { ReviewFab } from "@/components/review-fab";
+import { KakaoChatFab } from "@/components/kakao-chat-fab";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
 import { createClient } from "@/lib/supabase/server";
 import { getMembership } from "@/lib/membership";
@@ -181,6 +182,12 @@ export default function RootLayout({
           <StreamedSiteHeader />
         </Suspense>
         {children}
+        {/* 카카오톡 오픈채팅 입구. 로그인 여부와 무관해서 헤더 스트리밍을 기다릴
+            이유가 없지만, usePathname(런타임 데이터)으로 몰입형 화면을 걸러내므로
+            푸터와 같은 이유로 Suspense 뒤에 둔다. */}
+        <Suspense fallback={null}>
+          <KakaoChatFab />
+        </Suspense>
         {/* 푸터도 usePathname으로 몰입형 화면을 판별하므로 Suspense 뒤에 둔다 —
             페이지 맨 아래라 잠깐 비어 있어도 눈에 띄지 않는다. */}
         <Suspense fallback={null}>
