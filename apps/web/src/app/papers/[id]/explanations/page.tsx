@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Hourglass, LockKeyhole, Monitor } from "lucide-react";
+import { Hourglass, Monitor } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPaper } from "../paper-detail-data";
 import { getPaperExplanations } from "@/lib/wrong-notes";
@@ -35,19 +35,17 @@ export async function generateMetadata({
     description: `${displayTitle} 전체 문항 해설을 문제 이미지·정답과 함께 열람하세요.`,
     // ?download=1로 열면 인쇄창만 뜰 뿐 내용이 같으므로 정본은 파라미터 없는 주소다.
     alternates: { canonical: paperExplanationsHref(paper) },
-    // 비로그인(=크롤러)에게는 아래 ANON_PREVIEW_CARDS만큼만 렌더링되는 미리보기라,
-    // 색인되면 내용이 거의 없는 페이지가 문제지 수만큼 늘어나 사이트 전체 평가를
-    // 끌어내린다. 사이트맵에서 빼는 것만으로는 막히지 않는다 — 문제지 상세의
-    // "해설 열기" 링크를 타고 크롤러가 들어오기 때문에 여기서 못 박아야 한다.
-    // follow는 남겨서 이 페이지의 링크(문제지 상세)는 계속 따라가게 한다.
+    // 이 페이지는 로그인 없이는 아예 렌더링되지 않고 /login 으로 리다이렉트된다
+    // (아래 PaperExplanationsPage) — 크롤러도 로그인 화면만 보게 되므로 색인해도
+    // 얻을 콘텐츠가 없다. follow는 남겨서 이 페이지의 링크(문제지 상세)는 계속
+    // 따라가게 한다.
     robots: { index: false, follow: true },
   };
 }
 
-// 비로그인 사용자에게 실제로 렌더링해주는 해설 카드 수. 해설은 이 서비스가 직접
-// 만드는 자산이라 익명 크롤링에 통째로 내주지 않는다 — 나머지 문항은 CSS로 가리는
-// 게 아니라 서버가 HTML에 아예 담지 않는다.
-const ANON_PREVIEW_CARDS = 2;
+// 로그인은 돼 있지만 시간당 한도를 넘긴 요청에게만 렌더링해주는 해설 카드 수.
+// 나머지 문항은 CSS로 가리는 게 아니라 서버가 HTML에 아예 담지 않는다.
+const LIMITED_ACCESS_PREVIEW_CARDS = 2;
 
 // 문제지 전체 해설 페이지 ("해설 열기"). 문항 이미지 + 정답 + 해설을 번호순으로
 // 죽 읽어 내려가는 열람용 화면이라, 오답노트와 달리 해설을 펼친 채로 보여준다.
@@ -69,32 +67,27 @@ export default async function PaperExplanationsPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const loggedIn = !!user;
 
-  // 다운로드(?download=1)는 저장까지 이어지는 행위라 문제 PDF 다운로드
-  // (/download/[id])와 같은 기준으로 로그인을 요구한다 — 비로그인은 여기서 아예
-  // 막고 로그인 뒤 같은 주소(download=1까지 포함)로 돌아오게 한다. "해설 열기"(view)는
-  // 그대로 두어 비로그인도 미리보기 카드를 볼 수 있다 — 막는 건 다운로드뿐이다.
-  if (isDownload && !loggedIn) {
-    redirect(
-      `/login?next=${encodeURIComponent(`${paperExplanationsHref(paper)}?download=1`)}`,
-    );
+  // "해설 열기"(view)·"해설 다운로드"(download=1) 둘 다 로그인이 있어야 한다 — 문제
+  // PDF(/download/[id])·정답 PDF(/download/answer/[id])와 같은 기준. 비로그인은 여기서
+  // 막고 로그인 뒤 같은 주소(download=1까지 포함)로 돌아오게 한다.
+  if (!user) {
+    const base = paperExplanationsHref(paper);
+    const next = isDownload ? `${base}?download=1` : base;
+    redirect(`/login?next=${encodeURIComponent(next)}`);
   }
 
-  // 로그인 사용자만 한도 판정 대상이다 — 비로그인은 어차피 미리보기만 보이므로
-  // 별도로 셀 필요가 없다. 상세페이지의 "해설 열기"/"다운로드" 아이콘이 각각
-  // view/download로 들어오므로, 같은 사람이라도 시간당 한도는 독립적으로 소진된다.
-  // 무료 회원의 하루 몫은 반대로 둘을 합쳐 문제지 단위로 센다 — "이 문제지 해설을
-  // 오늘 봤는가"가 기준이라, 같은 문제지를 열람했다가 내려받는 건 한 개다.
-  const access = loggedIn
-    ? await resolveExplanationAccess({
-        userId: user!.id,
-        paperId: paper.id,
-        action: isDownload ? "download" : "view",
-        premium: await isPremium(supabase, user!.id),
-      })
-    : null;
-  const hasFullAccess = loggedIn && access!.full;
+  // 여기부터는 항상 로그인 상태다. 시간당 한도 판정만 남는다 — "해설 열기"/"다운로드"
+  // 아이콘이 각각 view/download로 들어오므로, 같은 사람이라도 시간당 한도는 독립적으로
+  // 소진된다. 무료 회원의 하루 몫은 반대로 둘을 합쳐 문제지 단위로 센다 — "이 문제지
+  // 해설을 오늘 봤는가"가 기준이라, 같은 문제지를 열람했다가 내려받는 건 한 개다.
+  const access = await resolveExplanationAccess({
+    userId: user.id,
+    paperId: paper.id,
+    action: isDownload ? "download" : "view",
+    premium: await isPremium(supabase, user.id),
+  });
+  const hasFullAccess = access.full;
 
   const questions = await getPaperExplanations(supabase, paper);
 
@@ -122,9 +115,9 @@ export default async function PaperExplanationsPage({
     questions.map((q) => ({ ...q, selectedChoice: null })),
   );
 
-  // 비로그인이거나 시간당 한도를 넘긴 요청은 미리보기 카드까지만 서버가
-  // 렌더링한다 (나머지는 응답에 포함 안 됨 — CSS로 가리는 게 아니다).
-  const visibleGroups = hasFullAccess ? groups : groups.slice(0, ANON_PREVIEW_CARDS);
+  // 시간당 한도를 넘긴 요청은 미리보기 카드까지만 서버가 렌더링한다
+  // (나머지는 응답에 포함 안 됨 — CSS로 가리는 게 아니다).
+  const visibleGroups = hasFullAccess ? groups : groups.slice(0, LIMITED_ACCESS_PREVIEW_CARDS);
   const hiddenQuestionCount =
     questions.length - visibleGroups.reduce((sum, g) => sum + g.rows.length, 0);
 
@@ -265,35 +258,15 @@ export default async function PaperExplanationsPage({
 
       {!hasFullAccess && hiddenQuestionCount > 0 && access?.reason !== "free-quota" && (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-blue-100 bg-blue-50/60 px-6 py-10 text-center dark:border-blue-900 dark:bg-blue-950/30">
-          {loggedIn ? (
-            <>
-              {/* 시간당 한도 초과: 로그인은 돼 있으니 로그인 유도 대신 "잠시 후"로만
-                  완만하게 안내한다 — 정상 사용자는 이 문구 자체를 볼 일이 없다.
-                  무료 한도(위 분기)와 절대 섞지 않는다: 수집 시도를 "결제하면 됩니다"로
-                  안내하게 되고, 반대로 정상 사용자에게는 결제하면 풀린다는 거짓말이 된다. */}
-              <Hourglass size={28} className="text-blue-600 dark:text-blue-400" />
-              <p className="font-semibold">잠시 후 다시 시도해주세요</p>
-              <p className="text-sm text-zinc-500 dark:text-zinc-500">
-                요청이 많아 전체 해설 표시가 일시적으로 제한됐어요.
-              </p>
-            </>
-          ) : (
-            <>
-              <LockKeyhole size={28} className="text-blue-600 dark:text-blue-400" />
-              <p className="font-semibold">
-                나머지 {hiddenQuestionCount}문항 해설은 로그인하면 볼 수 있어요
-              </p>
-              <p className="text-sm text-zinc-500 dark:text-zinc-500">
-                무료로 가입하고 전체 해설과 오답노트까지 이용해보세요.
-              </p>
-              <Link
-                href={`/login?next=${encodeURIComponent(paperExplanationsHref(paper))}`}
-                className="mt-1 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                로그인하고 전체 해설 보기
-              </Link>
-            </>
-          )}
+          {/* 시간당 한도 초과: 여기 도달하려면 이미 로그인이 돼 있으므로 로그인 유도 대신
+              "잠시 후"로만 완만하게 안내한다 — 정상 사용자는 이 문구 자체를 볼 일이 없다.
+              무료 한도(위 분기)와 절대 섞지 않는다: 수집 시도를 "결제하면 됩니다"로
+              안내하게 되고, 반대로 정상 사용자에게는 결제하면 풀린다는 거짓말이 된다. */}
+          <Hourglass size={28} className="text-blue-600 dark:text-blue-400" />
+          <p className="font-semibold">잠시 후 다시 시도해주세요</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-500">
+            요청이 많아 전체 해설 표시가 일시적으로 제한됐어요.
+          </p>
         </div>
       )}
 
