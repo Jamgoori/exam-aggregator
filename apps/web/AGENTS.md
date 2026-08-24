@@ -65,6 +65,13 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   미국 IP 에서 오므로, 예외가 빠지면 403 이 계속 나가 색인이 통째로 사라진다.
   `/payments/**`·`/auth/**`·`/api/**` 를 차단 대상에 넣지 말 것 (결제 승인
   리다이렉트를 막으면 돈만 빠진 주문이 남는다). 국가를 모를 때는 언제나 통과시킬 것.
+- **다운로드 집계**: `download-counting.ts` 의 봇 목록(`NON_HUMAN_UA`)에 `naver`·`daum`·
+  `kakaotalk` 을 넣지 말 것 — 셋 다 크롤러가 아니라 **인앱 브라우저**의 UA 표식이라
+  (`NAVER(inapp;...)`, `KAKAOTALK 10.x`, `DaumApps/...`) 넣는 순간 국내 모바일 유입이
+  통째로 집계에서 사라진다. 각 사의 크롤러 이름은 따로다(Yeti·Daumoa·kakaotalk-scrap).
+  같은 이유로 `geo-block.ts` 의 `CRAWLER_UA` 를 여기서 재사용하지 말 것 (그쪽은 넓을수록
+  안전한 목록이고 여기서는 넓으면 사람을 지운다). 판정이 false 여도 파일은 내줄 것 —
+  이건 집계 장치지 접근 통제가 아니다.
 - **과목명 표기**: 시행처가 과목을 다르게 부른다고(군무원 "행정법" ↔ 국가직
   "행정법총론") `subjects` 에 과목 행을 새로 만들지 말 것 — 개념 사전이 과목 단위라
   사전 복제와 `concept_id` 재발급이 따라온다. 표시 이름만
