@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { KakaoIcon } from "@/components/kakao-icon";
 import { KAKAO_OPEN_CHAT_URL } from "@/lib/business";
@@ -19,9 +20,29 @@ import { KAKAO_OPEN_CHAT_URL } from "@/lib/business";
 // 자리는 오른쪽이 아니라 왼쪽 아래다 — 오른쪽 아래는 ReviewFab("복습 N")이 쓰는데,
 // 그 버튼은 스크롤 위치와 오늘 복습량에 따라 나타났다 사라지므로 같은 쪽에 두면
 // 서로 밀려 위치가 튄다.
+
+// 이만큼 내려야 뜬다(ReviewFab과 같은 기준). 홈에 도착하자마자 튀어나오면 사이트가
+// 뭐 하는 곳인지 보기도 전에 말부터 거는 꼴이라, 목록을 한 번 훑은 사람에게만 보인다.
+const SHOW_AFTER_PX = 400;
+
 export function KakaoChatFab() {
   const pathname = usePathname();
-  if (pathname !== "/") return null;
+  const isHome = pathname === "/";
+  // 첫 렌더는 언제나 false라 서버 렌더 결과(아무것도 안 그림)와 어긋나지 않는다.
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    if (!isHome) return;
+    function onScroll() {
+      setScrolled(window.scrollY > SHOW_AFTER_PX);
+    }
+    // 뒤로가기로 돌아와 스크롤 위치가 복원된 경우를 위해 한 번 직접 확인한다.
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [isHome]);
+
+  if (!isHome || !scrolled) return null;
 
   return (
     <a
@@ -29,7 +50,7 @@ export function KakaoChatFab() {
       target="_blank"
       rel="noopener noreferrer"
       aria-label="공모아 카카오톡 오픈채팅방 열기"
-      className="fixed bottom-5 left-5 z-40 flex items-center gap-2 rounded-full bg-[#FEE500] p-3.5 text-sm font-bold text-black/90 shadow-lg shadow-black/10 transition-transform hover:scale-105 sm:py-3 sm:pl-4 sm:pr-5 print:hidden"
+      className="animate-modal-fade-in fixed bottom-5 left-5 z-40 flex items-center gap-2 rounded-full bg-[#FEE500] p-3.5 text-sm font-bold text-black/90 shadow-lg shadow-black/10 transition-transform hover:scale-105 sm:py-3 sm:pl-4 sm:pr-5 print:hidden"
       style={{ marginBottom: "env(safe-area-inset-bottom)" }}
     >
       <KakaoIcon />
