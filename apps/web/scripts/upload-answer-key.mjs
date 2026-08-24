@@ -49,6 +49,9 @@ const TRACK_KEYWORDS = {
   // 경찰 간부후보(경위 공채)는 같은 해 순경 공채와 정답표가 별개다. track을 안 붙이면
   // (exam_type_id, year, level, round, track) unique upsert에서 서로 덮어쓴다.
   간부후보: "간부후보",
+  // 2017 경찰 1차는 경기북부 여경 재시험이 따로 치러졌고 정답표도 별개다.
+  // track을 안 붙이면 같은 해 1차 정답표와 키가 겹쳐 서로 덮어쓴다.
+  재시험: "재시험",
   // 소방은 같은 날 공채(track null)와 경채가 따로 치러지고 정답표도 별개다.
   경채: "경채",
   // 소방 승진시험은 직급마다 문제지·정답표가 따로다(직급 키워드는 서로 배타적).
@@ -118,8 +121,16 @@ async function main() {
           : filename.includes("5급")
             ? "5급"
             : null;
-    // 2017 국가직 9급 추가선발(2차모집), 7급 1차/2차 시험처럼 회차가 나뉘는 경우 round로 구분
-    const round = filename.includes("추가") || filename.includes("2차") ? 2 : 1;
+    // 2017 국가직 9급 추가선발(2차모집), 7급 1차/2차 시험처럼 회차가 나뉘는 경우 round로 구분.
+    // 경찰은 3차까지 있다("’12년 제3차", "’15년 제3차", "’18년 제3차") — 예전처럼
+    // "2차"만 보고 나머지를 1로 뭉개면 3차 정답표가 1차와 같은 키가 돼
+    // (exam_type_id, year, level, round, track) upsert에서 서로 덮어쓴다.
+    const roundMatch = filename.match(/제?\s*(\d)\s*차/);
+    const round = roundMatch
+      ? Number(roundMatch[1])
+      : filename.includes("추가")
+        ? 2
+        : 1;
 
     let track = null;
     for (const [keyword, mapped] of Object.entries(TRACK_KEYWORDS)) {
