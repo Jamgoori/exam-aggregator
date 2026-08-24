@@ -74,7 +74,13 @@ Deno.serve(async (req) => {
     // 닉네임은 서버가 정한다 — 클라이언트가 남의 이름으로 쓰지 못하게.
     const { data: userRow } = await admin.auth.admin.getUserById(userId);
     const meta = userRow?.user?.user_metadata as { nickname?: string } | undefined;
-    const nickname = meta?.nickname ?? userRow?.user?.email?.split("@")[0] ?? "회원";
+    // 이메일 로컬파트로 떨어지지 않는다. 그 값은 닉네임 정책(길이·제어문자·금칙어·중복)을
+    // 한 번도 통과하지 않는다 — DB 트리거는 user_metadata 가 바뀔 때만 돌아서, 닉네임을
+    // 설정한 적 없는 계정은 트리거를 지나간 적이 없다. `관리자@…` 로 가입하면 금칙어
+    // 검사를 건너뛴 "관리자" 가 공개 댓글에 그대로 붙었다(운영진 사칭).
+    // 정본은 packages/core/src/nickname.ts 의 authorNickname — Deno 라 import 하지 못해
+    // 같은 규칙을 옮겨 둔다(10 = NICKNAME_MAX = comments_nickname_len 상한).
+    const nickname = (meta?.nickname ?? "").trim().slice(0, 10) || "회원";
 
     const { error } = await admin.from("comments").insert({
       paper_id: paperId,

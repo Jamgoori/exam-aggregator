@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Hourglass, LockKeyhole, Monitor } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPaper } from "../paper-detail-data";
@@ -70,6 +70,16 @@ export default async function PaperExplanationsPage({
     data: { user },
   } = await supabase.auth.getUser();
   const loggedIn = !!user;
+
+  // 다운로드(?download=1)는 저장까지 이어지는 행위라 문제 PDF 다운로드
+  // (/download/[id])와 같은 기준으로 로그인을 요구한다 — 비로그인은 여기서 아예
+  // 막고 로그인 뒤 같은 주소(download=1까지 포함)로 돌아오게 한다. "해설 열기"(view)는
+  // 그대로 두어 비로그인도 미리보기 카드를 볼 수 있다 — 막는 건 다운로드뿐이다.
+  if (isDownload && !loggedIn) {
+    redirect(
+      `/login?next=${encodeURIComponent(`${paperExplanationsHref(paper)}?download=1`)}`,
+    );
+  }
 
   // 로그인 사용자만 한도 판정 대상이다 — 비로그인은 어차피 미리보기만 보이므로
   // 별도로 셀 필요가 없다. 상세페이지의 "해설 열기"/"다운로드" 아이콘이 각각

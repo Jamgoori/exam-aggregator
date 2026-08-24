@@ -106,7 +106,6 @@ export default async function PaperDetailPage({
     roundAverages,
     myCbtRecordItems,
     answerKey,
-    answerKeyFileUrl,
   } = await getPaperDetailData(paper);
 
   const subject = paper.subjects;
@@ -283,10 +282,10 @@ export default async function PaperDetailPage({
           </a>
         </div>
 
-        {answerKey && answerKeyFileUrl && (
+        {answerKey && (
           <div className="flex items-stretch gap-2">
             <a
-              href={answerKeyFileUrl}
+              href={`/download/answer/${answerKey.id}?view=1`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-lg font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"

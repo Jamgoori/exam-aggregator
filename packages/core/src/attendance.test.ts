@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ATTENDANCE_MILESTONES,
+  ATTENDANCE_MIN_SECONDS_PER_QUESTION,
+  attendanceQuestionCount,
   ATTENDANCE_MONTHLY_MAX_DAYS,
   attendanceEarnedDays,
   attendanceMilestoneDates,
@@ -136,4 +138,38 @@ test("달의 일수: 2월과 윤년", () => {
   assert.equal(daysInMonthKey("2028-02-01"), 29);
   assert.equal(daysInMonthKey("2026-04-01"), 30);
   assert.equal(daysInMonthKey("2026-12-01"), 31);
+});
+
+// 출석은 grant_attendance_membership 을 통해 실제 멤버십 일수로 환전된다. 그래서
+// "문제를 풀지 않고 제출만 하는" 경로가 도장을 받으면 결제 없이 유료 기간이 나간다.
+test("답을 고르지 않은 문항은 출석으로 세지 않는다", () => {
+  assert.equal(attendanceQuestionCount({ answeredCount: 0, elapsedSeconds: 9999 }), 0);
+  assert.equal(attendanceQuestionCount({ answeredCount: -5, elapsedSeconds: 9999 }), 0);
+});
+
+test("세션이 너무 빨리 끝나면 출석으로 세지 않는다", () => {
+  // 20문항을 1초 만에 제출 — 스크립트다.
+  assert.equal(attendanceQuestionCount({ answeredCount: 20, elapsedSeconds: 1 }), 0);
+  // 문항당 하한(2초)에 미달.
+  assert.equal(
+    attendanceQuestionCount({ answeredCount: 20, elapsedSeconds: 20 * ATTENDANCE_MIN_SECONDS_PER_QUESTION - 1 }),
+    0,
+  );
+});
+
+test("실제로 풀면 그대로 센다", () => {
+  // 20문항을 10분에 — 평범한 복습 한 세션.
+  assert.equal(attendanceQuestionCount({ answeredCount: 20, elapsedSeconds: 600 }), 20);
+  // 하한 경계는 통과시킨다(걸려서 진짜 사용자의 도장이 빠지는 쪽이 더 나쁘다).
+  assert.equal(
+    attendanceQuestionCount({ answeredCount: 10, elapsedSeconds: 10 * ATTENDANCE_MIN_SECONDS_PER_QUESTION }),
+    10,
+  );
+  // 일부만 풀어도 푼 만큼은 센다(기준 10문항을 넘으면 출석).
+  assert.equal(attendanceQuestionCount({ answeredCount: 12, elapsedSeconds: 300 }), 12);
+});
+
+test("이상한 값은 0 으로 떨어뜨린다", () => {
+  assert.equal(attendanceQuestionCount({ answeredCount: NaN, elapsedSeconds: 600 }), 0);
+  assert.equal(attendanceQuestionCount({ answeredCount: 10, elapsedSeconds: NaN }), 0);
 });

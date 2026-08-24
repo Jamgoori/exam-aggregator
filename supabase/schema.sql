@@ -757,11 +757,19 @@ drop policy if exists "select own diagnoses" on ai_diagnoses;
 create policy "select own diagnoses" on ai_diagnoses
   for select to authenticated using (auth.uid() = user_id);
 
--- 사용자는 "오늘 진단 요청"만 만들 수 있다(report는 반드시 null). report 본문 작성은
--- service_role(생성기) 몫이라 update 정책을 주지 않는다.
+-- 쓰기 정책은 의도적으로 없다. 예전에는 "본인 행 + report is null" 이면 사용자가 요청
+-- 행을 직접 만들 수 있었는데, 그 정책은 멤버십도 자격(오답 15개/응시 3회)도 보지 않았다.
+-- AI 진단은 유료 기능이고 페이월이 애플리케이션에만 있었으므로(웹 requestDiagnosis 의
+-- isPremium, 앱 ai-diagnose 의 isPremiumUser), 무료 계정이 PostgREST 로 요청 행을 직접
+-- 만들면 리포트 생성 배치(scripts/next-diagnosis.mjs 는 report is null 인 가장 오래된
+-- 행을 멤버십 확인 없이 집는다)가 유료 리포트를 채워 줬다. diagnosis_date 에 제약이
+-- 없어 날짜만 바꿔 대기열을 통째로 점유하는 것도 가능했다.
+--
+-- 요청 행 생성도 report 작성과 마찬가지로 service_role 몫이다 — 웹은
+-- lib/ai-diagnosis.ts 의 requestTodayDiagnosis, 앱은 Edge Function 이 멤버십을 확인한 뒤
+-- 만든다. select 정책은 그대로 둔다(본인 리포트는 클라이언트가 직접 읽는다).
 drop policy if exists "insert own diagnosis request" on ai_diagnoses;
-create policy "insert own diagnosis request" on ai_diagnoses
-  for insert to authenticated with check (auth.uid() = user_id and report is null);
+revoke insert on ai_diagnoses from anon, authenticated;
 
 -- 문항 메모: 오답노트 문항별로 사용자가 남기는 개인 메모("내 노트"). 본인만 읽고 쓴다.
 create table if not exists question_memos (
@@ -787,6 +795,20 @@ create policy "update own memos" on question_memos
 drop policy if exists "delete own memos" on question_memos;
 create policy "delete own memos" on question_memos
   for delete to authenticated using (auth.uid() = user_id);
+
+-- 길이·범위는 DB 에서도 강제한다. 클라이언트 직접 쓰기를 유지하는 테이블이라(웹·앱이
+-- 모두 사용자 세션 클라이언트로 upsert 한다) 애플리케이션의 slice(0, 2000) 는 PostgREST
+-- 를 직접 부르면 그냥 우회된다 — comments·suggestions 에는 이미 있는 제약이 자유 텍스트인
+-- memo 에만 없어서, 계정 하나로 수 MB 짜리 행을 사실상 무한히 만들 수 있었다.
+do $$ begin
+  alter table question_memos add constraint question_memos_memo_len
+    check (char_length(memo) between 1 and 2000);
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table question_memos add constraint question_memos_qnum_range
+    check (question_number between 1 and 300);
+exception when duplicate_object then null; end $$;
 
 -- 전국 오답률: 문항별 "전체 응시자 중 몇 %가 틀렸나"를 집계해 돌려준다. cbt_attempt_answers는
 -- 본인 것만 select 가능한 RLS라, 전체 집계는 security definer로 우회한다. 반환값은 정답이
@@ -1114,6 +1136,12 @@ drop policy if exists "delete own wrong note marks" on wrong_note_marks;
 create policy "delete own wrong note marks" on wrong_note_marks
   for delete to authenticated using (auth.uid() = user_id);
 
+-- question_memos 와 같은 이유의 범위 제약(클라이언트 직접 쓰기 유지 + 상한은 DB 에서).
+do $$ begin
+  alter table wrong_note_marks add constraint wrong_note_marks_qnum_range
+    check (question_number between 1 and 300);
+exception when duplicate_object then null; end $$;
+
 -- 문항 오류 신고: 해설(explanation)이나 CBT 응시(cbt) 화면에서 "이 문항 이상해요"를
 -- 눌러 접수하는 신고. question_memos/wrong_note_marks 와 같은 이유로 questions.id가
 -- 아니라 (paper_id, question_number)로 문항을 가리킨다 — 화면들이 이미 그 조합으로
@@ -1146,9 +1174,18 @@ alter table question_reports enable row level security;
 drop policy if exists "select own question_reports" on question_reports;
 create policy "select own question_reports" on question_reports
   for select to authenticated using (auth.uid() = user_id or is_admin());
+-- 접수는 service_role(서버 액션 submitQuestionReport) 몫이라 insert 정책을 두지 않는다.
+-- 예전에는 `auth.uid() = user_id` 정책으로 클라이언트가 직접 넣을 수 있었는데, 시간당
+-- 상한(20건)과 문항 번호 상한은 서버 액션 안에만 있어서 PostgREST 를 직접 부르면 한 번도
+-- 평가되지 않았다 — 배열 본문으로 한 요청에 수천 행을 넣어 관리자 대기열을 못 쓰게
+-- 만들 수 있었다. select 정책은 그대로 둔다(본인 신고 + 관리자 화면).
 drop policy if exists "insert own question_reports" on question_reports;
-create policy "insert own question_reports" on question_reports
-  for insert to authenticated with check (auth.uid() = user_id);
+revoke insert on question_reports from anon, authenticated;
+
+do $$ begin
+  alter table question_reports add constraint question_reports_qnum_range
+    check (question_number between 1 and 300);
+exception when duplicate_object then null; end $$;
 drop policy if exists "admin update question_reports" on question_reports;
 create policy "admin update question_reports" on question_reports
   for update to authenticated using (is_admin());

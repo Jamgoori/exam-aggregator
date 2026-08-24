@@ -190,9 +190,13 @@ export default function SettingsScreen() {
             <SectionLabel text="계정" />
             <Row
               label="로그아웃"
+              // signOut 을 기다린 뒤에 화면을 바꾼다. 기다리지 않으면 세션이 아직
+              // 살아 있는 채로 마이페이지가 포커스를 받아 오답노트를 다시 조회하고,
+              // 그 결과가 방금 지운 오프라인 캐시에 다시 쓰인다(auth.ts signOut 주석).
               onPress={() => {
-                signOut().catch(() => {});
-                router.replace("/(tabs)/mypage");
+                void signOut()
+                  .catch(() => {})
+                  .finally(() => router.replace("/(tabs)/mypage"));
               }}
             />
             {deleting ? (

@@ -1,6 +1,11 @@
-// 사용법: node scripts/next-concept-chunk.mjs [--limit 60] [--subject 정보보호론] [--mine]
+// 사용법: node scripts/next-concept-chunk.mjs [--limit 60] [--subject 정보보호론]
+//                                            [--exclude 국어,경찰학] [--mine]
 //
 // 이미 만들어진 해설 중 concept_id 가 안 붙은 것을 과목 단위로 내려준다 (재분류 배치).
+//
+// 과목은 전범위다. 플래그 없이 부르면 정본 목록이 있는 과목을 이름순으로 훑어 미분류
+// 해설이 남은 첫 과목의 청크를 내려주고, 그 과목이 바닥나면 **같은 호출 안에서** 다음
+// 과목으로 넘어간다. 루틴이 과목을 기억했다가 --subject 로 이어 붙일 필요가 없다.
 //
 // 왜 필요한가: 해설 5만 개가 이미 있는데 전부 concept_id 가 null 이다. 정본 목록을
 // 세워도 별칭 매칭으로는 안 붙는다 — 실측 커버리지가 국어 0.2% · 한국사 1.3% ·
@@ -12,9 +17,22 @@
 // 해설 생성 배치보다 훨씬 싸고 빠르다.
 //
 // 출력(일반 모드):
-//   { done: false, subject: {id, name}, remaining: 1065,
+//   { done: false, subject: {id, name}, remaining: null, tail: false,
 //     concepts: [{name, unit, kind}, ...],
 //     items: [{question_id, keyword_title, question_text}, ...] }
+//
+// tail: true 는 이 과목의 미분류 해설이 한 청크를 못 채웠다는 뜻이다 — 끝물이라 다음
+// 호출은 다른 과목으로 넘어간다. remaining 은 일반 모드에서 항상 null 이다 (아래
+// "잔여량을 세지 않는다" 참고).
+//
+// --subject: 그 과목부터 시작한다. **가둬 두는 것이 아니다** — 그 과목이 바닥나면
+//   같은 호출 안에서 나머지 과목으로 넘어간다. 한 과목만 보려면 --only 를 함께 준다.
+//   (루틴 프롬프트가 옛 방식대로 --subject 를 이어 붙이더라도 배치가 그 과목에서
+//   멈추지 않게 하려는 것이다. 루틴은 이 플래그를 쓸 이유가 없다.)
+// --only: --subject 와 함께 쓴다. 그 과목만 보고, 바닥나면 done: true 로 끝낸다.
+//   사람이 한 과목만 손볼 때 쓴다.
+// --exclude: 그 과목들을 대상에서 뺀다. 정본 목록에 붙을 데가 없어 매 회차 같은 문항이
+//   되돌아오는 과목(과목이 잘못 붙은 잔여 등)을 소유자가 손볼 때까지 건너뛴다.
 //
 // --mine: 정본 목록이 아직 없는 과목의 표기를 무작위 표본으로 뽑는다. 목록을 세우는
 //   재료다. 이 모드는 분류를 하지 않는다.
@@ -50,10 +68,13 @@ async function main() {
 
   // 무인 루틴이 부르는 스크립트라 애매한 입력은 즉시 에러로 끝낸다. 조용히 다른
   // 모드로 굴러가면 엉뚱한 과목을 갈아엎는다.
-  const knownFlags = new Set(["limit", "subject", "mine"]);
+  const knownFlags = new Set(["limit", "subject", "only", "exclude", "mine"]);
   for (const key of Object.keys(args)) {
     if (!knownFlags.has(key)) {
-      console.error(`알 수 없는 플래그: --${key} (지원: --limit N, --subject 이름, --mine)`);
+      console.error(
+        `알 수 없는 플래그: --${key} ` +
+          "(지원: --limit N, --subject 이름, --only, --exclude 이름,이름, --mine)",
+      );
       process.exit(1);
     }
   }
@@ -68,6 +89,24 @@ async function main() {
     process.exit(1);
   }
   const subjectFilter = typeof args["subject"] === "string" ? args["subject"] : null;
+  const only = "only" in args;
+  if (only && args["only"] !== true) {
+    console.error("--only 는 값을 받지 않습니다.");
+    process.exit(1);
+  }
+  if (only && !subjectFilter) {
+    console.error("--only 는 --subject 와 함께 씁니다.");
+    process.exit(1);
+  }
+  const excluded = new Set(
+    typeof args["exclude"] === "string"
+      ? args["exclude"].split(",").map((n) => n.trim()).filter(Boolean)
+      : [],
+  );
+  if ("exclude" in args && excluded.size === 0) {
+    console.error("--exclude 는 과목 이름을 받습니다 (쉼표로 구분).");
+    process.exit(1);
+  }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -100,69 +139,102 @@ async function main() {
   }
   let targets = subjects ?? [];
   if (subjectFilter) {
-    targets = targets.filter((s) => s.name === subjectFilter);
-    if (targets.length === 0) {
+    if (!targets.some((s) => s.name === subjectFilter)) {
       console.error(`과목을 찾을 수 없습니다: ${subjectFilter}`);
       process.exit(1);
     }
+    // --only 가 아니면 가두지 않고 순서만 앞으로 당긴다. 지정한 과목이 바닥나면
+    // 아래 훑기가 그대로 다음 과목으로 넘어간다.
+    targets = only
+      ? targets.filter((s) => s.name === subjectFilter)
+      : [
+          ...targets.filter((s) => s.name === subjectFilter),
+          ...targets.filter((s) => s.name !== subjectFilter),
+        ];
+  }
+
+  if (excluded.size > 0) {
+    const known = new Set((subjects ?? []).map((s) => s.name));
+    const unknown = [...excluded].filter((n) => !known.has(n));
+    if (unknown.length > 0) {
+      console.error(`--exclude 에 없는 과목: ${unknown.join(", ")}`);
+      process.exit(1);
+    }
+    targets = targets.filter((s) => !excluded.has(s.name));
   }
 
   // 과목별 정본 목록. 목록이 있는 과목만 분류 대상이고, 없는 과목만 --mine 대상이다.
-  const conceptsBySubject = new Map();
-  for (const s of targets) {
+  //
+  // 과목마다 따로 묻지 않고 한 번에 받아 메모리에서 가른다. 전 과목을 훑게 되면서
+  // 과목당 왕복 하나가 그대로 청크당 지연이 됐다 (25과목이면 조회만 25번).
+  const CONCEPT_PAGE = 1000;
+  const conceptRows = [];
+  for (let from = 0; ; from += CONCEPT_PAGE) {
     const { data, error } = await supabase
       .from("concepts")
-      .select("id, name, parent_id, kind, merged_into")
-      .eq("subject_id", s.id);
+      .select("id, name, parent_id, kind, merged_into, subject_id")
+      .range(from, from + CONCEPT_PAGE - 1);
     if (error) {
-      console.error(`개념 목록 조회 실패 (${s.name}): ${error.message}`);
+      console.error(`개념 목록 조회 실패: ${error.message}`);
       process.exit(1);
     }
-    conceptsBySubject.set(s.id, shapeConceptList(data));
+    conceptRows.push(...(data ?? []));
+    if ((data?.length ?? 0) < CONCEPT_PAGE) break;
   }
-
-  // 아직 concept_id 가 없는 해설 수. 많이 남은 과목부터 처리한다.
-  //
-  // count:"exact" 로 세면 안 된다. 조인 전체를 끝까지 세느라 8초 statement timeout
-  // 을 넘긴다 (2026-08-16 실측: 봇 8.2초로 초과, service_role 도 7.8초로 아슬아슬).
-  // 코퍼스가 커지면서 넘은 선이라 앞으로 더 나빠지기만 한다. 이 숫자는 "어느 과목을
-  // 먼저 볼까"를 정하는 데에만 쓰이므로 planner 추정치로 충분하다.
-  //
-  // 과목 하나가 타임아웃해도 세션을 죽이지 않는다 — 예전에는 exit(1) 이라, 잔여가
-  // 0 이라 스캔이 끝까지 가는 과목(경찰학) 하나 때문에 배치 전체가 못 돌았다.
-  const pending = [];
-  const skipped = [];
+  const conceptRowsBySubject = new Map();
+  for (const r of conceptRows) {
+    const list = conceptRowsBySubject.get(r.subject_id);
+    if (list) list.push(r);
+    else conceptRowsBySubject.set(r.subject_id, [r]);
+  }
+  const conceptsBySubject = new Map();
   for (const s of targets) {
-    const hasList = (conceptsBySubject.get(s.id) ?? []).length > 0;
-    if (mine === hasList) continue; // mine 모드면 목록 없는 과목만, 아니면 있는 과목만
-
-    // 과목을 직접 지정했으면 셀 이유가 없다. 대상이 하나뿐이라 우선순위가 없고,
-    // 세는 쿼리가 그 자체로 이 스크립트가 죽던 자리다.
-    if (subjectFilter && !mine) {
-      pending.push({ ...s, remaining: null });
-      continue;
-    }
-
-    const { count, error } = await supabase
-      .from("question_explanations")
-      .select("question_id, questions!inner(exam_papers!inner(subject_id))", {
-        count: "planned",
-        head: true,
-      })
-      .is("concept_id", null)
-      .not("keyword_title", "is", null)
-      .eq("questions.exam_papers.subject_id", s.id);
-    if (error) {
-      skipped.push({ subject: s.name, reason: error.message || error.code || "타임아웃" });
-      continue;
-    }
-    if ((count ?? 0) > 0) pending.push({ ...s, remaining: count });
+    conceptsBySubject.set(s.id, shapeConceptList(conceptRowsBySubject.get(s.id) ?? []));
   }
-  if (skipped.length > 0) {
-    console.error(
-      `잔여량을 못 센 과목 ${skipped.length}개 (이번 회차만 건너뜀): ` +
-        skipped.map((s) => s.subject).join(", "),
-    );
+
+  // mine 모드면 목록 없는 과목만, 아니면 있는 과목만.
+  const candidates = targets.filter(
+    (s) => mine !== ((conceptsBySubject.get(s.id) ?? []).length > 0),
+  );
+
+  // 일반 모드는 잔여량을 세지 않는다.
+  //
+  // 예전에는 과목마다 count 를 날려 "많이 남은 과목부터" 정했는데, 그 한 판이 청크당
+  // 2분이었다 (2026-08-18 실측). 게다가 planned 추정치가 크게 빗나가서 순서로도 못
+  // 믿는다 (2026-08-17 실측: 국어 추정 2,204 vs 실제 미분류 10건). 아래에서 과목을
+  // 이름순으로 훑으며 **실제로 청크가 차는지**로 고르므로 이 숫자가 필요 없다.
+  //
+  // --mine 은 다르다. 무작위 위치 블록을 뽑으려면 모집단 크기가 있어야 한다.
+  const pending = [];
+  if (mine) {
+    // 과목 하나가 타임아웃해도 세션을 죽이지 않는다 — 예전에는 exit(1) 이라, 잔여가
+    // 0 이라 스캔이 끝까지 가는 과목(경찰학) 하나 때문에 배치 전체가 못 돌았다.
+    const skipped = [];
+    for (const s of candidates) {
+      const { count, error } = await supabase
+        .from("question_explanations")
+        .select("question_id, questions!inner(exam_papers!inner(subject_id))", {
+          count: "planned",
+          head: true,
+        })
+        .is("concept_id", null)
+        .not("keyword_title", "is", null)
+        .eq("questions.exam_papers.subject_id", s.id);
+      if (error) {
+        skipped.push({ subject: s.name, reason: error.message || error.code || "타임아웃" });
+        continue;
+      }
+      if ((count ?? 0) > 0) pending.push({ ...s, remaining: count });
+    }
+    if (skipped.length > 0) {
+      console.error(
+        `잔여량을 못 센 과목 ${skipped.length}개 (이번 회차만 건너뜀): ` +
+          skipped.map((s) => s.subject).join(", "),
+      );
+    }
+    pending.sort((a, b) => b.remaining - a.remaining || a.name.localeCompare(b.name, "ko"));
+  } else {
+    for (const s of candidates) pending.push({ ...s, remaining: null });
   }
 
   if (pending.length === 0) {
@@ -171,13 +243,13 @@ async function main() {
         done: true,
         reason: mine
           ? "정본 목록이 없는 과목 중 해설이 있는 과목이 없음"
-          : "정본 목록이 있는 과목의 해설에 concept_id 가 모두 붙음",
+          : only
+            ? `${subjectFilter} 에 정본 목록이 없다`
+            : "정본 목록이 있는 과목이 없다",
       }),
     );
     return;
   }
-
-  pending.sort((a, b) => b.remaining - a.remaining || a.name.localeCompare(b.name, "ko"));
 
   // question_text 를 함께 준다. 독해 문항은 keyword_title 이 지문 주제라
   // ("조선 후기 상업의 발달") 제목만으로는 기능형 개념을 못 고른다 — 발문을 봐야
@@ -232,24 +304,49 @@ async function main() {
     // 정본 목록에 붙을 데가 없고, 추정치만 믿으면 배치가 영원히 그 과목만 집어
     // 아무 일도 못 한다 — 루틴에서 실제로 그렇게 갇혔다.
     //
-    // 한 청크를 채우는 과목이 나오면 바로 쓴다. 아무도 못 채우면 그중 제일 많이
-    // 나온 과목을 쓴다(끝물이라 그런 것이니 그대로 처리하면 된다).
-    const TRIES = 5;
+    // 후보를 몇 개로 자르지 않고 **전 과목을 이름순으로** 훑는다. 한 청크를 채우는
+    // 과목이 나오면 거기서 멈추므로(보통 첫 과목, 조회 한 번 0.3초) 훑는 비용은 끝물
+    // 에서만 든다 — 그리고 그때가 바로 다음 과목으로 넘어가야 하는 때다. 한 과목이
+    // 바닥나면 같은 호출 안에서 다음 과목이 나오니, 루틴은 과목을 기억할 필요도
+    // --subject 를 옮겨 붙일 필요도 없다.
+    //
+    // 아무도 못 채우면 그중 제일 많이 나온 과목을 쓴다(끝물이라 그런 것이니 그대로
+    // 처리하면 된다).
+    let probeErrors = 0;
+    let pinnedEmpty = false;
     let best = null;
-    for (const candidate of pending.slice(0, TRIES)) {
+    for (const candidate of pending) {
       const got = await fetchRange(candidate, 0, limit - 1);
-      if (!got || got.length === 0) continue;
+      if (got === null) {
+        probeErrors++;
+        continue;
+      }
+      if (got.length === 0) {
+        if (candidate.name === subjectFilter) pinnedEmpty = true;
+        continue;
+      }
       if (!best || got.length > best.rows.length) best = { subject: candidate, rows: got };
       if (got.length >= limit) break;
     }
     if (!best) {
+      // 조회가 하나라도 실패했으면 done 이라고 말하지 않는다. 일시적 실패를 완료로
+      // 읽으면 루틴이 남은 과목을 그대로 두고 끝난다.
+      if (probeErrors > 0) {
+        console.error(`과목 ${probeErrors}개의 조회가 실패해 완료 여부를 알 수 없다. 재시도할 것.`);
+        process.exit(1);
+      }
       console.log(
         JSON.stringify({
           done: true,
-          reason: "후보 과목에서 미분류 해설을 못 가져왔다 (조회 실패거나 모두 처리됨)",
+          reason: only
+            ? `${subjectFilter} 의 해설에 concept_id 가 모두 붙음`
+            : "정본 목록이 있는 과목의 해설에 concept_id 가 모두 붙음",
         }),
       );
       return;
+    }
+    if (pinnedEmpty && best.subject.name !== subjectFilter) {
+      console.error(`${subjectFilter} 에는 미분류 해설이 없다. 다음 과목으로 넘어간다: ${best.subject.name}`);
     }
     subject = best.subject;
     rows = best.rows;
@@ -287,6 +384,8 @@ async function main() {
         done: false,
         subject: { id: subject.id, name: subject.name },
         remaining: subject.remaining,
+        // 이 과목의 끝물이라는 뜻. 다음 호출은 다른 과목으로 넘어간다.
+        tail: items.length < limit,
         concepts: conceptsBySubject.get(subject.id),
         items,
       },

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
-import { matchSubjectIds } from "@gongmoa/core";
+import { getSubjectShortName, matchSubjectIds } from "@gongmoa/core";
 import { SubjectBookmarkButton } from "@/components/subject-bookmark-button";
 import type { Subject } from "@gongmoa/core";
 
@@ -57,7 +57,7 @@ export function SubjectQuickAdd({
               key={s.id}
               className="flex items-center gap-1 rounded-lg border border-zinc-200 py-1 pl-3 pr-1.5 text-sm dark:border-zinc-700"
             >
-              <span className="flex-1 truncate">{s.name}</span>
+              <span className="flex-1 truncate">{getSubjectShortName(s.name)}</span>
               <SubjectBookmarkButton
                 subjectId={s.id}
                 initialBookmarked={bookmarkedSubjectIds.has(s.id)}

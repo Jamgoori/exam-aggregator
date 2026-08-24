@@ -114,6 +114,18 @@ export function getSubjectNameForQuery(subjectName: string, rawQuery: string): s
   );
 }
 
+// 즐겨찾기 추가/편집 화면(전체 과목이 시행처 구분 없이 섞여 나오는 목록)에서 쓸 표기.
+//
+// 원래 규칙(subject-names.md)은 이런 화면엔 DB 정본 이름(9급 표기, 예: "행정학개론")을
+// 그대로 쓰라고 되어 있다 — 시행처를 모르는 화면이라 어느 쪽으로 되돌릴지 정할 근거가
+// 없기 때문이다. 다만 즐겨찾기 화면은 사용자가 요청해 예외로 짧은 표기(9급 외 시행처가
+// 쓰는 이름)를 쓰기로 했다 — "행정학"을 즐겨찾아도 문제지는 여전히 같은 과목 행(DB
+// 이름은 "행정학개론")으로 그대로 연결된다.
+export function getSubjectShortName(subjectName: string): string {
+  const variants = getSubjectNameVariants(subjectName);
+  return variants.reduce((shortest, name) => (name.length < shortest.length ? name : shortest));
+}
+
 // 그 시행처가 실제로 쓰는 과목명. 예외가 없으면 DB 이름을 그대로 돌려준다.
 // 시행처를 모르는 자리(과목 페이지·오답노트처럼 여러 시행처가 섞이는 화면)에서는
 // 부르지 말 것 — 거기서는 DB 이름이 정본이다.

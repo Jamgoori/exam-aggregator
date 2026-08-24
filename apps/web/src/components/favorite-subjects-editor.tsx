@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { Pencil, Star, X } from "lucide-react";
 import { toggleSubjectBookmark } from "@/app/subjects/actions";
+import { getSubjectShortName } from "@gongmoa/core";
 import type { Subject } from "@gongmoa/core";
 
 // 마이페이지 즐겨찾기 탭의 "즐겨찾는 과목" 편집 영역. 즐겨찾은 과목을 칩으로
@@ -88,12 +89,12 @@ export function FavoriteSubjectsEditor({
                 href={`/subjects/${s.slug}`}
                 className="hover:text-blue-600 dark:hover:text-blue-400"
               >
-                {s.name}
+                {getSubjectShortName(s.name)}
               </Link>
               <button
                 type="button"
                 onClick={() => toggle(s.id)}
-                aria-label={`${s.name} 즐겨찾기 해제`}
+                aria-label={`${getSubjectShortName(s.name)} 즐겨찾기 해제`}
                 className="flex h-5 w-5 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-100 hover:text-red-500 dark:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-red-400"
               >
                 <X size={13} />
@@ -150,7 +151,7 @@ export function FavoriteSubjectsEditor({
                             : "border-zinc-200 text-zinc-600 hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:text-blue-400"
                         }`}
                       >
-                        <span className="truncate">{s.name}</span>
+                        <span className="truncate">{getSubjectShortName(s.name)}</span>
                         <Star
                           size={14}
                           className="shrink-0"

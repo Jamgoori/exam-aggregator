@@ -1,11 +1,16 @@
 import Link from "next/link";
+import { preload } from "react-dom";
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { CbtSolver } from "@/components/cbt-solver";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
 import { paperHref } from "@/lib/paper-href";
 import { resolvePaperId } from "@/lib/paper-slug-map";
+import { resolveInitialCbtViewMode } from "@/lib/cbt-view-mode";
 import type { ExamPaper } from "@gongmoa/core";
+
+// CbtSolver는 언제나 첫 문항(currentQuestionIndex 0 = 1번)부터 보여준다.
+const FIRST_QUESTION_NUMBER = 1;
 
 export default async function CbtPage({
   params,
@@ -100,6 +105,20 @@ export default async function CbtPage({
     rawDefaultViewMode === "single" || rawDefaultViewMode === "full"
       ? rawDefaultViewMode
       : null;
+
+  // 문제별 풀기로 시작하는 경우, 1번 문항 이미지를 <head>의 preload로 먼저 걸어둔다.
+  // 이 이미지 요청은 지금까지 JS 번들을 받아 하이드레이션이 끝난 뒤에야 나갔는데,
+  // 그 사이 회선이 놀고 있었다. HTML을 읽는 순간 받기 시작하면 화면이 준비될 때쯤
+  // 이미 캐시에 있다. 전체보기로 시작하는 계정에는 걸지 않는다(안 볼 이미지다).
+  const initialViewMode = resolveInitialCbtViewMode(
+    defaultViewMode,
+    Object.keys(questionImages).length > 0,
+  );
+  if (initialViewMode === "single") {
+    for (const src of questionImages[FIRST_QUESTION_NUMBER] ?? []) {
+      preload(src, { as: "image", fetchPriority: "high" });
+    }
+  }
 
   return (
     <CbtSolver
