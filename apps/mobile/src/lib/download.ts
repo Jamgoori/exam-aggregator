@@ -11,6 +11,10 @@ import { publicUrl } from "./storage";
 // 새 의존성 없이 이미 있는 react-native-blob-util 로 받아서 OS 기본 뷰어/공유 시트에
 // 넘긴다(iOS previewDocument, Android ACTION_VIEW).
 
+// **화면에 붙일 때 주의**: 웹은 /download/[id] 가 요청을 가려서 사람이 누른 것만 센다
+// (apps/web/src/lib/download-counting.ts — 봇·프리페치 제외). 여기는 RPC 를 그대로
+// 부르므로 그런 판정이 없다. 앱은 사용자가 손으로 누른 자리에서만 이 함수를 부를 것 —
+// 화면 진입이나 프리로드에서 부르면 웹에서 걷어낸 오염이 앱 쪽으로 다시 들어온다.
 export async function countDownload(paperId: string): Promise<void> {
   // 집계용이라 실패해도 사용자 흐름을 막지 않는다.
   try {
