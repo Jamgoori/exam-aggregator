@@ -182,9 +182,9 @@ export default function RootLayout({
           <StreamedSiteHeader />
         </Suspense>
         {children}
-        {/* 카카오톡 오픈채팅 입구. 로그인 여부와 무관해서 헤더 스트리밍을 기다릴
-            이유가 없지만, usePathname(런타임 데이터)으로 몰입형 화면을 걸러내므로
-            푸터와 같은 이유로 Suspense 뒤에 둔다. */}
+        {/* 카카오톡 오픈채팅 입구(홈에서만 뜬다). 로그인 여부와 무관해서 헤더
+            스트리밍을 기다릴 이유가 없지만, usePathname(런타임 데이터)으로 홈인지
+            판별하므로 푸터와 같은 이유로 Suspense 뒤에 둔다. */}
         <Suspense fallback={null}>
           <KakaoChatFab />
         </Suspense>
