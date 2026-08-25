@@ -18,7 +18,11 @@ import {
   type ConceptStat,
   type SubjectConceptGroup,
 } from "@/lib/diagnosis-live";
-import { ConceptSolveButton, DiagnosisCoachingButton } from "./diagnosis-actions";
+import {
+  ConceptSolveButton,
+  DiagnosisCoachingButton,
+  DiagnosisAutoGenerate,
+} from "./diagnosis-actions";
 import { isPremium } from "@/lib/membership";
 import { MembershipLockedPage } from "@/components/membership-upsell";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
@@ -43,7 +47,8 @@ function rangeLabel(days: number | null): string {
 //  A) 선택한 기간에 틀린 개념 막대그래프 — 그 기간에 뭘 틀렸는지 한눈에.
 //  B) 개념별 카드 — 이 기간에 몇 문항 틀렸는지(데이터) + 맞춤 극복법(AI, 주 1회 생성·캐시)
 //     + 같은 개념 기출 5문제 풀기.
-// AI(극복법)는 아래 "극복법 만들기"를 눌러야 생성된다. 아직 없으면 데이터층만 그린다.
+// AI(극복법)는 이 페이지에 들어오면 자동으로 생성된다(주기당 1회, 아래 autoGenerate).
+// 생성 전·실패 시에도 데이터층은 그대로 보인다.
 export default async function DiagnosisPage({
   searchParams,
 }: {
@@ -99,6 +104,18 @@ export default async function DiagnosisPage({
   // 주기 안내: 이번 주기에 이미 받았으면 언제 다시 받을 수 있는지 알려준다.
   const nextDate = today ? nextDiagnosisDate(today.date) : null;
 
+  // 들어오자마자 극복법을 만들지 판단한다. 요금이 나가는 경로라 조건을 좁게 잠근다:
+  //  - 아직 극복법이 없고
+  //  - 이번 주기에 요청 행 자체가 없고(실패해 pending 으로 남은 뒤엔 자동 재시도 금지)
+  //  - 진단 자격(누적 오답·응시 문턱)을 넘겼을 때만.
+  // 그래서 자동 생성은 주기당 최대 1회다 — 새로고침을 반복해도 요금이 새지 않는다.
+  const hasCoaching = (coaching ?? []).length > 0;
+  const autoGenerate =
+    !hasCoaching &&
+    today == null &&
+    agg.concepts.length > 0 &&
+    (await getDiagnosisEligibility(supabase, user.id)).eligible;
+
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-zinc-950">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pb-16 pt-6 sm:pt-8">
@@ -121,10 +138,11 @@ export default async function DiagnosisPage({
           <Dashboard
             agg={agg}
             coachingByConcept={coachingByConcept}
-            hasCoaching={(coaching ?? []).length > 0}
+            hasCoaching={hasCoaching}
             requestedThisWeek={today != null}
             nextDate={nextDate}
             selectedKey={selected.key}
+            autoGenerate={autoGenerate}
           />
         )}
       </div>
@@ -169,6 +187,7 @@ function Dashboard({
   requestedThisWeek,
   nextDate,
   selectedKey,
+  autoGenerate,
 }: {
   agg: DiagnosisAggregate;
   coachingByConcept: Map<string, DiagnosisConceptCoaching>;
@@ -177,6 +196,8 @@ function Dashboard({
   nextDate: string | null;
   // 지금 선택된 기간 칩(RANGES.key).
   selectedKey: string;
+  // 들어오자마자 극복법을 자동 생성할지(주기당 1회). page.tsx 가 판정한다.
+  autoGenerate: boolean;
   // 이번 주 진단 행이 이미 있는지. 있는데 극복법이 없다면 생성이 실패해 pending으로
   // 남은 것이므로 버튼을 "다시 시도"로 보여준다.
   requestedThisWeek: boolean;
@@ -227,9 +248,12 @@ function Dashboard({
         <SectionTitle icon={<Flame size={16} className="text-blue-600 dark:text-blue-400" />}>
           개념별 정리 · 극복
         </SectionTitle>
-        {!hasCoaching && (
-          <DiagnosisCoachingButton requestedThisWeek={requestedThisWeek} nextDate={nextDate} />
-        )}
+        {!hasCoaching &&
+          (autoGenerate ? (
+            <DiagnosisAutoGenerate />
+          ) : (
+            <DiagnosisCoachingButton requestedThisWeek={requestedThisWeek} nextDate={nextDate} />
+          ))}
         {topConcepts.map((c, i) => (
           <ConceptCard
             key={`${c.concept}-${i}`}

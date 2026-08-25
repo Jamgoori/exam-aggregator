@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createReviewSession, createReviewFromConcept } from "@/app/mypage/wrong-notes/actions";
 import { requestDiagnosis } from "@/app/mypage/actions";
@@ -121,6 +121,74 @@ export function SolveButton({
 // 데이터층(막대그래프·개념 카드)은 AI 없이 이미 떠 있으므로, 이 버튼이 채우는 것은
 // 개념별 극복법뿐이다. 생성이 실패하면(API 키 미설정·API 오류) 그 자리에서 이유를
 // 보여주고 다시 누를 수 있게 둔다 — 예전처럼 눌러도 아무 일도 안 일어나면 안 된다.
+// 페이지에 들어오면 맞춤 극복법을 알아서 만든다. 진단은 "눌렀더니 결과가 나오는 것"이지
+// 링크 한 번, 버튼 한 번을 요구할 일이 아니다.
+//
+// 다만 실제 API 요금이 나가는 경로라 자동 실행 조건을 좁게 잠근다 — 호출부(page.tsx)가
+// "이번 주기에 요청 행이 아직 없음 + 자격 충족 + 극복법 없음"일 때만 이 컴포넌트를
+// 그린다. 그래서 자동 생성은 주기당 최대 한 번이고, 실패해 pending 으로 남은 뒤에는
+// 자동으로 다시 부르지 않는다(수동 "다시 시도" 버튼으로 넘어간다). 새로고침을 반복해도
+// 요금이 새지 않아야 한다.
+export function DiagnosisAutoGenerate() {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  // StrictMode 의 이펙트 2회 실행으로 API 를 두 번 부르지 않게 막는다.
+  const firedRef = useRef(false);
+
+  useEffect(() => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    let alive = true;
+    (async () => {
+      try {
+        const res = await requestDiagnosis();
+        if (!alive) return;
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        setDone(true);
+        router.refresh();
+      } catch {
+        if (alive) setError("극복법을 만들지 못했어요. 잠시 후 다시 시도해주세요.");
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [router]);
+
+  if (error) {
+    return (
+      <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900/50 dark:bg-violet-950/20">
+        <p className="text-sm font-bold text-violet-900 dark:text-violet-200">맞춤 극복법</p>
+        <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>
+        <p className="mt-1 text-xs text-violet-700/70 dark:text-violet-300/60">
+          아래 그래프와 문제 풀기는 그대로 쓸 수 있어요.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900/50 dark:bg-violet-950/20"
+      aria-live="polite"
+    >
+      <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-violet-300 border-t-violet-600 dark:border-violet-800 dark:border-t-violet-400" />
+      <div className="min-w-0">
+        <p className="text-sm font-bold text-violet-900 dark:text-violet-200">
+          {done ? "극복법을 불러오는 중이에요" : "맞춤 극복법을 만들고 있어요"}
+        </p>
+        <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
+          틀린 문항을 개념별로 읽는 중이에요. 20초쯤 걸려요.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function DiagnosisCoachingButton({
   requestedThisWeek,
   nextDate,

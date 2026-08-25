@@ -750,6 +750,9 @@ function DiagnosisEntryLink() {
   return (
     <Link
       href="/mypage/diagnosis"
+      // 프리페치를 끈다. 이 링크가 가리키는 페이지는 진입 즉시 계정 전체 오답을 훑는
+      // 무거운 집계를 돌리는데, 프리페치는 화면에 보이기만 해도 그 렌더를 시켜 버린다.
+      prefetch={false}
       className="group flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 p-4 transition-colors hover:border-violet-300 hover:bg-violet-100 dark:border-violet-900/50 dark:bg-violet-950/20 dark:hover:bg-violet-950/40"
     >
       <Sparkles size={18} className="shrink-0 text-violet-600 dark:text-violet-400" />
