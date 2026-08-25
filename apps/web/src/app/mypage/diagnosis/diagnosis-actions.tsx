@@ -14,6 +14,7 @@ export function ConceptSolveButton({
   subjectSlug,
   limit = 5,
   label = "같은 개념 기출 풀기",
+  variant = "default",
   className = "",
 }: {
   concept: string;
@@ -21,6 +22,9 @@ export function ConceptSolveButton({
   subjectSlug: string;
   limit?: number;
   label?: string;
+  // primary: 화면에서 단 하나뿐인 "지금 할 일" 버튼(채운 버튼, 폭 가득).
+  // default: 개념 행을 펼쳤을 때 나오는 버튼(테두리만).
+  variant?: "default" | "primary";
   className?: string;
 }) {
   const router = useRouter();
@@ -40,13 +44,18 @@ export function ConceptSolveButton({
     });
   }
 
+  const style =
+    variant === "primary"
+      ? "flex w-full items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-700 disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+      : "inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:bg-zinc-800";
+
   return (
-    <div>
+    <div className={variant === "primary" ? "w-full" : undefined}>
       <button
         type="button"
         onClick={go}
         disabled={pending}
-        className={`inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:bg-zinc-800 ${className}`}
+        className={`${style} ${className}`}
       >
         {pending ? "준비 중..." : (
           <>
