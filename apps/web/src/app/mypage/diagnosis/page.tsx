@@ -297,6 +297,7 @@ function ConceptCard({
         {canSolve ? (
           <ConceptSolveButton
             concept={concept.concept}
+            conceptId={concept.conceptId}
             subjectSlug={concept.subjectSlug as string}
             limit={5}
             label="같은 개념 기출 5문제"

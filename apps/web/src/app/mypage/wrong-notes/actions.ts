@@ -84,11 +84,13 @@ export async function createReviewSession(input: {
 // (keyword_title) 문항을 랜덤으로 뽑아 세션을 만든다(있는 만큼).
 export async function createReviewFromConcept(input: {
   concept: string;
+  conceptId?: string | null;
   subjectSlug?: string | null;
   limit?: number;
 }): Promise<CreateReviewResult> {
   const concept = String(input?.concept ?? "").trim();
-  if (!concept) return { error: "개념을 찾을 수 없어요." };
+  const conceptId = input?.conceptId ? String(input.conceptId) : null;
+  if (!concept && !conceptId) return { error: "개념을 찾을 수 없어요." };
 
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
@@ -96,6 +98,7 @@ export async function createReviewFromConcept(input: {
 
   return createConceptReviewSessionForUser(supabase, user.id, {
     concept,
+    conceptId,
     subjectSlug: input.subjectSlug ?? null,
     limit: input.limit ?? 5,
   });

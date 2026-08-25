@@ -582,17 +582,19 @@ export async function collectConceptReviewCandidates(
   supabase: Supabase,
   concept: string,
   subjectSlug: string | null,
+  // 정본 개념 id. 있으면 이 축으로 뽑는다 — keyword_title은 문항 1:1이라(코퍼스 평균
+  // 1.02문항) 그 축으로는 "같은 개념 기출"이 사실상 자기 자신 하나뿐이다.
+  conceptId?: string | null,
 ): Promise<{ paperId: string; questionNumber: number }[]> {
   const kw = concept.trim();
-  if (!kw) return [];
+  if (!kw && !conceptId) return [];
   const admin = createAdminClient();
 
-  // 1) 같은 keyword_title 해설 → question_id. 코퍼스가 커도 상한을 둔다(랜덤 풀 충분).
-  const { data: expl } = await admin
-    .from("question_explanations")
-    .select("question_id")
-    .eq("keyword_title", kw)
-    .limit(500);
+  // 1) 같은 개념 해설 → question_id. 코퍼스가 커도 상한을 둔다(랜덤 풀 충분).
+  const explQuery = admin.from("question_explanations").select("question_id").limit(500);
+  const { data: expl } = await (conceptId
+    ? explQuery.eq("concept_id", conceptId)
+    : explQuery.eq("keyword_title", kw));
   const questionIds = [...new Set((expl ?? []).map((r) => r.question_id as string))];
   if (questionIds.length === 0) return [];
 
@@ -657,9 +659,14 @@ export async function collectConceptReviewCandidates(
 export async function createConceptReviewSessionForUser(
   supabase: Supabase,
   userId: string,
-  input: { concept: string; subjectSlug: string | null; limit?: number },
+  input: { concept: string; conceptId?: string | null; subjectSlug: string | null; limit?: number },
 ): Promise<{ sessionId?: string; error?: string }> {
-  const items = await collectConceptReviewCandidates(supabase, input.concept, input.subjectSlug);
+  const items = await collectConceptReviewCandidates(
+    supabase,
+    input.concept,
+    input.subjectSlug,
+    input.conceptId ?? null,
+  );
   if (items.length === 0) {
     return { error: "이 개념으로 풀 수 있는 기출 문항을 찾지 못했어요." };
   }

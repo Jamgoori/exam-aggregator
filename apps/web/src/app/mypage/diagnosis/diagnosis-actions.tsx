@@ -10,12 +10,14 @@ import { requestDiagnosis } from "@/app/mypage/actions";
 // 풀이 라우트를 만들 수 없어 렌더하지 않는다(호출부에서 처리).
 export function ConceptSolveButton({
   concept,
+  conceptId = null,
   subjectSlug,
   limit = 5,
   label = "같은 개념 기출 풀기",
   className = "",
 }: {
   concept: string;
+  conceptId?: string | null;
   subjectSlug: string;
   limit?: number;
   label?: string;
@@ -29,7 +31,7 @@ export function ConceptSolveButton({
     if (pending) return;
     setError(null);
     start(async () => {
-      const res = await createReviewFromConcept({ concept, subjectSlug, limit });
+      const res = await createReviewFromConcept({ concept, conceptId, subjectSlug, limit });
       if (res.error || !res.sessionId) {
         setError(res.error ?? "문제를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
         return;
