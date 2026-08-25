@@ -78,6 +78,14 @@ async function selectIn(supabase, table, columns, column, values) {
   return rows;
 }
 
+// 과목 + 이름 복합 키. 구분자 문자(예전엔 NUL)를 쓰지 않고 JSON 배열로 만든다 — 이름에
+// 어떤 문자가 들어와도 두 필드가 섞이지 않고, 이 스크립트가 루틴 프롬프트에 코드 블록
+// 통째로 실려 배포되는 경로에서 이스케이프가 변형될 여지도 없앤다
+// (next-explanation-chunk.mjs 의 groupKey 와 같은 방식).
+function subjectScopedKey(subjectId, name) {
+  return JSON.stringify([subjectId ?? null, name]);
+}
+
 // concept 이름 → concept_id. 문항이 속한 과목 안에서만 찾는다 — 별칭은 과목 안에서만
 // 유일하고, 국어 "내용 일치"와 영어 "내용 일치"는 서로 다른 개념이다.
 //
@@ -115,7 +123,7 @@ async function resolveConcepts(supabase, items) {
   const conceptByAlias = new Map();
   const subjectsWithDictionary = new Set();
   for (const a of aliasRows) {
-    conceptByAlias.set(`${a.subject_id}\u0000${a.normalized}`, a.concept_id);
+    conceptByAlias.set(subjectScopedKey(a.subject_id, a.normalized), a.concept_id);
     subjectsWithDictionary.add(a.subject_id);
   }
 
@@ -134,7 +142,7 @@ async function resolveConcepts(supabase, items) {
     if (!name) continue;
 
     const conceptId = subjectId
-      ? conceptByAlias.get(`${subjectId}\u0000${normalizeConceptAlias(name)}`)
+      ? conceptByAlias.get(subjectScopedKey(subjectId, normalizeConceptAlias(name)))
       : undefined;
 
     // "?"를 붙였어도 실제로 목록에 있으면 붙인다 — 이름이 맞으면 진단 분포는
@@ -150,7 +158,7 @@ async function resolveConcepts(supabase, items) {
       : subjectId && !subjectsWithDictionary.has(subjectId)
         ? noDictionary
         : unmatched;
-    const key = `${subjectId ?? "?"}\u0000${name}`;
+    const key = subjectScopedKey(subjectId, name);
     const entry = bucket.get(key) ?? { concept: name, subject_id: subjectId, count: 0 };
     entry.count++;
     entry.example_question_id ??= item.question_id;
