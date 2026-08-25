@@ -14,7 +14,7 @@ export const unstable_instant = {
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BookOpenCheck, ChevronRight, Star, Trophy } from "lucide-react";
+import { BookOpenCheck, ChevronRight, Sparkles, Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
@@ -23,6 +23,7 @@ import { ScrollToHash } from "@/components/scroll-to-hash";
 import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-card";
 import { AttendanceCard } from "@/components/attendance-card";
 import { getMembership, isAdminUser } from "@/lib/membership";
+import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 import { getDueReviewSummary } from "@/lib/review-queue";
 import { getAttendanceSummary } from "@/lib/attendance";
 import { findUnfinishedDueSession } from "@/lib/review-session";
@@ -426,6 +427,7 @@ export default async function MyPage({
             groups={wrongNoteGroups}
             unresolvedBySubject={unresolvedBySubject}
             reviewDue={reviewDue}
+            showDiagnosis={isDiagnosisDevAllowed(user.email)}
           />
         }
       />
@@ -592,11 +594,13 @@ function WrongNotesTab({
   groups,
   unresolvedBySubject,
   reviewDue,
+  showDiagnosis,
 }: {
   premium: boolean;
   groups: WrongNoteSubjectGroup[];
   unresolvedBySubject: Map<string, { name: string; slug: string; unresolved: number; due: number }>;
   reviewDue: ReviewDueCardProps;
+  showDiagnosis: boolean;
 }) {
   // 무료 회원: 오답노트는 열람도 정리도 섞어풀기도 그대로 쓴다. 다만 무거운
   // 집계(buildWrongNoteGroups)는 돌리지 않았으므로 과목 카드를 이미 계산해 둔
@@ -651,6 +655,7 @@ function WrongNotesTab({
           </div>
         )}
         <ReviewDueCard {...reviewDue} />
+        {showDiagnosis && <DiagnosisEntryLink />}
       </section>
     );
   }
@@ -734,6 +739,27 @@ function WrongNotesTab({
         </div>
       )}
       <ReviewDueCard {...reviewDue} />
+      {showDiagnosis && <DiagnosisEntryLink />}
     </section>
+  );
+}
+
+// 개발 중 임시 진입점: lks2354@gmail.com 계정에만 보이는 AI 약점 진단 링크.
+// 정식 오픈 시 diagnosis-dev-gate 와 함께 걷어내고 모든 회원에게 노출할 것.
+function DiagnosisEntryLink() {
+  return (
+    <Link
+      href="/mypage/diagnosis"
+      className="group flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 p-4 transition-colors hover:border-violet-300 hover:bg-violet-100 dark:border-violet-900/50 dark:bg-violet-950/20 dark:hover:bg-violet-950/40"
+    >
+      <Sparkles size={18} className="shrink-0 text-violet-600 dark:text-violet-400" />
+      <span className="flex-1 text-sm font-semibold text-violet-900 dark:text-violet-200">
+        AI 약점 진단
+      </span>
+      <ChevronRight
+        size={16}
+        className="shrink-0 text-violet-400 transition-transform group-hover:translate-x-0.5"
+      />
+    </Link>
   );
 }
