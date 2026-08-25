@@ -21,9 +21,10 @@ export type ConceptStat = {
   conceptKind: string | null;
   subject: string | null;
   subjectSlug: string | null;
+  // 이 창(기간) 안에서 틀린 문항 수(문항 단위 중복 제거).
   wrongCount: number;
-  resolvedCount: number;
-  // CBT 정답률(%). 응시 기록이 없으면 null.
+  // 이 창 안에서 이 개념 문항을 푼 총 횟수와 그중 정답률(%). 표본이 없으면 null.
+  answeredCount: number;
   accuracyPct: number | null;
   // 전체 기출 코퍼스에서 같은 keyword_title 문항 수.
   corpusCount: number;
@@ -47,7 +48,15 @@ export type SubjectConceptGroup = {
   concepts: ConceptStat[];
 };
 
+// 집계 기간. days=null 이면 전체 기간.
+export type DiagnosisWindow = {
+  days: number | null;
+  // 요청한 기간에 푼 문제가 없어 자동으로 넓힌 경우 true(화면이 그 사실을 알린다).
+  widened: boolean;
+};
+
 export type DiagnosisAggregate = {
+  window: DiagnosisWindow;
   totals: { attempts: number; wrongQuestions: number; conceptsWithKeyword: number };
   subjects: SubjectStat[];
   // wrongCount 내림차순, 최대 30개.
@@ -88,11 +97,113 @@ async function fetchAll<T>(
 
 const questionKey = (pid: string, n: number) => `${pid}#${n}`;
 
-// 사용자의 오답·응시 통계와 개념(keyword_title) 분포를 집계한다. 무AI. 배치 스크립트
-// next-diagnosis.mjs와 같은 규칙을 쓰되, 화면·생성기 양쪽에서 쓰도록 corpusCount와
-// 과목별 묶음(bySubject)까지 함께 돌려준다.
-export async function getDiagnosisAggregate(userId: string): Promise<DiagnosisAggregate> {
+// days 전부터 지금까지의 ISO 시각. days=null 이면 제한 없음(전체 기간).
+function sinceIso(days: number | null): string | null {
+  if (days == null) return null;
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
+
+// 기간 안에 사용자가 푼 문항별 정오 집계. CBT 제출과 섞어풀기·복습 세션을 모두 센다
+// (사용자에겐 둘 다 "푼 것"이고, 한쪽만 세면 복습으로만 공부한 주가 빈칸이 된다).
+// 같은 문항을 여러 번 풀었으면 total 이 늘고, 그중 틀린 횟수가 wrong 이다.
+async function collectAnswerEvents(
+  admin: Admin,
+  userId: string,
+  days: number | null,
+): Promise<Map<string, { paperId: string; questionNumber: number; wrong: number; total: number }>> {
+  const since = sinceIso(days);
+  const out = new Map<string, { paperId: string; questionNumber: number; wrong: number; total: number }>();
+
+  const bump = (paperId: string, questionNumber: number, isCorrect: boolean | null) => {
+    const k = questionKey(paperId, questionNumber);
+    const e = out.get(k) ?? { paperId, questionNumber, wrong: 0, total: 0 };
+    e.total++;
+    if (isCorrect === false) e.wrong++;
+    out.set(k, e);
+  };
+
+  // CBT: 제출(attempt) → 문항별 응답.
+  const attemptRows = await fetchAll<{ id: string; paper_id: string }>(
+    admin,
+    "cbt_attempts",
+    "id, paper_id",
+    (q) => (since ? q.eq("user_id", userId).gte("created_at", since) : q.eq("user_id", userId)),
+  );
+  const attemptPaperId = new Map(attemptRows.map((a) => [a.id, a.paper_id]));
+  for (const ids of chunk([...attemptPaperId.keys()], 100)) {
+    if (ids.length === 0) continue;
+    const rows = await fetchAll<{
+      attempt_id: string;
+      question_number: number;
+      selected_choice: number | null;
+      is_correct: boolean | null;
+    }>(
+      admin,
+      "cbt_attempt_answers",
+      "attempt_id, question_number, selected_choice, is_correct",
+      (q) => q.in("attempt_id", ids),
+    );
+    for (const r of rows) {
+      // 안 푼(미선택) 문항은 "틀렸다"가 아니라 "안 풀었다"이므로 세지 않는다.
+      if (r.selected_choice == null) continue;
+      const paperId = attemptPaperId.get(r.attempt_id);
+      if (paperId) bump(paperId, r.question_number, r.is_correct);
+    }
+  }
+
+  // 섞어풀기·복습: 채점을 마친(submitted) 세션만.
+  const sessionRows = await fetchAll<{ id: string }>(
+    admin,
+    "review_sessions",
+    "id",
+    (q) => {
+      const base = q.eq("user_id", userId).not("submitted_at", "is", null);
+      return since ? base.gte("created_at", since) : base;
+    },
+  );
+  for (const ids of chunk(sessionRows.map((s) => s.id), 100)) {
+    if (ids.length === 0) continue;
+    const rows = await fetchAll<{
+      paper_id: string;
+      question_number: number;
+      selected_choice: number | null;
+      is_correct: boolean | null;
+    }>(
+      admin,
+      "review_session_items",
+      "paper_id, question_number, selected_choice, is_correct",
+      (q) => q.in("session_id", ids),
+    );
+    for (const r of rows) {
+      if (r.selected_choice == null) continue;
+      bump(r.paper_id, r.question_number, r.is_correct);
+    }
+  }
+
+  return out;
+}
+
+// 자동 확장 사다리. 요청한 기간에 푼 문제가 없으면 다음 칸으로 넓힌다 — 며칠 쉰
+// 사용자에게 빈 그래프를 보여주는 것보다 "언제 것"인지 밝히고 보여주는 편이 낫다.
+const WIDEN_LADDER: (number | null)[] = [7, 30, 90, null];
+
+// 사용자가 이 기간에 "무엇을 틀렸는지"를 개념별로 집계한다(무AI).
+//
+// 누적 상태(user_question_status)가 아니라 **응시 이벤트**를 읽는다. 목표가 "지난
+// 일주일 동안 어떤 개념 위주로 틀렸나"라서 시점이 필요한데, 누적 상태에는 마지막
+// 응답 시각 하나뿐이라 기간을 자를 수 없다. CBT 제출(cbt_attempt_answers)과
+// 섞어풀기·복습(review_session_items)을 모두 센다 — 사용자에겐 둘 다 "푼 것"이다.
+export async function getDiagnosisAggregate(
+  userId: string,
+  opts: { days?: number | null; widen?: boolean } = {},
+): Promise<DiagnosisAggregate> {
   const admin = createAdminClient();
+  const requested = opts.days === undefined ? 7 : opts.days;
+  // widen=false 면 창을 절대 넓히지 않는다. AI 분석 경로가 이걸 쓴다 — 창이 곧 프롬프트
+  // 크기이자 요금이라, 빈 주에 조용히 90일치를 긁어 오면 안 된다.
+  const widenAllowed = opts.widen !== false;
 
   // 1) 응시 이력(과목 포함) — 과목별 정오율·추세.
   const attempts = await fetchAll<{
@@ -134,47 +245,36 @@ export async function getDiagnosisAggregate(userId: string): Promise<DiagnosisAg
     recentScores: e.recentPct.slice(-5),
   }));
 
-  // 1-1) CBT 제출별 정오 — 문항별 정답률(섞어풀기 제외, CBT 기준).
-  const attemptPaper = new Map(attempts.map((a) => [a.id, a.paper_id]));
-  const answerStats = new Map<string, { correct: number; total: number }>();
-  const attemptIds = attempts.map((a) => a.id);
-  for (const ids of chunk(attemptIds, 100)) {
-    if (ids.length === 0) continue;
-    const rows = await fetchAll<{
-      attempt_id: string;
-      question_number: number;
-      selected_choice: number | null;
-      is_correct: boolean | null;
-    }>(
-      admin,
-      "cbt_attempt_answers",
-      "attempt_id, question_number, selected_choice, is_correct",
-      (q) => q.in("attempt_id", ids),
-    );
-    for (const r of rows) {
-      if (r.selected_choice == null) continue;
-      const paperId = attemptPaper.get(r.attempt_id);
-      if (!paperId) continue;
-      const k = questionKey(paperId, r.question_number);
-      const e = answerStats.get(k) ?? { correct: 0, total: 0 };
-      e.total++;
-      if (r.is_correct) e.correct++;
-      answerStats.set(k, e);
+  // 2) 기간 안의 응시 이벤트 → 문항별 정오. CBT와 섞어풀기를 합쳐 센다.
+  //    사다리를 따라 넓히며 "틀린 문항이 하나라도 나오는" 첫 창을 쓴다.
+  // 요청한 창부터 시작해, 그보다 넓은 칸만 사다리로 이어 붙인다(요청이 9일이면
+  // 9 → 30 → 90 → 전체). 화면에서만 넓히고, 분석 경로는 widen:false 로 첫 칸에 묶인다.
+  const ladder: (number | null)[] = !widenAllowed
+    ? [requested]
+    : [requested, ...WIDEN_LADDER.filter((d) => d === null || (requested !== null && d > requested))];
+
+  type QuestionStat = { paperId: string; questionNumber: number; wrong: number; total: number };
+  let statsByQuestion = new Map<string, QuestionStat>();
+  let usedDays: number | null = requested;
+  let widened = false;
+
+  for (const days of ladder) {
+    statsByQuestion = await collectAnswerEvents(admin, userId, days);
+    const anyWrong = [...statsByQuestion.values()].some((s) => s.wrong > 0);
+    if (anyWrong) {
+      usedDays = days;
+      widened = days !== requested;
+      break;
     }
+    usedDays = days;
+    widened = days !== requested;
   }
 
-  // 2) 한 번이라도 틀린 문항(통합 상태) — 개념 분포.
-  const statusRows = await fetchAll<{
-    paper_id: string;
-    question_number: number;
-    wrong_count: number;
-    last_is_correct: boolean;
-  }>(
-    admin,
-    "user_question_status",
-    "paper_id, question_number, wrong_count, last_is_correct",
-    (q) => q.eq("user_id", userId).gt("wrong_count", 0),
-  );
+  // 개념 집계는 "이 기간에 한 번이라도 틀린 문항"만 대상으로 한다.
+  const statusRows = [...statsByQuestion.values()]
+    .filter((s) => s.wrong > 0)
+    .map((s) => ({ paper_id: s.paperId, question_number: s.questionNumber }));
+  const answerStats = statsByQuestion;
 
   // 3) (paper, 문항) → questions.id → keyword_title, paper → subject.
   const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
@@ -256,7 +356,6 @@ export async function getDiagnosisAggregate(userId: string): Promise<DiagnosisAg
       subject: string | null;
       subjectSlug: string | null;
       wrongCount: number;
-      resolvedCount: number;
       correctSum: number;
       answerSum: number;
     }
@@ -281,15 +380,15 @@ export async function getDiagnosisAggregate(userId: string): Promise<DiagnosisAg
         subject: subj?.name ?? null,
         subjectSlug: subj?.slug ?? null,
         wrongCount: 0,
-        resolvedCount: 0,
         correctSum: 0,
         answerSum: 0,
       };
+    // 이 기간에 틀린 문항 1개 = 1. 같은 문항을 두 번 틀려도 문항 수로는 1이다
+    // ("이 개념 문제 5개를 틀렸다"가 사람이 읽기 쉬운 단위).
     entry.wrongCount++;
-    if (r.last_is_correct) entry.resolvedCount++;
     const st = answerStats.get(questionKey(r.paper_id, r.question_number));
     if (st) {
-      entry.correctSum += st.correct;
+      entry.correctSum += st.total - st.wrong;
       entry.answerSum += st.total;
     }
     conceptMap.set(key, entry);
@@ -303,10 +402,10 @@ export async function getDiagnosisAggregate(userId: string): Promise<DiagnosisAg
       subject: e.subject,
       subjectSlug: e.subjectSlug,
       wrongCount: e.wrongCount,
-      resolvedCount: e.resolvedCount,
+      answeredCount: e.answerSum,
       accuracyPct: e.answerSum > 0 ? Math.round((e.correctSum / e.answerSum) * 100) : null,
     }))
-    .sort((a, b) => b.wrongCount - a.wrongCount || a.resolvedCount - b.resolvedCount)
+    .sort((a, b) => b.wrongCount - a.wrongCount || a.concept.localeCompare(b.concept))
     .slice(0, 30);
 
   // 5) 각 개념의 전체 기출 corpus 문항 수. 같은개념 5문제 풀기 가능 여부 판단에 그대로 쓰고,
@@ -350,6 +449,7 @@ export async function getDiagnosisAggregate(userId: string): Promise<DiagnosisAg
     .sort((a, b) => b.totalWrong - a.totalWrong);
 
   return {
+    window: { days: usedDays, widened },
     totals: {
       attempts: attempts.length,
       wrongQuestions: statusRows.length,

@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionUser } from "@/lib/supabase/session";
-import { requestWeeklyDiagnosis, DIAGNOSIS_CYCLE_DAYS } from "@/lib/ai-diagnosis";
+import {
+  requestWeeklyDiagnosis,
+  getLastAnalyzedDate,
+  analysisWindowDays,
+  DIAGNOSIS_CYCLE_DAYS,
+} from "@/lib/ai-diagnosis";
 import { runDiagnosisForUser } from "@/lib/diagnosis-generate";
 import { isPremium } from "@/lib/membership";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
@@ -54,11 +59,17 @@ export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
     .limit(1)
     .maybeSingle();
 
+  // 분석 창: 마지막으로 리포트가 나온 날부터 오늘까지, 최대 2주. 9일 전에 받았으면
+  // 9일치, 한 달을 쉬었어도 14일치까지만 훑는다 — 창이 곧 프롬프트 크기이자 요금이다.
+  const windowDays = analysisWindowDays(await getLastAnalyzedDate(supabase, user.id));
+
   let status: "ready" | "pending" = "pending";
+  let genError: string | undefined;
   if (row?.id) {
     try {
-      const gen = await runDiagnosisForUser(row.id as string, user.id);
+      const gen = await runDiagnosisForUser(row.id as string, user.id, windowDays);
       status = gen.status;
+      genError = gen.error;
     } catch {
       status = "pending";
     }
@@ -66,5 +77,6 @@ export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
 
   revalidatePath("/mypage");
   revalidatePath("/mypage/diagnosis");
-  return { status };
+  // 생성기가 이유를 말해 주면(예: 그 기간에 틀린 게 없음) 그대로 화면에 올린다.
+  return genError ? { status, error: genError } : { status };
 }

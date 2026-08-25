@@ -45,7 +45,9 @@ function toWeakConcepts(agg: DiagnosisAggregate): DiagnosisWeakConcept[] {
     subject: c.subject,
     subjectSlug: c.subjectSlug,
     wrongCount: c.wrongCount,
-    resolvedCount: c.resolvedCount,
+    // 리포트 스키마의 필드지만 진단은 더 이상 극복 여부를 세지 않는다(기간 안에
+    // 무엇을 틀렸는지만 본다). 앱이 값이 있을 때만 그리므로 null 로 둔다.
+    resolvedCount: null,
     frequency: freq(c.corpusCount),
     accuracyPct: c.accuracyPct,
   }));
@@ -72,14 +74,11 @@ function toSubjectTrends(agg: DiagnosisAggregate): DiagnosisSubjectTrend[] {
     });
 }
 
-// 코칭 대상 개념: 미극복 우선 + wrongCount 높은 순으로 상위 N.
+// 코칭 대상 개념: 이 기간에 많이 틀린 순으로 상위 N. 동률이면 정답률이 낮은 쪽을
+// 먼저 — 같은 3문항이라도 "5문항 중 3개"가 "20문항 중 3개"보다 급하다.
 function pickCoachTargets(agg: DiagnosisAggregate) {
   return [...agg.concepts]
-    .sort(
-      (a, b) =>
-        Number(a.resolvedCount >= a.wrongCount) - Number(b.resolvedCount >= b.wrongCount) ||
-        b.wrongCount - a.wrongCount,
-    )
+    .sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101))
     .slice(0, COACH_TOP_N);
 }
 
@@ -90,8 +89,9 @@ type CoachInput = {
   // 지식형/기능형 — 조언의 방향이 갈린다(개념 학습 vs 풀이 전략).
   conceptKind: string | null;
   subject: string | null;
+  // 이 기간에 틀린 문항 수 / 푼 문항 수. 모델이 "몇 개 중 몇 개"로 심각도를 읽는다.
   wrongCount: number;
-  resolvedCount: number;
+  answeredCount: number;
   accuracyPct: number | null;
 };
 
@@ -138,7 +138,7 @@ async function generateCoaching(
       // 지식형이면 "개념을 모른다", 기능형이면 "이 유형 풀이에 약하다" 쪽으로 조언한다.
       유형: t.conceptKind === "skill" ? "문제풀이 기능" : "지식 개념",
       wrongCount: t.wrongCount,
-      resolvedCount: t.resolvedCount,
+      answeredCount: t.answeredCount,
       accuracyPct: t.accuracyPct,
       // 이 개념에서 실제로 틀린 문항들. pickedChoice가 없으면 CBT 응시 기록이 없는
       // 문항(섞어풀기 등)이라 "무엇을 골랐는지"는 알 수 없다.
@@ -246,8 +246,21 @@ function buildSummary(agg: DiagnosisAggregate): string {
 export async function runDiagnosisForUser(
   diagnosisId: string,
   userId: string,
+  // 이번 분석이 훑을 기간(일) — 마지막 진단일부터 오늘까지, 최대 2주
+  // (ai-diagnosis.ts analysisWindowDays). 창이 곧 프롬프트 크기이자 요금이라
+  // widen:false 로 넘겨 절대 넓어지지 않게 한다.
+  windowDays: number,
 ): Promise<{ status: "ready" | "pending"; error?: string }> {
-  const agg = await getDiagnosisAggregate(userId);
+  const agg = await getDiagnosisAggregate(userId, { days: windowDays, widen: false });
+
+  // 그 기간에 틀린 게 없으면 만들 리포트가 없다. 여기서 끊지 않으면 빈 입력으로
+  // API를 호출해 요금만 나간다.
+  if (agg.concepts.length === 0) {
+    return {
+      status: "pending",
+      error: `최근 ${windowDays}일 동안 새로 틀린 문제가 없어요. 문제를 좀 더 풀고 다시 받아보세요.`,
+    };
+  }
 
   const weakConcepts = toWeakConcepts(agg);
   const subjectTrends = toSubjectTrends(agg);
@@ -270,7 +283,7 @@ export async function runDiagnosisForUser(
         conceptKind: t.conceptKind,
         subject: t.subject,
         wrongCount: t.wrongCount,
-        resolvedCount: t.resolvedCount,
+        answeredCount: t.answeredCount,
         accuracyPct: t.accuracyPct,
       })),
       subjectSlugByConcept,

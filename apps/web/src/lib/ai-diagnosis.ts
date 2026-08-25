@@ -100,6 +100,34 @@ export function kstToday(): string {
 // 진단 주기(일). 마지막으로 진단을 받은 날로부터 이만큼 지나야 다시 받을 수 있다.
 export const DIAGNOSIS_CYCLE_DAYS = 7;
 
+// 분석 창의 상한(일). 오래 쉬었다 돌아온 사람의 몇 달치를 통째로 긁으면 프롬프트가
+// 그만큼 커져 요금이 뛴다. 2주를 넘겨 거슬러 올라가지 않는다 — 그보다 오래된 오답은
+// "지금 무엇을 틀리고 있나"의 근거로도 약하다.
+export const DIAGNOSIS_MAX_WINDOW_DAYS = 14;
+
+// 이번 분석이 훑을 기간(일). 마지막 진단일부터 오늘까지, 최대 2주.
+//  - 9일 전에 받았으면 9일치
+//  - 4주 동안 안 받았어도 14일치까지만
+//  - 받은 적이 없으면 14일치
+export function analysisWindowDays(lastDiagnosisDate: string | null): number {
+  if (!lastDiagnosisDate) return DIAGNOSIS_MAX_WINDOW_DAYS;
+  const from = Date.parse(`${lastDiagnosisDate}T00:00:00Z`);
+  const to = Date.parse(`${kstToday()}T00:00:00Z`);
+  if (Number.isNaN(from) || Number.isNaN(to)) return DIAGNOSIS_MAX_WINDOW_DAYS;
+  const days = Math.round((to - from) / 86_400_000);
+  return Math.min(DIAGNOSIS_MAX_WINDOW_DAYS, Math.max(1, days));
+}
+
+// 마지막으로 리포트가 만들어진 날짜(YYYY-MM-DD). 분석 창의 시작점 — 그 뒤로 쌓인
+// 오답만 새로 본다. 없으면 null(처음 받는 사람).
+export async function getLastAnalyzedDate(
+  supabase: Supabase,
+  userId: string,
+): Promise<string | null> {
+  const latest = await getLatestReadyDiagnosis(supabase, userId);
+  return latest?.date ?? null;
+}
+
 // 진단 주기는 달력 주(월~일)가 아니라 **본인이 마지막으로 받은 날 기준 7일**이다.
 // 달력 주로 끊으면 금요일에 처음 받은 사람이 이틀 뒤 월요일에 또 받게 되고, 반대로
 // 월요일에 받은 사람은 6일을 기다린다 — 같은 "주 1회"인데 사람마다 실제 간격이 다르다.

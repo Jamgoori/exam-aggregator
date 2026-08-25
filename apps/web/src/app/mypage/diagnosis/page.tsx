@@ -7,6 +7,8 @@ import {
   getWeeklyDiagnosis,
   getLatestReadyDiagnosis,
   getDiagnosisEligibility,
+  getLastAnalyzedDate,
+  analysisWindowDays,
   nextDiagnosisDate,
   type DiagnosisConceptCoaching,
 } from "@/lib/ai-diagnosis";
@@ -21,13 +23,32 @@ import { isPremium } from "@/lib/membership";
 import { MembershipLockedPage } from "@/components/membership-upsell";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 
-// AI 약전진단(리뉴얼). 입장 즉시 보이는 것은 전부 결정적 데이터(무AI):
-//  A) 과목별 틀린 개념 막대그래프 — 어디가 약한지 한눈에.
-//  B) 개념별 카드 — 이 개념에서 주로 어떤 문제를 틀렸는지(데이터) + 맞춤 극복법(AI, 진단받기
-//     때 생성·캐시) + 같은 개념 기출 5문제 풀기.
-// AI(극복법)는 마이페이지 "진단받기"를 눌러야 생성된다. 아직 없으면 데이터층만 그리고
-// 극복법 자리에 안내를 둔다.
-export default async function DiagnosisPage() {
+// 기간 선택(?range=). 기본은 "지난 진단 이후"(최대 2주)로, AI가 실제로 분석하는 창과
+// 같다 — 이 화면의 질문이 "지난 진단 뒤로 뭘 틀렸나"이기 때문이다. 그 기간에 푼 문제가
+// 없으면 집계가 스스로 넓히고(widened), 사용자는 칩으로 직접 바꿀 수도 있다.
+const RANGES = [
+  // 기본값(cycle)은 분석 창과 같은 기간 — 마지막 진단 이후, 최대 2주. 그래프와 극복법이
+  // 서로 다른 기간을 보면 "이 개념 3문항 틀림"과 코칭 내용이 어긋난다.
+  { key: "cycle", days: null as number | null, label: "지난 진단 이후" },
+  { key: "30", days: 30 as number | null, label: "최근 30일" },
+  { key: "all", days: null as number | null, label: "전체" },
+];
+
+function rangeLabel(days: number | null): string {
+  if (days == null) return "전체 기간";
+  return `최근 ${days}일`;
+}
+
+// AI 약점 진단. 입장 즉시 보이는 것은 전부 결정적 데이터(무AI):
+//  A) 선택한 기간에 틀린 개념 막대그래프 — 그 기간에 뭘 틀렸는지 한눈에.
+//  B) 개념별 카드 — 이 기간에 몇 문항 틀렸는지(데이터) + 맞춤 극복법(AI, 주 1회 생성·캐시)
+//     + 같은 개념 기출 5문제 풀기.
+// AI(극복법)는 아래 "극복법 만들기"를 눌러야 생성된다. 아직 없으면 데이터층만 그린다.
+export default async function DiagnosisPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ range?: string }>;
+}) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -58,7 +79,12 @@ export default async function DiagnosisPage() {
   }
 
   // 데이터층(무AI): 막대그래프·개념 카드. 페이지 입장 즉시 라이브 집계.
-  const agg = await getDiagnosisAggregate(user.id);
+  const rangeKey = (await searchParams)?.range;
+  const selected = RANGES.find((r) => r.key === rangeKey) ?? RANGES[0];
+  // "지난 진단 이후"는 사람마다 길이가 다르다 — 마지막 리포트 날짜에서 계산한다.
+  const cycleDays = analysisWindowDays(await getLastAnalyzedDate(supabase, user.id));
+  const days = selected.key === "cycle" ? cycleDays : selected.days;
+  const agg = await getDiagnosisAggregate(user.id, { days });
 
   // AI 극복법(있으면): 이번 주 리포트 → 없으면 지난 완료 리포트에서 conceptCoaching만 가져온다.
   const today = await getWeeklyDiagnosis(supabase, user.id);
@@ -98,6 +124,7 @@ export default async function DiagnosisPage() {
             hasCoaching={(coaching ?? []).length > 0}
             requestedThisWeek={today != null}
             nextDate={nextDate}
+            selectedKey={selected.key}
           />
         )}
       </div>
@@ -141,12 +168,15 @@ function Dashboard({
   hasCoaching,
   requestedThisWeek,
   nextDate,
+  selectedKey,
 }: {
   agg: DiagnosisAggregate;
   coachingByConcept: Map<string, DiagnosisConceptCoaching>;
   hasCoaching: boolean;
   // 다음 진단을 받을 수 있는 날(YYYY-MM-DD). 이번 주기에 이미 받았을 때만 값이 있다.
   nextDate: string | null;
+  // 지금 선택된 기간 칩(RANGES.key).
+  selectedKey: string;
   // 이번 주 진단 행이 이미 있는지. 있는데 극복법이 없다면 생성이 실패해 pending으로
   // 남은 것이므로 버튼을 "다시 시도"로 보여준다.
   requestedThisWeek: boolean;
@@ -159,11 +189,32 @@ function Dashboard({
       {/* A. 과목별 틀린 개념 막대그래프 */}
       <Card>
         <SectionTitle icon={<BarChart3 size={16} className="text-blue-600 dark:text-blue-400" />}>
-          과목별 틀린 개념
+          {rangeLabel(agg.window.days)} 틀린 개념
         </SectionTitle>
         <p className="mt-1 px-1 text-xs text-slate-500 dark:text-zinc-500">
-          막대가 길수록 그 개념에서 더 많이 틀렸어요.
+          {agg.window.widened
+            ? "선택한 기간에 푼 문제가 없어 기간을 넓혔어요."
+            : "막대가 길수록 그 개념에서 더 많이 틀렸어요."}
         </p>
+        <div className="mt-3 flex gap-1.5 px-1">
+          {RANGES.map((r) => {
+            const active = r.key === selectedKey;
+            return (
+              <Link
+                key={r.key}
+                href={`/mypage/diagnosis?range=${r.key}`}
+                scroll={false}
+                className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+                  active
+                    ? "bg-blue-600 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                }`}
+              >
+                {r.label}
+              </Link>
+            );
+          })}
+        </div>
         <div className="mt-4 flex flex-col gap-5">
           {agg.bySubject.map((g) => (
             <SubjectBars key={g.subjectSlug ?? g.subject} group={g} maxWrong={maxWrong} />
@@ -190,7 +241,8 @@ function Dashboard({
       </div>
 
       <p className="px-1 text-center text-xs text-slate-400 dark:text-zinc-600">
-        그래프·문제는 실시간 데이터예요. 맞춤 극복법만 주 1회 AI가 생성해요.
+        그래프는 {rangeLabel(agg.window.days)} 실시간 데이터예요. 맞춤 극복법은 주 1회, 지난
+        진단 이후(최대 2주)에 틀린 문제만 분석해요.
         {hasCoaching && nextDate ? ` 다음 진단은 ${formatMonthDay(nextDate)}부터.` : ""}
       </p>
     </div>
@@ -207,7 +259,7 @@ function SubjectBars({ group, maxWrong }: { group: SubjectConceptGroup; maxWrong
     <div>
       <p className="mb-2 flex items-baseline justify-between px-1">
         <span className="text-sm font-bold text-slate-900 dark:text-zinc-100">{group.subject}</span>
-        <span className="text-xs text-slate-400 dark:text-zinc-500">틀린 {group.totalWrong}문항</span>
+        <span className="text-xs text-slate-400 dark:text-zinc-500">{group.totalWrong}문항 틀림</span>
       </p>
       <div className="flex flex-col gap-1.5">
         {shown.map((c, i) => (
@@ -221,23 +273,29 @@ function SubjectBars({ group, maxWrong }: { group: SubjectConceptGroup; maxWrong
   );
 }
 
+// 개념 막대 하나. 라벨을 막대 위에 두는 건 개념 이름이 길기 때문이다 — 좌측 고정폭에
+// 넣으면 "글의 내용과 일치·불일치 판단"이 "글의 내용과 일치…"로 잘려 정작 알아야 할
+// 정보가 사라진다. 막대는 이 기간에 틀린 문항 수만 나타낸다(극복 여부는 세지 않는다).
 function ConceptBar({ concept, maxWrong }: { concept: ConceptStat; maxWrong: number }) {
-  const pct = Math.max(6, Math.round((concept.wrongCount / maxWrong) * 100));
-  const resolved = (concept.resolvedCount ?? 0) >= concept.wrongCount && concept.wrongCount > 0;
+  const pct = Math.max(4, Math.round((concept.wrongCount / maxWrong) * 100));
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-28 shrink-0 truncate text-xs text-slate-600 dark:text-zinc-400" title={concept.concept}>
-        {concept.concept}
-      </span>
-      <div className="h-4 flex-1 overflow-hidden rounded bg-slate-100 dark:bg-zinc-800">
+    <div>
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <span className="min-w-0 text-[13px] leading-snug text-slate-700 dark:text-zinc-300">
+          {concept.concept}
+        </span>
+        <span className="shrink-0 text-xs text-slate-400 dark:text-zinc-500">
+          <b className="text-sm font-bold text-blue-600 dark:text-blue-400">{concept.wrongCount}</b>
+          문항
+          {concept.accuracyPct != null ? ` · 정답률 ${concept.accuracyPct}%` : ""}
+        </span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800">
         <div
-          className={`h-full rounded ${resolved ? "bg-emerald-400 dark:bg-emerald-500" : "bg-blue-500 dark:bg-blue-500"}`}
+          className="h-full rounded-full bg-blue-500"
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="w-6 shrink-0 text-right text-xs font-bold tabular-nums text-slate-500 dark:text-zinc-400">
-        {concept.wrongCount}
-      </span>
     </div>
   );
 }
@@ -282,7 +340,8 @@ function ConceptCard({
 
       {/* 데이터: 이 개념에서 주로 어땠는지(무AI) */}
       <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-        {concept.wrongCount}문항 중 {concept.resolvedCount}개 극복
+        이 기간에 {concept.wrongCount}문항 틀렸어요
+        {concept.answeredCount > 0 ? ` (푼 문항 ${concept.answeredCount}개)` : ""}
         {concept.corpusCount > 0 ? ` · 전체 기출 ${concept.corpusCount}문항` : ""}.
       </p>
 
