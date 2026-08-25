@@ -15,7 +15,7 @@ import {
   type ConceptStat,
   type SubjectConceptGroup,
 } from "@/lib/diagnosis-live";
-import { ConceptSolveButton } from "./diagnosis-actions";
+import { ConceptSolveButton, DiagnosisCoachingButton } from "./diagnosis-actions";
 import { isPremium } from "@/lib/membership";
 import { MembershipLockedPage } from "@/components/membership-upsell";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
@@ -88,7 +88,12 @@ export default async function DiagnosisPage() {
         {agg.concepts.length === 0 ? (
           <EmptyState supabase={supabase} userId={user.id} />
         ) : (
-          <Dashboard agg={agg} coachingByConcept={coachingByConcept} hasCoaching={(coaching ?? []).length > 0} />
+          <Dashboard
+            agg={agg}
+            coachingByConcept={coachingByConcept}
+            hasCoaching={(coaching ?? []).length > 0}
+            requestedToday={today != null}
+          />
         )}
       </div>
     </div>
@@ -123,10 +128,14 @@ function Dashboard({
   agg,
   coachingByConcept,
   hasCoaching,
+  requestedToday,
 }: {
   agg: DiagnosisAggregate;
   coachingByConcept: Map<string, DiagnosisConceptCoaching>;
   hasCoaching: boolean;
+  // 오늘 진단 행이 이미 있는지. 있는데 극복법이 없다면 생성이 실패해 pending으로
+  // 남은 것이므로 버튼을 "다시 시도"로 보여준다.
+  requestedToday: boolean;
 }) {
   const topConcepts = agg.concepts.slice(0, CONCEPT_CARD_LIMIT);
   const maxWrong = Math.max(1, ...agg.concepts.map((c) => c.wrongCount));
@@ -153,15 +162,7 @@ function Dashboard({
         <SectionTitle icon={<Flame size={16} className="text-blue-600 dark:text-blue-400" />}>
           개념별 정리 · 극복
         </SectionTitle>
-        {!hasCoaching && (
-          <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-xs text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/20 dark:text-violet-200">
-            맞춤 극복법은{" "}
-            <Link href="/mypage?tab=wrong-notes" className="font-bold underline">
-              오답노트에서 &lsquo;진단 받기&rsquo;
-            </Link>
-            를 누르면 개념별로 생성돼요(하루 1회).
-          </div>
-        )}
+        {!hasCoaching && <DiagnosisCoachingButton requestedToday={requestedToday} />}
         {topConcepts.map((c, i) => (
           <ConceptCard
             key={`${c.concept}-${i}`}
