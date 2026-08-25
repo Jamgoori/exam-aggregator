@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Sparkles, BarChart3, Flame, Lightbulb, BookOpen } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import {
   getWeeklyDiagnosis,
@@ -49,6 +48,10 @@ function rangeLabel(days: number | null): string {
 //     + 같은 개념 기출 5문제 풀기.
 // AI(극복법)는 이 페이지에 들어오면 자동으로 생성된다(주기당 1회, 아래 autoGenerate).
 // 생성 전·실패 시에도 데이터층은 그대로 보인다.
+//
+// 화면은 장식(아이콘·색 배지·틴트 박스)을 쓰지 않는다. 여기서 읽을 것은 개념 이름과
+// 틀린 문항 수뿐이라, 색은 막대 하나와 기본 버튼에만 남기고 나머지는 활자 크기와
+// 여백으로만 위계를 만든다.
 export default async function DiagnosisPage({
   searchParams,
 }: {
@@ -117,19 +120,23 @@ export default async function DiagnosisPage({
     (await getDiagnosisEligibility(supabase, user.id)).eligible;
 
   return (
-    <div className="min-h-dvh bg-slate-50 dark:bg-zinc-950">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pb-16 pt-6 sm:pt-8">
-        <header className="flex flex-col gap-1.5">
+    <div className="min-h-dvh bg-white dark:bg-zinc-950">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 pb-20 pt-6 sm:pt-10">
+        <header className="flex flex-col gap-3 border-b border-slate-200 pb-5 dark:border-zinc-800">
           <Link
             href="/mypage?tab=wrong-notes"
-            className="text-sm text-slate-500 transition-colors hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400"
+            className="text-sm text-slate-500 transition-colors hover:text-slate-900 dark:text-zinc-500 dark:hover:text-zinc-200"
           >
             ← 오답노트로
           </Link>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-slate-900 dark:text-zinc-100">
-            <Sparkles size={22} className="text-blue-600 dark:text-blue-400" />
-            AI 약점 진단
-          </h1>
+          <div className="flex flex-col gap-1">
+            <h1 className="text-[26px] font-bold leading-tight tracking-tight text-slate-900 dark:text-zinc-100">
+              약점 진단
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-zinc-500">
+              틀린 문항을 개념별로 모아서 보여드려요.
+            </p>
+          </div>
         </header>
 
         {agg.concepts.length === 0 ? (
@@ -150,22 +157,12 @@ export default async function DiagnosisPage({
   );
 }
 
-function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+function SectionTitle({ children, hint }: { children: ReactNode; hint?: ReactNode }) {
   return (
-    <section
-      className={`rounded-2xl border border-slate-100 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${className}`}
-    >
-      {children}
-    </section>
-  );
-}
-
-function SectionTitle({ icon, children }: { icon?: ReactNode; children: ReactNode }) {
-  return (
-    <h2 className="flex items-center gap-1.5 px-1 text-sm font-bold text-slate-700 dark:text-zinc-300">
-      {icon}
-      {children}
-    </h2>
+    <div className="flex flex-col gap-0.5">
+      <h2 className="text-base font-bold text-slate-900 dark:text-zinc-100">{children}</h2>
+      {hint && <p className="text-xs text-slate-500 dark:text-zinc-500">{hint}</p>}
+    </div>
   );
 }
 
@@ -206,18 +203,22 @@ function Dashboard({
   const maxWrong = Math.max(1, ...agg.concepts.map((c) => c.wrongCount));
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-10">
       {/* A. 과목별 틀린 개념 막대그래프 */}
-      <Card>
-        <SectionTitle icon={<BarChart3 size={16} className="text-blue-600 dark:text-blue-400" />}>
+      <section className="flex flex-col gap-4">
+        <SectionTitle
+          hint={
+            agg.window.widened
+              ? "선택한 기간에 푼 문제가 없어 기간을 넓혔어요."
+              : "막대가 길수록 그 개념에서 더 많이 틀렸어요."
+          }
+        >
           {rangeLabel(agg.window.days)} 틀린 개념
         </SectionTitle>
-        <p className="mt-1 px-1 text-xs text-slate-500 dark:text-zinc-500">
-          {agg.window.widened
-            ? "선택한 기간에 푼 문제가 없어 기간을 넓혔어요."
-            : "막대가 길수록 그 개념에서 더 많이 틀렸어요."}
-        </p>
-        <div className="mt-3 flex gap-1.5 px-1">
+
+        {/* 기간 전환은 탭처럼 — 칩 세 개를 색으로 칠하면 이 화면에서 가장 눈에 띄는
+            요소가 되어버린다. 밑줄만으로 현재 위치를 표시한다. */}
+        <div className="flex gap-5 border-b border-slate-200 dark:border-zinc-800">
           {RANGES.map((r) => {
             const active = r.key === selectedKey;
             return (
@@ -225,10 +226,10 @@ function Dashboard({
                 key={r.key}
                 href={`/mypage/diagnosis?range=${r.key}`}
                 scroll={false}
-                className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+                className={`-mb-px border-b-2 pb-2 text-sm transition-colors ${
                   active
-                    ? "bg-blue-600 text-white"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                    ? "border-slate-900 font-semibold text-slate-900 dark:border-zinc-100 dark:text-zinc-100"
+                    : "border-transparent text-slate-500 hover:text-slate-800 dark:text-zinc-500 dark:hover:text-zinc-300"
                 }`}
               >
                 {r.label}
@@ -236,35 +237,36 @@ function Dashboard({
             );
           })}
         </div>
-        <div className="mt-4 flex flex-col gap-5">
+
+        <div className="flex flex-col gap-7">
           {agg.bySubject.map((g) => (
             <SubjectBars key={g.subjectSlug ?? g.subject} group={g} maxWrong={maxWrong} />
           ))}
         </div>
-      </Card>
+      </section>
 
       {/* B. 개념별 카드 */}
-      <div className="flex flex-col gap-3">
-        <SectionTitle icon={<Flame size={16} className="text-blue-600 dark:text-blue-400" />}>
-          개념별 정리 · 극복
-        </SectionTitle>
+      <section className="flex flex-col gap-4">
+        <SectionTitle hint="틀린 문항이 많은 개념부터 정리했어요.">개념별 정리</SectionTitle>
         {!hasCoaching &&
           (autoGenerate ? (
             <DiagnosisAutoGenerate />
           ) : (
             <DiagnosisCoachingButton requestedThisWeek={requestedThisWeek} nextDate={nextDate} />
           ))}
-        {topConcepts.map((c, i) => (
-          <ConceptCard
-            key={`${c.concept}-${i}`}
-            rank={i + 1}
-            concept={c}
-            coaching={coachingByConcept.get(c.concept) ?? null}
-          />
-        ))}
-      </div>
+        <div className="flex flex-col divide-y divide-slate-200 border-y border-slate-200 dark:divide-zinc-800 dark:border-zinc-800">
+          {topConcepts.map((c, i) => (
+            <ConceptCard
+              key={`${c.concept}-${i}`}
+              rank={i + 1}
+              concept={c}
+              coaching={coachingByConcept.get(c.concept) ?? null}
+            />
+          ))}
+        </div>
+      </section>
 
-      <p className="px-1 text-center text-xs text-slate-400 dark:text-zinc-600">
+      <p className="text-xs leading-relaxed text-slate-400 dark:text-zinc-600">
         그래프는 {rangeLabel(agg.window.days)} 실시간 데이터예요. 맞춤 극복법은 주 1회, 지난
         진단 이후(최대 2주)에 틀린 문제만 분석해요.
         {hasCoaching && nextDate ? ` 다음 진단은 ${formatMonthDay(nextDate)}부터.` : ""}
@@ -281,17 +283,21 @@ function SubjectBars({ group, maxWrong }: { group: SubjectConceptGroup; maxWrong
   const hidden = group.concepts.length - shown.length;
   return (
     <div>
-      <p className="mb-2 flex items-baseline justify-between px-1">
-        <span className="text-sm font-bold text-slate-900 dark:text-zinc-100">{group.subject}</span>
-        <span className="text-xs text-slate-400 dark:text-zinc-500">{group.totalWrong}문항 틀림</span>
+      <p className="mb-2.5 flex items-baseline justify-between gap-2">
+        <span className="text-sm font-semibold text-slate-900 dark:text-zinc-100">
+          {group.subject}
+        </span>
+        <span className="text-xs text-slate-400 dark:text-zinc-500">
+          {group.totalWrong}문항 틀림
+        </span>
       </p>
-      <div className="flex flex-col gap-1.5">
+      <div className="flex flex-col gap-2.5">
         {shown.map((c, i) => (
           <ConceptBar key={`${c.concept}-${i}`} concept={c} maxWrong={maxWrong} />
         ))}
       </div>
       {hidden > 0 && (
-        <p className="mt-1.5 px-1 text-xs text-slate-400 dark:text-zinc-600">외 {hidden}개 개념</p>
+        <p className="mt-2 text-xs text-slate-400 dark:text-zinc-600">외 {hidden}개 개념</p>
       )}
     </div>
   );
@@ -304,21 +310,18 @@ function ConceptBar({ concept, maxWrong }: { concept: ConceptStat; maxWrong: num
   const pct = Math.max(4, Math.round((concept.wrongCount / maxWrong) * 100));
   return (
     <div>
-      <div className="mb-1 flex items-baseline justify-between gap-2">
+      <div className="mb-1.5 flex items-baseline justify-between gap-3">
         <span className="min-w-0 text-[13px] leading-snug text-slate-700 dark:text-zinc-300">
           {concept.concept}
         </span>
-        <span className="shrink-0 text-xs text-slate-400 dark:text-zinc-500">
-          <b className="text-sm font-bold text-blue-600 dark:text-blue-400">{concept.wrongCount}</b>
+        <span className="shrink-0 text-xs tabular-nums text-slate-400 dark:text-zinc-500">
+          <b className="font-semibold text-slate-700 dark:text-zinc-300">{concept.wrongCount}</b>
           문항
           {concept.accuracyPct != null ? ` · 정답률 ${concept.accuracyPct}%` : ""}
         </span>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800">
-        <div
-          className="h-full rounded-full bg-blue-500"
-          style={{ width: `${pct}%` }}
-        />
+      <div className="h-1.5 overflow-hidden rounded-sm bg-slate-100 dark:bg-zinc-800">
+        <div className="h-full rounded-sm bg-slate-700 dark:bg-zinc-400" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -334,82 +337,72 @@ function ConceptCard({
   coaching: DiagnosisConceptCoaching | null;
 }) {
   const canSolve = concept.subjectSlug != null && concept.corpusCount >= MIN_CORPUS_FOR_SOLVE;
+  // 배지 대신 한 줄 메타. 숫자마다 색 알약을 붙이면 개념 이름보다 배지가 먼저 읽힌다.
+  const meta = [
+    `${concept.wrongCount}문항 틀림`,
+    concept.answeredCount > 0 ? `푼 문항 ${concept.answeredCount}개` : null,
+    concept.accuracyPct != null ? `정답률 ${concept.accuracyPct}%` : null,
+    concept.corpusCount > 0 ? `기출 ${concept.corpusCount}문항` : null,
+  ].filter(Boolean) as string[];
+
   return (
-    <Card className="!p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
-          {rank}
-        </span>
-        <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-bold text-red-700 dark:bg-red-950/30 dark:text-red-300">
-          {concept.wrongCount}회 틀림
-        </span>
-        {concept.accuracyPct != null && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 dark:bg-zinc-800 dark:text-zinc-300">
-            정답률 {concept.accuracyPct}%
-          </span>
-        )}
-        {concept.corpusCount > 0 && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
-            기출 {concept.corpusCount}문항
-          </span>
-        )}
-      </div>
-
-      <div className="mt-2.5">
+    <article className="flex gap-3.5 py-5">
+      <span className="w-5 shrink-0 pt-0.5 text-sm font-semibold tabular-nums text-slate-300 dark:text-zinc-700">
+        {rank}
+      </span>
+      <div className="min-w-0 flex-1">
         {concept.subject && (
-          <p className="text-xs font-semibold text-slate-500 dark:text-zinc-500">{concept.subject}</p>
+          <p className="text-xs text-slate-500 dark:text-zinc-500">{concept.subject}</p>
         )}
-        <p className="text-base font-bold text-slate-900 dark:text-zinc-100">{concept.concept}</p>
-      </div>
+        <h3 className="mt-0.5 text-[15px] font-bold leading-snug text-slate-900 dark:text-zinc-100">
+          {concept.concept}
+        </h3>
+        {/* 데이터: 이 개념에서 주로 어땠는지(무AI) */}
+        <p className="mt-1.5 text-xs tabular-nums text-slate-500 dark:text-zinc-400">
+          {meta.join(" · ")}
+        </p>
 
-      {/* 데이터: 이 개념에서 주로 어땠는지(무AI) */}
-      <p className="mt-2 text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
-        이 기간에 {concept.wrongCount}문항 틀렸어요
-        {concept.answeredCount > 0 ? ` (푼 문항 ${concept.answeredCount}개)` : ""}
-        {concept.corpusCount > 0 ? ` · 전체 기출 ${concept.corpusCount}문항` : ""}.
-      </p>
+        {/* AI: 맞춤 극복법(있으면) */}
+        {coaching && (
+          <div className="mt-3 border-l-2 border-slate-200 pl-3.5 dark:border-zinc-700">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-zinc-500">
+              극복법
+            </p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
+              {coaching.weakPattern}
+            </p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
+              {coaching.howToOvercome}
+            </p>
+          </div>
+        )}
 
-      {/* AI: 맞춤 극복법(있으면) */}
-      {coaching && (
-        <div className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-3 dark:border-blue-900/40 dark:bg-blue-950/10">
-          <p className="flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
-            <Lightbulb size={13} /> 맞춤 극복법
-          </p>
-          <p className="mt-1.5 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
-            {coaching.weakPattern}
-          </p>
-          <p className="mt-1 text-sm leading-relaxed text-slate-700 dark:text-zinc-300">
-            {coaching.howToOvercome}
-          </p>
+        {/* 액션: 같은 개념 기출 풀기 */}
+        <div className="mt-3.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+          {canSolve ? (
+            <ConceptSolveButton
+              concept={concept.concept}
+              conceptId={concept.conceptId}
+              subjectSlug={concept.subjectSlug as string}
+              limit={5}
+              label="같은 개념 기출 5문제"
+            />
+          ) : (
+            <p className="text-xs text-slate-400 dark:text-zinc-600">
+              이 개념은 기출이 적어 풀기를 만들 수 없어요.
+            </p>
+          )}
+          {concept.subjectSlug && (
+            <Link
+              href={`/mypage/wrong-notes/${concept.subjectSlug}?view=questions`}
+              className="text-sm text-slate-500 underline underline-offset-4 transition-colors hover:text-slate-900 dark:text-zinc-500 dark:hover:text-zinc-200"
+            >
+              틀린 문항 보기
+            </Link>
+          )}
         </div>
-      )}
-
-      {/* 액션: 같은 개념 기출 풀기 */}
-      <div className="mt-3.5 flex items-center gap-2">
-        {concept.subjectSlug && (
-          <Link
-            href={`/mypage/wrong-notes/${concept.subjectSlug}?view=questions`}
-            className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition-colors hover:border-blue-300 hover:text-blue-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-blue-800 dark:hover:text-blue-300"
-          >
-            <BookOpen size={15} /> 틀린 문항 보기
-          </Link>
-        )}
-        {canSolve ? (
-          <ConceptSolveButton
-            concept={concept.concept}
-            conceptId={concept.conceptId}
-            subjectSlug={concept.subjectSlug as string}
-            limit={5}
-            label="같은 개념 기출 5문제"
-            className="flex-1"
-          />
-        ) : (
-          <p className="text-xs text-slate-400 dark:text-zinc-600">
-            이 개념은 기출이 적어 풀기를 만들 수 없어요.
-          </p>
-        )}
       </div>
-    </Card>
+    </article>
   );
 }
 
@@ -422,19 +415,18 @@ async function EmptyState({
 }) {
   const eligibility = await getDiagnosisEligibility(supabase, userId);
   return (
-    <Card className="flex flex-col items-center gap-3 text-center">
-      <Sparkles size={24} className="text-blue-500 dark:text-blue-400" />
-      <p className="text-sm text-slate-500 dark:text-zinc-400">
+    <div className="flex flex-col items-start gap-4 border-y border-slate-200 py-8 dark:border-zinc-800">
+      <p className="text-sm leading-relaxed text-slate-600 dark:text-zinc-400">
         {eligibility.eligible
           ? "아직 분석할 오답 개념이 없어요. 문제를 조금 더 풀면 여기에 약점이 정리돼요."
           : (eligibility.hint ?? "조금 더 풀면 진단을 받을 수 있어요.")}
       </p>
       <Link
         href="/mypage?tab=wrong-notes"
-        className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700"
+        className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
       >
         오답노트로 가기
       </Link>
-    </Card>
+    </div>
   );
 }
