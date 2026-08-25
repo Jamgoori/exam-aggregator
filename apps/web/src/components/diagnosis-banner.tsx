@@ -109,7 +109,7 @@ export function DiagnosisBanner({
         <p className="flex items-center gap-1.5 text-sm font-bold text-violet-900 dark:text-violet-200">
           AI 약점 진단 받기
           <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-            일 1회
+            주 1회
           </span>
         </p>
         <p className="text-xs text-violet-700/80 dark:text-violet-300/70">

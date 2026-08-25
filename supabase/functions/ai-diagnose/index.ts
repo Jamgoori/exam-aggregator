@@ -2,7 +2,7 @@
 // 바로 Claude 를 호출해 리포트를 생성·저장·반환한다(스키마는 웹 AiDiagnosisReport 동일).
 //
 // 필요 시크릿: ANTHROPIC_API_KEY (supabase secrets set). 모델은 DIAGNOSIS_MODEL 로 override.
-// 자격: 누적 오답 15개 또는 응시 3회 이상(웹 DIAGNOSIS_MIN_* 와 동일). 하루 1회 캐시.
+// 자격: 누적 오답 15개 또는 응시 3회 이상(웹 DIAGNOSIS_MIN_* 와 동일). 주 1회 캐시.
 import { corsHeaders, json } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
 import { isPremiumUser } from "../_shared/membership.ts";
@@ -14,6 +14,15 @@ const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 
 function kstToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+}
+
+// KST 기준 이번 주 월요일. 웹 ai-diagnosis.ts 의 kstWeekStart 와 같은 계산 —
+// diagnosis_date 에 주의 시작일을 넣어 unique(user_id, diagnosis_date) 로 "주 1회"를
+// 건다. 한쪽만 고치면 앱과 웹의 주기가 어긋난다.
+function kstWeekStart(): string {
+  const d = new Date(`${kstToday()}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
 }
 
 Deno.serve(async (req) => {
@@ -35,9 +44,9 @@ Deno.serve(async (req) => {
     return json({ error: "AI 약점 진단은 멤버십 기능이에요." }, 403);
   }
 
-  const today = kstToday();
+  const today = kstWeekStart();
 
-  // 하루 1회 캐시: 오늘 리포트가 있으면 그대로 반환.
+  // 주 1회 캐시: 이번 주 리포트가 있으면 그대로 반환.
   {
     const { data: existing } = await admin
       .from("ai_diagnoses")

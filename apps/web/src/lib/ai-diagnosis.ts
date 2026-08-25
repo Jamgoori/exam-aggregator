@@ -4,7 +4,7 @@ import type { createClient } from "@/lib/supabase/server";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
-// AI 약점 진단(일 1회)의 자격 판정·오늘 진단 조회. 실제 리포트 "생성"은 앱이 하지
+// AI 약점 진단(주 1회)의 자격 판정·이번 주 진단 조회. 실제 리포트 "생성"은 앱이 하지
 // 않는다 — 사용자가 요청하면 report가 null인 행만 만들고(요청 표시), 생성기(Claude
 // Code 배치나 온디맨드 API)가 나중에 report를 채운다. 이 파일은 그 요청·조회·자격만 담당.
 
@@ -61,7 +61,7 @@ export type DiagnosisInsight = {
 };
 
 // 개념별 "맞춤 극복법"(AI). 진단받기 시점에 온디맨드 API가 상위 취약 개념들을 한 번에
-// 생성해 report에 캐시한다(일 1회 재사용). 표시 방식은 화면 자유 — 데이터만 담아둔다.
+// 생성해 report에 캐시한다(주 1회 재사용). 표시 방식은 화면 자유 — 데이터만 담아둔다.
 export type DiagnosisConceptCoaching = {
   concept: string;
   subject?: string | null;
@@ -92,9 +92,25 @@ export type DiagnosisEligibility = {
   hint: string | null;
 };
 
-// KST 기준 오늘 날짜(YYYY-MM-DD). "일 1회"의 날짜 키. 서버(Node)에서 시간대 변환.
+// KST 기준 오늘 날짜(YYYY-MM-DD). 해설 열람 제한 등 "일 1회" 규칙의 날짜 키.
 export function kstToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+}
+
+// KST 기준 이번 주 월요일(YYYY-MM-DD). AI 약점 진단의 주기 키다.
+//
+// 진단은 "주 1회"다. ai_diagnoses.diagnosis_date 에 그 주의 월요일을 넣으면 기존
+// unique(user_id, diagnosis_date) 가 그대로 "주 1회" 잠금이 된다 — 스키마 변경 없이
+// 주기만 바뀐다. 오답이 하루 사이에 크게 달라지지 않아 매일 새로 만들 값이 적고,
+// 실제 API 비용이 그만큼(7분의 1로) 준다.
+export function kstWeekStart(): string {
+  const today = kstToday();
+  // YYYY-MM-DD 를 UTC 자정으로 읽어 요일을 구한다(시간대 재적용으로 하루 밀리는 것 방지).
+  const d = new Date(`${today}T00:00:00Z`);
+  // getUTCDay(): 0=일요일. 월요일 시작 주차로 환산.
+  const offset = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - offset);
+  return d.toISOString().slice(0, 10);
 }
 
 export async function getDiagnosisEligibility(
@@ -128,19 +144,19 @@ export async function getDiagnosisEligibility(
   return { eligible, wrongCount: wrongs, attemptCount: attempts, hint };
 }
 
-export type TodayDiagnosis = {
+export type WeeklyDiagnosis = {
   status: "ready" | "pending";
   report: AiDiagnosisReport | null;
   date: string;
 };
 
-// 오늘(KST) 진단 행을 조회한다. report가 있으면 ready, 요청만 있고 아직 없으면 pending,
+// 이번 주(KST, 월요일 시작) 진단 행을 조회한다. report가 있으면 ready, 요청만 있고 아직 없으면 pending,
 // 행이 없으면 null.
-export async function getTodayDiagnosis(
+export async function getWeeklyDiagnosis(
   supabase: Supabase,
   userId: string,
-): Promise<TodayDiagnosis | null> {
-  const date = kstToday();
+): Promise<WeeklyDiagnosis | null> {
+  const date = kstWeekStart();
   const { data } = await supabase
     .from("ai_diagnoses")
     .select("report")
@@ -152,7 +168,7 @@ export async function getTodayDiagnosis(
   return { status: report ? "ready" : "pending", report, date };
 }
 
-// 가장 최근에 생성된(리포트가 있는) 진단. 오늘 것이 아직 없을 때 리포트 페이지에서
+// 가장 최근에 생성된(리포트가 있는) 진단. 이번 주 것이 아직 없을 때 리포트 페이지에서
 // 지난 진단이라도 보여주기 위한 조회.
 export async function getLatestReadyDiagnosis(
   supabase: Supabase,
@@ -173,13 +189,13 @@ export async function getLatestReadyDiagnosis(
   };
 }
 
-// "오늘 진단 요청" 생성: 자격을 확인하고, 오늘 행이 없으면 report=null로 만든다.
-// 이미 있으면(요청/완료) 그대로 둔다("일 1회"). 리포트 생성은 별도(생성기)가 한다.
-export async function requestTodayDiagnosis(
+// "이번 주 진단 요청" 생성: 자격을 확인하고, 이번 주 행이 없으면 report=null로 만든다.
+// 이미 있으면(요청/완료) 그대로 둔다("주 1회"). 리포트 생성은 별도(생성기)가 한다.
+export async function requestWeeklyDiagnosis(
   supabase: Supabase,
   userId: string,
 ): Promise<{ error?: string; status?: "ready" | "pending" }> {
-  const existing = await getTodayDiagnosis(supabase, userId);
+  const existing = await getWeeklyDiagnosis(supabase, userId);
   if (existing) return { status: existing.status };
 
   const eligibility = await getDiagnosisEligibility(supabase, userId);
@@ -194,7 +210,7 @@ export async function requestTodayDiagnosis(
   // 바로 위에서 자격(getDiagnosisEligibility)을 이미 확인했다.
   const { error } = await createAdminClient()
     .from("ai_diagnoses")
-    .insert({ user_id: userId, diagnosis_date: kstToday(), report: null });
+    .insert({ user_id: userId, diagnosis_date: kstWeekStart(), report: null });
   // 동시에 두 번 눌러 unique 충돌이 나도 "이미 요청됨"으로 본다.
   if (error && error.code !== "23505") {
     return { error: "진단 요청에 실패했어요. 잠시 후 다시 시도해주세요." };

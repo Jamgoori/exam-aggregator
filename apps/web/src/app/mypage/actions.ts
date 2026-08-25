@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionUser } from "@/lib/supabase/session";
-import { requestTodayDiagnosis, kstToday } from "@/lib/ai-diagnosis";
+import { requestWeeklyDiagnosis, kstWeekStart } from "@/lib/ai-diagnosis";
 import { runDiagnosisForUser } from "@/lib/diagnosis-generate";
 import { isPremium } from "@/lib/membership";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
@@ -30,10 +30,10 @@ export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
     return { error: "AI 약점 진단은 멤버십 기능이에요." };
   }
 
-  const res = await requestTodayDiagnosis(supabase, user.id);
+  const res = await requestWeeklyDiagnosis(supabase, user.id);
   if (res.error) return res;
 
-  // 이미 오늘 리포트가 있으면(일 1회) 그대로 둔다.
+  // 이미 이번 주 리포트가 있으면(주 1회) 그대로 둔다.
   if (res.status === "ready") {
     revalidatePath("/mypage");
     revalidatePath("/mypage/diagnosis");
@@ -45,7 +45,7 @@ export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
     .from("ai_diagnoses")
     .select("id")
     .eq("user_id", user.id)
-    .eq("diagnosis_date", kstToday())
+    .eq("diagnosis_date", kstWeekStart())
     .maybeSingle();
 
   let status: "ready" | "pending" = "pending";

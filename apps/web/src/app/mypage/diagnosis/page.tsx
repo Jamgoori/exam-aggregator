@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { Sparkles, BarChart3, Flame, Lightbulb, BookOpen } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import {
-  getTodayDiagnosis,
+  getWeeklyDiagnosis,
   getLatestReadyDiagnosis,
   getDiagnosisEligibility,
   type DiagnosisConceptCoaching,
@@ -59,8 +59,8 @@ export default async function DiagnosisPage() {
   // 데이터층(무AI): 막대그래프·개념 카드. 페이지 입장 즉시 라이브 집계.
   const agg = await getDiagnosisAggregate(user.id);
 
-  // AI 극복법(있으면): 오늘 리포트 → 없으면 최근 완료 리포트에서 conceptCoaching만 가져온다.
-  const today = await getTodayDiagnosis(supabase, user.id);
+  // AI 극복법(있으면): 이번 주 리포트 → 없으면 지난 완료 리포트에서 conceptCoaching만 가져온다.
+  const today = await getWeeklyDiagnosis(supabase, user.id);
   let coaching = today?.report?.conceptCoaching ?? null;
   if (!coaching || coaching.length === 0) {
     const latest = await getLatestReadyDiagnosis(supabase, user.id);
@@ -92,7 +92,7 @@ export default async function DiagnosisPage() {
             agg={agg}
             coachingByConcept={coachingByConcept}
             hasCoaching={(coaching ?? []).length > 0}
-            requestedToday={today != null}
+            requestedThisWeek={today != null}
           />
         )}
       </div>
@@ -128,14 +128,14 @@ function Dashboard({
   agg,
   coachingByConcept,
   hasCoaching,
-  requestedToday,
+  requestedThisWeek,
 }: {
   agg: DiagnosisAggregate;
   coachingByConcept: Map<string, DiagnosisConceptCoaching>;
   hasCoaching: boolean;
-  // 오늘 진단 행이 이미 있는지. 있는데 극복법이 없다면 생성이 실패해 pending으로
+  // 이번 주 진단 행이 이미 있는지. 있는데 극복법이 없다면 생성이 실패해 pending으로
   // 남은 것이므로 버튼을 "다시 시도"로 보여준다.
-  requestedToday: boolean;
+  requestedThisWeek: boolean;
 }) {
   const topConcepts = agg.concepts.slice(0, CONCEPT_CARD_LIMIT);
   const maxWrong = Math.max(1, ...agg.concepts.map((c) => c.wrongCount));
@@ -162,7 +162,7 @@ function Dashboard({
         <SectionTitle icon={<Flame size={16} className="text-blue-600 dark:text-blue-400" />}>
           개념별 정리 · 극복
         </SectionTitle>
-        {!hasCoaching && <DiagnosisCoachingButton requestedToday={requestedToday} />}
+        {!hasCoaching && <DiagnosisCoachingButton requestedThisWeek={requestedThisWeek} />}
         {topConcepts.map((c, i) => (
           <ConceptCard
             key={`${c.concept}-${i}`}
@@ -174,7 +174,7 @@ function Dashboard({
       </div>
 
       <p className="px-1 text-center text-xs text-slate-400 dark:text-zinc-600">
-        그래프·문제는 실시간 데이터예요. 맞춤 극복법만 하루 1회 AI가 생성해요.
+        그래프·문제는 실시간 데이터예요. 맞춤 극복법만 주 1회 AI가 생성해요.
       </p>
     </div>
   );

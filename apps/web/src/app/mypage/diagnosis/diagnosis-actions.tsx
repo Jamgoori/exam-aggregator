@@ -117,11 +117,11 @@ export function SolveButton({
   );
 }
 
-// "맞춤 극복법 생성" 버튼. 진단 페이지에서 직접 오늘 진단을 요청·생성한다(하루 1회).
+// "맞춤 극복법 생성" 버튼. 진단 페이지에서 직접 이번 주 진단을 요청·생성한다(주 1회).
 // 데이터층(막대그래프·개념 카드)은 AI 없이 이미 떠 있으므로, 이 버튼이 채우는 것은
 // 개념별 극복법뿐이다. 생성이 실패하면(API 키 미설정·API 오류) 그 자리에서 이유를
 // 보여주고 다시 누를 수 있게 둔다 — 예전처럼 눌러도 아무 일도 안 일어나면 안 된다.
-export function DiagnosisCoachingButton({ requestedToday }: { requestedToday: boolean }) {
+export function DiagnosisCoachingButton({ requestedThisWeek }: { requestedThisWeek: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +150,7 @@ export function DiagnosisCoachingButton({ requestedToday }: { requestedToday: bo
           <p className="flex items-center gap-1.5 text-sm font-bold text-violet-900 dark:text-violet-200">
             맞춤 극복법
             <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-              일 1회
+              주 1회
             </span>
           </p>
           <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
@@ -163,7 +163,7 @@ export function DiagnosisCoachingButton({ requestedToday }: { requestedToday: bo
           disabled={pending}
           className="shrink-0 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-bold text-white transition-colors hover:bg-violet-700 disabled:opacity-60"
         >
-          {pending ? "생성 중..." : requestedToday ? "다시 시도" : "극복법 만들기"}
+          {pending ? "생성 중..." : requestedThisWeek ? "다시 시도" : "극복법 만들기"}
         </button>
       </div>
       {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
