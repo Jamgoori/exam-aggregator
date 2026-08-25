@@ -16,12 +16,14 @@ function kstToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 }
 
-// KST 기준 이번 주 월요일. 웹 ai-diagnosis.ts 의 kstWeekStart 와 같은 계산 —
-// diagnosis_date 에 주의 시작일을 넣어 unique(user_id, diagnosis_date) 로 "주 1회"를
-// 건다. 한쪽만 고치면 앱과 웹의 주기가 어긋난다.
-function kstWeekStart(): string {
+// 진단 주기(일). 달력 주가 아니라 "마지막으로 받은 날부터 7일"이다 — 웹
+// ai-diagnosis.ts 의 DIAGNOSIS_CYCLE_DAYS 와 같은 값. 한쪽만 고치면 앱과 웹의 주기가
+// 어긋난다.
+const CYCLE_DAYS = 7;
+
+function kstDaysAgo(days: number): string {
   const d = new Date(`${kstToday()}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  d.setUTCDate(d.getUTCDate() - days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -44,17 +46,21 @@ Deno.serve(async (req) => {
     return json({ error: "AI 약점 진단은 멤버십 기능이에요." }, 403);
   }
 
-  const today = kstWeekStart();
+  const today = kstToday();
 
-  // 주 1회 캐시: 이번 주 리포트가 있으면 그대로 반환.
+  // 주 1회 캐시: 최근 7일 안에 받은 리포트가 있으면 그대로 반환(주기 잠금).
   {
     const { data: existing } = await admin
       .from("ai_diagnoses")
-      .select("report")
+      .select("report, diagnosis_date")
       .eq("user_id", userId)
-      .eq("diagnosis_date", today)
+      .gte("diagnosis_date", kstDaysAgo(CYCLE_DAYS - 1))
+      .order("diagnosis_date", { ascending: false })
+      .limit(1)
       .maybeSingle();
-    if (existing?.report) return json({ report: existing.report, date: today, cached: true });
+    if (existing?.report) {
+      return json({ report: existing.report, date: existing.diagnosis_date, cached: true });
+    }
   }
 
   // 자격 판정.

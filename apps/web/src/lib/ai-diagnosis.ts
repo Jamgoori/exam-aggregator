@@ -97,19 +97,24 @@ export function kstToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 }
 
-// KST 기준 이번 주 월요일(YYYY-MM-DD). AI 약점 진단의 주기 키다.
-//
-// 진단은 "주 1회"다. ai_diagnoses.diagnosis_date 에 그 주의 월요일을 넣으면 기존
-// unique(user_id, diagnosis_date) 가 그대로 "주 1회" 잠금이 된다 — 스키마 변경 없이
-// 주기만 바뀐다. 오답이 하루 사이에 크게 달라지지 않아 매일 새로 만들 값이 적고,
-// 실제 API 비용이 그만큼(7분의 1로) 준다.
-export function kstWeekStart(): string {
-  const today = kstToday();
-  // YYYY-MM-DD 를 UTC 자정으로 읽어 요일을 구한다(시간대 재적용으로 하루 밀리는 것 방지).
-  const d = new Date(`${today}T00:00:00Z`);
-  // getUTCDay(): 0=일요일. 월요일 시작 주차로 환산.
-  const offset = (d.getUTCDay() + 6) % 7;
-  d.setUTCDate(d.getUTCDate() - offset);
+// 진단 주기(일). 마지막으로 진단을 받은 날로부터 이만큼 지나야 다시 받을 수 있다.
+export const DIAGNOSIS_CYCLE_DAYS = 7;
+
+// 진단 주기는 달력 주(월~일)가 아니라 **본인이 마지막으로 받은 날 기준 7일**이다.
+// 달력 주로 끊으면 금요일에 처음 받은 사람이 이틀 뒤 월요일에 또 받게 되고, 반대로
+// 월요일에 받은 사람은 6일을 기다린다 — 같은 "주 1회"인데 사람마다 실제 간격이 다르다.
+// diagnosis_date 에는 받은 날짜를 그대로 넣고(기존 unique 가 같은 날 중복만 막는다),
+// 잠금은 아래 조회가 "최근 7일 안에 행이 있는지"로 판정한다.
+function kstDaysAgo(days: number): string {
+  const d = new Date(`${kstToday()}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+// 주기가 풀리는 날(YYYY-MM-DD) — 마지막으로 받은 날 + 7일. 화면 안내용.
+export function nextDiagnosisDate(lastDate: string): string {
+  const d = new Date(`${lastDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + DIAGNOSIS_CYCLE_DAYS);
   return d.toISOString().slice(0, 10);
 }
 
@@ -150,22 +155,28 @@ export type WeeklyDiagnosis = {
   date: string;
 };
 
-// 이번 주(KST, 월요일 시작) 진단 행을 조회한다. report가 있으면 ready, 요청만 있고 아직 없으면 pending,
-// 행이 없으면 null.
+// 현재 주기(마지막으로 받은 날부터 7일) 안의 진단 행. report가 있으면 ready, 요청만
+// 있고 아직 없으면 pending, 주기 안에 행이 없으면 null(= 지금 새로 받을 수 있다).
 export async function getWeeklyDiagnosis(
   supabase: Supabase,
   userId: string,
 ): Promise<WeeklyDiagnosis | null> {
-  const date = kstWeekStart();
+  // 7일 전까지 훑고 가장 최근 행을 본다. 같은 날 중복은 unique 가 막으므로 최대 7행.
   const { data } = await supabase
     .from("ai_diagnoses")
-    .select("report")
+    .select("report, diagnosis_date")
     .eq("user_id", userId)
-    .eq("diagnosis_date", date)
+    .gte("diagnosis_date", kstDaysAgo(DIAGNOSIS_CYCLE_DAYS - 1))
+    .order("diagnosis_date", { ascending: false })
+    .limit(1)
     .maybeSingle();
   if (!data) return null;
   const report = (data.report as AiDiagnosisReport | null) ?? null;
-  return { status: report ? "ready" : "pending", report, date };
+  return {
+    status: report ? "ready" : "pending",
+    report,
+    date: data.diagnosis_date as string,
+  };
 }
 
 // 가장 최근에 생성된(리포트가 있는) 진단. 이번 주 것이 아직 없을 때 리포트 페이지에서
@@ -189,14 +200,17 @@ export async function getLatestReadyDiagnosis(
   };
 }
 
-// "이번 주 진단 요청" 생성: 자격을 확인하고, 이번 주 행이 없으면 report=null로 만든다.
-// 이미 있으면(요청/완료) 그대로 둔다("주 1회"). 리포트 생성은 별도(생성기)가 한다.
+// 진단 요청 생성: 자격을 확인하고, 현재 주기(마지막으로 받은 날부터 7일) 안에 행이
+// 없으면 report=null 로 만든다. 이미 있으면 그대로 둔다. 리포트 생성은 생성기가 한다.
+// nextDate 는 주기가 걸려 있을 때 "언제부터 다시 받을 수 있는지"(화면 안내용).
 export async function requestWeeklyDiagnosis(
   supabase: Supabase,
   userId: string,
-): Promise<{ error?: string; status?: "ready" | "pending" }> {
+): Promise<{ error?: string; status?: "ready" | "pending"; nextDate?: string }> {
   const existing = await getWeeklyDiagnosis(supabase, userId);
-  if (existing) return { status: existing.status };
+  if (existing) {
+    return { status: existing.status, nextDate: nextDiagnosisDate(existing.date) };
+  }
 
   const eligibility = await getDiagnosisEligibility(supabase, userId);
   if (!eligibility.eligible) {
@@ -210,7 +224,7 @@ export async function requestWeeklyDiagnosis(
   // 바로 위에서 자격(getDiagnosisEligibility)을 이미 확인했다.
   const { error } = await createAdminClient()
     .from("ai_diagnoses")
-    .insert({ user_id: userId, diagnosis_date: kstWeekStart(), report: null });
+    .insert({ user_id: userId, diagnosis_date: kstToday(), report: null });
   // 동시에 두 번 눌러 unique 충돌이 나도 "이미 요청됨"으로 본다.
   if (error && error.code !== "23505") {
     return { error: "진단 요청에 실패했어요. 잠시 후 다시 시도해주세요." };

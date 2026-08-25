@@ -121,7 +121,14 @@ export function SolveButton({
 // 데이터층(막대그래프·개념 카드)은 AI 없이 이미 떠 있으므로, 이 버튼이 채우는 것은
 // 개념별 극복법뿐이다. 생성이 실패하면(API 키 미설정·API 오류) 그 자리에서 이유를
 // 보여주고 다시 누를 수 있게 둔다 — 예전처럼 눌러도 아무 일도 안 일어나면 안 된다.
-export function DiagnosisCoachingButton({ requestedThisWeek }: { requestedThisWeek: boolean }) {
+export function DiagnosisCoachingButton({
+  requestedThisWeek,
+  nextDate,
+}: {
+  requestedThisWeek: boolean;
+  // 이번 주기에 이미 받았을 때 다음 가능일(YYYY-MM-DD). 없으면 지금 받을 수 있다.
+  nextDate?: string | null;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -156,6 +163,13 @@ export function DiagnosisCoachingButton({ requestedThisWeek }: { requestedThisWe
           <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
             위 취약 개념마다 &lsquo;어떤 유형에서 무너지는지 + 어떻게 극복할지&rsquo;를 만들어드려요.
           </p>
+          {/* 생성이 실패해 남은 주기는 다시 시도할 수 있다 — 잠금은 "성공한 진단"에만
+              걸리므로, 여기서는 언제까지가 이번 주기인지만 알려준다. */}
+          {requestedThisWeek && nextDate && (
+            <p className="mt-0.5 text-xs text-violet-700/60 dark:text-violet-300/50">
+              이번 주기는 {nextDate.slice(5).replace("-", "/")}까지예요.
+            </p>
+          )}
         </div>
         <button
           type="button"

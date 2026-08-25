@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSessionUser } from "@/lib/supabase/session";
-import { requestWeeklyDiagnosis, kstWeekStart } from "@/lib/ai-diagnosis";
+import { requestWeeklyDiagnosis, DIAGNOSIS_CYCLE_DAYS } from "@/lib/ai-diagnosis";
 import { runDiagnosisForUser } from "@/lib/diagnosis-generate";
 import { isPremium } from "@/lib/membership";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
@@ -40,12 +40,18 @@ export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
     return res;
   }
 
-  // 요청 행(report=null)의 id를 찾아 온디맨드 생성.
+  // 요청 행(report=null)의 id를 찾아 온디맨드 생성. 주기가 "받은 날부터 7일"이라
+  // 날짜를 특정할 수 없으므로, 주기 안의 가장 최근 행을 집는다(= 방금 만든 행이거나
+  // 생성이 실패해 pending 으로 남아 있던 행).
+  const since = new Date();
+  since.setDate(since.getDate() - (DIAGNOSIS_CYCLE_DAYS - 1));
   const { data: row } = await supabase
     .from("ai_diagnoses")
     .select("id")
     .eq("user_id", user.id)
-    .eq("diagnosis_date", kstWeekStart())
+    .gte("diagnosis_date", since.toISOString().slice(0, 10))
+    .order("diagnosis_date", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   let status: "ready" | "pending" = "pending";

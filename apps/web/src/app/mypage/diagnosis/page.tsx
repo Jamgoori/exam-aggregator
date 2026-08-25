@@ -7,6 +7,7 @@ import {
   getWeeklyDiagnosis,
   getLatestReadyDiagnosis,
   getDiagnosisEligibility,
+  nextDiagnosisDate,
   type DiagnosisConceptCoaching,
 } from "@/lib/ai-diagnosis";
 import {
@@ -69,6 +70,9 @@ export default async function DiagnosisPage() {
   const coachingByConcept = new Map<string, DiagnosisConceptCoaching>();
   for (const c of coaching ?? []) coachingByConcept.set(c.concept, c);
 
+  // 주기 안내: 이번 주기에 이미 받았으면 언제 다시 받을 수 있는지 알려준다.
+  const nextDate = today ? nextDiagnosisDate(today.date) : null;
+
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-zinc-950">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pb-16 pt-6 sm:pt-8">
@@ -93,6 +97,7 @@ export default async function DiagnosisPage() {
             coachingByConcept={coachingByConcept}
             hasCoaching={(coaching ?? []).length > 0}
             requestedThisWeek={today != null}
+            nextDate={nextDate}
           />
         )}
       </div>
@@ -119,6 +124,12 @@ function SectionTitle({ icon, children }: { icon?: ReactNode; children: ReactNod
   );
 }
 
+// "2026-08-31" → "8월 31일". 주기 안내에 쓴다.
+function formatMonthDay(date: string): string {
+  const [, m, d] = date.split("-");
+  return `${Number(m)}월 ${Number(d)}일`;
+}
+
 // 카드에 보여줄 개념 상한(막대그래프엔 전부, 카드엔 시급한 상위만).
 const CONCEPT_CARD_LIMIT = 8;
 // 같은개념 기출 풀기를 열어줄 최소 코퍼스 문항 수(너무 적으면 연습 가치가 약함).
@@ -129,10 +140,13 @@ function Dashboard({
   coachingByConcept,
   hasCoaching,
   requestedThisWeek,
+  nextDate,
 }: {
   agg: DiagnosisAggregate;
   coachingByConcept: Map<string, DiagnosisConceptCoaching>;
   hasCoaching: boolean;
+  // 다음 진단을 받을 수 있는 날(YYYY-MM-DD). 이번 주기에 이미 받았을 때만 값이 있다.
+  nextDate: string | null;
   // 이번 주 진단 행이 이미 있는지. 있는데 극복법이 없다면 생성이 실패해 pending으로
   // 남은 것이므로 버튼을 "다시 시도"로 보여준다.
   requestedThisWeek: boolean;
@@ -162,7 +176,9 @@ function Dashboard({
         <SectionTitle icon={<Flame size={16} className="text-blue-600 dark:text-blue-400" />}>
           개념별 정리 · 극복
         </SectionTitle>
-        {!hasCoaching && <DiagnosisCoachingButton requestedThisWeek={requestedThisWeek} />}
+        {!hasCoaching && (
+          <DiagnosisCoachingButton requestedThisWeek={requestedThisWeek} nextDate={nextDate} />
+        )}
         {topConcepts.map((c, i) => (
           <ConceptCard
             key={`${c.concept}-${i}`}
@@ -175,6 +191,7 @@ function Dashboard({
 
       <p className="px-1 text-center text-xs text-slate-400 dark:text-zinc-600">
         그래프·문제는 실시간 데이터예요. 맞춤 극복법만 주 1회 AI가 생성해요.
+        {hasCoaching && nextDate ? ` 다음 진단은 ${formatMonthDay(nextDate)}부터.` : ""}
       </p>
     </div>
   );
