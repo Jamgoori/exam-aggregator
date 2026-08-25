@@ -12,16 +12,26 @@ import {
   type AiDiagnosisReport,
 } from "../src/lib/diagnosis";
 import { useColors } from "../src/theme/colors";
+import { useAuth } from "../src/providers/auth-provider";
+import { isDiagnosisDevAllowed } from "../src/lib/diagnosis-dev-gate";
 
 // AI 약점 진단: 버튼 → Edge Function(Claude) 생성 → 리포트 표시. 하루 1회.
+// 개발 중 임시 게이트: 마이페이지 버튼은 숨겨뒀지만, 직접 주소로 들어와도
+// 막아야 하니 여기서도 확인한다.
 export default function DiagnosisScreen() {
   const colors = useColors();
   const router = useRouter();
+  const { session } = useAuth();
+  const allowed = isDiagnosisDevAllowed(session?.user.email);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<AiDiagnosisReport | null>(null);
 
   async function run() {
+    if (!allowed) {
+      setError("AI 약점 진단은 아직 준비 중이에요.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -48,9 +58,9 @@ export default function DiagnosisScreen() {
           )}
           <Pressable
             onPress={run}
-            disabled={loading}
+            disabled={loading || !allowed}
             style={{
-              backgroundColor: loading ? colors.border : colors.primary,
+              backgroundColor: loading || !allowed ? colors.border : colors.primary,
               borderRadius: 12,
               paddingHorizontal: 24,
               paddingVertical: 12,
