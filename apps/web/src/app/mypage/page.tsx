@@ -14,7 +14,7 @@ export const unstable_instant = {
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BookOpenCheck, ChevronRight, Sparkles, Star, Trophy } from "lucide-react";
+import { BookOpenCheck, ChevronRight, Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
@@ -755,7 +755,6 @@ function DiagnosisEntryLink() {
       prefetch={false}
       className="group flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 p-4 transition-colors hover:border-violet-300 hover:bg-violet-100 dark:border-violet-900/50 dark:bg-violet-950/20 dark:hover:bg-violet-950/40"
     >
-      <Sparkles size={18} className="shrink-0 text-violet-600 dark:text-violet-400" />
       <span className="flex-1 text-sm font-semibold text-violet-900 dark:text-violet-200">
         AI 약점 진단
       </span>
