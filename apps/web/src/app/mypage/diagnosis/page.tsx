@@ -18,6 +18,7 @@ import {
 import { ConceptSolveButton } from "./diagnosis-actions";
 import { isPremium } from "@/lib/membership";
 import { MembershipLockedPage } from "@/components/membership-upsell";
+import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 
 // AI 약전진단(리뉴얼). 입장 즉시 보이는 것은 전부 결정적 데이터(무AI):
 //  A) 과목별 틀린 개념 막대그래프 — 어디가 약한지 한눈에.
@@ -34,6 +35,11 @@ export default async function DiagnosisPage() {
     redirect(
       `/login?next=${encodeURIComponent("/mypage/diagnosis")}&error=${encodeURIComponent("로그인이 필요해요")}`,
     );
+  }
+
+  // 개발 중 임시 게이트: 이 계정 외에는 기능 자체를 노출하지 않는다.
+  if (!isDiagnosisDevAllowed(user.email)) {
+    redirect("/mypage?tab=wrong-notes");
   }
 
   // AI 약점 진단은 멤버십 기능. 아래 라이브 집계가 계정 전체 오답을 훑는 무거운

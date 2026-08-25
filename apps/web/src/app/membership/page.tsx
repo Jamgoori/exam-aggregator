@@ -6,6 +6,7 @@ import { getMembership, isAdminUser } from "@/lib/membership";
 import { MembershipPlans } from "@/components/membership-plans";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
 import { isTossConfigured } from "@/lib/toss";
+import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 import {
   BASE_MONTHLY_PRICE,
   FREE_EXPLANATION_DAILY_PAPERS,
@@ -93,7 +94,7 @@ export default async function MembershipPage({
       {/* 무료 vs 멤버십 */}
       <section className="flex flex-col gap-4">
         <SectionTitle>무료와 어떤 점이 다른가요</SectionTitle>
-        <FeatureTable />
+        <FeatureTable rows={featureRowsFor(user?.email)} />
       </section>
 
       {/* 체험 안내 — 기간은 core 의 TRIAL_DAYS 하나에서 온다. 이벤트가 끝나 상수를
@@ -230,14 +231,20 @@ const FEATURE_ROWS: { label: string; free: string | boolean; premium: string | b
   { label: "오답노트 안에서 문항 해설 보기", free: false, premium: true },
   { label: "회독별 다른 회원 평균 점수", free: false, premium: true },
   { label: "오늘의 복습 (간격 반복 일정)", free: false, premium: true },
-  { label: "AI 약점 진단", free: false, premium: "개발 중" },
 ];
+
+// AI 약점 진단은 개발 중이라 이 계정에게만 표에 노출한다. 정식 오픈 시 위
+// FEATURE_ROWS로 합치고 이 함수는 제거할 것.
+function featureRowsFor(email: string | null | undefined) {
+  if (!isDiagnosisDevAllowed(email)) return FEATURE_ROWS;
+  return [...FEATURE_ROWS, { label: "AI 약점 진단", free: false, premium: "개발 중" }];
+}
 
 // 좁은 화면에서 가로 스크롤이 생기지 않게 폭을 짠다. min-width 를 걸어두면 375px
 // 기기에서 표가 통째로 옆으로 밀려, 정작 비교하려는 두 칸이 화면 밖으로 나간다.
 // 값 칸만 고정폭(무료 4.5rem / 멤버십 5rem)으로 잡고 기능 이름은 남는 폭을 쓰며
 // break-keep 으로 접는다. overflow-x-auto 는 글자 크기를 키운 사용자를 위한 안전망.
-function FeatureTable() {
+function FeatureTable({ rows }: { rows: typeof FEATURE_ROWS }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full table-fixed border-collapse text-sm">
@@ -260,7 +267,7 @@ function FeatureTable() {
           </tr>
         </thead>
         <tbody>
-          {FEATURE_ROWS.map((row) => (
+          {rows.map((row) => (
             <tr
               key={row.label}
               className="border-b border-zinc-100 last:border-0 dark:border-zinc-800"
