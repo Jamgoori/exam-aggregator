@@ -117,6 +117,30 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
     만들어 검사한다. 실행 가드(`import.meta.url === argv[1]`)를 넣는 편이 짧지만,
     그 가드가 어긋나면 루틴이 조용히 0건 저장으로 끝난다 — 그래서 스크립트 쪽은
     손대지 않았다.
+- **청크 조회 성능 개편 (2026-08-25)**: `next-explanation-chunk.mjs`가 문제지를
+  하나씩 돌며 문제지마다 (questions, 기존 해설) 2왕복을 치르던 스캔을 없앴다 —
+  최우선 그룹 문제지 491개 기준 청크 하나에 20~35분(REST 왕복 약 1,000번)이 걸리고,
+  완료 문제지가 쌓일수록 더 느려지던 구조였다. 지금은 2단계다:
+  - **1차 RPC**: `next_explanation_pending_papers(p_reverse, p_max_papers)` 한 번으로
+    미해설 문항이 남은 앞쪽 문제지들의 pending 목록을 DB에서 바로 받는다
+    (`question_explanations` NOT EXISTS anti-join + 기존과 동일한
+    priority→exam_type_id→level, year→id, question_number 정렬).
+    마이그레이션은 `supabase/migrations/20260825120000_next_explanation_pending_papers.sql`
+    — **소유자가 `supabase db query --linked`(또는 SQL Editor)로 적용해야 활성화된다.**
+    security definer + authenticated execute (verify_question_answer 패턴).
+  - **2차 폴백**: RPC가 없거나(PGRST202) 실패하면 자동으로 클라이언트 벌크 조회로
+    떨어진다 — 문제지 전체를 `.range()` 페이지로 받고, 문항은 문제지 150개 단위
+    `.in()` + `question_explanations!left` 임베드 is.null(서버 anti-join, 거부되면
+    임베드 클라이언트 필터)로 받는다. 폴백도 왕복 십수 번이면 끝나므로
+    **마이그레이션 적용 전에도 배치는 깨지지 않고 빨라진다.**
+  - 어느 경로든 출력은 종전 로직과 100% 동일하다(세트 경계·순방향 기준 청크 분할·
+    정렬·출력 형식·done 형식·오류 시 수집분 보존 전부) — 신/구를 로컬 PostgreSQL
+    픽스처(엣지 케이스 + 실운영 규모)에서 플래그 조합별로 diff 해 검증했다.
+  - **"지난 세션 커서 저장" 류의 상태를 추가하지 말 것.** 순/역방향이 양 끝에서
+    좁혀와 중간에서 만나는 수렴 설계는 매 호출이 전체 순서를 다시 계산해야 안전하다.
+  - 스크립트 최상단 실행 구조(`main().catch` 직접 호출, 실행 가드 없음)와 최상위
+    `shapeConceptList`는 `src/lib/explanation-concepts.test.ts`가 소스를 떼어내
+    검사하므로 형태를 바꾸지 말 것.
 - **스케줄은 2시간 간격, UTC 기준.** 순방향은 짝수 UTC시(=KST 홀수시), 역방향은
   홀수 UTC시(=KST 짝수시) 59분에 발동해서 매시간 한쪽이 새로 뜬다. 루틴 화면의
   "반복" 목록 UI는 시간대 변환 없이 UTC 숫자를 그대로 표시하는 버그가 있다 —
