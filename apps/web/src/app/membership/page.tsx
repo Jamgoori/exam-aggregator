@@ -217,7 +217,14 @@ function StatusPill({
 //   - 오답노트는 무료(열람·정리·섞어풀기): app/mypage/wrong-notes/** 의 isPremium 은
 //     "해설 본문을 받을지"에만 쓴다 (lib/wrong-notes.ts 의 includeExplanations)
 //   - 오늘의 복습(간격 반복)/AI 진단: app/mypage/** 의 isPremium 확인
-const FEATURE_ROWS: { label: string; free: string | boolean; premium: string | boolean }[] = [
+// href 를 준 줄은 기능 이름이 상세 안내 페이지로 가는 링크가 된다(표 안에서 더
+// 알아볼 수 있게). 없으면 지금까지처럼 그냥 글자다.
+const FEATURE_ROWS: {
+  label: string;
+  free: string | boolean;
+  premium: string | boolean;
+  href?: string;
+}[] = [
   { label: "기출문제·정답 열람", free: true, premium: true },
   { label: "문제지 PDF 다운로드", free: true, premium: true },
   { label: "CBT 온라인 풀이·채점", free: true, premium: true },
@@ -234,10 +241,14 @@ const FEATURE_ROWS: { label: string; free: string | boolean; premium: string | b
 ];
 
 // AI 약점 진단은 개발 중이라 이 계정에게만 표에 노출한다. 정식 오픈 시 위
-// FEATURE_ROWS로 합치고 이 함수는 제거할 것.
+// FEATURE_ROWS로 합치고 이 함수는 제거할 것(그때 href 는 그대로 두면 된다 —
+// /diagnosis 는 이 기능의 전용 안내 페이지라 상시 유효하다).
 function featureRowsFor(email: string | null | undefined) {
   if (!isDiagnosisDevAllowed(email)) return FEATURE_ROWS;
-  return [...FEATURE_ROWS, { label: "AI 약점 진단", free: false, premium: "개발 중" }];
+  return [
+    ...FEATURE_ROWS,
+    { label: "AI 약점 진단", free: false, premium: "개발 중", href: "/diagnosis" },
+  ];
 }
 
 // 좁은 화면에서 가로 스크롤이 생기지 않게 폭을 짠다. min-width 를 걸어두면 375px
@@ -273,7 +284,16 @@ function FeatureTable({ rows }: { rows: typeof FEATURE_ROWS }) {
               className="border-b border-zinc-100 last:border-0 dark:border-zinc-800"
             >
               <td className="break-keep py-3 pr-2 text-xs text-zinc-700 sm:pr-3 sm:text-sm dark:text-zinc-300">
-                {row.label}
+                {row.href ? (
+                  <Link
+                    href={row.href}
+                    className="font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                  >
+                    {row.label}
+                  </Link>
+                ) : (
+                  row.label
+                )}
               </td>
               <td className="px-1 py-3 text-center">
                 <Cell value={row.free} />
