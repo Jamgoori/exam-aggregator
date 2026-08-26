@@ -18,10 +18,15 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-// --samples 로 표본을 뽑을 상위 취약 개념 수와 개념당 문항 수. 온디맨드 경로의
-// COACH_TOP_N/SAMPLES_PER_CONCEPT 와 같은 값으로 맞춘다 — 같은 재료로 같은 품질의
+// --samples 로 표본을 뽑을 상위 취약 개념 수와 개념당 문항 수. 기본값은 온디맨드
+// 경로의 COACH_TOP_N/SAMPLES_PER_CONCEPT 와 같게 맞춘다 — 같은 재료로 같은 품질의
 // 극복법이 나와야 두 경로의 결과가 서로 어긋나지 않는다.
-const COACH_TOP_N = 5;
+//
+// 온디맨드 경로가 5개에 묶여 있는 건 품질이 아니라 **요금** 때문이다(유저당 개념 5 ×
+// 문항 6 만큼의 실API 생성). 이 배치는 실비가 없으므로 --coach-top=N 으로 더 많은
+// 개념을 덮을 수 있다. 취약 개념이 열 개 넘게 잡히는 계정에서 상위 5개만 극복법이
+// 붙으면 나머지 카드가 통계만 있는 채로 남는다.
+const DEFAULT_COACH_TOP_N = 5;
 const SAMPLES_PER_CONCEPT = 6;
 // 모델에 넣기 전 자르는 길이(diagnosis-live.ts SAMPLE_TEXT_MAX 와 동일).
 const SAMPLE_TEXT_MAX = 140;
@@ -56,7 +61,10 @@ async function fetchAll(supabase, table, columns, apply) {
 }
 
 async function main() {
-  const wantSamples = process.argv.slice(2).includes("--samples");
+  const args = process.argv.slice(2);
+  const wantSamples = args.includes("--samples");
+  const topArg = args.find((a) => a.startsWith("--coach-top="));
+  const coachTopN = Math.max(1, Number(topArg?.split("=")[1]) || DEFAULT_COACH_TOP_N);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) {
@@ -304,7 +312,7 @@ async function main() {
     // 코칭 대상: 많이 틀린 순, 동률이면 정답률이 낮은 쪽 먼저.
     const targets = [...concepts]
       .sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101))
-      .slice(0, COACH_TOP_N);
+      .slice(0, coachTopN);
     // 묶는 키는 표기가 아니라 개념 키다 — 표기 이름은 과목이 다르면 겹칠 수 있다.
     const wanted = new Map(targets.map((t) => [countKeyOf(t), t]));
 
