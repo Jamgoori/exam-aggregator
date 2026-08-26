@@ -159,7 +159,7 @@ async function main() {
   );
 
   // 4) (paper_id, question_number) → questions.id → keyword_title, 그리고 paper→subject.
-  const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
+  const paperIds = [...new Set(attempts.map((a) => a.paper_id))];
 
   // 문항 id 매핑
   const questionKey = (pid, n) => `${pid}#${n}`;
@@ -230,8 +230,23 @@ async function main() {
   };
 
   // 5) 개념 × 과목 집계: 틀린 문항 수 / 극복(last_is_correct) 수.
+  //
+  // 정답률(accuracyPct)의 분모는 그 개념 문항을 **푼 것 전체**여야 한다. 오답 문항만
+  // 순회하면 분모와 분자가 같은 집합이라, 한 문항을 한 번씩만 푼 사용자는 모든 개념이
+  // 0%로 나온다 — lib/diagnosis-live.ts 와 같은 결함이었다. 그래서 오답 목록이 아니라
+  // 채점 원본(answerStats)의 모든 문항을 순회하고, 틀린 적 있는 문항만 wrongCount 로 센다.
+  const answeredRows = [];
+  for (const key of answerStats.keys()) {
+    const idx = key.lastIndexOf("#");
+    answeredRows.push({ paper_id: key.slice(0, idx), question_number: Number(key.slice(idx + 1)) });
+  }
+  const wrongKeys = new Set(statusRows.map((r) => questionKey(r.paper_id, r.question_number)));
+  const resolvedKeys = new Set(
+    statusRows.filter((r) => r.last_is_correct).map((r) => questionKey(r.paper_id, r.question_number)),
+  );
+
   const conceptMap = new Map();
-  for (const r of statusRows) {
+  for (const r of answeredRows) {
     const qid = questionIdByKey.get(questionKey(r.paper_id, r.question_number));
     if (!qid) continue;
     const concept = conceptNameOf(qid);
@@ -251,8 +266,11 @@ async function main() {
         correctSum: 0,
         answerSum: 0,
       };
-    entry.wrongCount++;
-    if (r.last_is_correct) entry.resolvedCount++;
+    const k = questionKey(r.paper_id, r.question_number);
+    if (wrongKeys.has(k)) {
+      entry.wrongCount++;
+      if (resolvedKeys.has(k)) entry.resolvedCount++;
+    }
     // 이 개념 취약 문항(틀린 적 있는 문항)의 CBT 정답률 누적.
     const st = answerStats.get(`${r.paper_id}#${r.question_number}`);
     if (st) {
@@ -262,6 +280,8 @@ async function main() {
     conceptMap.set(key, entry);
   }
   const concepts = [...conceptMap.values()]
+    // 한 번도 안 틀린 개념은 취약 개념이 아니다 — 정답률 분모 역할만 했다.
+    .filter((e) => e.wrongCount > 0)
     .map((e) => ({
       concept: e.concept,
       // 정본 개념 id(없으면 미분류). 코퍼스 빈도와 오답 표본을 이 축으로 센다.

@@ -270,14 +270,20 @@ export async function getDiagnosisAggregate(
     widened = days !== requested;
   }
 
-  // 개념 집계는 "이 기간에 한 번이라도 틀린 문항"만 대상으로 한다.
+  // 막대그래프에 세는 "틀린 문항"은 이 기간에 한 번이라도 틀린 것만이다.
   const statusRows = [...statsByQuestion.values()]
     .filter((s) => s.wrong > 0)
     .map((s) => ({ paper_id: s.paperId, question_number: s.questionNumber }));
+  // 정답률은 그 개념 문항을 **푼 것 전체**로 낸다. 예전엔 위의 오답 문항만 순회해서
+  // 분모와 분자가 같은 집합이었고, 한 문항을 한 번씩만 푼 사용자(대부분)는 모든 개념이
+  // 정답률 0%로 표시됐다 — 66문항 중 13개 틀린 개념도 0%였다. 맞힌 문항이 분모에
+  // 들어가야 "이 개념 몇 문항 중 몇 개 틀렸나"가 되고, 그래야 오답 수가 같은 두 개념
+  // 중 무엇이 더 급한지 판단할 수 있다.
+  const answeredRows = [...statsByQuestion.values()];
   const answerStats = statsByQuestion;
 
   // 3) (paper, 문항) → questions.id → keyword_title, paper → subject.
-  const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
+  const paperIds = [...new Set(answeredRows.map((r) => r.paperId))];
   const questionIdByKey = new Map<string, string>();
   const paperSubject = new Map<string, { name: string; slug: string } | null>();
   for (const ids of chunk(paperIds, 100)) {
@@ -360,8 +366,8 @@ export async function getDiagnosisAggregate(
       answerSum: number;
     }
   >();
-  for (const r of statusRows) {
-    const qid = questionIdByKey.get(questionKey(r.paper_id, r.question_number));
+  for (const r of answeredRows) {
+    const qid = questionIdByKey.get(questionKey(r.paperId, r.questionNumber));
     if (!qid) continue;
     const ref = conceptRefByQuestionId.get(qid);
     if (!ref) continue;
@@ -369,7 +375,7 @@ export async function getDiagnosisAggregate(
     // 정본이 있으면 정본 이름으로, 없으면 해설이 쓴 표기 그대로.
     const concept = meta?.name ?? ref.title;
     if (!concept) continue;
-    const subj = paperSubject.get(r.paper_id);
+    const subj = paperSubject.get(r.paperId);
     const key = `${ref.conceptId ?? `kw:${ref.title}`}###${subj?.slug ?? ""}`;
     const entry =
       conceptMap.get(key) ??
@@ -384,9 +390,10 @@ export async function getDiagnosisAggregate(
         answerSum: 0,
       };
     // 이 기간에 틀린 문항 1개 = 1. 같은 문항을 두 번 틀려도 문항 수로는 1이다
-    // ("이 개념 문제 5개를 틀렸다"가 사람이 읽기 쉬운 단위).
-    entry.wrongCount++;
-    const st = answerStats.get(questionKey(r.paper_id, r.question_number));
+    // ("이 개념 문제 5개를 틀렸다"가 사람이 읽기 쉬운 단위). 맞히기만 한 문항은
+    // 여기서 세지 않고 아래 정답률 분모에만 들어간다.
+    if (r.wrong > 0) entry.wrongCount++;
+    const st = answerStats.get(questionKey(r.paperId, r.questionNumber));
     if (st) {
       entry.correctSum += st.total - st.wrong;
       entry.answerSum += st.total;
@@ -395,6 +402,8 @@ export async function getDiagnosisAggregate(
   }
 
   const conceptsRaw = [...conceptMap.values()]
+    // 이 기간에 한 번도 안 틀린 개념은 그래프에 세우지 않는다 — 분모 역할만 한 것이다.
+    .filter((e) => e.wrongCount > 0)
     .map((e) => ({
       concept: e.concept,
       conceptId: e.conceptId,
@@ -453,7 +462,7 @@ export async function getDiagnosisAggregate(
     totals: {
       attempts: attempts.length,
       wrongQuestions: statusRows.length,
-      conceptsWithKeyword: conceptMap.size,
+      conceptsWithKeyword: [...conceptMap.values()].filter((e) => e.wrongCount > 0).length,
     },
     subjects,
     concepts,
