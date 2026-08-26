@@ -5,10 +5,32 @@
 // stdout에 출력한다. 이 JSON을 diagnosis-prompt.md와 함께 Claude(구독)에 넣어 리포트를
 // 생성하고, save-diagnosis.mjs로 저장한다 — 해설 배치와 같은 흐름이며 API 실비가 없다.
 //
-// 진단 입력에는 정답 자체가 전혀 들어가지 않는다(문항 번호·개념 키워드·점수 통계뿐).
+// 기본 출력에는 정답 자체가 전혀 들어가지 않는다(문항 번호·개념 키워드·점수 통계뿐).
+//
+// --samples 를 붙이면 상위 취약 개념의 "실제로 틀린 문항" 표본(발문 요약·정답과 그 근거·
+// 사용자가 고른 오답 선지와 그 선지가 틀린 이유)까지 함께 내려준다. 개념별 맞춤 극복법
+// (report.conceptCoaching)은 통계만으로는 "판례 위주로 반복하세요" 수준의 일반론밖에 안
+// 나와서, 문항을 봐야 유형을 짚을 수 있기 때문이다 — 온디맨드 경로(lib/diagnosis-generate.ts)가
+// 모델에 넣는 것과 같은 재료다. 이 출력에는 정답이 들어가므로 파일로 남기지 말고, 남겼다면
+// 리포트를 저장한 뒤 지운다.
+//
 // service_role로 실행(오답노트 통계는 본인만 볼 수 있어 RLS를 우회해 집계).
 
 import { createClient } from "@supabase/supabase-js";
+
+// --samples 로 표본을 뽑을 상위 취약 개념 수와 개념당 문항 수. 온디맨드 경로의
+// COACH_TOP_N/SAMPLES_PER_CONCEPT 와 같은 값으로 맞춘다 — 같은 재료로 같은 품질의
+// 극복법이 나와야 두 경로의 결과가 서로 어긋나지 않는다.
+const COACH_TOP_N = 5;
+const SAMPLES_PER_CONCEPT = 6;
+// 모델에 넣기 전 자르는 길이(diagnosis-live.ts SAMPLE_TEXT_MAX 와 동일).
+const SAMPLE_TEXT_MAX = 140;
+
+function truncate(s, max = SAMPLE_TEXT_MAX) {
+  const t = (s ?? "").trim();
+  if (!t) return null;
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
 
 function chunk(items, size) {
   const out = [];
@@ -34,6 +56,7 @@ async function fetchAll(supabase, table, columns, apply) {
 }
 
 async function main() {
+  const wantSamples = process.argv.slice(2).includes("--samples");
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) {
@@ -154,36 +177,65 @@ async function main() {
     }
   }
 
-  // keyword_title 조회 (question_id 기준)
+  // 개념 조회. 진단 축은 정본 개념(concept_id)이다 — keyword_title 은 해설 배치가
+  // 문항마다 자유롭게 쓴 문자열이라 사실상 문항 1:1이고(코퍼스 기준 개념당 1.02문항),
+  // 그 축으로 집계하면 개념마다 wrongCount 가 1이 되어 "어디가 약한지"가 안 보인다.
+  // 정본이 아직 안 붙은 문항만 keyword_title 표기로 남긴다(미매칭을 "기타"로 뭉치지
+  // 않는다 — docs/agents/concept-dictionary.md). 화면(lib/diagnosis-live.ts)이 쓰는 축과
+  // 같아야 여기서 만든 극복법이 화면의 개념 카드에 붙는다.
   const questionIds = [...questionIdByKey.values()];
-  const keywordByQuestionId = new Map();
+  const conceptRefByQuestionId = new Map(); // question_id → { conceptId, title }
+  const conceptIdsSeen = new Set();
   for (const ids of chunk(questionIds, 100)) {
     const rows = await fetchAll(
       supabase,
       "question_explanations",
-      "question_id, keyword_title",
+      "question_id, keyword_title, concept_id",
       (q) => q.in("question_id", ids),
     );
     for (const r of rows) {
-      if (r.keyword_title && r.keyword_title.trim()) {
-        keywordByQuestionId.set(r.question_id, r.keyword_title.trim());
-      }
+      const title = (r.keyword_title ?? "").trim();
+      if (!r.concept_id && !title) continue;
+      if (r.concept_id) conceptIdsSeen.add(r.concept_id);
+      conceptRefByQuestionId.set(r.question_id, { conceptId: r.concept_id, title });
     }
   }
+
+  // 정본 개념의 이름. 합쳐진 개념(merged_into)은 합쳐진 쪽 이름으로 보여준다.
+  const conceptMeta = new Map();
+  for (const ids of chunk([...conceptIdsSeen], 100)) {
+    const rows = await fetchAll(supabase, "concepts", "id, name", (q) => q.in("id", ids));
+    for (const r of rows) conceptMeta.set(r.id, { name: r.name });
+  }
+
+  // question_id → 화면 표기(정본 이름 우선) / 집계 키(정본 id 우선).
+  const conceptNameOf = (qid) => {
+    const ref = conceptRefByQuestionId.get(qid);
+    if (!ref) return null;
+    const name = (ref.conceptId ? conceptMeta.get(ref.conceptId)?.name : null) ?? ref.title;
+    return name || null;
+  };
+  const conceptKeyOf = (qid) => {
+    const ref = conceptRefByQuestionId.get(qid);
+    if (!ref) return null;
+    return ref.conceptId ?? `kw:${ref.title}`;
+  };
 
   // 5) 개념 × 과목 집계: 틀린 문항 수 / 극복(last_is_correct) 수.
   const conceptMap = new Map();
   for (const r of statusRows) {
     const qid = questionIdByKey.get(questionKey(r.paper_id, r.question_number));
     if (!qid) continue;
-    const concept = keywordByQuestionId.get(qid);
+    const concept = conceptNameOf(qid);
+    const conceptId = conceptRefByQuestionId.get(qid)?.conceptId ?? null;
     if (!concept) continue; // 해설 미생성 문항은 개념 분포에서 빠진다(통계엔 이미 반영).
     const subj = paperSubject.get(r.paper_id);
-    const key = `${concept}###${subj?.slug ?? ""}`;
+    const key = `${conceptKeyOf(qid)}###${subj?.slug ?? ""}`;
     const entry =
       conceptMap.get(key) ??
       {
         concept,
+        conceptId,
         subject: subj?.name ?? null,
         subjectSlug: subj?.slug ?? null,
         wrongCount: 0,
@@ -204,6 +256,8 @@ async function main() {
   const concepts = [...conceptMap.values()]
     .map((e) => ({
       concept: e.concept,
+      // 정본 개념 id(없으면 미분류). 코퍼스 빈도와 오답 표본을 이 축으로 센다.
+      conceptId: e.conceptId,
       subject: e.subject,
       subjectSlug: e.subjectSlug,
       wrongCount: e.wrongCount,
@@ -218,22 +272,117 @@ async function main() {
   // 코퍼스 전체에서 같은 keyword_title을 단 해설 수를 세어(개념=문항 1:1이라 문항 빈도),
   // 이 사용자의 개념 집합 안에서 3분위(tercile)로 눌러 1~3점을 매긴다. 절대 스케일을
   // 모르므로 상대 분위로 정한다("자주 나오는데 약한 것"의 가성비 판단용).
-  const uniqueConcepts = [...new Set(concepts.map((c) => c.concept))];
+  // 정본 개념은 concept_id 로 센다(평균 15문항). 정본이 없는 것만 keyword_title 로
+  // 세는데, 그 축은 문항 1:1이라 거의 항상 1이 나온다.
+  const countKeyOf = (c) => c.conceptId ?? `kw:${c.concept}`;
+  const uniqueTargets = new Map();
+  for (const c of concepts) uniqueTargets.set(countKeyOf(c), c);
   const corpusCount = new Map();
-  for (const kw of uniqueConcepts) {
-    const { count } = await supabase
+  for (const [key, c] of uniqueTargets) {
+    const base = supabase
       .from("question_explanations")
-      .select("question_id", { count: "exact", head: true })
-      .eq("keyword_title", kw);
-    corpusCount.set(kw, count ?? 0);
+      .select("question_id", { count: "exact", head: true });
+    const { count } = await (c.conceptId
+      ? base.eq("concept_id", c.conceptId)
+      : base.eq("keyword_title", c.concept));
+    corpusCount.set(key, count ?? 0);
   }
   const counts = [...corpusCount.values()].filter((n) => n > 0).sort((a, b) => a - b);
   const q1 = counts.length ? counts[Math.floor(counts.length / 3)] : 0;
   const q2 = counts.length ? counts[Math.floor((counts.length * 2) / 3)] : 0;
   for (const c of concepts) {
-    const n = corpusCount.get(c.concept) ?? 0;
+    const n = corpusCount.get(countKeyOf(c)) ?? 0;
     // 분위 경계로 1~3점. 데이터가 거의 없으면(0) frequency는 넣지 않는다(화면이 뱃지 숨김).
     c.frequency = n <= 0 ? null : n > q2 ? 3 : n > q1 ? 2 : 1;
+  }
+
+  // 7) (--samples) 상위 취약 개념의 "실제로 틀린 문항" 표본. 개념별 맞춤 극복법용.
+  // 고르는 규칙은 diagnosis-live.ts getWrongQuestionSamples 와 같다: 아직 극복하지
+  // 못한 문항(last_is_correct=false) 먼저, 그다음 많이 틀린 순.
+  let samples = null;
+  if (wantSamples) {
+    // 코칭 대상: 많이 틀린 순, 동률이면 정답률이 낮은 쪽 먼저.
+    const targets = [...concepts]
+      .sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101))
+      .slice(0, COACH_TOP_N);
+    // 묶는 키는 표기가 아니라 개념 키다 — 표기 이름은 과목이 다르면 겹칠 수 있다.
+    const wanted = new Map(targets.map((t) => [countKeyOf(t), t]));
+
+    // 개념별 후보 문항.
+    const byConcept = new Map();
+    for (const r of statusRows) {
+      const qid = questionIdByKey.get(questionKey(r.paper_id, r.question_number));
+      if (!qid) continue;
+      const ckey = conceptKeyOf(qid);
+      if (!ckey || !wanted.has(ckey)) continue;
+      const list = byConcept.get(ckey) ?? [];
+      list.push({ qid, status: r });
+      byConcept.set(ckey, list);
+    }
+    const picked = [];
+    for (const [ckey, list] of byConcept) {
+      list.sort(
+        (a, b) =>
+          Number(a.status.last_is_correct) - Number(b.status.last_is_correct) ||
+          b.status.wrong_count - a.status.wrong_count,
+      );
+      const concept = wanted.get(ckey).concept;
+      for (const c of list.slice(0, SAMPLES_PER_CONCEPT)) picked.push({ concept, ...c });
+    }
+
+    // 해설 본문(발문 요약·정답·선지별 해설).
+    const expByQid = new Map();
+    for (const ids of chunk([...new Set(picked.map((p) => p.qid))], 100)) {
+      const rows = await fetchAll(
+        supabase,
+        "question_explanations",
+        "question_id, question_text, correct_choice_number, correct_choice_summary, choice_explanations",
+        (q) => q.in("question_id", ids),
+      );
+      for (const r of rows) expByQid.set(r.question_id, r);
+    }
+
+    // "내가 고른 선지": 뽑힌 문항의 CBT 응시 기록에서 틀린 선택(가장 최근 것).
+    const pickedPaperIds = [...new Set(picked.map((p) => p.status.paper_id))];
+    const sampleAttempts = attempts.filter((a) => pickedPaperIds.includes(a.paper_id));
+    const chosenByKey = new Map();
+    for (const ids of chunk(sampleAttempts.map((a) => a.id), 100)) {
+      if (ids.length === 0) continue;
+      const rows = await fetchAll(
+        supabase,
+        "cbt_attempt_answers",
+        "attempt_id, question_number, selected_choice, is_correct",
+        (q) => q.in("attempt_id", ids),
+      );
+      for (const r of rows) {
+        if (r.is_correct || r.selected_choice == null) continue;
+        const paperId = attemptPaper.get(r.attempt_id);
+        if (!paperId) continue;
+        chosenByKey.set(questionKey(paperId, r.question_number), r.selected_choice);
+      }
+    }
+
+    samples = picked.map((p) => {
+      const exp = expByQid.get(p.qid) ?? {};
+      const key = questionKey(p.status.paper_id, p.status.question_number);
+      const pickedChoice = chosenByKey.get(key) ?? null;
+      const choiceRow =
+        pickedChoice != null
+          ? (exp.choice_explanations ?? []).find((c) => c?.number === pickedChoice)
+          : undefined;
+      const subj = paperSubject.get(p.status.paper_id);
+      return {
+        concept: p.concept,
+        subject: subj?.name ?? null,
+        questionText: truncate(exp.question_text, 100),
+        correctChoice: exp.correct_choice_number ?? null,
+        correctSummary: truncate(exp.correct_choice_summary),
+        pickedChoice,
+        pickedReason: choiceRow
+          ? truncate([choiceRow.verdict_label, choiceRow.explanation].filter(Boolean).join(" — "))
+          : null,
+      };
+    });
   }
 
   const output = {
@@ -247,6 +396,8 @@ async function main() {
     },
     subjects,
     concepts,
+    // --samples 일 때만. 없으면 키 자체를 넣지 않는다.
+    ...(samples ? { samples } : {}),
   };
   console.log(JSON.stringify(output, null, 2));
 }
