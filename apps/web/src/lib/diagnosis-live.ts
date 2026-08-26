@@ -28,6 +28,12 @@ export type ConceptStat = {
   accuracyPct: number | null;
   // 전체 기출 코퍼스에서 같은 keyword_title 문항 수.
   corpusCount: number;
+  // 이 개념을 전부 맞혔다면 그 과목 회차 점수가 몇 점 오르는지(%p). 계산은
+  // 이 개념 오답 수 ÷ 그 과목에서 이 기간에 푼 문항 수 × 100 — AI가 아니라 산수다.
+  // "몇 문항 틀렸다"만으로는 심각도가 안 잡혀서, 사용자가 아는 단위(점수)로 바꿔 준다.
+  // 그 개념을 **전부** 맞힌다는 가정의 상한이므로 화면에서 단독으로 크게 쓰지 말 것
+  // (회차당 몇 문항인지와 함께 보여준다).
+  scoreGainPct: number | null;
 };
 
 export type SubjectStat = {
@@ -197,13 +203,17 @@ const WIDEN_LADDER: (number | null)[] = [7, 30, 90, null];
 // 섞어풀기·복습(review_session_items)을 모두 센다 — 사용자에겐 둘 다 "푼 것"이다.
 export async function getDiagnosisAggregate(
   userId: string,
-  opts: { days?: number | null; widen?: boolean } = {},
+  // subjectSlug 를 주면 그 과목만 집계한다(화면의 과목 칩). 개념 상위 30개를 자르기
+  // **전에** 걸러야 한다 — 전체에서 자른 뒤 거르면 개념이 잘게 쪼개진 과목이 통째로
+  // 사라진다.
+  opts: { days?: number | null; widen?: boolean; subjectSlug?: string | null } = {},
 ): Promise<DiagnosisAggregate> {
   const admin = createAdminClient();
   const requested = opts.days === undefined ? 7 : opts.days;
   // widen=false 면 창을 절대 넓히지 않는다. AI 분석 경로가 이걸 쓴다 — 창이 곧 프롬프트
   // 크기이자 요금이라, 빈 주에 조용히 90일치를 긁어 오면 안 된다.
   const widenAllowed = opts.widen !== false;
+  const subjectFilter = opts.subjectSlug ?? null;
 
   // 1) 응시 이력(과목 포함) — 과목별 정오율·추세.
   const attempts = await fetchAll<{
@@ -366,6 +376,14 @@ export async function getDiagnosisAggregate(
       answerSum: number;
     }
   >();
+  // 예상 점수의 분모: 이 기간에 그 과목에서 푼 문항 수(개념이 안 붙은 문항도 포함해야
+  // 실제 회차 점수 환산이 된다). 과목 필터와 무관하게 원래 과목 기준으로 센다.
+  const answeredBySubject = new Map<string, number>();
+  for (const r of answeredRows) {
+    const slug = paperSubject.get(r.paperId)?.slug;
+    if (slug) answeredBySubject.set(slug, (answeredBySubject.get(slug) ?? 0) + 1);
+  }
+
   for (const r of answeredRows) {
     const qid = questionIdByKey.get(questionKey(r.paperId, r.questionNumber));
     if (!qid) continue;
@@ -376,6 +394,7 @@ export async function getDiagnosisAggregate(
     const concept = meta?.name ?? ref.title;
     if (!concept) continue;
     const subj = paperSubject.get(r.paperId);
+    if (subjectFilter && subj?.slug !== subjectFilter) continue;
     const key = `${ref.conceptId ?? `kw:${ref.title}`}###${subj?.slug ?? ""}`;
     const entry =
       conceptMap.get(key) ??
@@ -413,6 +432,11 @@ export async function getDiagnosisAggregate(
       wrongCount: e.wrongCount,
       answeredCount: e.answerSum,
       accuracyPct: e.answerSum > 0 ? Math.round((e.correctSum / e.answerSum) * 100) : null,
+      scoreGainPct: (() => {
+        const denom = e.subjectSlug ? (answeredBySubject.get(e.subjectSlug) ?? 0) : 0;
+        if (denom <= 0) return null;
+        return Math.round((e.wrongCount / denom) * 1000) / 10;
+      })(),
     }))
     .sort((a, b) => b.wrongCount - a.wrongCount || a.concept.localeCompare(b.concept))
     .slice(0, 30);
@@ -461,7 +485,9 @@ export async function getDiagnosisAggregate(
     window: { days: usedDays, widened },
     totals: {
       attempts: attempts.length,
-      wrongQuestions: statusRows.length,
+      wrongQuestions: subjectFilter
+        ? statusRows.filter((r) => paperSubject.get(r.paper_id)?.slug === subjectFilter).length
+        : statusRows.length,
       conceptsWithKeyword: [...conceptMap.values()].filter((e) => e.wrongCount > 0).length,
     },
     subjects,
