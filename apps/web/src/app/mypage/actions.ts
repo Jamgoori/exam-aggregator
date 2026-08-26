@@ -9,6 +9,10 @@ import {
   DIAGNOSIS_CYCLE_DAYS,
 } from "@/lib/ai-diagnosis";
 import { runDiagnosisForUser } from "@/lib/diagnosis-generate";
+import {
+  getExcludedDiagnosisSubjectSlugs,
+  setDiagnosisSubjectPaused,
+} from "@/lib/review-preferences";
 import { isPremium } from "@/lib/membership";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 
@@ -16,6 +20,23 @@ export type RequestDiagnosisResult = {
   error?: string;
   status?: "ready" | "pending";
 };
+
+// 진단에서 분석할 과목 켜기/끄기. 맞춤 극복법은 과목당 7개·전체 15개 개념까지만
+// 만들어서(개념 수 = 요금), 준비하지 않는 과목이 그 자리를 차지하면 정작 필요한 과목이
+// 얕아진다. 저장만 하고 생성은 하지 않는다 — 고르는 동안 요금이 나가면 안 된다.
+export async function toggleDiagnosisSubject(
+  subjectId: string,
+  include: boolean,
+): Promise<{ error?: string; excludedSubjectIds?: string[] }> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  if (!isDiagnosisDevAllowed(user.email)) return { error: "AI 약점 진단은 아직 준비 중이에요." };
+
+  const res = await setDiagnosisSubjectPaused(supabase, user.id, subjectId, !include);
+  if (res.error) return { error: res.error };
+  revalidatePath("/mypage/diagnosis");
+  return { excludedSubjectIds: res.pausedSubjectIds };
+}
 
 // "AI 약점 진단 받기" 버튼. 자격을 확인하고 오늘 진단 요청(report=null 행)을 만든 뒤,
 // 그 자리에서 온디맨드 AI로 맞춤 극복법을 생성해 채운다. 생성에 실패하면(키 미설정·API
@@ -67,7 +88,12 @@ export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
   let genError: string | undefined;
   if (row?.id) {
     try {
-      const gen = await runDiagnosisForUser(row.id as string, user.id, windowDays);
+      const gen = await runDiagnosisForUser(
+        row.id as string,
+        user.id,
+        windowDays,
+        await getExcludedDiagnosisSubjectSlugs(supabase, user.id),
+      );
       status = gen.status;
       genError = gen.error;
     } catch {

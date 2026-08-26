@@ -16,6 +16,10 @@
 //     ],
 //     "subjectTrends": [
 //       { "subject": "행정법", "trend": "up", "note": "최근 3회 62→70→75점..." }
+//     ],
+//     "conceptCoaching": [
+//       { "concept": "처분성", "subject": "행정법", "subjectSlug": "administrative-law",
+//         "weakPattern": "어떤 걸 틀리는지 한두 문장", "howToOvercome": "어떻게 잡을지 한두 문장" }
 //     ]
 //   }
 // }
@@ -60,6 +64,30 @@ function normalizeReport(report) {
         }
       : null;
 
+  // 개념별 맞춤 극복법. 온디맨드 경로(lib/diagnosis-generate.ts)가 채우는 것과 같은
+  // 필드로, 진단 화면의 개념 카드가 이걸로 "이런 걸 틀려요 / 이렇게 잡으세요"를 그린다.
+  // concept 는 화면이 개념 카드와 맞춰보는 키라 반드시 집계에 나온 표기 그대로여야 한다.
+  const conceptCoaching = Array.isArray(report.conceptCoaching)
+    ? report.conceptCoaching
+        .filter(
+          (c) =>
+            c &&
+            typeof c.concept === "string" &&
+            c.concept.trim() &&
+            typeof c.weakPattern === "string" &&
+            c.weakPattern.trim() &&
+            typeof c.howToOvercome === "string" &&
+            c.howToOvercome.trim(),
+        )
+        .map((c) => ({
+          concept: String(c.concept).trim(),
+          subject: c.subject != null ? String(c.subject) : null,
+          subjectSlug: c.subjectSlug != null ? String(c.subjectSlug) : null,
+          weakPattern: String(c.weakPattern).trim(),
+          howToOvercome: String(c.howToOvercome).trim(),
+        }))
+    : [];
+
   const insights = Array.isArray(report.insights)
     ? report.insights
         .filter((ins) => ins && typeof ins.text === "string" && ins.text.trim())
@@ -74,6 +102,7 @@ function normalizeReport(report) {
     summary: report.summary.trim(),
     mission,
     insights,
+    conceptCoaching,
     weakConcepts: report.weakConcepts.map((c) => ({
       concept: String(c.concept).trim(),
       subject: c.subject != null ? String(c.subject) : null,

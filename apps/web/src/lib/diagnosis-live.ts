@@ -28,9 +28,18 @@ export type ConceptStat = {
   accuracyPct: number | null;
   // 전체 기출 코퍼스에서 같은 keyword_title 문항 수.
   corpusCount: number;
+  // 이 개념을 전부 맞혔다면 그 과목 회차 점수가 몇 점 오르는지(%p). 계산은
+  // 이 개념 오답 수 ÷ 그 과목에서 이 기간에 푼 문항 수 × 100 — AI가 아니라 산수다.
+  // "몇 문항 틀렸다"만으로는 심각도가 안 잡혀서, 사용자가 아는 단위(점수)로 바꿔 준다.
+  // 그 개념을 **전부** 맞힌다는 가정의 상한이므로 화면에서 단독으로 크게 쓰지 말 것
+  // (회차당 몇 문항인지와 함께 보여준다).
+  scoreGainPct: number | null;
 };
 
 export type SubjectStat = {
+  // subjects.id. 진단 과목 선택(review_preferences.diagnosis_paused_subject_ids)이
+  // id 축이라 화면이 토글하려면 이 값이 필요하다.
+  id: string;
   name: string;
   slug: string;
   attempts: number;
@@ -197,13 +206,17 @@ const WIDEN_LADDER: (number | null)[] = [7, 30, 90, null];
 // 섞어풀기·복습(review_session_items)을 모두 센다 — 사용자에겐 둘 다 "푼 것"이다.
 export async function getDiagnosisAggregate(
   userId: string,
-  opts: { days?: number | null; widen?: boolean } = {},
+  // subjectSlug 를 주면 그 과목만 집계한다(화면의 과목 칩). 개념 상위 30개를 자르기
+  // **전에** 걸러야 한다 — 전체에서 자른 뒤 거르면 개념이 잘게 쪼개진 과목이 통째로
+  // 사라진다.
+  opts: { days?: number | null; widen?: boolean; subjectSlug?: string | null } = {},
 ): Promise<DiagnosisAggregate> {
   const admin = createAdminClient();
   const requested = opts.days === undefined ? 7 : opts.days;
   // widen=false 면 창을 절대 넓히지 않는다. AI 분석 경로가 이걸 쓴다 — 창이 곧 프롬프트
   // 크기이자 요금이라, 빈 주에 조용히 90일치를 긁어 오면 안 된다.
   const widenAllowed = opts.widen !== false;
+  const subjectFilter = opts.subjectSlug ?? null;
 
   // 1) 응시 이력(과목 포함) — 과목별 정오율·추세.
   const attempts = await fetchAll<{
@@ -221,14 +234,30 @@ export async function getDiagnosisAggregate(
 
   const bySubjectMap = new Map<
     string,
-    { name: string; slug: string; attempts: number; scoreSum: number; totalSum: number; recentPct: number[] }
+    {
+      id: string;
+      name: string;
+      slug: string;
+      attempts: number;
+      scoreSum: number;
+      totalSum: number;
+      recentPct: number[];
+    }
   >();
   for (const a of attempts) {
     const subj = a.exam_papers?.subjects;
     if (!subj) continue;
     const entry =
       bySubjectMap.get(subj.slug) ??
-      { name: subj.name, slug: subj.slug, attempts: 0, scoreSum: 0, totalSum: 0, recentPct: [] };
+      {
+        id: a.exam_papers?.subject_id ?? "",
+        name: subj.name,
+        slug: subj.slug,
+        attempts: 0,
+        scoreSum: 0,
+        totalSum: 0,
+        recentPct: [],
+      };
     entry.attempts++;
     entry.scoreSum += a.score ?? 0;
     entry.totalSum += a.total_questions ?? 0;
@@ -238,6 +267,7 @@ export async function getDiagnosisAggregate(
     bySubjectMap.set(subj.slug, entry);
   }
   const subjects: SubjectStat[] = [...bySubjectMap.values()].map((e) => ({
+    id: e.id,
     name: e.name,
     slug: e.slug,
     attempts: e.attempts,
@@ -270,14 +300,20 @@ export async function getDiagnosisAggregate(
     widened = days !== requested;
   }
 
-  // 개념 집계는 "이 기간에 한 번이라도 틀린 문항"만 대상으로 한다.
+  // 막대그래프에 세는 "틀린 문항"은 이 기간에 한 번이라도 틀린 것만이다.
   const statusRows = [...statsByQuestion.values()]
     .filter((s) => s.wrong > 0)
     .map((s) => ({ paper_id: s.paperId, question_number: s.questionNumber }));
+  // 정답률은 그 개념 문항을 **푼 것 전체**로 낸다. 예전엔 위의 오답 문항만 순회해서
+  // 분모와 분자가 같은 집합이었고, 한 문항을 한 번씩만 푼 사용자(대부분)는 모든 개념이
+  // 정답률 0%로 표시됐다 — 66문항 중 13개 틀린 개념도 0%였다. 맞힌 문항이 분모에
+  // 들어가야 "이 개념 몇 문항 중 몇 개 틀렸나"가 되고, 그래야 오답 수가 같은 두 개념
+  // 중 무엇이 더 급한지 판단할 수 있다.
+  const answeredRows = [...statsByQuestion.values()];
   const answerStats = statsByQuestion;
 
   // 3) (paper, 문항) → questions.id → keyword_title, paper → subject.
-  const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
+  const paperIds = [...new Set(answeredRows.map((r) => r.paperId))];
   const questionIdByKey = new Map<string, string>();
   const paperSubject = new Map<string, { name: string; slug: string } | null>();
   for (const ids of chunk(paperIds, 100)) {
@@ -360,8 +396,16 @@ export async function getDiagnosisAggregate(
       answerSum: number;
     }
   >();
-  for (const r of statusRows) {
-    const qid = questionIdByKey.get(questionKey(r.paper_id, r.question_number));
+  // 예상 점수의 분모: 이 기간에 그 과목에서 푼 문항 수(개념이 안 붙은 문항도 포함해야
+  // 실제 회차 점수 환산이 된다). 과목 필터와 무관하게 원래 과목 기준으로 센다.
+  const answeredBySubject = new Map<string, number>();
+  for (const r of answeredRows) {
+    const slug = paperSubject.get(r.paperId)?.slug;
+    if (slug) answeredBySubject.set(slug, (answeredBySubject.get(slug) ?? 0) + 1);
+  }
+
+  for (const r of answeredRows) {
+    const qid = questionIdByKey.get(questionKey(r.paperId, r.questionNumber));
     if (!qid) continue;
     const ref = conceptRefByQuestionId.get(qid);
     if (!ref) continue;
@@ -369,7 +413,8 @@ export async function getDiagnosisAggregate(
     // 정본이 있으면 정본 이름으로, 없으면 해설이 쓴 표기 그대로.
     const concept = meta?.name ?? ref.title;
     if (!concept) continue;
-    const subj = paperSubject.get(r.paper_id);
+    const subj = paperSubject.get(r.paperId);
+    if (subjectFilter && subj?.slug !== subjectFilter) continue;
     const key = `${ref.conceptId ?? `kw:${ref.title}`}###${subj?.slug ?? ""}`;
     const entry =
       conceptMap.get(key) ??
@@ -384,9 +429,10 @@ export async function getDiagnosisAggregate(
         answerSum: 0,
       };
     // 이 기간에 틀린 문항 1개 = 1. 같은 문항을 두 번 틀려도 문항 수로는 1이다
-    // ("이 개념 문제 5개를 틀렸다"가 사람이 읽기 쉬운 단위).
-    entry.wrongCount++;
-    const st = answerStats.get(questionKey(r.paper_id, r.question_number));
+    // ("이 개념 문제 5개를 틀렸다"가 사람이 읽기 쉬운 단위). 맞히기만 한 문항은
+    // 여기서 세지 않고 아래 정답률 분모에만 들어간다.
+    if (r.wrong > 0) entry.wrongCount++;
+    const st = answerStats.get(questionKey(r.paperId, r.questionNumber));
     if (st) {
       entry.correctSum += st.total - st.wrong;
       entry.answerSum += st.total;
@@ -395,6 +441,8 @@ export async function getDiagnosisAggregate(
   }
 
   const conceptsRaw = [...conceptMap.values()]
+    // 이 기간에 한 번도 안 틀린 개념은 그래프에 세우지 않는다 — 분모 역할만 한 것이다.
+    .filter((e) => e.wrongCount > 0)
     .map((e) => ({
       concept: e.concept,
       conceptId: e.conceptId,
@@ -404,9 +452,18 @@ export async function getDiagnosisAggregate(
       wrongCount: e.wrongCount,
       answeredCount: e.answerSum,
       accuracyPct: e.answerSum > 0 ? Math.round((e.correctSum / e.answerSum) * 100) : null,
+      scoreGainPct: (() => {
+        const denom = e.subjectSlug ? (answeredBySubject.get(e.subjectSlug) ?? 0) : 0;
+        if (denom <= 0) return null;
+        return Math.round((e.wrongCount / denom) * 1000) / 10;
+      })(),
     }))
     .sort((a, b) => b.wrongCount - a.wrongCount || a.concept.localeCompare(b.concept))
-    .slice(0, 30);
+    // 전체 상위 N개. 코칭 대상을 과목당 7개까지 고르므로(diagnosis-generate.ts) 이 컷이
+    // 30이면 문항을 많이 푼 과목이 30자리를 다 가져가 다른 과목의 7번째가 사라진다.
+    // 화면은 어차피 과목당 6개만 그리고(BARS_PER_SUBJECT) 이 배열은 AI 프롬프트에
+    // 들어가지 않으므로, 과목 수 × 7을 넉넉히 덮는 값으로 둔다.
+    .slice(0, 60);
 
   // 5) 각 개념의 전체 기출 corpus 문항 수. 같은개념 5문제 풀기 가능 여부 판단에 그대로 쓰고,
   // 화면 뱃지(출제 빈도)에도 쓴다. 정본 개념은 concept_id로 센다(평균 15문항). 정본이
@@ -452,8 +509,10 @@ export async function getDiagnosisAggregate(
     window: { days: usedDays, widened },
     totals: {
       attempts: attempts.length,
-      wrongQuestions: statusRows.length,
-      conceptsWithKeyword: conceptMap.size,
+      wrongQuestions: subjectFilter
+        ? statusRows.filter((r) => paperSubject.get(r.paper_id)?.slug === subjectFilter).length
+        : statusRows.length,
+      conceptsWithKeyword: [...conceptMap.values()].filter((e) => e.wrongCount > 0).length,
     },
     subjects,
     concepts,

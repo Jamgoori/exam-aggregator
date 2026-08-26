@@ -1,9 +1,11 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { COACH_MAX_TOTAL, COACH_PER_SUBJECT } from "@/lib/diagnosis-limits";
 import {
   getDiagnosisAggregate,
   getWrongQuestionSamples,
+  type ConceptStat,
   type DiagnosisAggregate,
   type WrongQuestionSample,
 } from "@/lib/diagnosis-live";
@@ -22,8 +24,7 @@ import type {
 // 비운 채(pending) 두고, 기존 배치 생성기가 나중에 채우게 한다(호출부에서 처리).
 
 const MODEL = process.env.ANTHROPIC_DIAGNOSIS_MODEL || "claude-opus-5";
-// 코칭할 상위 취약 개념 수(1콜 묶음). 비용 상한 = 유저당 이 개수만큼의 짧은 생성.
-const COACH_TOP_N = 5;
+// 개념 수 상한은 lib/diagnosis-limits.ts 에 있다(선택창과 같은 숫자를 써야 한다).
 // 개념마다 모델에 함께 넣을 "실제로 틀린 문항" 표본 수. 이 값과 diagnosis-live 의
 // truncate 길이가 1회 요금을 정한다 — 개념 5 × 문항 6 × 약 300자 ≈ 9천 자(입력 10K
 // 토큰 남짓, 회당 수백 원). 늘리기 전에 비용을 다시 계산할 것.
@@ -74,12 +75,43 @@ function toSubjectTrends(agg: DiagnosisAggregate): DiagnosisSubjectTrend[] {
     });
 }
 
-// 코칭 대상 개념: 이 기간에 많이 틀린 순으로 상위 N. 동률이면 정답률이 낮은 쪽을
+// 코칭 대상 개념을 고른다. 과목 안에서는 많이 틀린 순, 동률이면 정답률이 낮은 쪽을
 // 먼저 — 같은 3문항이라도 "5문항 중 3개"가 "20문항 중 3개"보다 급하다.
-function pickCoachTargets(agg: DiagnosisAggregate) {
-  return [...agg.concepts]
-    .sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101))
-    .slice(0, COACH_TOP_N);
+//
+// 과목당 COACH_PER_SUBJECT 개까지 뽑되 전체가 COACH_MAX_TOTAL 을 넘지 않게, 순위별로
+// 돌아가며(1위끼리 → 2위끼리 → …) 채운다. 과목 순서대로 7개씩 채우면 상한에 걸릴 때
+// 뒤쪽 과목이 통째로 빠지는데, 그러면 "내 과목은 아예 안 봐주네"가 된다.
+//
+// excludedSubjectSlugs 는 사용자가 진단에서 뺀 과목이다. 빼는 만큼 남은 과목이 상한을
+// 더 깊게 쓴다.
+export function pickCoachTargets(agg: DiagnosisAggregate, excludedSubjectSlugs: Set<string>) {
+  const bySubject = new Map<string, ConceptStat[]>();
+  for (const c of agg.concepts) {
+    const slug = c.subjectSlug ?? "";
+    if (slug && excludedSubjectSlugs.has(slug)) continue;
+    const list = bySubject.get(slug) ?? [];
+    if (list.length >= COACH_PER_SUBJECT) continue;
+    list.push(c);
+    bySubject.set(slug, list);
+  }
+  // 과목 순서는 그 과목에서 틀린 문항이 많은 쪽부터 — 상한에 걸려 잘리는 자리는
+  // 오답이 적은 과목의 하위 개념이어야 한다.
+  const groups = [...bySubject.values()].sort(
+    (a, b) =>
+      b.reduce((n, c) => n + c.wrongCount, 0) - a.reduce((n, c) => n + c.wrongCount, 0),
+  );
+  for (const g of groups) {
+    g.sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101));
+  }
+
+  const picked: ConceptStat[] = [];
+  for (let rank = 0; rank < COACH_PER_SUBJECT && picked.length < COACH_MAX_TOTAL; rank++) {
+    for (const g of groups) {
+      if (picked.length >= COACH_MAX_TOTAL) break;
+      if (g[rank]) picked.push(g[rank]);
+    }
+  }
+  return picked;
 }
 
 type CoachInput = {
@@ -119,7 +151,12 @@ async function generateCoaching(
     "있는 행동으로 조언합니다.\n" +
     "규칙: 반드시 주어진 문항들에서 드러난 근거로만 말할 것. 입력에 없는 수치·과목·개념·판례를 " +
     "지어내지 말 것. 표본이 적어 공통점이 안 보이면 억지로 패턴을 만들지 말고 그 개념의 " +
-    "핵심 함정을 짚을 것. 과장·위로성 표현 없이 담백하게. 각 항목 1~2문장, 한국어.";
+    "핵심 함정을 짚을 것. 과장·위로성 표현 없이 담백하게. 각 항목 1~2문장, 한국어.\n" +
+    "발문이 '옳지 않은 것 / 적절하지 않은 것 / 아닌 것'을 묻는 문항에서는 '고른 선지가 사실은 " +
+    "맞는 설명이었다', '발문의 부정 방향을 놓쳤다'를 진단으로 쓰지 말 것 — 그런 문항은 정답 하나만 " +
+    "틀린 진술이라 오답이면 반드시 맞는 선지를 고르게 된다. 아무나 해당하는 동어반복이라 " +
+    "이 수험생에 대해 아무것도 말해 주지 않는다. 이 유형에서는 '내가고른선지'가 아니라 " +
+    "**놓친 정답 진술(정답근거)**이 무엇을 요구했는지를 근거로 삼을 것.";
 
   // 표본은 개념 키(정본 id 우선)로 묶는다 — 표시 이름은 과목이 다르면 겹칠 수 있다.
   const conceptKeyOf = (c: { conceptId: string | null; concept: string }) =>
@@ -175,7 +212,10 @@ async function generateCoaching(
 
   const response = await client.messages.create({
     model: MODEL,
-    max_tokens: 4000,
+    // 개념 20개 × 두 문장이면 4,000 토큰으로는 잘린다. 잘린 JSON 은 아래 JSON.parse 에서
+    // 조용히 실패해 극복법이 0개가 되고, 자동 생성은 주기당 1회라 그 주가 통째로 빈다.
+    // 넉넉히 두되 SDK 타임아웃에 걸리지 않는 범위(비스트리밍 권장 상한)로 잡는다.
+    max_tokens: 16000,
     // effort는 그대로 비용이다. 통계만 넣던 때는 low로 충분했지만, 이제는 문항 여러
     // 개에서 공통 오개념을 찾아야 해서 medium으로 둔다. 더 올리기 전에 결과를 눈으로
     // 비교할 것 — 체감이 없으면 요금만 오른다.
@@ -250,6 +290,9 @@ export async function runDiagnosisForUser(
   // (ai-diagnosis.ts analysisWindowDays). 창이 곧 프롬프트 크기이자 요금이라
   // widen:false 로 넘겨 절대 넓어지지 않게 한다.
   windowDays: number,
+  // 사용자가 진단에서 뺀 과목 slug. 극복법 대상에서만 빠진다 — 막대그래프는 무AI라
+  // 그대로 다 보여준다.
+  excludedSubjectSlugs: Set<string> = new Set(),
 ): Promise<{ status: "ready" | "pending"; error?: string }> {
   const agg = await getDiagnosisAggregate(userId, { days: windowDays, widen: false });
 
@@ -265,7 +308,15 @@ export async function runDiagnosisForUser(
   const weakConcepts = toWeakConcepts(agg);
   const subjectTrends = toSubjectTrends(agg);
 
-  const targets = pickCoachTargets(agg);
+  // 고른 과목에서 틀린 게 없으면 만들 극복법이 없다. 빈 입력으로 API 를 부르지 않는다.
+  if (pickCoachTargets(agg, excludedSubjectSlugs).length === 0) {
+    return {
+      status: "pending",
+      error: "진단할 과목을 하나 이상 선택해주세요(고른 과목에 최근 오답이 없어요).",
+    };
+  }
+
+  const targets = pickCoachTargets(agg, excludedSubjectSlugs);
   const subjectSlugByConcept = new Map(agg.concepts.map((c) => [c.concept, c.subjectSlug]));
 
   let conceptCoaching: DiagnosisConceptCoaching[] = [];

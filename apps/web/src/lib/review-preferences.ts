@@ -49,6 +49,66 @@ export async function getReviewPrefs(
   };
 }
 
+// AI 약점 진단에서 뺄 과목. 복습 보류와 목적이 달라 컬럼이 따로다(schema.sql 참고).
+// 맞춤 극복법은 개념 하나당 실API 생성이 붙어 요금이 개념 수에 비례하므로 과목당 7개·
+// 전체 15개 상한이 있다. 준비하지 않는 과목이 그 자리를 차지하면 정작 필요한 과목이
+// 얕아지므로 사용자가 직접 뺀다.
+//
+// 마이그레이션 전이면 컬럼이 없어 조회가 실패한다 — 그때는 "아무것도 안 뺐다"로 본다
+// (진단이 통째로 막히는 것보다 낫다).
+export async function getDiagnosisPausedSubjectIds(
+  supabase: Supabase,
+  userId: string,
+): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("review_preferences")
+    .select("diagnosis_paused_subject_ids")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) return new Set();
+  return new Set(((data?.diagnosis_paused_subject_ids ?? []) as string[]).filter(Boolean));
+}
+
+// 진단에서 뺀 과목의 slug 집합. 생성기는 slug 축으로 개념을 묶으므로 id → slug 로
+// 한 번 바꿔서 넘긴다. 뺀 과목이 없으면 조회 없이 빈 집합.
+export async function getExcludedDiagnosisSubjectSlugs(
+  supabase: Supabase,
+  userId: string,
+): Promise<Set<string>> {
+  const ids = await getDiagnosisPausedSubjectIds(supabase, userId);
+  if (ids.size === 0) return new Set();
+  const { data } = await supabase.from("subjects").select("id, slug").in("id", [...ids]);
+  return new Set(((data ?? []) as { slug: string }[]).map((r) => r.slug).filter(Boolean));
+}
+
+export type SetDiagnosisSubjectResult = { error?: string; pausedSubjectIds?: string[] };
+
+// 과목 하나를 진단에서 빼거나 다시 넣는다. 복습 쪽 setSubjectPaused 와 달리 재예약 같은
+// 후속 작업이 없어 저장만 하면 된다.
+export async function setDiagnosisSubjectPaused(
+  supabase: Supabase,
+  userId: string,
+  subjectId: string,
+  paused: boolean,
+  now: Date = new Date(),
+): Promise<SetDiagnosisSubjectResult> {
+  const current = await getDiagnosisPausedSubjectIds(supabase, userId);
+  if (current.has(subjectId) === paused) return { pausedSubjectIds: [...current] };
+
+  if (paused) current.add(subjectId);
+  else current.delete(subjectId);
+
+  const next = [...current];
+  const { error } = await supabase
+    .from("review_preferences")
+    .upsert(
+      { user_id: userId, diagnosis_paused_subject_ids: next, updated_at: now.toISOString() },
+      { onConflict: "user_id" },
+    );
+  if (error) return { error: "진단 과목 설정을 저장하지 못했어요." };
+  return { pausedSubjectIds: next };
+}
+
 // 직전에 판정된 학습 국면(히스테리시스의 입력). 마이그레이션 전이거나 값이
 // 이상하면 null — 첫 판정으로 처리되고 다음 저장에서 채워진다.
 export async function getStoredStudyPhase(
