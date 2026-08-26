@@ -20,11 +20,8 @@ import {
   type SubjectStat,
   type SubjectConceptGroup,
 } from "@/lib/diagnosis-live";
-import {
-  ConceptSolveButton,
-  DiagnosisCoachingButton,
-  DiagnosisAutoGenerate,
-} from "./diagnosis-actions";
+import { ConceptSolveButton, DiagnosisSubjectPicker } from "./diagnosis-actions";
+import { getDiagnosisPausedSubjectIds } from "@/lib/review-preferences";
 import { isPremium } from "@/lib/membership";
 import { MembershipLockedPage } from "@/components/membership-upsell";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
@@ -124,17 +121,23 @@ export default async function DiagnosisPage({
   // 주기 안내: 이번 주기에 이미 받았으면 언제 다시 받을 수 있는지 알려준다.
   const nextDate = today ? nextDiagnosisDate(today.date) : null;
 
-  // 들어오자마자 극복법을 만들지 판단한다. 요금이 나가는 경로라 조건을 좁게 잠근다:
-  //  - 아직 극복법이 없고
-  //  - 이번 주기에 요청 행 자체가 없고(실패해 pending 으로 남은 뒤엔 자동 재시도 금지)
-  //  - 진단 자격(누적 오답·응시 문턱)을 넘겼을 때만.
-  // 그래서 자동 생성은 주기당 최대 1회다 — 새로고침을 반복해도 요금이 새지 않는다.
+  // 극복법은 자동 생성하지 않는다. 예전에는 페이지 입장만으로 만들었는데, 그러면
+  // 사용자가 분석할 과목을 고를 틈이 없다 — 준비하지 않는 과목이 상한(과목당 7개·전체
+  // 20개)을 차지한 채 요금까지 나간다. 이제 선택창에서 고르고 직접 누른다.
   const hasCoaching = (coaching ?? []).length > 0;
-  const autoGenerate =
+  const canGenerate =
     !hasCoaching &&
-    today == null &&
     agg.concepts.length > 0 &&
     (await getDiagnosisEligibility(supabase, user.id)).eligible;
+  // 선택창에 뿌릴 과목별 오답 수(전체 기간 아님 — 지금 보고 있는 창 기준). 어떤 과목을
+  // 뺄지 판단하려면 그 과목에서 뭘 얼마나 틀렸는지가 같이 보여야 한다.
+  const wrongBySubjectSlug = new Map(all.bySubject.map((g) => [g.subjectSlug, g.totalWrong]));
+  const pickerSubjects = all.subjects.map((s) => ({
+    id: s.id,
+    name: s.name,
+    wrongCount: wrongBySubjectSlug.get(s.slug) ?? 0,
+  }));
+  const excludedSubjectIds = [...(await getDiagnosisPausedSubjectIds(supabase, user.id))];
 
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-zinc-950">
@@ -166,7 +169,9 @@ export default async function DiagnosisPage({
             cycleDays={cycleDays}
             subjects={all.subjects}
             subjectSlug={subjectSlug}
-            autoGenerate={autoGenerate}
+            canGenerate={canGenerate}
+            pickerSubjects={pickerSubjects}
+            excludedSubjectIds={excludedSubjectIds}
           />
         )}
       </div>
@@ -237,7 +242,9 @@ function Dashboard({
   cycleDays,
   subjects,
   subjectSlug,
-  autoGenerate,
+  canGenerate,
+  pickerSubjects,
+  excludedSubjectIds,
 }: {
   agg: DiagnosisAggregate;
   // "기본" 칩이 실제로 훑는 일수. 라벨에 그대로 쓴다.
@@ -246,14 +253,18 @@ function Dashboard({
   subjects: SubjectStat[];
   // 지금 선택된 과목 slug. null이면 전체.
   subjectSlug: string | null;
+  // 지금 극복법을 만들 수 있는 상태인지(자격·오답 있음·아직 극복법 없음).
+  canGenerate: boolean;
+  // 선택창에 뿌릴 과목 목록(id·이름·이 기간 오답 수).
+  pickerSubjects: { id: string; name: string; wrongCount: number }[];
+  // 진단에서 뺀 과목 id.
+  excludedSubjectIds: string[];
   coachingByConcept: Map<string, DiagnosisConceptCoaching>;
   hasCoaching: boolean;
   // 다음 진단을 받을 수 있는 날(YYYY-MM-DD). 이번 주기에 이미 받았을 때만 값이 있다.
   nextDate: string | null;
   // 지금 선택된 기간 칩(RANGES.key).
   selectedKey: string;
-  // 들어오자마자 극복법을 자동 생성할지(주기당 1회). page.tsx 가 판정한다.
-  autoGenerate: boolean;
   // 이번 주 진단 행이 이미 있는지. 있는데 극복법이 없다면 생성이 실패해 pending으로
   // 남은 것이므로 버튼을 "다시 시도"로 보여준다.
   requestedThisWeek: boolean;
@@ -316,12 +327,14 @@ function Dashboard({
         <SectionTitle icon={<Flame size={16} className="text-blue-600 dark:text-blue-400" />}>
           개념별 정리 · 극복
         </SectionTitle>
-        {!hasCoaching &&
-          (autoGenerate ? (
-            <DiagnosisAutoGenerate />
-          ) : (
-            <DiagnosisCoachingButton requestedThisWeek={requestedThisWeek} nextDate={nextDate} />
-          ))}
+        {!hasCoaching && canGenerate && (
+          <DiagnosisSubjectPicker
+            subjects={pickerSubjects}
+            excludedSubjectIds={excludedSubjectIds}
+            requestedThisWeek={requestedThisWeek}
+            nextDate={nextDate}
+          />
+        )}
         {topConcepts.map((c, i) => (
           <ConceptCard
             key={`${c.concept}-${i}`}

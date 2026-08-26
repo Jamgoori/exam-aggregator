@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createReviewSession, createReviewFromConcept } from "@/app/mypage/wrong-notes/actions";
-import { requestDiagnosis } from "@/app/mypage/actions";
+import { requestDiagnosis, toggleDiagnosisSubject } from "@/app/mypage/actions";
 
 // 같은개념 기출 랜덤(있는 만큼, 기본 5문제) 풀기. 유저 오답이 아니라 기출 전체에서 같은
 // keyword_title 문항을 뽑아 세션을 만들고 풀이 페이지로 이동한다. subjectSlug가 없으면
@@ -129,80 +129,62 @@ export function SolveButton({
 // 그린다. 그래서 자동 생성은 주기당 최대 한 번이고, 실패해 pending 으로 남은 뒤에는
 // 자동으로 다시 부르지 않는다(수동 "다시 시도" 버튼으로 넘어간다). 새로고침을 반복해도
 // 요금이 새지 않아야 한다.
-export function DiagnosisAutoGenerate() {
-  const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
-  // StrictMode 의 이펙트 2회 실행으로 API 를 두 번 부르지 않게 막는다.
-  const firedRef = useRef(false);
-
-  useEffect(() => {
-    if (firedRef.current) return;
-    firedRef.current = true;
-    let alive = true;
-    (async () => {
-      try {
-        const res = await requestDiagnosis();
-        if (!alive) return;
-        if (res.error) {
-          setError(res.error);
-          return;
-        }
-        setDone(true);
-        router.refresh();
-      } catch {
-        if (alive) setError("극복법을 만들지 못했어요. 잠시 후 다시 시도해주세요.");
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [router]);
-
-  if (error) {
-    return (
-      <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900/50 dark:bg-violet-950/20">
-        <p className="text-sm font-bold text-violet-900 dark:text-violet-200">맞춤 극복법</p>
-        <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>
-        <p className="mt-1 text-xs text-violet-700/70 dark:text-violet-300/60">
-          아래 그래프와 문제 풀기는 그대로 쓸 수 있어요.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900/50 dark:bg-violet-950/20"
-      aria-live="polite"
-    >
-      <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-violet-300 border-t-violet-600 dark:border-violet-800 dark:border-t-violet-400" />
-      <div className="min-w-0">
-        <p className="text-sm font-bold text-violet-900 dark:text-violet-200">
-          {done ? "극복법을 불러오는 중이에요" : "맞춤 극복법을 만들고 있어요"}
-        </p>
-        <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
-          틀린 문항을 개념별로 읽는 중이에요. 20초쯤 걸려요.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-export function DiagnosisCoachingButton({
+// 진단 과목 선택창 + 생성 버튼.
+//
+// 예전에는 페이지에 들어오면 자동으로 극복법을 만들었다(DiagnosisAutoGenerate). 그러면
+// 사용자가 과목을 고를 틈이 없고, 준비하지 않는 과목이 상한(과목당 7개·전체 20개)을
+// 차지한 채 요금까지 나간다. 그래서 고른 뒤 직접 누르는 흐름으로 바꿨다.
+export function DiagnosisSubjectPicker({
+  subjects,
+  excludedSubjectIds,
   requestedThisWeek,
   nextDate,
 }: {
+  subjects: { id: string; name: string; wrongCount: number }[];
+  excludedSubjectIds: string[];
   requestedThisWeek: boolean;
-  // 이번 주기에 이미 받았을 때 다음 가능일(YYYY-MM-DD). 없으면 지금 받을 수 있다.
   nextDate?: string | null;
 }) {
   const router = useRouter();
+  const [excluded, setExcluded] = useState<Set<string>>(new Set(excludedSubjectIds));
   const [pending, start] = useTransition();
+  const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const included = subjects.filter((s) => !excluded.has(s.id));
+  // 이번 생성이 실제로 몇 개 개념을 다룰지. 상한 규칙을 말로만 적어 두면 와닿지 않는다.
+  const planned = Math.min(20, included.length * 7);
+  const perSubject = included.length > 0 ? Math.floor(planned / included.length) : 0;
+
+  function toggle(id: string) {
+    if (pending || saving) return;
+    const include = excluded.has(id);
+    setSaving(id);
+    setError(null);
+    // 낙관적 갱신 — 저장이 실패하면 되돌린다.
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      if (include) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    void (async () => {
+      const res = await toggleDiagnosisSubject(id, include);
+      setSaving(null);
+      if (res.error) {
+        setError(res.error);
+        setExcluded((prev) => {
+          const next = new Set(prev);
+          if (include) next.add(id);
+          else next.delete(id);
+          return next;
+        });
+      }
+    })();
+  }
+
   function go() {
-    if (pending) return;
+    if (pending || included.length === 0) return;
     setError(null);
     start(async () => {
       const res = await requestDiagnosis();
@@ -219,36 +201,62 @@ export function DiagnosisCoachingButton({
   }
 
   return (
-    <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900/50 dark:bg-violet-950/20">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 text-sm font-bold text-violet-900 dark:text-violet-200">
-            맞춤 극복법
-            <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-              주 1회
-            </span>
-          </p>
-          <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
-            위 취약 개념마다 &lsquo;어떤 유형에서 무너지는지 + 어떻게 극복할지&rsquo;를 만들어드려요.
-          </p>
-          {/* 생성이 실패해 남은 주기는 다시 시도할 수 있다 — 잠금은 "성공한 진단"에만
-              걸리므로, 여기서는 언제까지가 이번 주기인지만 알려준다. */}
-          {requestedThisWeek && nextDate && (
-            <p className="mt-0.5 text-xs text-violet-700/60 dark:text-violet-300/50">
-              이번 주기는 {nextDate.slice(5).replace("-", "/")}까지예요.
-            </p>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={go}
-          disabled={pending}
-          className="shrink-0 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-bold text-white transition-colors hover:bg-violet-700 disabled:opacity-60"
-        >
-          {pending ? "생성 중..." : requestedThisWeek ? "다시 시도" : "극복법 만들기"}
-        </button>
+    <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3.5 dark:border-violet-900/50 dark:bg-violet-950/20">
+      <p className="flex items-center gap-1.5 text-sm font-bold text-violet-900 dark:text-violet-200">
+        맞춤 극복법
+        <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+          주 1회
+        </span>
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-violet-700/80 dark:text-violet-300/70">
+        취약 개념마다 &lsquo;어떤 유형에서 무너지는지 + 어떻게 극복할지&rsquo;를 만들어드려요.{" "}
+        <b className="font-bold">과목당 7개, 전체 20개 개념까지</b> 다뤄요 — 안 보는 과목을 빼면
+        남은 과목을 그만큼 더 깊게 짚어줘요.
+      </p>
+
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {subjects.map((s) => {
+          const on = !excluded.has(s.id);
+          return (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => toggle(s.id)}
+              disabled={pending || saving != null}
+              aria-pressed={on}
+              className={`rounded-full px-3 py-1.5 text-xs font-bold transition-colors disabled:opacity-60 ${
+                on
+                  ? "bg-violet-600 text-white"
+                  : "bg-white text-slate-400 line-through dark:bg-zinc-900 dark:text-zinc-600"
+              }`}
+            >
+              {on ? "✓ " : ""}
+              {s.name}
+              <span className={on ? "opacity-70" : ""}> {s.wrongCount}</span>
+            </button>
+          );
+        })}
       </div>
-      {error && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
+
+      <p className="mt-2 text-xs text-violet-700/60 dark:text-violet-300/50">
+        {included.length === 0
+          ? "과목을 하나 이상 골라주세요."
+          : `${included.length}과목 · 개념 ${planned}개를 다뤄요 (과목당 약 ${perSubject}개).`}
+        {requestedThisWeek && nextDate
+          ? ` 이번 주기는 ${nextDate.slice(5).replace("-", "/")}까지예요.`
+          : ""}
+      </p>
+
+      {error && <p className="mt-1.5 text-xs text-red-600 dark:text-red-400">{error}</p>}
+
+      <button
+        type="button"
+        onClick={go}
+        disabled={pending || included.length === 0}
+        className="mt-2.5 w-full rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-violet-700 disabled:opacity-60"
+      >
+        {pending ? "만드는 중이에요… (20초쯤)" : "맞춤 극복법 만들기"}
+      </button>
     </div>
   );
 }

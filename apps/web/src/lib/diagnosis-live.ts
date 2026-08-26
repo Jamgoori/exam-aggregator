@@ -37,6 +37,9 @@ export type ConceptStat = {
 };
 
 export type SubjectStat = {
+  // subjects.id. 진단 과목 선택(review_preferences.diagnosis_paused_subject_ids)이
+  // id 축이라 화면이 토글하려면 이 값이 필요하다.
+  id: string;
   name: string;
   slug: string;
   attempts: number;
@@ -231,14 +234,30 @@ export async function getDiagnosisAggregate(
 
   const bySubjectMap = new Map<
     string,
-    { name: string; slug: string; attempts: number; scoreSum: number; totalSum: number; recentPct: number[] }
+    {
+      id: string;
+      name: string;
+      slug: string;
+      attempts: number;
+      scoreSum: number;
+      totalSum: number;
+      recentPct: number[];
+    }
   >();
   for (const a of attempts) {
     const subj = a.exam_papers?.subjects;
     if (!subj) continue;
     const entry =
       bySubjectMap.get(subj.slug) ??
-      { name: subj.name, slug: subj.slug, attempts: 0, scoreSum: 0, totalSum: 0, recentPct: [] };
+      {
+        id: a.exam_papers?.subject_id ?? "",
+        name: subj.name,
+        slug: subj.slug,
+        attempts: 0,
+        scoreSum: 0,
+        totalSum: 0,
+        recentPct: [],
+      };
     entry.attempts++;
     entry.scoreSum += a.score ?? 0;
     entry.totalSum += a.total_questions ?? 0;
@@ -248,6 +267,7 @@ export async function getDiagnosisAggregate(
     bySubjectMap.set(subj.slug, entry);
   }
   const subjects: SubjectStat[] = [...bySubjectMap.values()].map((e) => ({
+    id: e.id,
     name: e.name,
     slug: e.slug,
     attempts: e.attempts,
@@ -439,7 +459,11 @@ export async function getDiagnosisAggregate(
       })(),
     }))
     .sort((a, b) => b.wrongCount - a.wrongCount || a.concept.localeCompare(b.concept))
-    .slice(0, 30);
+    // 전체 상위 N개. 코칭 대상을 과목당 7개까지 고르므로(diagnosis-generate.ts) 이 컷이
+    // 30이면 문항을 많이 푼 과목이 30자리를 다 가져가 다른 과목의 7번째가 사라진다.
+    // 화면은 어차피 과목당 6개만 그리고(BARS_PER_SUBJECT) 이 배열은 AI 프롬프트에
+    // 들어가지 않으므로, 과목 수 × 7을 넉넉히 덮는 값으로 둔다.
+    .slice(0, 60);
 
   // 5) 각 개념의 전체 기출 corpus 문항 수. 같은개념 5문제 풀기 가능 여부 판단에 그대로 쓰고,
   // 화면 뱃지(출제 빈도)에도 쓴다. 정본 개념은 concept_id로 센다(평균 15문항). 정본이

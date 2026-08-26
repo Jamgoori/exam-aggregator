@@ -18,15 +18,16 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-// --samples 로 표본을 뽑을 상위 취약 개념 수와 개념당 문항 수. 기본값은 온디맨드
-// 경로의 COACH_TOP_N/SAMPLES_PER_CONCEPT 와 같게 맞춘다 — 같은 재료로 같은 품질의
-// 극복법이 나와야 두 경로의 결과가 서로 어긋나지 않는다.
+// --samples 로 표본을 뽑을 개념 수와 개념당 문항 수. 온디맨드 경로
+// (lib/diagnosis-generate.ts)의 COACH_PER_SUBJECT/COACH_MAX_TOTAL/SAMPLES_PER_CONCEPT 와
+// 같은 규칙이어야 한다 — 같은 재료로 같은 품질의 극복법이 나와야 두 경로가 어긋나지 않는다.
 //
-// 온디맨드 경로가 5개에 묶여 있는 건 품질이 아니라 **요금** 때문이다(유저당 개념 5 ×
-// 문항 6 만큼의 실API 생성). 이 배치는 실비가 없으므로 --coach-top=N 으로 더 많은
-// 개념을 덮을 수 있다. 취약 개념이 열 개 넘게 잡히는 계정에서 상위 5개만 극복법이
-// 붙으면 나머지 카드가 통계만 있는 채로 남는다.
-const DEFAULT_COACH_TOP_N = 5;
+// 과목당 상한과 전체 상한을 따로 두는 이유: 전체 상위 N개만 뽑으면 문항을 많이 푼 과목이
+// 자리를 다 가져간다. 과목당으로 끊어야 준비하는 모든 과목이 최소한 다뤄지고, 전체 상한이
+// 과목 많은 사용자의 요금 폭주를 막는다. --coach-top=N 으로 전체 상한만 덮어쓸 수 있다
+// (이 배치는 실API 요금이 없어서, 검수용으로 더 넓게 볼 때 쓴다).
+const COACH_PER_SUBJECT = 7;
+const DEFAULT_COACH_MAX_TOTAL = 20;
 const SAMPLES_PER_CONCEPT = 6;
 // 모델에 넣기 전 자르는 길이(diagnosis-live.ts SAMPLE_TEXT_MAX 와 동일).
 const SAMPLE_TEXT_MAX = 140;
@@ -64,7 +65,7 @@ async function main() {
   const args = process.argv.slice(2);
   const wantSamples = args.includes("--samples");
   const topArg = args.find((a) => a.startsWith("--coach-top="));
-  const coachTopN = Math.max(1, Number(topArg?.split("=")[1]) || DEFAULT_COACH_TOP_N);
+  const coachMaxTotal = Math.max(1, Number(topArg?.split("=")[1]) || DEFAULT_COACH_MAX_TOTAL);
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !serviceKey) {
@@ -329,10 +330,46 @@ async function main() {
   // 못한 문항(last_is_correct=false) 먼저, 그다음 많이 틀린 순.
   let samples = null;
   if (wantSamples) {
-    // 코칭 대상: 많이 틀린 순, 동률이면 정답률이 낮은 쪽 먼저.
-    const targets = [...concepts]
-      .sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101))
-      .slice(0, coachTopN);
+    // 사용자가 진단에서 뺀 과목(review_preferences.diagnosis_paused_subject_ids).
+    // 마이그레이션 전이면 컬럼이 없어 조회가 실패한다 — 그때는 아무것도 안 뺀 것으로 본다.
+    const excludedSubjectSlugs = new Set();
+    const { data: prefs } = await supabase
+      .from("review_preferences")
+      .select("diagnosis_paused_subject_ids")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const excludedIds = (prefs?.diagnosis_paused_subject_ids ?? []).filter(Boolean);
+    if (excludedIds.length > 0) {
+      const { data: subs } = await supabase.from("subjects").select("slug").in("id", excludedIds);
+      for (const r of subs ?? []) if (r.slug) excludedSubjectSlugs.add(r.slug);
+    }
+
+    // 코칭 대상: 과목당 COACH_PER_SUBJECT 개까지, 전체 coachMaxTotal 개까지. 순위별로
+    // 돌아가며(1위끼리 → 2위끼리 → …) 채운다 — 과목 순서대로 채우면 상한에 걸릴 때
+    // 뒤쪽 과목이 통째로 빠진다. 사용자가 진단에서 뺀 과목은 후보에서 제외한다.
+    const bySubjectTargets = new Map();
+    for (const c of concepts) {
+      const slug = c.subjectSlug ?? "";
+      if (excludedSubjectSlugs.has(slug)) continue;
+      const list = bySubjectTargets.get(slug) ?? [];
+      if (list.length >= COACH_PER_SUBJECT) continue;
+      list.push(c);
+      bySubjectTargets.set(slug, list);
+    }
+    const groups = [...bySubjectTargets.values()].sort(
+      (a, b) =>
+        b.reduce((n, c) => n + c.wrongCount, 0) - a.reduce((n, c) => n + c.wrongCount, 0),
+    );
+    for (const g of groups) {
+      g.sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101));
+    }
+    const targets = [];
+    for (let rank = 0; rank < COACH_PER_SUBJECT && targets.length < coachMaxTotal; rank++) {
+      for (const g of groups) {
+        if (targets.length >= coachMaxTotal) break;
+        if (g[rank]) targets.push(g[rank]);
+      }
+    }
     // 묶는 키는 표기가 아니라 개념 키다 — 표기 이름은 과목이 다르면 겹칠 수 있다.
     const wanted = new Map(targets.map((t) => [countKeyOf(t), t]));
 

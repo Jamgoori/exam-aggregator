@@ -1599,6 +1599,14 @@ create table if not exists review_preferences (
   updated_at timestamptz not null default now()
 );
 
+-- AI 약점 진단에서 뺄 과목. 복습 보류(paused_subject_ids)와 목적이 달라 컬럼을 나눈다 —
+-- 복습을 쉬는 과목이라고 진단까지 빼고 싶은 건 아니고, 반대도 마찬가지다.
+-- 여기도 "뺄 과목" 목록인 이유는 위와 같다: 나중에 새로 시작한 과목이 기본으로 켜져 있어야 한다.
+-- 맞춤 극복법은 과목당 상위 7개 개념, 전체 20개까지만 만든다(실API 요금이 개념 수에
+-- 비례한다). 과목을 빼면 남은 과목이 그 상한을 더 깊게 쓴다.
+alter table review_preferences
+  add column if not exists diagnosis_paused_subject_ids uuid[] not null default '{}';
+
 -- 하루에 낼 복습 문항 수. 고를 수 있는 값은 DAILY_LIMIT_OPTIONS(10/20/40/60)로
 -- 제한한다 — 임의의 수를 허용하면 "하루 1문항" 같은 설정으로 스케줄이 사실상
 -- 정지한다(유입이 처리를 영구히 앞선다). 검증은 서버 쪽 setDailyLimit이 한다.
