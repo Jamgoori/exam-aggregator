@@ -139,9 +139,15 @@ async function generateCoaching(
   samples: WrongQuestionSample[],
 ): Promise<DiagnosisConceptCoaching[]> {
   if (targets.length === 0) return [];
-  if (!process.env.ANTHROPIC_API_KEY) return [];
+  // 이 기능 전용 키다. 레포에 ANTHROPIC_API_KEY 를 읽는 곳이 이 파일 말고도 있다
+  // (scripts/extract-answer-keys.mjs — 정답 추출 배치, 완전히 다른 용도). 같은 변수
+  // 이름을 쓰면 여기 등록한 키가 그쪽에서도 그대로 읽혀 의도치 않게 그 배치의 실API
+  // 요금까지 이 키로 나간다. 그래서 이 파일만 별도 변수명으로 읽는다 — 다른 곳에서
+  // ANTHROPIC_API_KEY 를 설정해도 이 기능엔 영향이 없고, 반대도 마찬가지다.
+  const apiKey = process.env.ANTHROPIC_DIAGNOSIS_API_KEY;
+  if (!apiKey) return [];
 
-  const client = new Anthropic();
+  const client = new Anthropic({ apiKey });
 
   const system =
     "당신은 한국 공무원·자격 시험 학습 코치입니다. 수험생이 실제로 틀린 문항들(발문 요약, " +
