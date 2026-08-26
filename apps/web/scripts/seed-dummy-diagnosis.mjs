@@ -9,7 +9,7 @@
 //   - 진단 페이지 막대그래프(과목별 틀린 개념)와 개념 카드가 라이브로 뜨고,
 //   - 같은 개념 기출 5문제 풀기가 동작하고,
 //   - 진단 자격(오답 15개 또는 응시 3회)을 넘겨 "진단받기"(맞춤 극복법)도 활성화된다.
-// 극복법 생성 자체는 앱에서 ANTHROPIC_API_KEY가 있어야 채워진다(없으면 그래프/풀기만).
+// 극복법 생성 자체는 앱에서 ANTHROPIC_DIAGNOSIS_API_KEY가 있어야 채워진다(없으면 그래프/풀기만).
 //
 // service_role로 실행(RLS 우회). 되돌리려면 --reset 후 재실행(이 계정의 응시/상태만 삭제).
 
@@ -291,7 +291,7 @@ async function main() {
   console.log(`  문항상태(user_question_status): ${statusRows.length}건`);
   console.log(`  틀린 개념문항(누적): ${wrongDistinct.size}개`);
   console.log("이제 해당 계정으로 로그인해 마이페이지 > AI 약점 진단에서 확인하세요.");
-  console.log("맞춤 극복법까지 채우려면 오답노트의 '진단 받기'를 누르세요(ANTHROPIC_API_KEY 필요).");
+  console.log("맞춤 극복법까지 채우려면 오답노트의 '진단 받기'를 누르세요(ANTHROPIC_DIAGNOSIS_API_KEY 필요).");
 }
 
 main().catch((e) => {
