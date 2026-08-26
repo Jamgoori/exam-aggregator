@@ -1,6 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { COACH_MAX_TOTAL, COACH_PER_SUBJECT } from "@/lib/diagnosis-limits";
 import {
   getDiagnosisAggregate,
   getWrongQuestionSamples,
@@ -23,15 +24,7 @@ import type {
 // 비운 채(pending) 두고, 기존 배치 생성기가 나중에 채우게 한다(호출부에서 처리).
 
 const MODEL = process.env.ANTHROPIC_DIAGNOSIS_MODEL || "claude-opus-5";
-// 코칭할 개념 수. 요금이 개념 수에 정비례하므로(개념마다 표본 문항이 프롬프트에 붙는다)
-// 이 두 값이 곧 유저당 진단 1회 요금이다.
-//
-// 과목당 상한과 전체 상한을 따로 두는 이유: 전체 상위 N개만 뽑으면 문항을 많이 푼 과목이
-// 자리를 다 가져간다(실측 계정에서 상위 5개가 국어·영어뿐이었고 정보보호론은 6위에서
-// 잘렸다). 과목당으로 끊어야 준비하는 모든 과목이 최소한 다뤄진다. 전체 상한은 과목이
-// 많은 사용자의 요금 폭주를 막는 장치다 — 5과목이면 과목당 7개가 35개가 된다.
-const COACH_PER_SUBJECT = 7;
-const COACH_MAX_TOTAL = 20;
+// 개념 수 상한은 lib/diagnosis-limits.ts 에 있다(선택창과 같은 숫자를 써야 한다).
 // 개념마다 모델에 함께 넣을 "실제로 틀린 문항" 표본 수. 이 값과 diagnosis-live 의
 // truncate 길이가 1회 요금을 정한다 — 개념 5 × 문항 6 × 약 300자 ≈ 9천 자(입력 10K
 // 토큰 남짓, 회당 수백 원). 늘리기 전에 비용을 다시 계산할 것.

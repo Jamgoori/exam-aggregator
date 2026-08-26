@@ -4,6 +4,11 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createReviewSession, createReviewFromConcept } from "@/app/mypage/wrong-notes/actions";
 import { requestDiagnosis, toggleDiagnosisSubject } from "@/app/mypage/actions";
+import {
+  COACH_MAX_TOTAL,
+  COACH_PER_SUBJECT,
+  plannedConceptCount,
+} from "@/lib/diagnosis-limits";
 
 // 같은개념 기출 랜덤(있는 만큼, 기본 5문제) 풀기. 유저 오답이 아니라 기출 전체에서 같은
 // keyword_title 문항을 뽑아 세션을 만들고 풀이 페이지로 이동한다. subjectSlug가 없으면
@@ -132,7 +137,7 @@ export function SolveButton({
 // 진단 과목 선택창 + 생성 버튼.
 //
 // 예전에는 페이지에 들어오면 자동으로 극복법을 만들었다(DiagnosisAutoGenerate). 그러면
-// 사용자가 과목을 고를 틈이 없고, 준비하지 않는 과목이 상한(과목당 7개·전체 20개)을
+// 사용자가 과목을 고를 틈이 없고, 준비하지 않는 과목이 상한(과목당 7개·전체 15개)을
 // 차지한 채 요금까지 나간다. 그래서 고른 뒤 직접 누르는 흐름으로 바꿨다.
 export function DiagnosisSubjectPicker({
   subjects,
@@ -153,7 +158,7 @@ export function DiagnosisSubjectPicker({
 
   const included = subjects.filter((s) => !excluded.has(s.id));
   // 이번 생성이 실제로 몇 개 개념을 다룰지. 상한 규칙을 말로만 적어 두면 와닿지 않는다.
-  const planned = Math.min(20, included.length * 7);
+  const planned = plannedConceptCount(included.length);
   const perSubject = included.length > 0 ? Math.floor(planned / included.length) : 0;
 
   function toggle(id: string) {
@@ -210,8 +215,10 @@ export function DiagnosisSubjectPicker({
       </p>
       <p className="mt-1 text-xs leading-relaxed text-violet-700/80 dark:text-violet-300/70">
         취약 개념마다 &lsquo;어떤 유형에서 무너지는지 + 어떻게 극복할지&rsquo;를 만들어드려요.{" "}
-        <b className="font-bold">과목당 7개, 전체 20개 개념까지</b> 다뤄요 — 안 보는 과목을 빼면
-        남은 과목을 그만큼 더 깊게 짚어줘요.
+        <b className="font-bold">
+          과목당 {COACH_PER_SUBJECT}개, 전체 {COACH_MAX_TOTAL}개 개념까지
+        </b>{" "}
+        다뤄요 — 안 보는 과목을 빼면 남은 과목을 그만큼 더 깊게 짚어줘요.
       </p>
 
       <div className="mt-2.5 flex flex-wrap gap-1.5">

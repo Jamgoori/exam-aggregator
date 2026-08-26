@@ -21,7 +21,7 @@ export type RequestDiagnosisResult = {
   status?: "ready" | "pending";
 };
 
-// 진단에서 분석할 과목 켜기/끄기. 맞춤 극복법은 과목당 7개·전체 20개 개념까지만
+// 진단에서 분석할 과목 켜기/끄기. 맞춤 극복법은 과목당 7개·전체 15개 개념까지만
 // 만들어서(개념 수 = 요금), 준비하지 않는 과목이 그 자리를 차지하면 정작 필요한 과목이
 // 얕아진다. 저장만 하고 생성은 하지 않는다 — 고르는 동안 요금이 나가면 안 된다.
 export async function toggleDiagnosisSubject(
