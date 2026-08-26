@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BarChart3, Flame, Lightbulb, BookOpen, ChevronDown, HelpCircle } from "lucide-react";
+import { BarChart3, Flame, Lightbulb, BookOpen, HelpCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import {
   getWeeklyDiagnosis,
@@ -25,7 +25,6 @@ import { getDiagnosisPausedSubjectIds } from "@/lib/review-preferences";
 import { isPremium } from "@/lib/membership";
 import { MembershipLockedPage } from "@/components/membership-upsell";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
-import { TOP_CONCEPT_CARDS, CONCEPT_CARDS_BEFORE_FOLD } from "@/lib/diagnosis-limits";
 
 // 기간 선택(?range=). 기본(cycle)은 "지난 진단 이후"이되 최소 7일을 보장한다
 // (GRAPH_MIN_WINDOW_DAYS). 진단 직후엔 그 창이 1일이라 어제 푼 것만 남는데, 사다리는
@@ -238,9 +237,10 @@ function formatMonthDay(date: string): string {
   return `${Number(m)}월 ${Number(d)}일`;
 }
 
-// 카드에 보여줄 개념 상한(막대그래프엔 전부, 카드엔 시급한 상위 TOP N만)과 접는 지점은
-// lib/diagnosis-limits.ts 하나에서 온다 — 소개 페이지(/diagnosis)가 "TOP 20까지 나온다"고
-// 안내하므로, 여기에 숫자를 따로 적으면 화면과 안내가 조용히 어긋난다.
+// 카드에 보여줄 개념 상한(막대그래프엔 전부, 카드엔 시급한 상위만). 한때 20장까지
+// 세워 봤는데, 그만큼 세우면 "무엇부터 잡을지"를 정해 주는 화면이 아니라 그냥 목록이
+// 된다 — 극복법이 붙는 개념 수(과목당 7·전체 15)와도 어긋나 안내가 꼬였다.
+const CONCEPT_CARD_LIMIT = 8;
 // 같은개념 기출 풀기를 열어줄 최소 코퍼스 문항 수(너무 적으면 연습 가치가 약함).
 const MIN_CORPUS_FOR_SOLVE = 2;
 
@@ -281,11 +281,7 @@ function Dashboard({
   // 남은 것이므로 버튼을 "다시 시도"로 보여준다.
   requestedThisWeek: boolean;
 }) {
-  const topConcepts = agg.concepts.slice(0, TOP_CONCEPT_CARDS);
-  // 앞의 몇 장만 펼쳐두고 나머지는 접는다. 스무 장을 한꺼번에 세우면 스크롤이 길어져
-  // 정작 1위부터 손대게 만드는 힘이 사라진다.
-  const shownConcepts = topConcepts.slice(0, CONCEPT_CARDS_BEFORE_FOLD);
-  const foldedConcepts = topConcepts.slice(CONCEPT_CARDS_BEFORE_FOLD);
+  const topConcepts = agg.concepts.slice(0, CONCEPT_CARD_LIMIT);
   const maxWrong = Math.max(1, ...agg.concepts.map((c) => c.wrongCount));
 
   return (
@@ -351,7 +347,7 @@ function Dashboard({
             nextDate={nextDate}
           />
         )}
-        {shownConcepts.map((c, i) => (
+        {topConcepts.map((c, i) => (
           <ConceptCard
             key={`${c.concept}-${i}`}
             rank={i + 1}
@@ -359,36 +355,11 @@ function Dashboard({
             coaching={coachingByConcept.get(c.concept) ?? null}
           />
         ))}
-        {foldedConcepts.length > 0 && (
-          <details className="group flex flex-col gap-3">
-            <summary className="flex cursor-pointer list-none items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white py-2.5 text-sm font-bold text-slate-600 transition-colors hover:border-blue-300 hover:text-blue-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-blue-800 dark:hover:text-blue-300">
-              <span className="group-open:hidden">
-                {CONCEPT_CARDS_BEFORE_FOLD + 1}~{topConcepts.length}위 더 보기
-              </span>
-              <span className="hidden group-open:inline">접기</span>
-              <ChevronDown
-                size={15}
-                className="transition-transform group-open:rotate-180"
-              />
-            </summary>
-            <div className="mt-3 flex flex-col gap-3">
-              {foldedConcepts.map((c, i) => (
-                <ConceptCard
-                  key={`${c.concept}-${CONCEPT_CARDS_BEFORE_FOLD + i}`}
-                  rank={CONCEPT_CARDS_BEFORE_FOLD + i + 1}
-                  concept={c}
-                  coaching={coachingByConcept.get(c.concept) ?? null}
-                />
-              ))}
-            </div>
-          </details>
-        )}
       </div>
 
       <p className="px-1 text-center text-xs text-slate-400 dark:text-zinc-600">
-        그래프는 {rangeLabel(agg.window.days)} 실시간 데이터예요. 개념 카드는 오답이 많은
-        순으로 TOP {TOP_CONCEPT_CARDS}까지 세우고, 맞춤 극복법은 주 1회 · 지난 진단
-        이후(최대 2주)에 틀린 문제만 분석해요.
+        그래프는 {rangeLabel(agg.window.days)} 실시간 데이터예요. 맞춤 극복법은 주 1회, 지난
+        진단 이후(최대 2주)에 틀린 문제만 분석해요.
         {hasCoaching && nextDate ? ` 다음 진단은 ${formatMonthDay(nextDate)}부터.` : ""}
       </p>
     </div>

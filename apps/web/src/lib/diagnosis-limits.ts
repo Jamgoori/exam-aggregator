@@ -24,16 +24,3 @@ export function plannedConceptCount(subjectCount: number): number {
   if (subjectCount <= 0) return 0;
   return Math.min(COACH_MAX_TOTAL, subjectCount * COACH_PER_SUBJECT);
 }
-
-// 진단 화면의 개념 카드 상한(TOP N). 막대그래프는 과목별로 상위 몇 개만 그리지만,
-// 카드는 "무엇부터 잡을지" 목록이라 한 화면에 20위까지 세운다. 21위부터는 이 주기의
-// 우선순위라고 부르기 어렵고, 카드가 길어질수록 1위의 무게가 옅어진다.
-//
-// AI 극복법 상한(COACH_MAX_TOTAL)과 다른 값인 게 정상이다 — 카드는 집계(무료·무AI)라
-// 개수를 늘려도 요금이 늘지 않고, 극복법만 요금이 개념 수에 정비례한다. 그래서
-// 20위까지 세워두고 그중 상위 개념에만 극복법이 붙는다.
-export const TOP_CONCEPT_CARDS = 20;
-
-// 카드를 접지 않고 바로 보여주는 개수. 나머지(FOLD+1 ~ TOP_CONCEPT_CARDS)는 접어 둔다 —
-// 스무 장을 한꺼번에 펼치면 스크롤이 길어져 정작 1위부터 손대게 만드는 힘이 사라진다.
-export const CONCEPT_CARDS_BEFORE_FOLD = 8;
