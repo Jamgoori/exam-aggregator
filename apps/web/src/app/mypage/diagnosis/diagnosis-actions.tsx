@@ -14,7 +14,6 @@ export function ConceptSolveButton({
   subjectSlug,
   limit = 5,
   label = "같은 개념 기출 풀기",
-  variant = "default",
   className = "",
 }: {
   concept: string;
@@ -22,9 +21,6 @@ export function ConceptSolveButton({
   subjectSlug: string;
   limit?: number;
   label?: string;
-  // primary: 화면에서 단 하나뿐인 "지금 할 일" 버튼(채운 버튼, 폭 가득).
-  // default: 개념 행을 펼쳤을 때 나오는 버튼(테두리만).
-  variant?: "default" | "primary";
   className?: string;
 }) {
   const router = useRouter();
@@ -44,18 +40,13 @@ export function ConceptSolveButton({
     });
   }
 
-  const style =
-    variant === "primary"
-      ? "flex w-full items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-700 disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-      : "inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-zinc-600 dark:hover:bg-zinc-800";
-
   return (
-    <div className={variant === "primary" ? "w-full" : undefined}>
+    <div>
       <button
         type="button"
         onClick={go}
         disabled={pending}
-        className={`${style} ${className}`}
+        className={`inline-flex items-center justify-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-60 ${className}`}
       >
         {pending ? "준비 중..." : (
           <>
@@ -170,10 +161,10 @@ export function DiagnosisAutoGenerate() {
 
   if (error) {
     return (
-      <div className="rounded-lg border border-slate-200 bg-white px-4 py-3.5 dark:border-zinc-800 dark:bg-zinc-900">
-        <p className="text-sm font-bold text-slate-900 dark:text-zinc-100">맞춤 극복법</p>
+      <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900/50 dark:bg-violet-950/20">
+        <p className="text-sm font-bold text-violet-900 dark:text-violet-200">맞춤 극복법</p>
         <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>
-        <p className="mt-1 text-xs text-slate-500 dark:text-zinc-500">
+        <p className="mt-1 text-xs text-violet-700/70 dark:text-violet-300/60">
           아래 그래프와 문제 풀기는 그대로 쓸 수 있어요.
         </p>
       </div>
@@ -182,15 +173,15 @@ export function DiagnosisAutoGenerate() {
 
   return (
     <div
-      className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3.5 dark:border-zinc-800 dark:bg-zinc-900"
+      className="flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900/50 dark:bg-violet-950/20"
       aria-live="polite"
     >
-      <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600 dark:border-zinc-700 dark:border-t-zinc-300" />
+      <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-violet-300 border-t-violet-600 dark:border-violet-800 dark:border-t-violet-400" />
       <div className="min-w-0">
-        <p className="text-sm font-bold text-slate-900 dark:text-zinc-100">
+        <p className="text-sm font-bold text-violet-900 dark:text-violet-200">
           {done ? "극복법을 불러오는 중이에요" : "맞춤 극복법을 만들고 있어요"}
         </p>
-        <p className="text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+        <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
           틀린 문항을 개념별로 읽는 중이에요. 20초쯤 걸려요.
         </p>
       </div>
@@ -228,20 +219,22 @@ export function DiagnosisCoachingButton({
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3.5 dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-900/50 dark:bg-violet-950/20">
       <div className="flex flex-wrap items-center gap-3">
         <div className="min-w-0 flex-1">
-          <p className="flex items-center gap-1.5 text-sm font-bold text-slate-900 dark:text-zinc-100">
+          <p className="flex items-center gap-1.5 text-sm font-bold text-violet-900 dark:text-violet-200">
             맞춤 극복법
-            <span className="text-xs font-medium text-slate-400 dark:text-zinc-500">주 1회</span>
+            <span className="rounded-full bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+              주 1회
+            </span>
           </p>
-          <p className="text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
+          <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
             위 취약 개념마다 &lsquo;어떤 유형에서 무너지는지 + 어떻게 극복할지&rsquo;를 만들어드려요.
           </p>
           {/* 생성이 실패해 남은 주기는 다시 시도할 수 있다 — 잠금은 "성공한 진단"에만
               걸리므로, 여기서는 언제까지가 이번 주기인지만 알려준다. */}
           {requestedThisWeek && nextDate && (
-            <p className="mt-0.5 text-xs text-slate-400 dark:text-zinc-500">
+            <p className="mt-0.5 text-xs text-violet-700/60 dark:text-violet-300/50">
               이번 주기는 {nextDate.slice(5).replace("-", "/")}까지예요.
             </p>
           )}
@@ -250,7 +243,7 @@ export function DiagnosisCoachingButton({
           type="button"
           onClick={go}
           disabled={pending}
-          className="shrink-0 rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-700 disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+          className="shrink-0 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-bold text-white transition-colors hover:bg-violet-700 disabled:opacity-60"
         >
           {pending ? "생성 중..." : requestedThisWeek ? "다시 시도" : "극복법 만들기"}
         </button>
