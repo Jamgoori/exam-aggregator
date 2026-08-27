@@ -2295,3 +2295,67 @@ revoke all on function record_attendance_day(uuid, date, int, int) from public, 
 revoke all on function grant_attendance_membership(uuid, date, int, int) from public, anon, authenticated;
 grant execute on function record_attendance_day(uuid, date, int, int) to service_role;
 grant execute on function grant_attendance_membership(uuid, date, int, int) to service_role;
+
+-- ── 공지사항 게시판 (notices) ──────────────────────────────────────────────
+-- 운영자가 전체 이용자에게 알리는 글. suggestions(건의게시판)와 달리 비밀글·
+-- 댓글·답변 개념이 없고, 읽기는 완전히 공개(exam_papers와 같은 방식)라
+-- service_role을 거치지 않고 anon/authenticated가 직접 select 할 수 있다.
+-- 쓰기(작성/수정/삭제)는 admins 화이트리스트(is_admin())만 가능하다.
+create table if not exists notices (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  content text not null,
+  -- 목록 맨 위 고정 여부. 공지 특성상 여러 건 고정될 수 있어 boolean으로 충분하다.
+  is_pinned boolean not null default false,
+  view_count int not null default 0,
+  created_by uuid references auth.users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz
+);
+
+do $$ begin
+  alter table notices add constraint notices_title_len
+    check (char_length(title) between 1 and 100);
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table notices add constraint notices_content_len
+    check (char_length(content) between 1 and 5000);
+exception when duplicate_object then null; end $$;
+
+-- 목록은 항상 최신순 한 페이지씩 읽는다.
+create index if not exists notices_created_idx on notices(created_at desc);
+-- 고정 공지 조회용 (흔치 않게 참이므로 부분 인덱스로 충분히 작다).
+create index if not exists notices_pinned_idx on notices(created_at desc) where is_pinned;
+
+alter table notices enable row level security;
+
+-- 누구나 읽기 가능 (공개 게시판).
+drop policy if exists "public read notices" on notices;
+create policy "public read notices" on notices for select using (true);
+
+-- admins 화이트리스트에 등록된 이메일만 쓸 수 있음 (exam_papers와 같은 방식).
+drop policy if exists "admin insert notices" on notices;
+create policy "admin insert notices" on notices
+  for insert to authenticated with check (is_admin());
+
+drop policy if exists "admin update notices" on notices;
+create policy "admin update notices" on notices
+  for update to authenticated using (is_admin());
+
+drop policy if exists "admin delete notices" on notices;
+create policy "admin delete notices" on notices
+  for delete to authenticated using (is_admin());
+
+-- 조회수 +1 용 함수: 익명 사용자가 다운로드 카운트를 올릴 때와 같은 이유로
+-- security definer로 만들어, 테이블 UPDATE 권한은 따로 열어주지 않는다.
+create or replace function increment_notice_view(p_notice_id uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update notices set view_count = view_count + 1 where id = p_notice_id;
+$$;
+
+grant execute on function increment_notice_view(uuid) to anon, authenticated;
