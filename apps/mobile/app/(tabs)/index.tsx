@@ -230,7 +230,7 @@ export default function HomeScreen() {
           </Text>
         )}
         <Text style={{ fontSize: 26, fontWeight: "700", lineHeight: 34 }}>
-          나만의 <Text style={{ color: colors.primary }}>데이터</Text>로,{"\n"}합격까지 빠르게
+          <Text style={{ color: colors.primary }}>공모아</Text>에서 문제풀고{"\n"}오답노트, AI 약점진단 받으세요
         </Text>
         <Text style={{ color: colors.textMuted, fontSize: 13, lineHeight: 19 }}>
           국가직·지방직·소방·경찰 등 주요 공무원 시험 기출문제를 연도별·과목별로 정리했어요.
