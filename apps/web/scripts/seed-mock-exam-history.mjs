@@ -3,7 +3,7 @@
 //   기본 이메일 = lks2354@gmail.com
 //
 // 한 계정에 "최근 일주일 동안 국어·영어·컴퓨터일반·정보보호론을 각각 2026년부터
-// 최신 회차순으로 20회차씩 풀었고, 매 회차 70~90점을 받았다"는 응시 이력을 넣는다.
+// 최신 회차순으로 20회차씩 풀었고, 매 회차 65~90점을 받았다"는 응시 이력을 넣는다.
 // AI 약점 진단(막대그래프·개념 카드·맞춤 극복법)과 오답노트를 실데이터에 가깝게
 // 확인하려는 용도다. seed-dummy-diagnosis.mjs 가 "개념 문항만" 골라 3회 응시를
 // 만드는 최소 시드라면, 이쪽은 문제지를 통째로 채점한 정식 회차를 쌓는다.
@@ -41,17 +41,17 @@ const MAX_YEAR = 2026;
 const SPREAD_DAYS = 6;
 const LAST_ATTEMPT_DAYS_AGO = 2;
 // 점수(정답률 %) 하한·상한. 회차별 목표 점수는 이 사이에서만 움직인다.
-const SCORE_MIN = 70;
+const SCORE_MIN = 65;
 const SCORE_MAX = 90;
 
 // 과목별 점수 흐름(첫 회차 → 마지막 회차 목표 점수). 회차 순서는 "최신 회차부터"라
 // 첫 회차가 2026년 문제지다. 진단의 과목별 추세(up/down/flat)가 과목마다 다르게
 // 나오도록 일부러 다른 곡선을 준다.
 const SCORE_CURVE = {
-  국어: { from: 73, to: 88 },
-  영어: { from: 86, to: 74 },
-  컴퓨터일반: { from: 71, to: 89 },
-  정보보호론: { from: 79, to: 81 },
+  국어: { from: 68, to: 88 },
+  영어: { from: 87, to: 69 },
+  컴퓨터일반: { from: 66, to: 89 },
+  정보보호론: { from: 76, to: 82 },
 };
 // 과목별 학습 시간대(KST 기준 시작 시각). 같은 날 여러 회차를 풀면 뒤로 밀린다.
 const SUBJECT_HOUR = { 국어: 9, 영어: 11, 컴퓨터일반: 14, 정보보호론: 20 };
@@ -147,7 +147,7 @@ function kstIso(daysAgo, hour, minute) {
   return new Date(kstMs - KST_OFFSET_MS).toISOString();
 }
 
-// 목표 정답률(%)을 실제 문항 수로 옮긴다. 반올림 때문에 70~90 밖으로 나가지 않게
+// 목표 정답률(%)을 실제 문항 수로 옮긴다. 반올림 때문에 65~90 밖으로 나가지 않게
 // 정답 수를 한 칸씩 당긴다(문항 수가 적은 문제지일수록 한 문항의 무게가 크다).
 function correctCountFor(total, targetPct) {
   let correct = Math.round((total * targetPct) / 100);
@@ -283,7 +283,7 @@ async function main() {
       const total = correctAnswers.length;
       const choiceCount = paper.choice_count ?? 4;
 
-      // 목표 점수: 곡선 + 회차 지터. 항상 70~90 안.
+      // 목표 점수: 곡선 + 회차 지터. 항상 65~90 안.
       const t = papers.length > 1 ? i / (papers.length - 1) : 0;
       const jitter = (rand01(`${userId}|${paper.id}|score`) - 0.5) * 8;
       const targetPct = Math.max(
