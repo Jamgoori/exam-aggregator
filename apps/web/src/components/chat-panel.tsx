@@ -11,7 +11,9 @@ import { sendChatMessage, type ChatMessage } from "@/app/chat/actions";
 
 // 화면에 한 번에 보여줄 최근 메시지 수. 채팅은 지금 대화가 중요하지 목록을
 // 무한스크롤로 훑는 화면이 아니라서, 페이지네이션 없이 최근 것만 보여준다.
-const HISTORY_LIMIT = 50;
+// 메시지당 최대 300자라 300개를 받아도 수백 KB 수준이고, 말풍선 300개를 그리는
+// 것도 가상 스크롤 없이 충분히 가벼워서 부담 없이 넉넉하게 잡는다.
+const HISTORY_LIMIT = 300;
 // 이 안에 있을 때만 새 메시지에 맞춰 자동으로 따라 내려간다 — 지난 대화를 읽으려고
 // 위로 올려둔 사람을 방해하지 않는다.
 const AUTOSCROLL_THRESHOLD_PX = 120;
