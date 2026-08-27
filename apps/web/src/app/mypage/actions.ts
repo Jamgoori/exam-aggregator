@@ -9,6 +9,7 @@ import {
   DIAGNOSIS_CYCLE_DAYS,
 } from "@/lib/ai-diagnosis";
 import { runDiagnosisForUser } from "@/lib/diagnosis-generate";
+import { submitPendingDiagnoses } from "@/lib/diagnosis-batch";
 import {
   getExcludedDiagnosisSubjectSlugs,
   setDiagnosisSubjectPaused,
@@ -18,7 +19,10 @@ import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 
 export type RequestDiagnosisResult = {
   error?: string;
-  status?: "ready" | "pending";
+  // ready   — 이번 주기 리포트가 이미 있다(그대로 보여준다)
+  // queued  — 배치에 실렸다. 결과는 몇 분 뒤 진단 페이지에 뜬다
+  // pending — 요청 행은 있는데 배치에 싣지 못했다(사유는 error)
+  status?: "ready" | "queued" | "pending";
 };
 
 // 진단에서 분석할 과목 켜기/끄기. 맞춤 극복법은 과목당 7개·전체 15개 개념까지만
@@ -38,9 +42,10 @@ export async function toggleDiagnosisSubject(
   return { excludedSubjectIds: res.pausedSubjectIds };
 }
 
-// "AI 약점 진단 받기" 버튼. 자격을 확인하고 오늘 진단 요청(report=null 행)을 만든 뒤,
-// 그 자리에서 온디맨드 AI로 맞춤 극복법을 생성해 채운다. 생성에 실패하면(키 미설정·API
-// 오류) 요청 행만 남겨 pending으로 두고 배치 생성기가 나중에 채우게 한다.
+// "AI 약점 진단 받기" 버튼. 자격을 확인하고 이번 주기 진단 요청(report=null 행)을 만든 뒤,
+// 맞춤 극복법을 Message Batches API 에 실어 보낸다(요금 절반·비동기). 결과는 크론이나
+// 진단 페이지 진입이 수거해 report 를 채우고, 그때까지 화면에는 무AI 데이터층이 그대로
+// 떠 있는다. 배치에 싣지 못하면 요청 행만 pending 으로 남아 다음 크론이 다시 시도한다.
 export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
@@ -80,24 +85,37 @@ export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
     .limit(1)
     .maybeSingle();
 
-  // 분석 창: 마지막으로 리포트가 나온 날부터 오늘까지, 최대 2주. 9일 전에 받았으면
-  // 9일치, 한 달을 쉬었어도 14일치까지만 훑는다 — 창이 곧 프롬프트 크기이자 요금이다.
-  const windowDays = analysisWindowDays(await getLastAnalyzedDate(supabase, user.id));
-
-  let status: "ready" | "pending" = "pending";
+  // 기본 경로는 배치(Message Batches API)다. 주 1회짜리 기능이라 몇 분 늦게 와도 되고
+  // 요금이 절반이며, 서버리스 함수가 모델 응답을 기다리지 않아 타임아웃과도 싸우지
+  // 않는다. 결과는 크론(api/cron/diagnosis)이나 진단 페이지 진입이 수거한다.
+  //
+  // ANTHROPIC_DIAGNOSIS_SYNC=1 이면 예전처럼 그 자리에서 만든다 — 운영 중 결과를 바로
+  // 확인해야 할 때의 탈출구다(요금은 2배).
+  let status: RequestDiagnosisResult["status"] = "pending";
   let genError: string | undefined;
   if (row?.id) {
-    try {
-      const gen = await runDiagnosisForUser(
-        row.id as string,
-        user.id,
-        windowDays,
-        await getExcludedDiagnosisSubjectSlugs(supabase, user.id),
-      );
-      status = gen.status;
-      genError = gen.error;
-    } catch {
-      status = "pending";
+    if (process.env.ANTHROPIC_DIAGNOSIS_SYNC === "1") {
+      try {
+        // 분석 창: 마지막으로 리포트가 나온 날부터 오늘까지, 최대 2주. 9일 전에 받았으면
+        // 9일치, 한 달을 쉬었어도 14일치까지만 훑는다 — 창이 곧 프롬프트 크기이자
+        // 요금이다. (배치 경로는 크론에서도 도느라 세션이 없어 같은 계산을 자기가 한다.)
+        const gen = await runDiagnosisForUser(
+          row.id as string,
+          user.id,
+          analysisWindowDays(await getLastAnalyzedDate(supabase, user.id)),
+          await getExcludedDiagnosisSubjectSlugs(supabase, user.id),
+        );
+        status = gen.status;
+        genError = gen.error;
+      } catch {
+        status = "pending";
+      }
+    } else {
+      const res = await submitPendingDiagnoses({ userId: user.id });
+      status = res.submitted > 0 ? "queued" : "pending";
+      // 제출이 0건인 데는 이유가 있다(그 기간에 오답이 없다·이미 배치에 실려 있다).
+      // 앞의 것은 사용자가 고칠 수 있으니 그대로 올리고, 뒤의 것은 오류가 아니다.
+      genError = res.submitted > 0 ? undefined : res.error;
     }
   }
 

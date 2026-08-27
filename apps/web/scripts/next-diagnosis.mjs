@@ -1,5 +1,11 @@
 // 사용법: node --env-file=.env.local scripts/next-diagnosis.mjs
 //
+// 참고: 평소 극복법은 앱이 Message Batches API 로 만든다(lib/diagnosis-batch.ts, 요금
+// 절반·비동기). 이 스크립트는 실API 없이 구독 Claude 로 리포트를 만드는 수동 경로로,
+// 키가 없거나 배치가 계속 실패할 때의 대체 수단이다. 둘 다 "report 가 비어 있는 행"을
+// 집으므로, 배치가 도는 중에 이걸 같이 돌리면 같은 행을 두 번 만들게 된다 — 돌리기 전에
+// ai_diagnosis_batches 에 status='pending' 인 행이 있는지 확인할 것.
+//
 // ai_diagnoses에서 report가 아직 비어 있는(요청됨/생성 대기) 가장 오래된 행을 하나
 // 찾아서, 그 사용자의 오답·응시 통계와 취약 개념(keyword_title) 분포를 조립해 JSON으로
 // stdout에 출력한다. 이 JSON을 diagnosis-prompt.md와 함께 Claude(구독)에 넣어 리포트를
