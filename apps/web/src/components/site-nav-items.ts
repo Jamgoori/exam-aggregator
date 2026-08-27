@@ -4,6 +4,7 @@ import {
   Crown,
   FileStack,
   Library,
+  Megaphone,
   MessageSquarePlus,
   Receipt,
   Settings,
@@ -129,6 +130,15 @@ export const ACCOUNT_NAV: NavItem[][] = [
       label: "건의게시판",
       icon: MessageSquarePlus,
       match: (p) => p.startsWith("/suggestions"),
+    },
+    // 공지사항도 건의게시판과 같은 이유로 계정 메뉴에 둔다(메뉴바 본줄은 이미
+    // 5개라 하나만 더 늘어도 768px(md) 폭에서 줄이 넘친다). 비회원도 볼 수 있게
+    // 푸터에도 같은 링크가 있다(site-footer.tsx).
+    {
+      href: "/notices",
+      label: "공지사항",
+      icon: Megaphone,
+      match: (p) => p.startsWith("/notices"),
     },
   ],
 ];

@@ -67,6 +67,13 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly",
       priority: 0.6,
     },
+    // 공지사항 목록(app/notices/page.tsx). suggestions와 달리 완전히 공개된
+    // 게시판이라 색인을 막을 이유가 없다(robots.ts에도 별도 disallow가 없다).
+    {
+      url: absoluteUrl("/notices"),
+      changeFrequency: "weekly",
+      priority: 0.5,
+    },
     // 과목 목록 허브(app/subjects/page.tsx). 개별 과목 페이지로 가는 링크를 전부
     // 담고 있어서, 크롤러가 여기 한 장만 읽어도 과목 수백 장을 발견한다.
     {
