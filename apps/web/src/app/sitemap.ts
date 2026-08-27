@@ -3,6 +3,7 @@ import { cacheLife, cacheTag } from "next/cache";
 import { createPublicClient } from "@/lib/supabase/public";
 import { fetchAllExamPapers } from "@/lib/all-papers";
 import { fetchAllPages } from "@/lib/fetch-paged";
+import { fetchNoticeSitemapEntries } from "@/lib/notices";
 import { getExamIndex, examHref } from "@/lib/exam-index";
 import { paperHref } from "@/lib/paper-href";
 import { absoluteUrl } from "@/lib/site-url";
@@ -25,7 +26,7 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
 
   const supabase = createPublicClient();
 
-  const [{ papers }, { data: subjectRows }, { combos }, uploadedAtRows] =
+  const [{ papers }, { data: subjectRows }, { combos }, uploadedAtRows, notices] =
     await Promise.all([
     fetchAllExamPapers(supabase),
     supabase.from("subjects").select("slug").order("name"),
@@ -45,6 +46,7 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
         }>,
       "사이트맵 업로드 시각",
     ),
+    fetchNoticeSitemapEntries(),
   ]);
 
   const uploadedAt = new Map(uploadedAtRows.map((r) => [r.id, r.created_at]));
@@ -71,8 +73,30 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
     // 게시판이라 색인을 막을 이유가 없다(robots.ts에도 별도 disallow가 없다).
     {
       url: absoluteUrl("/notices"),
+      lastModified: notices[0]?.lastModified,
       changeFrequency: "weekly",
       priority: 0.5,
+    },
+    // 공지 한 건 한 건. 목록이 20개씩 끊기는 데다 2페이지 이후로는 링크가 사실상
+    // 끊기므로, 문제지와 마찬가지로 사이트맵이 유일한 발견 경로다.
+    ...notices.map((n) => ({
+      url: absoluteUrl(`/notices/${n.id}`),
+      lastModified: n.lastModified,
+      changeFrequency: "monthly" as const,
+      priority: 0.4,
+    })),
+    // 이용약관·개인정보처리방침. 순위를 노리는 문서는 아니지만 로그인 없이 열리는
+    // 공개 페이지이고, 검색엔진이 사이트의 신뢰 신호(운영 주체·연락처)를 읽는
+    // 자리라 색인에서 빠뜨리지 않는다.
+    {
+      url: absoluteUrl("/terms"),
+      changeFrequency: "yearly",
+      priority: 0.2,
+    },
+    {
+      url: absoluteUrl("/privacy"),
+      changeFrequency: "yearly",
+      priority: 0.2,
     },
     // 과목 목록 허브(app/subjects/page.tsx). 개별 과목 페이지로 가는 링크를 전부
     // 담고 있어서, 크롤러가 여기 한 장만 읽어도 과목 수백 장을 발견한다.

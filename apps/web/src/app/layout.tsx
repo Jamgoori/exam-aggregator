@@ -170,7 +170,19 @@ export default function RootLayout({
                 "@type": "Organization",
                 "@id": `${SITE_URL}/#organization`,
                 name: SITE_NAME,
+                alternateName: "공모아 - 공무원 기출문제 자료실",
                 url: SITE_URL,
+                // 구글이 검색 결과 사이트명 옆에 로고를 붙이려면 Organization 에
+                // logo 가 있어야 한다(name·url 만으로는 후보에도 못 든다).
+                // 절대 주소여야 하고, PWA 아이콘과 같은 파일을 재사용한다.
+                logo: {
+                  "@type": "ImageObject",
+                  url: absoluteUrl("/icon-512.png"),
+                  width: 512,
+                  height: 512,
+                },
+                description:
+                  "국가직·지방직 등 공무원 기출문제를 연도별·과목별로 모아 정답·해설과 함께 무료로 제공하는 기출문제 자료실입니다.",
               },
             ],
           }}

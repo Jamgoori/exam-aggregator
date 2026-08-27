@@ -3,6 +3,8 @@ import { isTossConfigured } from "@/lib/toss";
 
 export const metadata: Metadata = {
   title: "개인정보처리방침",
+  description: "공모아가 수집하는 개인정보 항목과 보관 기간, 이용 목적과 파기 절차를 안내합니다.",
+  alternates: { canonical: "/privacy" },
 };
 
 // 법적 고지 문서라 DB나 상태에 의존하지 않는 정적 페이지로 둔다. 내용을 고칠 때는

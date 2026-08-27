@@ -57,6 +57,14 @@ const nextConfig: NextConfig = {
       {
         source: "/(.*)",
         headers: [
+          // 이 도메인은 HTTPS 로만 서비스한다. 한 번 방문한 브라우저가 이후
+          // http:// 로 시작하는 주소를 아예 요청조차 하지 않게 해서, 리다이렉트
+          // 한 홉과 그 사이의 가로채기를 함께 없앤다. preload 는 넣지 않았다 —
+          // 목록에 올라가면 되돌리는 데 몇 달이 걸린다.
+          {
+            key: "Strict-Transport-Security",
+            value: "max-age=31536000; includeSubDomains",
+          },
           // 브라우저가 응답을 선언된 Content-Type 외의 것으로 추측(스니핑)해 실행하지 못하게 한다.
           { key: "X-Content-Type-Options", value: "nosniff" },
           // 다른 사이트가 이 사이트를 iframe에 넣어 클릭재킹하는 것을 막는다.

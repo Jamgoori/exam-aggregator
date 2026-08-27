@@ -101,6 +101,24 @@ export async function fetchNoticePage(page: number) {
   };
 }
 
+// 사이트맵에 실을 공지 목록. 목록 페이지는 20개씩 끊어 보여주므로 2페이지 뒤로
+// 밀려난 공지는 크롤러가 <a>로 닿는 경로가 사실상 없다 — 사이트맵이 유일한 발견
+// 경로다. 본문은 필요 없고 주소와 마지막 수정 시각만 있으면 된다.
+export async function fetchNoticeSitemapEntries(): Promise<
+  { id: string; lastModified: string }[]
+> {
+  const supabase = createPublicClient();
+  const { data } = await supabase
+    .from("notices")
+    .select("id, created_at, updated_at")
+    .order("created_at", { ascending: false });
+
+  return (data ?? []).map((row) => ({
+    id: row.id as string,
+    lastModified: (row.updated_at as string | null) ?? (row.created_at as string),
+  }));
+}
+
 export async function fetchNotice(id: string): Promise<NoticeDetail | null> {
   const supabase = createPublicClient();
   const { data } = await supabase

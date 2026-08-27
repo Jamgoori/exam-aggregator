@@ -3,6 +3,8 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "이용약관",
+  description: "공모아 서비스 이용약관입니다. 회원 자격, 유료 멤버십, 저작권과 책임 범위를 안내합니다.",
+  alternates: { canonical: "/terms" },
 };
 
 // 법적 고지 문서라 정적 페이지로 둔다. 서비스 기능(소셜 로그인 전용, CBT, 오답노트,

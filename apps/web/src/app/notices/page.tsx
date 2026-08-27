@@ -9,6 +9,11 @@ import { fetchNoticePage, isNoticeAdmin, NOTICES_PAGE_SIZE, type NoticeListItem 
 export const metadata: Metadata = {
   title: "공지사항",
   description: "공모아의 새 소식과 안내를 확인하세요.",
+  // ?page= 로 갈라지는 목록이라 정본을 1페이지로 모은다. 공지 본문은 각 상세
+  // 페이지가 자기 주소를 정본으로 들고 있고 사이트맵에도 따로 실리므로, 2페이지
+  // 이후를 색인에서 접어도 발견 경로가 끊기지 않는다.
+  alternates: { canonical: "/notices" },
+  openGraph: { url: "/notices", title: "공지사항" },
 };
 
 function formatDate(iso: string) {
