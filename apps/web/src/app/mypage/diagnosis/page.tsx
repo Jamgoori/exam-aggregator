@@ -119,12 +119,18 @@ export default async function DiagnosisPage({
     generating = await getPendingDiagnosisBatch(user.id);
   }
 
-  // AI 극복법(있으면): 이번 주 리포트 → 없으면 지난 완료 리포트에서 conceptCoaching만 가져온다.
+  // AI 극복법(있으면): 이번 주기 리포트 → 없으면 지난 완료 리포트에서 conceptCoaching만
+  // 가져온다. 뒤쪽(지난 리포트)이면 **그렇다고 화면에 적어야 한다** — 이번에 과목을 빼고
+  // 요청했는데 지난주에 만든 국어·영어 극복법이 그대로 떠 있으면, 사용자는 자기가 뺀
+  // 과목이 무시된 줄 안다(실제로는 이번 진단이 아직 만들어지는 중이다).
   const today = await getWeeklyDiagnosis(supabase, user.id);
   let coaching = today?.report?.conceptCoaching ?? null;
+  // 지금 보고 있는 극복법이 만들어진 날. 이번 주기 것이면 null(=지난 것이 아님).
+  let staleCoachingDate: string | null = null;
   if (!coaching || coaching.length === 0) {
     const latest = await getLatestReadyDiagnosis(supabase, user.id);
     coaching = latest?.report?.conceptCoaching ?? null;
+    if (latest && (coaching?.length ?? 0) > 0) staleCoachingDate = latest.date;
   }
   const coachingByConcept = new Map<string, DiagnosisConceptCoaching>();
   for (const c of coaching ?? []) coachingByConcept.set(c.concept, c);
@@ -197,6 +203,7 @@ export default async function DiagnosisPage({
             pickerSubjects={pickerSubjects}
             excludedSubjectIds={excludedSubjectIds}
             generatingSince={generating?.requestedAt ?? null}
+            staleCoachingDate={staleCoachingDate}
           />
         )}
       </div>
@@ -273,6 +280,7 @@ function Dashboard({
   pickerSubjects,
   excludedSubjectIds,
   generatingSince,
+  staleCoachingDate,
 }: {
   agg: DiagnosisAggregate;
   // "기본" 칩이 실제로 훑는 일수. 라벨에 그대로 쓴다.
@@ -289,6 +297,8 @@ function Dashboard({
   excludedSubjectIds: string[];
   // 극복법 배치를 제출한 시각(ISO). 값이 있으면 지금 만들어지는 중이다.
   generatingSince: string | null;
+  // 지금 보여주는 극복법이 지난 진단 것이면 그 날짜(YYYY-MM-DD). 이번 주기 것이면 null.
+  staleCoachingDate: string | null;
   coachingByConcept: Map<string, DiagnosisConceptCoaching>;
   hasCoaching: boolean;
   // 다음 진단을 받을 수 있는 날(YYYY-MM-DD). 이번 주기에 이미 받았을 때만 값이 있다.
@@ -299,7 +309,12 @@ function Dashboard({
   // 남은 것이므로 버튼을 "다시 시도"로 보여준다.
   requestedThisWeek: boolean;
 }) {
-  const topConcepts = agg.concepts.slice(0, CONCEPT_CARD_LIMIT);
+  // 카드는 상위 8개까지. 다만 **극복법이 붙은 개념은 8위 밖이어도 반드시 보여준다** —
+  // 극복법은 과목당 7개·전체 15개까지 만들어지므로(요금이 나간 만큼), 8장에서 자르면
+  // 9위 아래 개념에 붙은 극복법이 화면에 영영 안 나온다. 돈을 쓰고 숨기는 셈이다.
+  const topConcepts = agg.concepts
+    .map((c, i) => ({ concept: c, rank: i + 1 }))
+    .filter(({ concept, rank }) => rank <= CONCEPT_CARD_LIMIT || coachingByConcept.has(concept.concept));
   const maxWrong = Math.max(1, ...agg.concepts.map((c) => c.wrongCount));
 
   return (
@@ -357,6 +372,13 @@ function Dashboard({
         <SectionTitle icon={<Flame size={16} className="text-blue-600 dark:text-blue-400" />}>
           개념별 정리 · 극복
         </SectionTitle>
+        {staleCoachingDate && (
+          <p className="-mt-1 px-1 text-xs leading-relaxed text-amber-700 dark:text-amber-400">
+            아래 극복법은 {formatMonthDay(staleCoachingDate)}에 만든 지난 진단 것이에요
+            {generatingSince ? " — 이번 진단은 지금 만들고 있어요" : ""}. 그때 고른 과목
+            기준이라, 지금 뺀 과목이 남아 있을 수 있어요.
+          </p>
+        )}
         <GeneratingNotice since={generatingSince} />
         {!hasCoaching && canGenerate && (
           <DiagnosisSubjectPicker
@@ -366,12 +388,12 @@ function Dashboard({
             nextDate={nextDate}
           />
         )}
-        {topConcepts.map((c, i) => (
+        {topConcepts.map(({ concept, rank }) => (
           <ConceptCard
-            key={`${c.concept}-${i}`}
-            rank={i + 1}
-            concept={c}
-            coaching={coachingByConcept.get(c.concept) ?? null}
+            key={`${concept.concept}-${rank}`}
+            rank={rank}
+            concept={concept}
+            coaching={coachingByConcept.get(concept.concept) ?? null}
           />
         ))}
       </div>
