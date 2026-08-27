@@ -1,6 +1,11 @@
 import "server-only";
 import { createPublicClient } from "@/lib/supabase/public";
 import { getSessionUser } from "@/lib/supabase/session";
+import {
+  canDeleteNoticeComment,
+  canEditNoticeComment,
+  type NoticeViewer,
+} from "@gongmoa/core";
 
 export const NOTICES_PAGE_SIZE = 20;
 const NOTICE_LIST_COLUMNS = "id, title, is_pinned, view_count, created_at";
@@ -45,10 +50,18 @@ function toListItem(row: {
 // 이 게시판에서 글쓰기 버튼(및 상세의 수정·삭제 버튼)을 보여줄지만 결정한다 —
 // 실제 쓰기 권한은 RLS(is_admin())와 서버 액션이 다시 검사한다.
 export async function isNoticeAdmin(): Promise<boolean> {
+  return (await getNoticeViewer()).isAdmin;
+}
+
+// 댓글 작성 가능 여부(loggedIn)와 댓글 수정·삭제 권한 판단(canEditNoticeComment
+// 등)에 쓰는 뷰어 정보. notices 원글은 RLS로 완전히 공개되어 있어 관리자 여부만
+// 필요했지만, 댓글은 "본인" 개념이 있어 userId까지 필요하다.
+export async function getNoticeViewer(): Promise<NoticeViewer & { loggedIn: boolean }> {
   const { supabase, user } = await getSessionUser();
-  if (!user) return false;
+  if (!user) return { userId: null, isAdmin: false, loggedIn: false };
+
   const { data } = await supabase.rpc("is_admin");
-  return data === true;
+  return { userId: user.id, isAdmin: data === true, loggedIn: true };
 }
 
 // 고정 공지는 페이지 1에서만 목록 맨 위에 따로 얹어 보여준다(suggestions와 같은
@@ -114,4 +127,41 @@ export async function fetchNotice(id: string): Promise<NoticeDetail | null> {
 export async function countNoticeView(id: string) {
   const supabase = createPublicClient();
   await supabase.rpc("increment_notice_view", { p_notice_id: id });
+}
+
+export type NoticeCommentItem = {
+  id: string;
+  nickname: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string | null;
+  canEdit: boolean;
+  canDelete: boolean;
+};
+
+// notice_comments도 원글처럼 완전히 공개된 테이블이라(RLS: public read) 공개
+// 클라이언트로 바로 읽는다 — 쓰기만 로그인 회원으로 제한된다(schema.sql).
+export async function fetchNoticeComments(
+  noticeId: string,
+  viewer: NoticeViewer,
+): Promise<NoticeCommentItem[]> {
+  const supabase = createPublicClient();
+  const { data } = await supabase
+    .from("notice_comments")
+    .select("id, user_id, nickname, content, created_at, updated_at")
+    .eq("notice_id", noticeId)
+    .order("created_at", { ascending: true });
+
+  return (data ?? []).map((row) => {
+    const ownership = { user_id: row.user_id as string };
+    return {
+      id: row.id as string,
+      nickname: row.nickname as string,
+      content: row.content as string,
+      createdAt: row.created_at as string,
+      updatedAt: row.updated_at as string | null,
+      canEdit: canEditNoticeComment(ownership, viewer),
+      canDelete: canDeleteNoticeComment(ownership, viewer),
+    };
+  });
 }

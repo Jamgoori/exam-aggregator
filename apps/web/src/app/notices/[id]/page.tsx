@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { Pin } from "lucide-react";
+import { NoticeComments } from "@/components/notice-comments";
 import { NoticeDeleteButton } from "@/components/notice-delete-button";
-import { countNoticeView, fetchNotice, isNoticeAdmin } from "@/lib/notices";
+import { countNoticeView, fetchNotice, fetchNoticeComments, getNoticeViewer } from "@/lib/notices";
 
 export async function generateMetadata({
   params,
@@ -34,7 +35,12 @@ export default async function NoticeDetailPage({
   const notice = await fetchNotice(id);
   if (!notice) notFound();
 
-  const [, canWrite] = await Promise.all([countNoticeView(id), isNoticeAdmin()]);
+  const viewer = await getNoticeViewer();
+  const [, comments] = await Promise.all([
+    countNoticeView(id),
+    fetchNoticeComments(id, viewer),
+  ]);
+  const canWrite = viewer.isAdmin;
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
@@ -79,6 +85,10 @@ export default async function NoticeDetailPage({
           </div>
         )}
       </article>
+
+      <div className="border-t border-zinc-200 pt-6 dark:border-zinc-700">
+        <NoticeComments noticeId={notice.id} comments={comments} loggedIn={viewer.loggedIn} />
+      </div>
     </div>
   );
 }

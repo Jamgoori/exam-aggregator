@@ -2359,3 +2359,51 @@ as $$
 $$;
 
 grant execute on function increment_notice_view(uuid) to anon, authenticated;
+
+-- 공지 하나 아래 댓글. 답글 트리 없이 평평하다(packages/core/src/notices.ts
+-- 참고 — 로그인 회원만 쓸 수 있어 답글 깊이 제한 같은 comments 테이블의 복잡함이
+-- 필요 없다). 원글과 반대로 읽기는 공개, 쓰기는 회원만이라 RLS를 그렇게 건다.
+create table if not exists notice_comments (
+  id uuid primary key default gen_random_uuid(),
+  notice_id uuid not null references notices(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  -- 작성 시점 닉네임을 그대로 박아둔다 (suggestions·comments와 같은 이유 —
+  -- 나중에 닉네임을 바꿔도 과거 댓글의 작성자 표시가 흔들리지 않게).
+  nickname text not null,
+  content text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz
+);
+
+do $$ begin
+  alter table notice_comments add constraint notice_comments_content_len
+    check (char_length(content) between 1 and 1000);
+exception when duplicate_object then null; end $$;
+
+-- 상세 화면은 항상 한 공지의 댓글을 작성순으로 전부 읽는다.
+create index if not exists notice_comments_notice_idx
+  on notice_comments(notice_id, created_at);
+-- 도배 방지(시간당 작성 수) 조회용.
+create index if not exists notice_comments_user_idx
+  on notice_comments(user_id, created_at desc);
+
+alter table notice_comments enable row level security;
+
+-- 누구나 읽기 가능 (원글처럼 완전히 공개된 게시판).
+drop policy if exists "public read notice_comments" on notice_comments;
+create policy "public read notice_comments" on notice_comments
+  for select using (true);
+
+-- 쓰기는 로그인 회원 본인 명의로만 — "본인" 특정이 필요한 수정·삭제 권한의 전제.
+drop policy if exists "insert own notice_comments" on notice_comments;
+create policy "insert own notice_comments" on notice_comments
+  for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "update own notice_comments" on notice_comments;
+create policy "update own notice_comments" on notice_comments
+  for update to authenticated using (auth.uid() = user_id);
+
+-- 삭제는 본인 + 관리자(스팸·욕설 정리).
+drop policy if exists "delete own or admin notice_comments" on notice_comments;
+create policy "delete own or admin notice_comments" on notice_comments
+  for delete to authenticated using (auth.uid() = user_id or is_admin());
