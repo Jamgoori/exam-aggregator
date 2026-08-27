@@ -25,6 +25,7 @@ import { getDiagnosisPausedSubjectIds } from "@/lib/review-preferences";
 import { isPremium } from "@/lib/membership";
 import { MembershipLockedPage } from "@/components/membership-upsell";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
+import { collectDiagnosisBatches, getPendingDiagnosisBatch } from "@/lib/diagnosis-batch";
 
 // 기간 선택(?range=). 기본(cycle)은 "지난 진단 이후"이되 최소 7일을 보장한다
 // (GRAPH_MIN_WINDOW_DAYS). 진단 직후엔 그 창이 1일이라 어제 푼 것만 남는데, 사다리는
@@ -108,6 +109,16 @@ export default async function DiagnosisPage({
     ? await getDiagnosisAggregate(user.id, { days, subjectSlug })
     : all;
 
+  // 배치로 만들던 극복법이 끝났으면 여기서 수거한다. 크론(api/cron/diagnosis)이 매시간
+  // 같은 일을 하지만, 그걸 기다리면 방금 끝난 결과를 최대 한 시간 늦게 본다. 진행 중인
+  // 배치가 있을 때만 부른다 — 아니면 진단 페이지를 열 때마다 Anthropic 왕복이 하나씩
+  // 붙는다(수거는 무료 API지만 공짜는 아니다).
+  let generating = await getPendingDiagnosisBatch(user.id);
+  if (generating) {
+    await collectDiagnosisBatches({ userId: user.id });
+    generating = await getPendingDiagnosisBatch(user.id);
+  }
+
   // AI 극복법(있으면): 이번 주 리포트 → 없으면 지난 완료 리포트에서 conceptCoaching만 가져온다.
   const today = await getWeeklyDiagnosis(supabase, user.id);
   let coaching = today?.report?.conceptCoaching ?? null;
@@ -125,8 +136,11 @@ export default async function DiagnosisPage({
   // 사용자가 분석할 과목을 고를 틈이 없다 — 준비하지 않는 과목이 상한(과목당 7개·전체
   // 20개)을 차지한 채 요금까지 나간다. 이제 선택창에서 고르고 직접 누른다.
   const hasCoaching = (coaching ?? []).length > 0;
+  // 배치가 도는 중이면 다시 만들 버튼을 보여주지 않는다 — 누르면 같은 진단에 두 번
+  // 요금이 나가고, 사용자는 자기가 뭘 잘못했나 싶어 계속 누른다.
   const canGenerate =
     !hasCoaching &&
+    generating == null &&
     agg.concepts.length > 0 &&
     (await getDiagnosisEligibility(supabase, user.id)).eligible;
   // 선택창에 뿌릴 과목별 오답 수(전체 기간 아님 — 지금 보고 있는 창 기준). 어떤 과목을
@@ -182,6 +196,7 @@ export default async function DiagnosisPage({
             canGenerate={canGenerate}
             pickerSubjects={pickerSubjects}
             excludedSubjectIds={excludedSubjectIds}
+            generatingSince={generating?.requestedAt ?? null}
           />
         )}
       </div>
@@ -257,6 +272,7 @@ function Dashboard({
   canGenerate,
   pickerSubjects,
   excludedSubjectIds,
+  generatingSince,
 }: {
   agg: DiagnosisAggregate;
   // "기본" 칩이 실제로 훑는 일수. 라벨에 그대로 쓴다.
@@ -271,6 +287,8 @@ function Dashboard({
   pickerSubjects: { id: string; name: string; wrongCount: number }[];
   // 진단에서 뺀 과목 id.
   excludedSubjectIds: string[];
+  // 극복법 배치를 제출한 시각(ISO). 값이 있으면 지금 만들어지는 중이다.
+  generatingSince: string | null;
   coachingByConcept: Map<string, DiagnosisConceptCoaching>;
   hasCoaching: boolean;
   // 다음 진단을 받을 수 있는 날(YYYY-MM-DD). 이번 주기에 이미 받았을 때만 값이 있다.
@@ -339,6 +357,7 @@ function Dashboard({
         <SectionTitle icon={<Flame size={16} className="text-blue-600 dark:text-blue-400" />}>
           개념별 정리 · 극복
         </SectionTitle>
+        <GeneratingNotice since={generatingSince} />
         {!hasCoaching && canGenerate && (
           <DiagnosisSubjectPicker
             subjects={pickerSubjects}
@@ -364,6 +383,35 @@ function Dashboard({
       </p>
     </div>
   );
+}
+
+// "만드는 중" 카드. 배치는 보통 몇 분, 늦어도 24시간 안에 끝난다 — 그 사이 화면이
+// 아무 말도 안 하면 사용자는 버튼이 먹통이라고 생각하고 다시 누르러 온다(그때마다
+// 요금이 나갈 수 있었다). 언제 요청했는지도 같이 적는다.
+function GeneratingNotice({ since }: { since: string | null }) {
+  if (!since) return null;
+  return (
+    <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3.5 dark:border-violet-900/50 dark:bg-violet-950/20">
+      <p className="text-sm font-bold text-violet-900 dark:text-violet-200">
+        맞춤 극복법을 만들고 있어요
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-violet-700/80 dark:text-violet-300/70">
+        {formatRequestedAt(since)}에 요청했어요. 보통 몇 분이면 끝나고, 준비되면 이 화면에
+        바로 떠요 — 기다리는 동안 아래 개념 카드에서 틀린 문항부터 다시 볼 수 있어요.
+      </p>
+    </div>
+  );
+}
+
+// "2026-08-27T05:12:00Z" → "오후 2:12". 한국 시간 기준(사용자가 사는 시간대다).
+function formatRequestedAt(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "조금 전";
+  return new Date(t).toLocaleTimeString("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 // 한 과목 그룹의 개념 막대들. 개념이 많으면 상위만 보이고 나머지는 접는다.

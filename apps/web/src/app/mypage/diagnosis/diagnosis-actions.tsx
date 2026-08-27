@@ -197,11 +197,13 @@ export function DiagnosisSubjectPicker({
         setError(res.error);
         return;
       }
-      if (res.status === "ready") {
+      // ready(이미 이번 주기 리포트가 있다)든 queued(배치에 실렸다)든 화면을 새로 그린다.
+      // queued 면 서버가 "만들고 있어요" 카드로 바꿔 주므로 여기서 따로 말할 게 없다.
+      if (res.status === "ready" || res.status === "queued") {
         router.refresh();
         return;
       }
-      setError("극복법을 생성하지 못했어요. 잠시 후 다시 시도해주세요.");
+      setError("극복법 생성을 시작하지 못했어요. 잠시 후 다시 시도해주세요.");
     });
   }
 
@@ -218,7 +220,8 @@ export function DiagnosisSubjectPicker({
         <b className="font-bold">
           과목당 {COACH_PER_SUBJECT}개, 전체 {COACH_MAX_TOTAL}개 개념까지
         </b>{" "}
-        다뤄요 — 안 보는 과목을 빼면 남은 과목을 그만큼 더 깊게 짚어줘요.
+        다뤄요 — 안 보는 과목을 빼면 남은 과목을 그만큼 더 깊게 짚어줘요. 만드는 데는
+        보통 몇 분 걸리고, 다 되면 이 화면에 바로 떠요.
       </p>
 
       <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -262,7 +265,7 @@ export function DiagnosisSubjectPicker({
         disabled={pending || included.length === 0}
         className="mt-2.5 w-full rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-violet-700 disabled:opacity-60"
       >
-        {pending ? "만드는 중이에요… (20초쯤)" : "맞춤 극복법 만들기"}
+        {pending ? "요청하는 중이에요…" : "맞춤 극복법 만들기"}
       </button>
     </div>
   );
