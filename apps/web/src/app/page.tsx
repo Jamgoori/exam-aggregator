@@ -106,7 +106,10 @@ export default async function Home({
                 ? `${latestYear}년 자료 업데이트 완료`
                 : "기출문제를 업로드해보세요"}
             </span>
-            <h1 className="text-3xl font-bold text-black sm:text-4xl dark:text-zinc-100">
+            {/* 모바일에서 "오답노트, AI 약점진단 받으세요"가 3줄로 흘러 화면 위쪽이
+                답답해져서, 좁은 폭에서는 글자 크기를 뷰포트에 맞춰 줄여 두 줄로
+                떨어지게 한다(360px 기준 약 22px). sm 이상은 기존 크기 그대로. */}
+            <h1 className="text-[clamp(1.125rem,6.2vw,1.875rem)] font-bold tracking-tight text-black sm:text-4xl sm:tracking-normal dark:text-zinc-100">
               <span className="text-blue-600 dark:text-blue-400">공모아</span>
               에서 문제풀고
               <br />
