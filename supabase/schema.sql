@@ -790,6 +790,12 @@ create table if not exists ai_diagnoses (
   unique (user_id, diagnosis_date)
 );
 
+-- 사용자가 이번 진단에서 고른 개념들([{conceptId, concept}]). null 이면 예전처럼
+-- 생성기가 알아서 상위 개념을 고른다(구버전 요청·배치 스크립트 경로). 요청할 때 박아
+-- 두는 이유는 제출과 생성이 몇 시간 떨어져 있어서다 — 그 사이 사용자가 문제를 더 풀면
+-- 다시 집계한 상위 개념은 사용자가 체크한 것과 달라진다.
+alter table ai_diagnoses add column if not exists selected_concepts jsonb;
+
 create index if not exists ai_diagnoses_user_idx
   on ai_diagnoses(user_id, diagnosis_date desc);
 

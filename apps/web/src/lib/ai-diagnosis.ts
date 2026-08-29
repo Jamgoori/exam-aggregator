@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { COACH_MAX_TOTAL } from "@/lib/diagnosis-limits";
 import type { createClient } from "@/lib/supabase/server";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -70,6 +71,14 @@ export type DiagnosisConceptCoaching = {
   weakPattern: string;
   // 어떻게 극복하면 좋을지 실천형 조언 한두 문장.
   howToOvercome: string;
+};
+
+// 사용자가 이번 진단에서 고른 개념. 화면의 체크박스가 그대로 이 배열이 된다.
+// conceptId 는 정본 개념 id(없는 개념이면 null이고 표기로만 식별한다) —
+// diagnosis-limits 의 conceptSelectionKey 와 짝이다.
+export type DiagnosisConceptSelection = {
+  conceptId: string | null;
+  concept: string;
 };
 
 export type AiDiagnosisReport = {
@@ -241,9 +250,28 @@ export async function getLatestReadyDiagnosis(
 export async function requestWeeklyDiagnosis(
   supabase: Supabase,
   userId: string,
+  // 화면에서 체크한 개념들. 요청 행에 그대로 박아 두고, 생성기(즉시·배치)가 이 목록만
+  // 코칭한다. 빈 배열이면 예전처럼 생성기가 알아서 상위 개념을 고른다(구버전 화면·
+  // 배치 스크립트 경로 호환).
+  selectedConcepts: DiagnosisConceptSelection[] = [],
 ): Promise<{ error?: string; status?: "ready" | "pending"; nextDate?: string }> {
+  // 선택은 여기서도 상한으로 자른다. 개념 하나가 곧 프롬프트 한 덩이이자 요금이라,
+  // 화면을 우회해 200개를 실어 보내는 요청이 그대로 청구서가 되면 안 된다.
+  const selected = normalizeConceptSelection(selectedConcepts);
+
   const existing = await getWeeklyDiagnosis(supabase, userId);
   if (existing) {
+    // 생성이 실패해 pending 으로 남은 요청을 다시 누른 경우다. 그 사이 사용자가 개념을
+    // 다시 골랐다면 그 선택으로 갈아 준다 — 체크박스를 고쳐 놓고 눌렀는데 예전 선택으로
+    // 만들어지면 화면이 거짓말을 한 것이 된다. 이미 완료된(ready) 리포트는 건드리지 않는다.
+    if (existing.status === "pending" && selected.length > 0) {
+      await createAdminClient()
+        .from("ai_diagnoses")
+        .update({ selected_concepts: selected })
+        .eq("user_id", userId)
+        .eq("diagnosis_date", existing.date)
+        .is("report", null);
+    }
     return { status: existing.status, nextDate: nextDiagnosisDate(existing.date) };
   }
 
@@ -259,10 +287,36 @@ export async function requestWeeklyDiagnosis(
   // 바로 위에서 자격(getDiagnosisEligibility)을 이미 확인했다.
   const { error } = await createAdminClient()
     .from("ai_diagnoses")
-    .insert({ user_id: userId, diagnosis_date: kstToday(), report: null });
+    .insert({
+      user_id: userId,
+      diagnosis_date: kstToday(),
+      report: null,
+      selected_concepts: selected.length > 0 ? selected : null,
+    });
   // 동시에 두 번 눌러 unique 충돌이 나도 "이미 요청됨"으로 본다.
   if (error && error.code !== "23505") {
     return { error: "진단 요청에 실패했어요. 잠시 후 다시 시도해주세요." };
   }
   return { status: "pending" };
+}
+
+// 클라이언트가 보낸 개념 선택을 믿을 수 있는 모양으로 정리한다: 문자열만 남기고,
+// 같은 개념 중복을 없애고, 전체 상한(COACH_MAX_TOTAL)까지 자른다.
+export function normalizeConceptSelection(
+  input: DiagnosisConceptSelection[] | null | undefined,
+): DiagnosisConceptSelection[] {
+  if (!Array.isArray(input)) return [];
+  const seen = new Set<string>();
+  const out: DiagnosisConceptSelection[] = [];
+  for (const raw of input) {
+    const concept = typeof raw?.concept === "string" ? raw.concept.trim() : "";
+    if (!concept) continue;
+    const conceptId = typeof raw?.conceptId === "string" && raw.conceptId ? raw.conceptId : null;
+    const key = conceptId ?? `kw:${concept}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ conceptId, concept });
+    if (out.length >= COACH_MAX_TOTAL) break;
+  }
+  return out;
 }

@@ -16,7 +16,7 @@ import {
   kstToday,
   nextDiagnosisDate,
 } from "@/lib/ai-diagnosis";
-import { COACH_MAX_TOTAL, COACH_PER_SUBJECT } from "@/lib/diagnosis-limits";
+import { COACH_MAX_TOTAL } from "@/lib/diagnosis-limits";
 
 export const metadata: Metadata = {
   title: "AI 약점 진단",
@@ -203,7 +203,7 @@ const RULES: { label: string; value: string }[] = [
   { label: "분석 기간", value: `지난 진단 이후 · 최대 ${DIAGNOSIS_MAX_WINDOW_DAYS}일` },
   {
     label: "극복법 개수",
-    value: `과목당 최대 ${COACH_PER_SUBJECT}개 · 한 번에 최대 ${COACH_MAX_TOTAL}개 개념`,
+    value: `직접 고른 개념에 한 번에 최대 ${COACH_MAX_TOTAL}개`,
   },
   { label: "그래프", value: "주기와 무관하게 항상 실시간" },
   {
@@ -224,11 +224,12 @@ const FAQ: { q: string; a: ReactNode }[] = [
     ),
   },
   {
-    q: "모든 개념에 극복법이 붙나요?",
+    q: "어떤 개념에 극복법이 붙나요?",
     a: (
       <>
-        한 번에 과목당 최대 {COACH_PER_SUBJECT}개, 전체 최대 {COACH_MAX_TOTAL}개 개념에
-        붙어요. 준비하지 않는 과목은 진단 화면에서 빼두면 남은 과목을 그만큼 더 깊게 봐요.
+        진단 화면에서 직접 고른 개념에 붙어요. 한 번에 최대 {COACH_MAX_TOTAL}개까지 고를 수
+        있고, 처음에는 많이 틀린 개념이 미리 체크돼 있어요 — 그대로 눌러도 되고, 시험이
+        가까운 과목 위주로 바꿔도 돼요.
       </>
     ),
   },

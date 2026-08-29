@@ -18,9 +18,10 @@ export const COACH_PER_SUBJECT = 7;
 // 35개가 된다. 요금이 개념 수에 정비례하므로 이 값을 올리는 건 그대로 요금 인상이다.
 export const COACH_MAX_TOTAL = 15;
 
-// 지금 고른 과목 수로 이번 생성이 실제로 다룰 개념 수. 선택창이 "과목을 빼면 남은 과목을
-// 더 깊게 본다"를 숫자로 보여주는 데 쓴다.
-export function plannedConceptCount(subjectCount: number): number {
-  if (subjectCount <= 0) return 0;
-  return Math.min(COACH_MAX_TOTAL, subjectCount * COACH_PER_SUBJECT);
+// 개념 선택 키. 같은 표기(keyword_title)라도 과목이 다르면 다른 개념이므로, 정본
+// 개념 id 가 있으면 그것을 쓰고 없을 때만 표기로 떨어진다 — diagnosis-live 의 오답 문항
+// 표본(conceptKey)과 **같은 규칙**이어야 화면에서 고른 개념과 프롬프트가 맞물린다.
+// 화면(체크박스)과 서버(선택 저장·대상 선정)가 같이 쓰므로 server-only 가 아닌 이 파일에 둔다.
+export function conceptSelectionKey(c: { conceptId: string | null; concept: string }): string {
+  return c.conceptId ?? `kw:${c.concept.trim()}`;
 }

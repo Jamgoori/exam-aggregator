@@ -1,16 +1,16 @@
-"use client";
-
-import { useState, useTransition } from "react";
 import Link from "next/link";
-import { requestDiagnosis } from "@/app/mypage/actions";
 
 export type DiagnosisBannerState = "ready" | "pending" | "eligible" | "locked";
 
 // 오답노트 허브의 AI 약점 진단 배너. 상태별로 하나의 행동만 보여준다:
 //  ready   → 오늘 리포트 보기
 //  pending → 요청됨, 생성 대기(생성기가 채우면 ready로 바뀜)
-//  eligible→ "진단 받기" 버튼(요청 생성)
+//  eligible→ "진단 받기"(진단 페이지로 — 거기서 개념을 고르고 만든다)
 //  locked  → 데이터 문턱 미달 안내
+//
+// 여기서 곧바로 생성을 걸지 않는 이유: 극복법은 사용자가 고른 개념으로 만들고, 주기당
+// 한 번뿐이다. 배너 버튼이 요청을 만들어 버리면 개념을 고를 화면을 보지도 못한 채
+// 그 주의 한 번이 소진된다.
 export function DiagnosisBanner({
   initialState,
   hint,
@@ -18,22 +18,7 @@ export function DiagnosisBanner({
   initialState: DiagnosisBannerState;
   hint?: string | null;
 }) {
-  const [state, setState] = useState<DiagnosisBannerState>(initialState);
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-
-  function request() {
-    if (pending) return;
-    setError(null);
-    start(async () => {
-      const res = await requestDiagnosis();
-      if (res.error) {
-        setError(res.error);
-        return;
-      }
-      setState(res.status === "ready" ? "ready" : "pending");
-    });
-  }
+  const state = initialState;
 
   const shell =
     "flex items-center gap-3 rounded-2xl border px-4 py-3.5 border-violet-200 bg-violet-50 dark:border-violet-900/50 dark:bg-violet-950/20";
@@ -88,16 +73,13 @@ export function DiagnosisBanner({
           <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
             눌러서 과목별 틀린 개념부터 확인해보세요 · 맞춤 극복법은 준비 중
           </p>
-          {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
         </Link>
-        <button
-          type="button"
-          onClick={request}
-          disabled={pending}
-          className="shrink-0 rounded-lg border border-violet-300 bg-white px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-50 disabled:opacity-60 dark:border-violet-800 dark:bg-zinc-900 dark:text-violet-300"
+        <Link
+          href="/mypage/diagnosis"
+          className="shrink-0 rounded-lg border border-violet-300 bg-white px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-50 dark:border-violet-800 dark:bg-zinc-900 dark:text-violet-300"
         >
-          {pending ? "생성 중..." : "극복법 다시 시도"}
-        </button>
+          극복법 다시 시도
+        </Link>
       </div>
     );
   }
@@ -113,18 +95,15 @@ export function DiagnosisBanner({
           </span>
         </p>
         <p className="text-xs text-violet-700/80 dark:text-violet-300/70">
-          오답을 분석해 취약 개념과 다음에 할 일을 알려드려요
+          틀린 개념을 그래프로 정리하고, 고른 개념마다 극복법을 만들어드려요
         </p>
-        {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
       </div>
-      <button
-        type="button"
-        onClick={request}
-        disabled={pending}
-        className="shrink-0 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-bold text-white hover:bg-violet-700 disabled:opacity-60"
+      <Link
+        href="/mypage/diagnosis"
+        className="shrink-0 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-bold text-white hover:bg-violet-700"
       >
-        {pending ? "요청 중..." : "진단 받기"}
-      </button>
+        개념 고르고 진단받기
+      </Link>
     </div>
   );
 }
