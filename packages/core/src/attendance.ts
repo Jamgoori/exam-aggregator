@@ -174,6 +174,21 @@ export function kstDateKey(now: Date = new Date()): string {
   return now.toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
 }
 
+// 같은 하루 경계를 정수 하나로 — 1970-01-01 KST 를 0 으로 센 날짜 번호.
+//
+// kstDateKey 와 자르는 지점이 완전히 같다(KST 00:00). 다른 건 결과의 모양뿐이라,
+// "며칠 전인지"를 세거나 하루를 Set/Map 의 키로 쓸 때는 이쪽이 맞다:
+//   - 문자열 키는 만들 때마다 Intl 포맷이 돈다. 응시 1,000행이면 그게 1,000번이다.
+//   - 어제를 구하려면 문자열을 Date 로 되돌렸다 하루 빼고 다시 포맷해야 한다.
+//     정수는 -1 이면 끝이다.
+// KST 는 서머타임이 없어 하루가 언제나 정확히 24시간이므로 나눗셈이 성립한다.
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function kstDayIndex(at: Date): number {
+  return Math.floor((at.getTime() + KST_OFFSET_MS) / DAY_MS);
+}
+
 // 그 날짜가 속한 달의 1일 — "YYYY-MM-01" (KST). 월간 카드의 키다.
 export function kstMonthKey(now: Date = new Date()): string {
   return `${kstDateKey(now).slice(0, 7)}-01`;
