@@ -1,4 +1,5 @@
 import "server-only";
+import { cacheLife } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // AI 약점 진단의 "결정적(무AI) 데이터층". 페이지 입장 즉시 그리는 과목별 개념 오답
@@ -206,17 +207,44 @@ const WIDEN_LADDER: (number | null)[] = [7, 30, 90, null];
 // 섞어풀기·복습(review_session_items)을 모두 센다 — 사용자에겐 둘 다 "푼 것"이다.
 export async function getDiagnosisAggregate(
   userId: string,
-  // subjectSlug 를 주면 그 과목만 집계한다(화면의 과목 칩). 개념 상위 30개를 자르기
-  // **전에** 걸러야 한다 — 전체에서 자른 뒤 거르면 개념이 잘게 쪼개진 과목이 통째로
-  // 사라진다.
+  // subjectSlug 를 주면 그 과목만 집계한다. 개념 상위 N개를 자르기 **전에** 걸러야
+  // 한다 — 전체에서 자른 뒤 거르면 개념이 잘게 쪼개진 과목이 통째로 사라진다.
+  // (화면의 과목 탭은 더 이상 이 인자를 쓰지 않고 클라이언트에서 거른다.)
   opts: { days?: number | null; widen?: boolean; subjectSlug?: string | null } = {},
 ): Promise<DiagnosisAggregate> {
+  // 캐시 키가 눈에 보이도록 옵션을 여기서 원시값으로 펴서 넘긴다. 기본값이 호출부마다
+  // 다르게 생략되면(`{days:7}` vs `{days:7, widen:undefined}`) 같은 질문이 다른 키가 돼
+  // 캐시가 놀게 된다.
+  return aggregateCached(
+    userId,
+    opts.days === undefined ? 7 : opts.days,
+    // widen=false 면 창을 절대 넓히지 않는다. AI 분석 경로가 이걸 쓴다 — 창이 곧
+    // 프롬프트 크기이자 요금이라, 빈 주에 조용히 90일치를 긁어 오면 안 된다.
+    opts.widen !== false,
+    opts.subjectSlug ?? null,
+  );
+}
+
+// 집계 본체 + 캐시. 진단 화면에서 가장 느린 구간이 여기다(계정 전체 응시 이력 → 기간
+// 안의 응답 → 문항·해설·개념 → 개념별 기출 수). 페이지를 다시 열거나 기간 칩을 오갈
+// 때마다 같은 계산을 처음부터 다시 하고 있었다.
+//
+// **userId 가 첫 번째 인자인 것이 이 캐시의 안전장치다** — 캐시 키는 인자에서 나오므로,
+// 사용자 구분이 인자에 없으면 남의 오답 집계가 다른 사람에게 나간다. 인자를 줄이거나
+// 사용자 정보를 함수 밖(전역·요청 컨텍스트)에서 읽도록 바꾸지 말 것.
+//
+// 30초로 짧게 잡는다. 문제를 풀고 바로 진단으로 넘어오는 흐름이 흔해서, 방금 푼 것이
+// 한참 안 보이면 고장으로 읽힌다.
+async function aggregateCached(
+  userId: string,
+  requested: number | null,
+  widenAllowed: boolean,
+  subjectFilter: string | null,
+): Promise<DiagnosisAggregate> {
+  "use cache";
+  cacheLife({ revalidate: 30, expire: 300 });
+
   const admin = createAdminClient();
-  const requested = opts.days === undefined ? 7 : opts.days;
-  // widen=false 면 창을 절대 넓히지 않는다. AI 분석 경로가 이걸 쓴다 — 창이 곧 프롬프트
-  // 크기이자 요금이라, 빈 주에 조용히 90일치를 긁어 오면 안 된다.
-  const widenAllowed = opts.widen !== false;
-  const subjectFilter = opts.subjectSlug ?? null;
 
   // 1) 응시 이력(과목 포함) — 과목별 정오율·추세.
   const attempts = await fetchAll<{

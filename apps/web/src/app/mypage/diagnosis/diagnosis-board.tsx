@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { BarChart3, BookOpen, Check, Flame, Lightbulb, Target } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { BarChart3, BookOpen, Check, Flame, Lightbulb, Loader2, Target } from "lucide-react";
+import { checkDiagnosisProgress } from "@/app/mypage/actions";
 import type {
   ConceptStat,
   DiagnosisWindow,
@@ -56,7 +58,7 @@ export function DiagnosisBoard({
   analysisDays,
   requestedThisWeek,
   nextDate,
-  generatingSince,
+  generating,
 }: {
   // 그래프가 실제로 그린 기간(자동 확장 결과 포함).
   window: DiagnosisWindow;
@@ -83,9 +85,11 @@ export function DiagnosisBoard({
   analysisDays: number;
   requestedThisWeek: boolean;
   nextDate: string | null;
-  generatingSince: string | null;
+  // 지금 극복법이 만들어지는 중이면 그 요청 시각과 개념 수. null 이면 대기 중이 아니다.
+  generating: { requestedAt: string; conceptCount: number } | null;
 }) {
   const [subject, setSubject] = useState<string | null>(initialSubject);
+  useCoachingReadyRefresh(generating?.requestedAt ?? null);
 
   const shownGroups = useMemo(
     () => (subject ? bySubject.filter((g) => g.subjectSlug === subject) : bySubject),
@@ -169,7 +173,7 @@ export function DiagnosisBoard({
         <SectionTitle icon={<Flame size={16} className="text-blue-600 dark:text-blue-400" />}>
           맞춤 극복법
         </SectionTitle>
-        <GeneratingNotice since={generatingSince} />
+        {generating && <GeneratingNotice generating={generating} />}
         {picker && picker.length > 0 && (
           <DiagnosisConceptPicker
             concepts={picker}
@@ -184,7 +188,7 @@ export function DiagnosisBoard({
           </p>
         )}
         <CoachingResults coaching={coaching} subject={subject} statByKey={statByKey} />
-        {!picker && coaching.length === 0 && generatingSince == null && (
+        {!picker && coaching.length === 0 && generating == null && (
           <p className="px-1 text-xs text-slate-400 dark:text-zinc-600">
             최근 {analysisDays}일 안에 틀린 문제가 쌓이면 여기서 개념을 골라 극복법을 받을 수
             있어요.
@@ -193,7 +197,7 @@ export function DiagnosisBoard({
       </div>
 
       <p className="px-1 text-center text-xs text-slate-400 dark:text-zinc-600">
-        그래프는 {rangeLabel(win.days)} 실시간 데이터예요. 맞춤 극복법은 주 1회, 최근{" "}
+        그래프는 {rangeLabel(win.days)} 오답 기록이에요. 맞춤 극복법은 주 1회, 최근{" "}
         {analysisDays}일 안에 틀린 문제에서 고른 개념을 분석해요.
         {coaching.length > 0 && nextDate ? ` 다음 진단은 ${formatMonthDay(nextDate)}부터.` : ""}
       </p>
@@ -272,19 +276,97 @@ function RangeChip({
   );
 }
 
-// "만드는 중" 카드. 배치는 보통 몇 분, 늦어도 24시간 안에 끝난다 — 그 사이 화면이
+// 극복법이 다 만들어졌는지 주기적으로 물어보고, 끝난 순간 화면을 한 번 새로 그린다.
+//
+// 예전에는 사용자가 직접 새로고침해야 결과를 봤다. 배치가 몇 분 뒤에 끝나므로 대부분은
+// 다 된 줄도 모르고 화면을 떠났다. 페이지를 통째로 다시 그리는 대신 가벼운 액션으로
+// 상태만 묻는 이유는 진단 렌더가 무겁기 때문이다(집계 포함) — 그래서 폴링은 싸고,
+// 새로 그리는 일은 끝나는 순간 딱 한 번 일어난다. 결과가 하나씩 붙지 않고 전부 함께
+// 나타나는 것도 그래서다.
+const POLL_MS = 20_000;
+
+function useCoachingReadyRefresh(requestedAt: string | null) {
+  const router = useRouter();
+  useEffect(() => {
+    if (!requestedAt) return;
+    let alive = true;
+    const timer = setInterval(async () => {
+      // 백그라운드 탭은 묻지 않는다 — 켜 둔 채 잊은 탭이 서버를 계속 두드리게 된다.
+      if (document.visibilityState === "hidden") return;
+      try {
+        const res = await checkDiagnosisProgress();
+        // 끝났으면 여기서 딱 한 번 새로 그린다. 새 렌더에는 requestedAt 이 없으므로
+        // 이 효과가 정리되면서 폴링도 같이 멈춘다.
+        if (alive && !res.generating) router.refresh();
+      } catch {
+        // 일시적인 네트워크 오류. 다음 차례에 다시 묻는다.
+      }
+    }, POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [requestedAt, router]);
+}
+
+// 요청 후 지난 시간(분). 서버와 클라이언트의 시계가 달라 첫 렌더에서 계산하면 hydration
+// 불일치가 나므로, 마운트 직후에 한 번 채우고 그다음부터 30초마다 갱신한다.
+function useElapsedMinutes(since: string): number | null {
+  const [minutes, setMinutes] = useState<number | null>(null);
+  useEffect(() => {
+    const tick = () => {
+      const started = Date.parse(since);
+      if (Number.isNaN(started)) return;
+      setMinutes(Math.max(0, Math.floor((Date.now() - started) / 60_000)));
+    };
+    // 효과 본문에서 바로 setState 하지 않는다(렌더가 연쇄로 돈다) — 다음 틱으로 미룬다.
+    const first = setTimeout(tick, 0);
+    const timer = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    };
+  }, [since]);
+  return minutes;
+}
+
+// "만드는 중" 로딩 카드. 배치는 보통 몇 분, 늦어도 24시간 안에 끝난다 — 그 사이 화면이
 // 아무 말도 안 하면 사용자는 버튼이 먹통이라고 생각하고 다시 누르러 온다(그때마다
-// 요금이 나갈 수 있었다). 언제 요청했는지도 같이 적는다.
-function GeneratingNotice({ since }: { since: string | null }) {
-  if (!since) return null;
+// 요금이 나갈 수 있었다). 몇 개를 만들고 있는지·언제 요청했는지·얼마나 지났는지를
+// 같이 적고, 예상보다 길어지면 문구를 바꿔 준다.
+function GeneratingNotice({
+  generating,
+}: {
+  generating: { requestedAt: string; conceptCount: number };
+}) {
+  const { requestedAt, conceptCount } = generating;
+  const minutes = useElapsedMinutes(requestedAt);
+  // 배치가 늦어지는 일은 있다(보장은 24시간이다). 5~10분이라고 안내해 놓고 15분이
+  // 지나도 같은 말을 하고 있으면 그때부터는 화면이 거짓말을 하는 것이다.
+  const slow = minutes != null && minutes >= 15;
   return (
-    <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3.5 dark:border-violet-900/50 dark:bg-violet-950/20">
-      <p className="text-sm font-bold text-violet-900 dark:text-violet-200">
+    <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-4 dark:border-violet-900/50 dark:bg-violet-950/20">
+      <p className="flex items-center gap-2 text-sm font-bold text-violet-900 dark:text-violet-200">
+        <Loader2 size={15} className="animate-spin" aria-hidden />
         맞춤 극복법을 만들고 있어요
       </p>
-      <p className="mt-1 text-xs leading-relaxed text-violet-700/80 dark:text-violet-300/70">
-        {formatRequestedAt(since)}에 요청했어요. 보통 몇 분이면 끝나고, 준비되면 이 화면에
-        바로 떠요 — 기다리는 동안 위 그래프에서 어떤 개념을 틀렸는지 볼 수 있어요.
+      <p className="mt-1.5 text-xs leading-relaxed text-violet-700/80 dark:text-violet-300/70">
+        {conceptCount > 0 ? `고른 ${conceptCount}개 개념을 ` : ""}
+        틀린 문항 하나씩 짚어 가며 분석하는 중이에요.{" "}
+        {slow
+          ? "예상보다 오래 걸리고 있어요. 그대로 두시면 다 되는 대로 나타나요."
+          : "보통 5~10분 걸려요."}
+      </p>
+      {/* 진행률을 알 수 없는 작업이라(배치가 언제 끝나는지 API가 알려주지 않는다) 좌우로
+          흐르는 인디케이터만 둔다 — 가짜 퍼센트를 그리면 90%에서 멈춘 것처럼 보인다. */}
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-violet-200/70 dark:bg-violet-900/40">
+        <div className="animate-loading-bar h-full w-1/3 rounded-full bg-violet-500" />
+      </div>
+      <p className="mt-2.5 text-[11px] leading-relaxed text-violet-700/60 dark:text-violet-300/50">
+        {formatRequestedAt(requestedAt)} 요청
+        {minutes != null ? ` · ${minutes < 1 ? "방금 시작했어요" : `${minutes}분 지났어요`}` : ""} ·
+        새로고침하지 않아도 다 되면 전부 한 번에 나타나요. 기다리는 동안 위 그래프에서 어떤
+        개념을 틀렸는지 볼 수 있어요.
       </p>
     </div>
   );
@@ -385,7 +467,10 @@ function CoachingResults({
     );
   }
   return (
-    <>
+    // 결과는 한 번에 저장되므로(배치 응답 1건 = report 1회 쓰기) 언제나 전부 함께 온다.
+    // 다만 카드가 길어 브라우저가 위에서부터 그리면 하나씩 붙는 것처럼 보이는데, 컨테이너를
+    // 통째로 페이드인시키면 실제로도 화면상으로도 "한 번에" 나타난다.
+    <div className="animate-loading-fade-in flex flex-col gap-3">
       {shown.map((c, i) => (
         <CoachingCard
           key={`${c.concept}-${i}`}
@@ -397,7 +482,7 @@ function CoachingResults({
           }
         />
       ))}
-    </>
+    </div>
   );
 }
 

@@ -340,17 +340,24 @@ async function closeItems(ids: string[], status: "ready" | "failed", error: stri
 }
 
 // 이 사용자의 극복법이 지금 배치에서 만들어지는 중인지. 화면이 "생성 중"과 "실패해서
-// 다시 눌러야 함"을 구분해 말해 주려면 필요하다.
+// 다시 눌러야 함"을 구분해 말해 주려면 필요하다. conceptCount 는 로딩 카드가 "고른 8개
+// 개념을 분석하는 중"이라고 말해 주기 위한 값 — 몇 개를 기다리는지 모르면 대기가 더 길게
+// 느껴진다.
 export async function getPendingDiagnosisBatch(
   userId: string,
-): Promise<{ requestedAt: string } | null> {
+): Promise<{ requestedAt: string; conceptCount: number } | null> {
   const { data } = await createAdminClient()
     .from("ai_diagnosis_batches")
-    .select("requested_at")
+    .select("requested_at, context")
     .eq("user_id", userId)
     .eq("status", "pending")
     .order("requested_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  return data ? { requestedAt: data.requested_at as string } : null;
+  if (!data) return null;
+  const context = data.context as BatchItemContext | null;
+  return {
+    requestedAt: data.requested_at as string,
+    conceptCount: context?.targets?.length ?? 0,
+  };
 }

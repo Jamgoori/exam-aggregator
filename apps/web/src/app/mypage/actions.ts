@@ -9,7 +9,11 @@ import {
   type DiagnosisConceptSelection,
 } from "@/lib/ai-diagnosis";
 import { runDiagnosisForUser } from "@/lib/diagnosis-generate";
-import { submitPendingDiagnoses } from "@/lib/diagnosis-batch";
+import {
+  collectDiagnosisBatches,
+  getPendingDiagnosisBatch,
+  submitPendingDiagnoses,
+} from "@/lib/diagnosis-batch";
 import { getExcludedDiagnosisSubjectSlugs } from "@/lib/review-preferences";
 import { isPremium } from "@/lib/membership";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
@@ -110,4 +114,23 @@ export async function requestDiagnosis(
   revalidatePath("/mypage/diagnosis");
   // 생성기가 이유를 말해 주면(예: 그 기간에 틀린 게 없음) 그대로 화면에 올린다.
   return genError ? { status, error: genError } : { status };
+}
+
+// 극복법이 다 만들어졌는지 묻는다(진단 화면이 생성 중일 때 주기적으로 부른다).
+//
+// 왜 페이지를 통째로 새로 그리지 않고 이 액션을 따로 두는가: 진단 페이지 렌더는 계정
+// 전체 오답을 훑는 집계를 포함해서, 20초마다 그걸 다시 돌리면 대기 중인 사용자 한 명이
+// 서버를 계속 두드리는 꼴이 된다. 여기서는 배치 상태만 보고(끝났으면 결과를 수거하고),
+// 화면은 **끝난 그 순간 딱 한 번** 새로 그린다 — 그래서 결과가 하나씩 붙는 게 아니라
+// 전부 한 번에 나타난다.
+//
+// 수거(collectDiagnosisBatches)는 토큰 요금이 없는 조회 API다. 자기 배치가 진행 중일
+// 때만 도므로, 남의 진단을 건드리거나 없는 요청에 요금을 태울 여지가 없다.
+export async function checkDiagnosisProgress(): Promise<{ generating: boolean }> {
+  const { user } = await getSessionUser();
+  if (!user) return { generating: false };
+
+  if (!(await getPendingDiagnosisBatch(user.id))) return { generating: false };
+  await collectDiagnosisBatches({ userId: user.id });
+  return { generating: (await getPendingDiagnosisBatch(user.id)) != null };
 }

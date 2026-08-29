@@ -214,7 +214,7 @@ export default async function DiagnosisPage({
             analysisDays={DIAGNOSIS_WINDOW_DAYS}
             requestedThisWeek={today != null}
             nextDate={nextDate}
-            generatingSince={generating?.requestedAt ?? null}
+            generating={generating}
           />
         )}
       </div>
