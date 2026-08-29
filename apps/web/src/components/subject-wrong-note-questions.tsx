@@ -47,6 +47,9 @@ function toRow(q: SubjectWrongNoteQuestion): WrongNoteCardRow {
 // 같은 이미지 배열이 연속되면(같은 문제지의 세트문제) 카드 하나로 묶는다. 다른
 // 문제지끼리는 이미지 경로가 겹칠 일이 없어 자연히 분리된다.
 type Card = {
+  // 이 카드의 고유 식별자 = 세트 묶음 서명(문제지 + 이미지 배열). 정렬·필터가 바뀌어도
+  // 같은 카드에는 같은 값이 유지되므로 React key 로 그대로 쓴다.
+  id: string;
   paperId: string;
   paperTitle: string;
   paperLevel: string | null;
@@ -189,6 +192,7 @@ export function SubjectWrongNoteQuestions({
       const head = qs[0];
       return {
         card: {
+          id: sig,
           paperId: head.paperId,
           paperTitle: head.paperTitle,
           paperLevel: head.paperLevel,
@@ -342,8 +346,14 @@ export function SubjectWrongNoteQuestions({
         <>
           <WrongNoteLegend />
           <div className="flex flex-col gap-5">
-            {cards.map((card, i) => (
-              <div key={`${sort}-${card.paperId}-${card.rows[0].questionNumber}-${i}`} className="flex flex-col gap-1.5">
+            {cards.map((card) => (
+              // key 는 카드의 고유 식별자만 쓴다. 예전에는 정렬 기준(sort)과 배열
+              // 인덱스(i)를 섞어 넣었는데, 둘 다 "이 카드가 무엇인가"가 아니라 "지금
+              // 몇 번째로 보이는가"라서 필터 칩을 누르거나 정렬을 바꾸는 순간 모든
+              // key 가 달라졌다. React 는 그걸 전부 다른 카드로 보고 수백 장을
+              // 언마운트했다가 다시 마운트하는데, 그때 자식의 로컬 상태가 같이
+              // 사라진다 — 메모를 쓰던 중에 옆의 필터를 누르면 초안이 날아갔다.
+              <div key={card.id} className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-500">
                   {card.paperLevel && (
                     <span

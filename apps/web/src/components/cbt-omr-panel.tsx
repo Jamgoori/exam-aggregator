@@ -1,9 +1,20 @@
 "use client";
 
+import { memo } from "react";
+
 // OMR 답안 표기 패널. 데스크톱에서는 시험지 오른쪽에 고정으로, 모바일에서는
 // "답안 입력" 버튼으로 여는 바텀시트 안에 같은 컴포넌트가 들어간다.
 // 채점이 끝나면(resultByQuestion) 문항별 정오답 색으로 바뀌고 입력이 잠긴다.
-export function OmrPanel({
+//
+// memo 로 감싸는 이유: 부모(CbtSolver)는 경과 시간 때문에 1초마다 다시 그려지는데,
+// 이 패널은 문항 20~40개 × 선지 4~5개 = 버튼 수백 개짜리 격자다. 모바일에서 답안
+// 시트까지 열어두면 두 벌이 뜬다. 100분짜리 시험이면 틱만 6000번이라, 답과 아무
+// 상관없이 이 격자를 6000번 다시 만들게 된다 — 필기 캔버스(pointermove)와 같은
+// 메인 스레드를 쓰므로 중저가 기기에서는 그게 필기 지연으로 나타난다.
+// props 가 실제로 바뀔 때(답 선택·채점·에러)만 다시 그리면 된다. 그래서 부모는
+// onSelect/onSubmit 을 useCallback 으로, resultByQuestion 을 useMemo 로 넘긴다 —
+// 셋 중 하나라도 매 렌더 새로 만들면 이 memo 는 그냥 무효가 된다.
+function OmrPanelImpl({
   className,
   totalQuestions,
   choiceCount,
@@ -98,3 +109,5 @@ export function OmrPanel({
     </div>
   );
 }
+
+export const OmrPanel = memo(OmrPanelImpl);

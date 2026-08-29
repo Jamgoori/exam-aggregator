@@ -383,15 +383,18 @@ export function CbtSolver({
 
   const answeredCount = answers.filter((a) => a !== null).length;
 
-  function selectChoice(questionIndex: number, choice: number) {
+  // 아래 셋(selectChoice · handleSubmit · resultByQuestion)은 OmrPanel 의 memo 가
+  // 실제로 걸리게 하려고 안정적으로 유지한다. 하나라도 매 렌더 새로 만들면 1초마다
+  // 오는 타이머 리렌더에서 버튼 수백 개짜리 격자가 통째로 다시 만들어진다.
+  const selectChoice = useCallback((questionIndex: number, choice: number) => {
     setAnswers((prev) => {
       const next = [...prev];
       next[questionIndex] = next[questionIndex] === choice ? null : choice;
       return next;
     });
-  }
+  }, []);
 
-  function handleSubmit() {
+  const handleSubmit = useCallback(function handleSubmit() {
     if (isPending) return;
     if (!started) {
       alert("시작 기록 확인 중이에요. 잠시 후 다시 시도해주세요.");
@@ -427,7 +430,7 @@ export function CbtSolver({
       setOmrOpen(false);
       setResult(res);
     });
-  }
+  }, [isPending, started, answeredCount, totalQuestions, answers, paperId, startedAtRef]);
 
   function handleRetry() {
     setAnswers(Array(totalQuestions).fill(null));
@@ -436,8 +439,10 @@ export function CbtSolver({
     resetTimer();
   }
 
-  const resultByQuestion = new Map(
-    (result?.questionResults ?? []).map((q) => [q.question_number, q]),
+  const resultByQuestion = useMemo(
+    () =>
+      new Map((result?.questionResults ?? []).map((q) => [q.question_number, q])),
+    [result],
   );
 
   // 세트로 묶인 문제는 이전/다음 이동도 개별 번호가 아니라 세트 단위로 건너뛴다
