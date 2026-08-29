@@ -65,16 +65,24 @@ test("상한에 걸려도 모든 과목이 다뤄진다", () => {
 });
 
 test("과목 수가 적으면 남은 과목이 상한을 더 깊게 쓴다", () => {
-  // 2과목이면 전체 상한(15)에 걸리지 않아 과목당 상한(7)을 온전히 쓴다.
+  // 과목이 적으면 한 과목이 가져가는 자리가 늘어난다. 두 상한 중 낮은 쪽까지만 채우므로
+  // (과목당 7 · 전체 10) 여기서는 전체 상한이 먼저 걸린다 — 상한 값을 조정해도 이 성질은
+  // 유지돼야 해서 숫자를 박지 않고 두 상수로 쓴다.
   const two = pickCoachTargets(aggOf(["a", "b"], 12), new Set());
-  assert.equal(two.length, 2 * COACH_PER_SUBJECT);
-  assert.equal(two.filter((c) => c.subjectSlug === "a").length, COACH_PER_SUBJECT);
+  assert.equal(two.length, Math.min(2 * COACH_PER_SUBJECT, COACH_MAX_TOTAL));
+  // 5과목일 때(과목당 2개)보다 한 과목이 더 깊게 다뤄진다.
+  const five = pickCoachTargets(aggOf(["a", "b", "c", "d", "e"], 12), new Set());
+  assert.ok(
+    two.filter((c) => c.subjectSlug === "a").length >
+      five.filter((c) => c.subjectSlug === "a").length,
+  );
 });
 
 test("뺀 과목은 대상에서 제외된다", () => {
   const picked = pickCoachTargets(aggOf(["a", "b", "c"], 12), new Set(["b"]));
   assert.ok(!picked.some((c) => c.subjectSlug === "b"));
-  assert.equal(picked.length, 2 * COACH_PER_SUBJECT); // 남은 2과목
+  // 남은 2과목이 상한까지 채운다(과목당 7 · 전체 10 중 낮은 쪽).
+  assert.equal(picked.length, Math.min(2 * COACH_PER_SUBJECT, COACH_MAX_TOTAL));
 });
 
 test("과목 안에서는 많이 틀린 순, 동률이면 정답률이 낮은 쪽 먼저", () => {

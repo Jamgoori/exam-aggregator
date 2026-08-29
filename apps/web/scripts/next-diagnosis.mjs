@@ -36,7 +36,7 @@ const COACH_PER_SUBJECT = 7;
 // ⚠️ lib/diagnosis-limits.ts 의 COACH_PER_SUBJECT/COACH_MAX_TOTAL 과 같은 값이어야 한다
 // (여기는 plain node 라 TypeScript 를 import 하지 못해 복제해 둔 것). 한쪽만 고치면
 // 같은 계정에 대해 배치와 앱이 서로 다른 개념 집합을 코칭한다.
-const DEFAULT_COACH_MAX_TOTAL = 15;
+const DEFAULT_COACH_MAX_TOTAL = 10;
 const SAMPLES_PER_CONCEPT = 8;
 // 모델에 넣기 전 자르는 길이(diagnosis-live.ts SAMPLE_TEXT_MAX 와 동일).
 const SAMPLE_TEXT_MAX = 240;

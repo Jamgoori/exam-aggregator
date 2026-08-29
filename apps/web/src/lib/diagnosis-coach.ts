@@ -215,11 +215,12 @@ export function buildCoachingParams(
     // 비동기라 상관없지만, 즉시 경로(diagnosis-generate.ts)는 그래서 messages.stream 을
     // 쓴다 — 그쪽을 messages.create 로 되돌리면 이 상한에서 즉시 예외가 난다.
     max_tokens: 48000,
-    // effort 는 그대로 비용이다. 통계만 넣던 때는 low, 유형만 짚던 때는 medium 으로
-    // 충분했지만, 이제는 여러 문항의 오답 선지에서 공통 원인을 찾아 계획까지 세워야
-    // 해서 high 로 둔다. 요금을 줄여야 하면 개념 수(COACH_MAX_TOTAL)보다 먼저 여기를
-    // medium 으로 내려 결과를 눈으로 비교할 것.
-    output_config: { effort: "high", format: { type: "json_schema", schema } },
+    // effort 는 그대로 비용이다(thinking 토큰이 출력 요금으로 붙는다). 여러 문항의 오답
+    // 선지에서 공통 원인을 찾는 일이라 high 가 이상적이지만, 요금 대비 체감을 보고
+    // medium 으로 운영한다 — 프롬프트와 스키마(원인·근거·계획·체크리스트)는 그대로라
+    // 결과의 "모양"은 같고, 근거를 얼마나 파고드느냐가 달라진다.
+    // 결과가 다시 일반론으로 흐르면 개념 수를 줄이기 전에 여기를 high 로 되돌릴 것.
+    output_config: { effort: "medium", format: { type: "json_schema", schema } },
     system,
     messages: [
       {
