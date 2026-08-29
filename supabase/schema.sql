@@ -455,32 +455,6 @@ $$;
 
 grant execute on function has_cbt_answers_bulk(uuid[]) to anon, authenticated;
 
--- 중복 시험지(직류만 다른 같은 시험지) 대표 선정용 문항 수. 대표는 "문항 많은 쪽"이
--- 1순위 타이브레이커라(packages/core/src/dedup-papers.ts isBetterRepresentative)
--- 이 수가 틀리면 목록에서 어느 카드가 보일지(제목·링크)가 흔들린다.
---
--- 예전에는 questions 에서 paper_id 를 문항 하나당 한 행씩 받아 클라이언트에서 셌다.
--- PostgREST 응답은 1000행에서 잘리는데(이 레포도 다른 곳에서는 range 로 1000씩
--- 페이징한다) 그 자름이 조용해서, 겹치는 문제지가 25~40장만 넘어도 — 문항이 장당
--- 25~40개라 — 뒤쪽 문제지의 문항 수가 0으로 집계됐다. 법원직처럼 직류가 여럿인
--- 시험유형이 몇 년치 쌓이면 쉽게 넘는 수다.
---
--- 세는 일은 DB 가 하는 게 맞다. 문제지당 한 행만 돌려주므로 자를 일 자체가 없다.
-create or replace function paper_question_counts(p_paper_ids uuid[])
-returns table (paper_id uuid, question_count bigint)
-language sql
-security definer
-set search_path = public
-stable
-as $$
-  select questions.paper_id, count(*)
-  from questions
-  where questions.paper_id = any(p_paper_ids)
-  group by questions.paper_id;
-$$;
-
-grant execute on function paper_question_counts(uuid[]) to anon, authenticated;
-
 -- 과목 페이지의 급수·직렬 탭에 넣을 값 목록. 실제로 필요한 건 그 과목에 존재하는
 -- 급수 5종·직렬 14종 남짓인데, 예전에는 그걸 알아내려고 그 과목의 exam_papers 를
 -- 두 번 통째로 받아 클라이언트에서 distinct 를 떴다. 문제지가 수백 장인 과목
@@ -585,6 +559,32 @@ create table if not exists questions (
 );
 
 create index if not exists questions_paper_idx on questions(paper_id);
+
+-- 중복 시험지(직류만 다른 같은 시험지) 대표 선정용 문항 수. 대표는 "문항 많은 쪽"이
+-- 1순위 타이브레이커라(packages/core/src/dedup-papers.ts isBetterRepresentative)
+-- 이 수가 틀리면 목록에서 어느 카드가 보일지(제목·링크)가 흔들린다.
+--
+-- 예전에는 questions 에서 paper_id 를 문항 하나당 한 행씩 받아 클라이언트에서 셌다.
+-- PostgREST 응답은 1000행에서 잘리는데(이 레포도 다른 곳에서는 range 로 1000씩
+-- 페이징한다) 그 자름이 조용해서, 겹치는 문제지가 25~40장만 넘어도 — 문항이 장당
+-- 25~40개라 — 뒤쪽 문제지의 문항 수가 0으로 집계됐다. 법원직처럼 직류가 여럿인
+-- 시험유형이 몇 년치 쌓이면 쉽게 넘는 수다.
+--
+-- 세는 일은 DB 가 하는 게 맞다. 문제지당 한 행만 돌려주므로 자를 일 자체가 없다.
+create or replace function paper_question_counts(p_paper_ids uuid[])
+returns table (paper_id uuid, question_count bigint)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select questions.paper_id, count(*)
+  from questions
+  where questions.paper_id = any(p_paper_ids)
+  group by questions.paper_id;
+$$;
+
+grant execute on function paper_question_counts(uuid[]) to anon, authenticated;
 
 alter table questions enable row level security;
 
@@ -1172,7 +1172,21 @@ alter table question_explanations add column if not exists current_answer_status
 alter table question_explanations add column if not exists current_answer_note text;
 alter table question_explanations add column if not exists law_basis_date text;
 
-create index if not exists question_explanations_question_idx on question_explanations(question_id);
+-- 문항당 해설은 하나다. 해설 배치가 이 전제로 upsert 하고(AGENTS.md: 이 unique 인덱스
+-- 삭제 금지 — upsert 전제조건), 운영 DB 에는 이미 이 이름으로 들어가 있다. 그런데 이
+-- 파일에는 non-unique 로만 적혀 있어서, 스키마 파일로 새로 만든 환경은 중복 해설을
+-- 허용하고 upsert 도 다르게 동작했다. 스키마 파일이 "새 환경 재현용"이라고 스스로
+-- 밝히는 이상 그 환경이 조용히 다르게 도는 건 그 자체로 사고다. 운영에는 no-op 이다.
+--
+-- 기존 DB 에 적용하기 전 중복 확인(있으면 unique 생성이 실패한다):
+--   select question_id, count(*) from question_explanations
+--   group by question_id having count(*) > 1;
+--
+-- 이 unique 가 (question_id) btree 를 만들므로 예전의 non-unique
+-- question_explanations_question_idx 는 완전히 포함된다. 이미 있는 DB 라면
+-- pg_stat_user_indexes 로 사용량 0 을 확인한 뒤 따로 지우면 된다.
+create unique index if not exists question_explanations_question_uidx
+  on question_explanations(question_id);
 
 -- 약점 진단이 개념마다 "이 개념 기출이 몇 문항인가"를 센다(diagnosis-live.ts corpusCount).
 -- 정본 개념이 붙은 것은 concept_id 로 세고 그쪽은 인덱스가 있는데
@@ -1660,12 +1674,31 @@ create index if not exists user_question_status_pending_idx
   on user_question_status(user_id, wrong_count desc, last_answered_at)
   where srs_due_at is null;
 
+-- 대기 풀은 두 축으로 읽는다. 위 인덱스가 승격 순서("자주 틀린 것 먼저")를 실어 주고,
+-- 이 인덱스가 나머지 한 축인 "최근에 틀린 것 먼저"를 실어 준다
+-- (review-queue.ts 의 PENDING_RECENT_FETCH_LIMIT 조회 — 어제 오답이 승격 후보에
+-- 들어오게 하려고 따로 한 벌 더 뜨는 그 조회다). 정렬 축이 달라 위 인덱스로는 못
+-- 타므로, limit 이 붙어 있어도 대기 행 전체를 매번 다시 정렬했다. 1회독 중인
+-- 사용자의 대기 풀이 수백~수천 행이고, 그게 이 기능이 가장 필요한 사용자다.
+create index if not exists user_question_status_pending_recent_idx
+  on user_question_status(user_id, last_answered_at desc)
+  where srs_due_at is null;
+
 -- leech(상습범)로 접어둔 시각. null 이면 정상. SRS_LEECH_THRESHOLD(8)번 무너지면
 -- 자동으로 채워지고, 그 문항은 복습 큐에서도 대기 풀에서도 빠진다(Anki의 suspend).
 -- 간격을 더 좁혀도 안 풀리는 문항 몇 개가 우선순위 점수 탓에 매일 큐 앞자리를
 -- 영구 점유하는 걸 막는다 — 문제는 간격이 아니라 이해라 따로 봐야 한다.
 -- 스케줄(srs_due_at)은 지우지 않는다: 다시 넣을 때 진도를 잃지 않게.
 alter table user_question_status add column if not exists srs_suspended_at timestamptz;
+
+-- 접어둔(leech) 문항은 드물어서 이 인덱스는 대부분의 사용자에게 비어 있다 — 즉
+-- 쓰기·저장 비용이 사실상 0 이다. 그런데 "몇 개 접혀 있나"는 복습 큐를 만들 때마다
+-- 묻고(review-queue.ts), 인덱스가 없으면 답이 0 인 경우에도 그 사용자의 문항 행을
+-- 전부 훑는다. 되살리기 화면(review-preferences.ts)의
+-- `.not(srs_suspended_at, is, null).order(srs_suspended_at)` 도 같은 인덱스를 탄다.
+create index if not exists user_question_status_suspended_idx
+  on user_question_status(user_id, srs_suspended_at)
+  where srs_suspended_at is not null;
 
 -- 기존 오답 백필. 이걸 안 하면 출시 첫날 모든 사용자의 복습 큐가 비어서 기능이
 -- 아예 시작되지 않는다. 하루 경계는 srs.ts와 같은 KST 04:00 기준으로 맞춘다.
