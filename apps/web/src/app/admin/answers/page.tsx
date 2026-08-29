@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/admin/actions";
+import { getCbtAvailability } from "@/lib/cbt-availability";
 
 export default async function AnswersListPage({
   searchParams,
@@ -33,12 +34,22 @@ export default async function AnswersListPage({
     .limit(50);
   if (q) papersQuery = papersQuery.ilike("title", `%${q}%`);
 
-  const [{ data: papers }, { data: answered }] = await Promise.all([
-    papersQuery,
-    supabase.from("paper_answers").select("paper_id"),
-  ]);
+  const { data: papers } = await papersQuery;
 
-  const answeredSet = new Set((answered ?? []).map((a) => a.paper_id as string));
+  // "정답 있음" 판정은 화면에 보이는 50장에 대해서만 묻는다.
+  //
+  // 예전에는 paper_answers 전체를 받아 Set 에 담았는데, PostgREST 응답은 1000행에서
+  // 조용히 잘린다. paper_answers 는 이미 1000건을 넘었고(lib/cbt-availability.ts 의
+  // 같은 사고 기록 참고), 그래서 1000번째 뒤의 문제지는 정답이 멀쩡히 등록돼 있는데도
+  // 이 목록에서 "미입력" 으로 보였다. 표시가 틀리는 문제다.
+  //
+  // 어차피 화면에 그릴 건 50장뿐이니 그 id 만 넘긴다 — 잘릴 일이 없어지고 전송량도
+  // 수천 행에서 50행 이하로 준다. getCbtAvailability 가 쓰는 has_cbt_answers_bulk 는
+  // 정확히 이 용도로 만들어 둔 함수다(정답 내용은 안 나오고 존재 여부만 온다).
+  const answeredSet = await getCbtAvailability(
+    supabase,
+    (papers ?? []).map((p) => p.id as string),
+  );
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-16">

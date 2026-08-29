@@ -24,6 +24,7 @@ import {
 import type { ExamPaper } from "@gongmoa/core";
 import { getSubjectBySlug } from "@gongmoa/core";
 import type { Metadata } from "next";
+import { fetchSubjectFacets } from "@/lib/subject-facets";
 
 const PAGE_SIZE = 24;
 
@@ -165,21 +166,18 @@ export default async function SubjectPage({
     return rows;
   }
 
-  // 급수 탭은 이 과목에 존재하는 급수 종류만 필요하므로, 목록 전체를 받아오는 대신
-  // level 컬럼만 가볍게 조회해서 만든다.
+  // 급수 탭·직렬 탭에 넣을 값은 DB 가 distinct 로 뽑아 준다(lib/subject-facets.ts).
+  // 시행처 이름·순서는 그 19개 남짓의 id 를 exam_types 한 번 조회해 붙인다 — 예전에는
+  // 문제지 행마다 exam_types(*) 를 임베드해 같은 객체를 행 수만큼 복제해 받았다.
   const [
-    { data: levelRows },
+    facets,
     { data: examTypeRows },
     allSubjectPapers,
     myRoundCounts,
     bookmarkedSubjectIds,
   ] = await Promise.all([
-    supabase.from("exam_papers").select("level").eq("subject_id", subject.id),
-    // 직렬 탭도 급수 탭과 같은 이유로, 이 과목에 실제 존재하는 직렬만 가볍게 조회한다.
-    supabase
-      .from("exam_papers")
-      .select("exam_type_id, exam_types(id, name, display_order)")
-      .eq("subject_id", subject.id),
+    fetchSubjectFacets(supabase, subject.id),
+    supabase.from("exam_types").select("id, name, display_order"),
     fetchAllSubjectPapers(),
     userId
       ? getMyRoundCounts(supabase, userId)
@@ -199,25 +197,27 @@ export default async function SubjectPage({
   const totalPages = Math.max(1, Math.ceil(dedupedPapers.length / PAGE_SIZE));
   const pageStart = (currentPage - 1) * PAGE_SIZE;
 
-  const availableLevels = [
-    ...new Set(
-      (levelRows ?? []).map((r) => r.level).filter((l): l is string => !!l),
-    ),
-  ].sort(compareLevels);
+  const availableLevels = [...facets.levels].sort(compareLevels);
+  // "이 과목에 자료가 아예 없다" 와 "필터에 안 걸렸다" 를 가르는 값. exam_type_id 는
+  // not null 이라 문제지가 한 장이라도 있으면 반드시 하나는 잡힌다(level 은 nullable
+  // 이라 이 판정에 쓸 수 없다).
+  const hasAnyPaper = facets.examTypeIds.length > 0;
 
   const examTypeById = new Map<
     string,
     { id: string; name: string; display_order: number }
   >();
-  for (const row of examTypeRows ?? []) {
-    const et = row.exam_types as unknown as
-      | { id: string; name: string; display_order: number }
-      | null;
-    if (et) examTypeById.set(et.id, et);
+  for (const row of (examTypeRows ?? []) as {
+    id: string;
+    name: string;
+    display_order: number;
+  }[]) {
+    examTypeById.set(row.id, row);
   }
-  const availableExamTypes = [...examTypeById.values()].sort(
-    (a, b) => a.display_order - b.display_order,
-  );
+  const availableExamTypes = facets.examTypeIds
+    .map((id) => examTypeById.get(id))
+    .filter((et): et is { id: string; name: string; display_order: number } => !!et)
+    .sort((a, b) => a.display_order - b.display_order);
 
   const filteredPapers = dedupedPapers.slice(pageStart, pageStart + PAGE_SIZE);
 
@@ -369,9 +369,9 @@ export default async function SubjectPage({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filteredPapers.length === 0 && (
           <p className="col-span-full py-12 text-center text-zinc-500 dark:text-zinc-500">
-            {(levelRows ?? []).length === 0
-              ? "아직 업로드된 기출문제가 없습니다."
-              : "조건에 맞는 기출문제가 없습니다."}
+            {hasAnyPaper
+              ? "조건에 맞는 기출문제가 없습니다."
+              : "아직 업로드된 기출문제가 없습니다."}
           </p>
         )}
         {filteredPapers.map((paper) => (

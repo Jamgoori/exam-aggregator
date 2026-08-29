@@ -481,6 +481,27 @@ $$;
 
 grant execute on function paper_question_counts(uuid[]) to anon, authenticated;
 
+-- 과목 페이지의 급수·직렬 탭에 넣을 값 목록. 실제로 필요한 건 그 과목에 존재하는
+-- 급수 5종·직렬 14종 남짓인데, 예전에는 그걸 알아내려고 그 과목의 exam_papers 를
+-- 두 번 통째로 받아 클라이언트에서 distinct 를 떴다. 문제지가 수백 장인 과목
+-- (국어·영어·한국사는 거의 모든 시행처×연도에 있다)에서는 수백 행 × 2 가 오갔고,
+-- range() 가 없어 1000행을 넘기면 조용히 잘려 탭에서 급수·직렬이 통째로 빠졌다.
+--
+-- distinct 는 DB 가 하는 게 맞다. 돌려주는 행이 종류 수만큼뿐이라 자를 일이 없다.
+create or replace function subject_paper_facets(p_subject_id uuid)
+returns table (level text, exam_type_id uuid)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select distinct exam_papers.level, exam_papers.exam_type_id
+  from exam_papers
+  where exam_papers.subject_id = p_subject_id;
+$$;
+
+grant execute on function subject_paper_facets(uuid) to anon, authenticated;
+
 -- 홈 화면 검색을 서버 왕복 없이 클라이언트에서 즉시 필터링하도록 바꾸면서, 화면에
 -- 보이는 문제지 id를 미리 알 수 없어졌다(필터링 자체가 클라이언트에서 일어나므로).
 -- 그래서 "바로 풀기" 가능 여부를 문제지 전체에 대해 한 번에 다 받아둔다.
