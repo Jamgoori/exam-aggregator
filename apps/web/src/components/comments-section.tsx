@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { postComment } from "@/app/papers/actions";
@@ -40,7 +40,12 @@ export function CommentsSection({
 
   // 답글에 답글을 달 수 있어 깊이가 여러 단이므로 트리로 만들어 재귀로 그린다
   // (규칙·깊이 한도는 @gongmoa/core 에 있어 앱과 같다).
-  const tree = buildCommentTree(comments);
+  //
+  // 트리는 comments 가 바뀔 때만 다시 만든다. 예전에는 렌더마다 다시 만들어서, 댓글을
+  // 한 글자 칠 때마다(content state) 트리 전체와 노드 객체가 새로 생겼다 — 노드가 전부
+  // 새 객체라 React 가 아래 서브트리를 통째로 다시 조정했다. comments 는 서버에서
+  // 내려오는 prop 이라 실제로 바뀌는 시점은 등록·수정·삭제 후 router.refresh() 뿐이다.
+  const tree = useMemo(() => buildCommentTree(comments), [comments]);
 
   function submitNew(e: React.FormEvent) {
     e.preventDefault();

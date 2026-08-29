@@ -1174,6 +1174,18 @@ alter table question_explanations add column if not exists law_basis_date text;
 
 create index if not exists question_explanations_question_idx on question_explanations(question_id);
 
+-- 약점 진단이 개념마다 "이 개념 기출이 몇 문항인가"를 센다(diagnosis-live.ts corpusCount).
+-- 정본 개념이 붙은 것은 concept_id 로 세고 그쪽은 인덱스가 있는데
+-- (question_explanations_concept_idx, scripts/sql/2026-08-11-concepts.sql), 아직 사전에
+-- 매칭되지 않은 개념은 keyword_title 동등 비교로 센다. 그 컬럼에 인덱스가 없어서
+-- 4.7만 행 순차 스캔이 됐고, 미매칭 개념이 20~30개면 그 스캔이 진단 화면을 열 때마다
+-- 동시에 그만큼 뜬다. 무료 티어 DB 라 같은 순간의 다른 조회(해설 배치 upsert 포함)까지
+-- 함께 느려진다.
+-- null 행은 동등 비교에 걸릴 일이 없으므로 부분 인덱스로 둔다.
+create index if not exists question_explanations_keyword_title_idx
+  on question_explanations(keyword_title)
+  where keyword_title is not null;
+
 alter table question_explanations enable row level security;
 
 drop policy if exists "admin read question_explanations" on question_explanations;
