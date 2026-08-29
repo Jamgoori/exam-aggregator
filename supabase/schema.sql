@@ -455,6 +455,32 @@ $$;
 
 grant execute on function has_cbt_answers_bulk(uuid[]) to anon, authenticated;
 
+-- 중복 시험지(직류만 다른 같은 시험지) 대표 선정용 문항 수. 대표는 "문항 많은 쪽"이
+-- 1순위 타이브레이커라(packages/core/src/dedup-papers.ts isBetterRepresentative)
+-- 이 수가 틀리면 목록에서 어느 카드가 보일지(제목·링크)가 흔들린다.
+--
+-- 예전에는 questions 에서 paper_id 를 문항 하나당 한 행씩 받아 클라이언트에서 셌다.
+-- PostgREST 응답은 1000행에서 잘리는데(이 레포도 다른 곳에서는 range 로 1000씩
+-- 페이징한다) 그 자름이 조용해서, 겹치는 문제지가 25~40장만 넘어도 — 문항이 장당
+-- 25~40개라 — 뒤쪽 문제지의 문항 수가 0으로 집계됐다. 법원직처럼 직류가 여럿인
+-- 시험유형이 몇 년치 쌓이면 쉽게 넘는 수다.
+--
+-- 세는 일은 DB 가 하는 게 맞다. 문제지당 한 행만 돌려주므로 자를 일 자체가 없다.
+create or replace function paper_question_counts(p_paper_ids uuid[])
+returns table (paper_id uuid, question_count bigint)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select questions.paper_id, count(*)
+  from questions
+  where questions.paper_id = any(p_paper_ids)
+  group by questions.paper_id;
+$$;
+
+grant execute on function paper_question_counts(uuid[]) to anon, authenticated;
+
 -- 홈 화면 검색을 서버 왕복 없이 클라이언트에서 즉시 필터링하도록 바꾸면서, 화면에
 -- 보이는 문제지 id를 미리 알 수 없어졌다(필터링 자체가 클라이언트에서 일어나므로).
 -- 그래서 "바로 풀기" 가능 여부를 문제지 전체에 대해 한 번에 다 받아둔다.

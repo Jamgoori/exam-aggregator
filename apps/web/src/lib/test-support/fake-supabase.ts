@@ -9,12 +9,16 @@
 // 그래서 PostgREST 빌더의 "이 코드가 실제로 쓰는 부분만" 흉내 낸다:
 //   .select(cols, { count, head }) · .eq · .neq · .is · .not(col,"is",null)
 //   .gt · .gte · .lt · .lte · .in · .order · .limit · .range · .maybeSingle
-//   .update(...)  · storage.from(...).getPublicUrl(...)
+//   .update(...)  · storage.from(...).getPublicUrl(...) · .rpc(name, args)
 //
 // select 문자열은 해석하지 않는다 — 테이블에 넣어 둔 행 객체를 그대로 돌려준다.
 // 임베드(exam_papers → subjects, questions → question_images)는 행 안에 중첩
 // 객체로 미리 넣어 두면 된다. 컬럼 선택을 흉내 내는 것보다 그게 정직하다:
 // 이 테스트가 지키려는 건 "어떤 컬럼을 골랐나"가 아니라 "어떤 문항이 큐에 남나"다.
+
+// PostgREST 의 한 응답 최대 행 수(Supabase 기본값). 이 레포의 대량 조회들이
+// range(from, from + 1000 - 1) 로 페이징하는 이유가 이 값이다.
+const MAX_ROWS = 1000;
 
 export type Row = Record<string, unknown>;
 export type Tables = Record<string, Row[]>;
@@ -153,6 +157,11 @@ class Query {
         let page = matched;
         if (this.rangeTo != null) page = page.slice(this.rangeFrom, this.rangeTo + 1);
         if (this.limitCount != null) page = page.slice(0, this.limitCount);
+        // PostgREST 는 한 응답에 최대 MAX_ROWS 행만 실어 보낸다(Supabase 기본값).
+        // 넘치면 조용히 잘릴 뿐 에러가 아니라서, 페이징을 빠뜨린 조회는 운영에서만
+        // 틀린 답을 낸다 — 실제로 그렇게 난 사고가 있어(dedup 문항 수) 가짜 쪽도
+        // 같은 자름을 흉내 낸다. 대량 조회를 하는 코드는 .range 로 끝까지 훑어야 한다.
+        if (page.length > MAX_ROWS) page = page.slice(0, MAX_ROWS);
 
         result = this.single
           ? { data: page[0] ?? null, error: null }
@@ -184,6 +193,23 @@ export class FakeSupabase {
 
   from(table: string): Query {
     return new Query(table, this);
+  }
+
+  // RPC 는 SQL 을 흉내 내지 않는다. 테스트가 이름별 구현을 직접 꽂고, 꽂지 않은
+  // 이름은 "이 환경에 그 함수가 없다"로 취급해 에러를 돌려준다 — 마이그레이션 전
+  // 환경에서 호출부가 대체 경로로 떨어지는지 확인하는 데 그 모양이 필요하다.
+  rpcHandlers: Record<string, (args: Row) => Row[]> = {};
+
+  rpc(name: string, args: Row = {}): Promise<{ data: Row[] | null; error: unknown }> {
+    this.reads.push(`rpc:${name}`);
+    const handler = this.rpcHandlers[name];
+    if (!handler) {
+      return Promise.resolve({
+        data: null,
+        error: { code: "PGRST202", message: `function ${name} does not exist` },
+      });
+    }
+    return Promise.resolve({ data: handler(args), error: null });
   }
 
   storage = {
