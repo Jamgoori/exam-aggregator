@@ -167,6 +167,13 @@ function kstDaysAgo(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// 지금 주기의 시작 날짜(YYYY-MM-DD). "이 날짜 이후의 진단 행이 있으면 이번 주기는 이미
+// 썼다"가 잠금의 정의다. 조회(getWeeklyDiagnosis)와 관리자 초기화가 **같은 경계**를 써야
+// 한다 — 한쪽만 6일, 한쪽만 7일이면 초기화해도 잠금이 안 풀리는 행이 남는다.
+export function currentCycleStartDate(): string {
+  return kstDaysAgo(DIAGNOSIS_CYCLE_DAYS - 1);
+}
+
 // 주기가 풀리는 날(YYYY-MM-DD) — 마지막으로 받은 날 + 7일. 화면 안내용.
 export function nextDiagnosisDate(lastDate: string): string {
   const d = new Date(`${lastDate}T00:00:00Z`);
@@ -222,7 +229,7 @@ export async function getWeeklyDiagnosis(
     .from("ai_diagnoses")
     .select("report, diagnosis_date")
     .eq("user_id", userId)
-    .gte("diagnosis_date", kstDaysAgo(DIAGNOSIS_CYCLE_DAYS - 1))
+    .gte("diagnosis_date", currentCycleStartDate())
     .order("diagnosis_date", { ascending: false })
     .limit(1)
     .maybeSingle();

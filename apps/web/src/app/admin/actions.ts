@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { currentCycleStartDate, DIAGNOSIS_CYCLE_DAYS } from "@/lib/ai-diagnosis";
 import { optimizePdf } from "@/lib/optimize-pdf";
 
 export async function login(formData: FormData) {
@@ -215,4 +217,93 @@ export async function savePaperAnswers(
   // 정답이 새로 생기면 홈의 "바로 풀기"(CBT 가능) 목록이 바뀌므로 홈 캐시도 갱신.
   revalidateTag("home-data", "max");
   return { success: true };
+}
+
+// ── AI 약점 진단 초기화(관리자) ───────────────────────────────────────────────
+//
+// 진단은 주 1회라 한 번 받으면 7일을 기다려야 한다. 검수하려면 같은 계정으로 여러 번
+// 돌려봐야 하고, 생성이 실패했다는 문의가 오면 그 주를 되돌려 줘야 한다. 그래서 진단
+// 행을 지우는 일을 관리자 화면에 둔다 — 이 테이블은 정책이 없어 service_role 로만
+// 쓸 수 있으므로(schema.sql), 이 액션이 유일한 통로다.
+//
+// **삭제 대상은 진단 요청 기록뿐이다.** 오답·응시 기록은 건드리지 않는다(그쪽이 지워지면
+// 사용자의 학습 이력이 사라진다). ai_diagnosis_batches 는 diagnosis_id 외래키의
+// on delete cascade 로 같이 정리된다.
+export type ResetDiagnosisState = { error?: string; message?: string };
+
+export async function resetDiagnosisCycle(
+  _prevState: ResetDiagnosisState | undefined,
+  formData: FormData,
+): Promise<ResetDiagnosisState> {
+  const supabase = await createClient();
+  const guard = await requireAdmin(supabase);
+  if ("error" in guard) return { error: guard.error };
+
+  // 이메일이 비어 있으면 관리자 본인 계정. 검수용으로 가장 자주 쓰는 경로다.
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const scope = String(formData.get("scope") ?? "cycle") === "all" ? "all" : "cycle";
+
+  const admin = createAdminClient();
+  let userId = guard.user.id;
+  let label = guard.user.email ?? "내 계정";
+  if (email && email !== (guard.user.email ?? "").toLowerCase()) {
+    const found = await findUserIdByEmail(admin, email);
+    if (!found) return { error: `${email} 계정을 찾지 못했어요.` };
+    userId = found;
+    label = email;
+  }
+
+  // 지우기 전에 무엇을 지우는지 센다. 진행 중인 배치가 있으면 그 사실을 결과에 밝힌다 —
+  // 그 배치의 결과는 수거할 행이 사라져 버려지고(요금은 이미 나갔다), 사용자가 곧바로
+  // 다시 요청하면 같은 분석에 두 번 요금이 나간다.
+  let query = admin.from("ai_diagnoses").select("id").eq("user_id", userId);
+  if (scope === "cycle") query = query.gte("diagnosis_date", currentCycleStartDate());
+  const { data: rows, error: readError } = await query;
+  if (readError) return { error: "진단 기록을 읽지 못했어요." };
+  const ids = (rows ?? []).map((r) => r.id as string);
+  if (ids.length === 0) {
+    return {
+      message:
+        scope === "cycle"
+          ? `${label}: 이번 주기(${DIAGNOSIS_CYCLE_DAYS}일)에 받은 진단이 없어요. 이미 다시 받을 수 있는 상태예요.`
+          : `${label}: 지울 진단 기록이 없어요.`,
+    };
+  }
+
+  const { count: pendingBatches } = await admin
+    .from("ai_diagnosis_batches")
+    .select("id", { count: "exact", head: true })
+    .in("diagnosis_id", ids)
+    .eq("status", "pending");
+
+  const { error: deleteError } = await admin.from("ai_diagnoses").delete().in("id", ids);
+  if (deleteError) return { error: "초기화에 실패했어요." };
+
+  revalidatePath("/mypage/diagnosis");
+  revalidatePath("/mypage");
+  const warn =
+    (pendingBatches ?? 0) > 0
+      ? " 만들던 중인 배치가 있어 그 결과는 버려져요(요금은 이미 나갔습니다). 바로 다시 요청하면 같은 분석에 두 번 요금이 나갑니다."
+      : "";
+  return {
+    message: `${label}: 진단 기록 ${ids.length}건을 지웠어요. 이제 바로 다시 받을 수 있어요.${warn}`,
+  };
+}
+
+// 이메일로 사용자를 찾는다. auth.users 는 PostgREST 로 못 읽어서 Admin API 를 훑는다.
+// 관리자만 닿는 경로이고 계정 수가 수천 단위라 페이지 몇 장이면 끝난다 — 사용자 수가
+// 크게 늘면 이메일을 담은 별도 테이블을 두는 편이 낫다.
+async function findUserIdByEmail(
+  admin: ReturnType<typeof createAdminClient>,
+  email: string,
+): Promise<string | null> {
+  for (let page = 1; page <= 20; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) return null;
+    const users = data?.users ?? [];
+    const hit = users.find((u) => (u.email ?? "").toLowerCase() === email);
+    if (hit) return hit.id;
+    if (users.length < 1000) return null;
+  }
+  return null;
 }

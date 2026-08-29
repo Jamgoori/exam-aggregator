@@ -56,8 +56,8 @@ export default function PrivacyPage() {
             북마크, 난이도 평가
           </li>
           <li>
-            <strong>AI 약점 진단</strong>: 진단 요청 일자와 학습 기록을 바탕으로 생성된 진단
-            리포트
+            <strong>AI 약점 진단</strong>: 진단 요청 일자, 이용자가 분석 대상으로 고른 개념
+            목록, 학습 기록을 바탕으로 생성된 진단 리포트(틀린 문항별 분석과 극복 계획 포함)
           </li>
           <li>
             <strong>이용 기록</strong>: 해설 페이지 열람·인쇄(다운로드) 기록, CBT 시작 화면
@@ -172,7 +172,9 @@ export default function PrivacyPage() {
                 <td className="py-2 pr-4">Anthropic, PBC (미국)</td>
                 <td className="py-2 pr-4">AI 해설·약점 진단 리포트 생성</td>
                 <td className="py-2">
-                  문항 정보와 학습 통계만 처리되며, 이메일 등 식별 정보는 전달하지 않음
+                  문항 정보(발문 요약·정답·선지 해설)와 해당 문항에 대한 오답 기록(이용자가
+                  고른 선지 번호, 틀린 횟수), 개념별 학습 통계가 처리됩니다. 이메일·닉네임·
+                  회원 식별자 등 이용자를 식별할 수 있는 정보는 전달하지 않습니다.
                 </td>
               </tr>
               <tr className="border-b border-zinc-100 dark:border-zinc-800">
@@ -271,7 +273,11 @@ export default function PrivacyPage() {
       </Section>
 
       <Section title="부칙">
-        <p>이 개인정보처리방침은 2026년 7월 17일부터 적용됩니다. 내용이 변경되는 경우 시행 7일 전부터 서비스 내 공지로 알립니다.</p>
+        <p>
+          이 개인정보처리방침은 2026년 9월 5일부터 적용됩니다. 직전 방침(2026년 7월 17일 시행)
+          대비 AI 약점 진단이 처리하는 항목과 국외 이전 내용을 실제 동작에 맞게 구체화했습니다.
+          내용이 변경되는 경우 시행 7일 전부터 서비스 내 공지로 알립니다.
+        </p>
       </Section>
     </div>
   );
