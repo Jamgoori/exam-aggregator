@@ -18,6 +18,7 @@ import {
   type ConceptStat,
   type DiagnosisAggregate,
 } from "@/lib/diagnosis-live";
+import { DIAGNOSIS_WINDOW_DAYS } from "@/lib/ai-diagnosis";
 import type {
   AiDiagnosisReport,
   DiagnosisConceptSelection,
@@ -40,9 +41,12 @@ import type {
 const MODEL = DIAGNOSIS_MODEL;
 // 개념 수 상한은 lib/diagnosis-limits.ts 에 있다(선택창과 같은 숫자를 써야 한다).
 // 개념마다 모델에 함께 넣을 "실제로 틀린 문항" 표본 수. 이 값과 diagnosis-live 의
-// truncate 길이가 1회 요금을 정한다 — 개념 5 × 문항 6 × 약 300자 ≈ 9천 자(입력 10K
-// 토큰 남짓, 회당 수백 원). 늘리기 전에 비용을 다시 계산할 것.
-const SAMPLES_PER_CONCEPT = 6;
+// truncate 길이가 1회 요금을 정한다 — 개념 15 × 문항 8 × 약 600자 ≈ 7만 자(입력 40K
+// 토큰 남짓). 늘리기 전에 비용을 다시 계산할 것.
+//
+// 6에서 8로 올린 이유: 극복법이 문항별 근거(evidence)를 쓰게 되면서 표본 수가 곧
+// "내 이야기"의 개수가 됐다. 3~4개만 보이면 원인 분석이 다시 일반론으로 돌아간다.
+const SAMPLES_PER_CONCEPT = 8;
 
 // corpusCount(전체 기출 빈도)를 유저 개념 집합 안에서 3분위로 눌러 1~3점. next-diagnosis와
 // 같은 규칙 — 절대 스케일을 모르므로 상대 분위로 "자주 나오는데 약한 것"을 가린다.
@@ -181,21 +185,23 @@ export type CoachingPlan = {
 
 export async function planCoaching(
   userId: string,
-  // 이번 분석이 훑을 기간(일) — 마지막 진단일부터 오늘까지, 최대 2주
-  // (ai-diagnosis.ts analysisWindowDays). 창이 곧 프롬프트 크기이자 요금이라
-  // widen:false 로 넘겨 절대 넓어지지 않게 한다.
-  windowDays: number,
   // 사용자가 진단에서 뺀 과목 slug. 극복법 대상에서만 빠진다 — 막대그래프는 무AI라
   // 그대로 다 보여준다.
   excludedSubjectSlugs: Set<string> = new Set(),
   // 사용자가 요청할 때 고른 개념(ai_diagnoses.selected_concepts). null 이면 자동 선정.
   selectedConcepts: DiagnosisConceptSelection[] | null = null,
 ): Promise<{ plan?: CoachingPlan; error?: string }> {
-  const agg = await getDiagnosisAggregate(userId, { days: windowDays, widen: false });
+  // 분석 창은 언제나 최근 7일(DIAGNOSIS_WINDOW_DAYS)이다. 창이 곧 프롬프트 크기이자
+  // 요금이라 widen:false 로 넘겨 절대 넓어지지 않게 한다 — 그 기간에 오답이 없으면
+  // 조용히 90일치를 긁는 대신 아래에서 사유를 돌려준다.
+  const agg = await getDiagnosisAggregate(userId, {
+    days: DIAGNOSIS_WINDOW_DAYS,
+    widen: false,
+  });
 
   if (agg.concepts.length === 0) {
     return {
-      error: `최근 ${windowDays}일 동안 새로 틀린 문제가 없어요. 문제를 좀 더 풀고 다시 받아보세요.`,
+      error: `최근 ${DIAGNOSIS_WINDOW_DAYS}일 동안 새로 틀린 문제가 없어요. 문제를 좀 더 풀고 다시 받아보세요.`,
     };
   }
 
@@ -204,7 +210,7 @@ export async function planCoaching(
     return {
       error:
         selectedConcepts && selectedConcepts.length > 0
-          ? `고른 개념에 최근 ${windowDays}일 오답이 없어요. 개념을 다시 골라주세요.`
+          ? `고른 개념에 최근 ${DIAGNOSIS_WINDOW_DAYS}일 오답이 없어요. 개념을 다시 골라주세요.`
           : "진단할 과목을 하나 이상 선택해주세요(고른 과목에 최근 오답이 없어요).",
     };
   }
@@ -270,16 +276,10 @@ export async function saveDiagnosisReport(
 export async function runDiagnosisForUser(
   diagnosisId: string,
   userId: string,
-  windowDays: number,
   excludedSubjectSlugs: Set<string> = new Set(),
   selectedConcepts: DiagnosisConceptSelection[] | null = null,
 ): Promise<{ status: "ready" | "pending"; error?: string }> {
-  const { plan, error } = await planCoaching(
-    userId,
-    windowDays,
-    excludedSubjectSlugs,
-    selectedConcepts,
-  );
+  const { plan, error } = await planCoaching(userId, excludedSubjectSlugs, selectedConcepts);
   if (!plan) return { status: "pending", error };
 
   // 이 기능 전용 키다. 레포에 ANTHROPIC_API_KEY 를 읽는 곳이 이 파일 말고도 있다
@@ -291,7 +291,11 @@ export async function runDiagnosisForUser(
 
   let conceptCoaching: DiagnosisConceptCoaching[] = [];
   try {
-    const response = await new Anthropic({ apiKey }).messages.create(plan.params);
+    // 스트리밍으로 받는다(결과는 finalMessage 로 한 번에 읽는다). 극복법은 개념 15개 ×
+    // 긴 진단이라 max_tokens 가 크고, SDK 는 그만한 비스트리밍 요청을 아예 거부한다
+    // (diagnosis-coach.ts max_tokens 주석 참고) — create 로 되돌리면 즉시 예외가 난다.
+    const stream = new Anthropic({ apiKey }).messages.stream(plan.params);
+    const response = await stream.finalMessage();
     const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("");
     conceptCoaching = parseCoachingItems(text, plan.targets);
   } catch {

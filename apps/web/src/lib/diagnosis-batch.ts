@@ -1,11 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  DIAGNOSIS_CYCLE_DAYS,
-  DIAGNOSIS_MAX_WINDOW_DAYS,
-  analysisWindowDays,
-} from "@/lib/ai-diagnosis";
+import { DIAGNOSIS_CYCLE_DAYS } from "@/lib/ai-diagnosis";
 import { DIAGNOSIS_MODEL, parseCoachingItems } from "@/lib/diagnosis-coach";
 import { planCoaching, saveDiagnosisReport } from "@/lib/diagnosis-generate";
 import type { AiDiagnosisReport, DiagnosisConceptSelection } from "@/lib/ai-diagnosis";
@@ -41,8 +37,15 @@ const MAX_ATTEMPTS_PER_DIAGNOSIS = 5;
 type BatchItemContext = {
   // 제출 시점에 계산해 둔 리포트의 무AI 부분. 수거할 때 코칭만 얹어 저장한다.
   report: Omit<AiDiagnosisReport, "conceptCoaching">;
-  // 그때 물어본 개념들. 모델 응답을 화면 데이터에 다시 붙이는 열쇠다.
-  targets: { concept: string; subject: string | null; subjectSlug: string | null }[];
+  // 그때 물어본 개념들. 모델 응답을 화면 데이터에 다시 붙이는 열쇠다. conceptId 는
+  // 수거된 극복법 카드가 "같은 개념 기출 풀기"를 정본 개념 축으로 열어주기 위한 값이라
+  // 여기에 함께 저장해 둔다(구버전 행에는 없어서 화면이 표기로 떨어진다).
+  targets: {
+    concept: string;
+    conceptId?: string | null;
+    subject: string | null;
+    subjectSlug: string | null;
+  }[];
 };
 
 type PendingDiagnosisRow = {
@@ -58,22 +61,6 @@ function client(): Anthropic | null {
   // 사용자 흐름이 깨지지는 않고, 진단은 pending 으로 남아 화면의 데이터층만 보인다.
   const apiKey = process.env.ANTHROPIC_DIAGNOSIS_API_KEY;
   return apiKey ? new Anthropic({ apiKey }) : null;
-}
-
-// 이 사용자의 분석 창(일). 마지막으로 리포트가 나온 날부터 오늘까지, 최대 2주.
-// 배치 경로는 사용자 세션 없이 도는 크론에서도 불리므로 admin 클라이언트로 직접 읽는다.
-async function windowDaysFor(userId: string): Promise<number> {
-  const admin = createAdminClient();
-  const { data } = await admin
-    .from("ai_diagnoses")
-    .select("diagnosis_date")
-    .eq("user_id", userId)
-    .not("report", "is", null)
-    .order("diagnosis_date", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const last = (data?.diagnosis_date as string | undefined) ?? null;
-  return last ? analysisWindowDays(last) : DIAGNOSIS_MAX_WINDOW_DAYS;
 }
 
 // 사용자가 진단에서 뺀 과목 slug. review-preferences 의 같은 이름 함수는 사용자 세션
@@ -163,7 +150,6 @@ export async function submitPendingDiagnoses(
 
     const { plan, error } = await planCoaching(
       row.user_id,
-      await windowDaysFor(row.user_id),
       // 개념을 직접 고른 요청이면 과목 제외 설정은 볼 필요가 없다(선택이 이미 과목까지
       // 정한다). 고르지 않은 구버전 요청만 예전처럼 과목 제외로 좁힌다.
       row.selected_concepts?.length ? new Set<string>() : await excludedSubjectSlugsFor(row.user_id),
@@ -186,6 +172,7 @@ export async function submitPendingDiagnoses(
         report: plan.report,
         targets: plan.targets.map((t) => ({
           concept: t.concept,
+          conceptId: t.conceptId,
           subject: t.subject,
           subjectSlug: t.subjectSlug,
         })),

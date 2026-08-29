@@ -61,16 +61,54 @@ export type DiagnosisInsight = {
   wrongRatePct?: number | null;
 };
 
-// 개념별 "맞춤 극복법"(AI). 진단받기 시점에 온디맨드 API가 상위 취약 개념들을 한 번에
-// 생성해 report에 캐시한다(주 1회 재사용). 표시 방식은 화면 자유 — 데이터만 담아둔다.
+// 내가 실제로 틀린 문항 하나에 대한 진단. "당신은 이 문제에서 3번을 골랐고, 그 선택은
+// ~을 ~로 착각했을 때 나온다" — 극복법이 일반론이 아니라 **내 이야기**로 읽히게 하는
+// 부분이다. 문항 자체(발문·정답)는 우리 데이터에서 왔고, insight 만 AI가 쓴다.
+export type DiagnosisCoachingEvidence = {
+  // 어떤 문제였는지 한 줄 요약.
+  question: string;
+  // 내가 고른 선지가 무엇이었고 그게 어떤 판단이었는지. CBT 응시 기록이 없는 문항
+  // (섞어풀기만 푼 경우)은 무엇을 골랐는지 알 수 없어 null.
+  myChoice?: string | null;
+  // 그 선택이 드러내는 착각·구멍.
+  insight: string;
+};
+
+// 극복 계획의 한 단계. 순서가 곧 실행 순서다.
+export type DiagnosisCoachingStep = {
+  title: string;
+  detail: string;
+  // 예상 소요(분). "오늘 25분"처럼 실행 단위를 잡아 준다. 없으면 화면이 숨긴다.
+  minutes?: number | null;
+};
+
+// 개념별 "맞춤 극복법"(AI). 진단받기 시점에 상위 취약 개념들을 한 번에 생성해 report에
+// 캐시한다(주 1회 재사용). 표시 방식은 화면 자유 — 데이터만 담아둔다.
+//
+// weakPattern/howToOvercome 두 문장만 있던 시절엔 "개념별 풀이법 사전"과 다를 게 없었다
+// (누구에게나 같은 말이라 굳이 AI일 이유가 없다). 아래 필드들은 **이 사람이 실제로 고른
+// 오답**에서 출발해 원인→근거→계획→체크리스트로 이어지는 분량 있는 진단을 담는다.
+// 전부 선택 필드다 — 구버전 리포트(두 문장짜리)도 그대로 그려져야 한다.
 export type DiagnosisConceptCoaching = {
   concept: string;
+  // 정본 개념 id(있으면). 같은 개념 기출 뽑기가 이 축을 쓴다.
+  conceptId?: string | null;
   subject?: string | null;
   subjectSlug?: string | null;
-  // 이 개념에서 "주로 어떤 문제를 틀리는지" 한두 문장(데이터 근거 기반).
+  // 이 개념에서 무너지는 지점(2~4문장, 고른 오답에서 드러난 공통점).
   weakPattern: string;
-  // 어떻게 극복하면 좋을지 실천형 조언 한두 문장.
+  // 처방 한 줄 요약. 아래 steps 가 그 실행 계획이다.
   howToOvercome: string;
+  // 왜 그렇게 골랐는지 — 오개념의 뿌리를 짚는 원인 분석(3~5문장).
+  rootCause?: string | null;
+  // 내 오답 문항별 근거.
+  evidence?: DiagnosisCoachingEvidence[] | null;
+  // 오늘부터의 실행 계획.
+  steps?: DiagnosisCoachingStep[] | null;
+  // 같은 유형을 다시 만났을 때 순서대로 확인할 것들.
+  checkpoints?: string[] | null;
+  // 이 개념 문항에서 반복되는 함정 한 줄.
+  trap?: string | null;
 };
 
 // 사용자가 이번 진단에서 고른 개념. 화면의 체크박스가 그대로 이 배열이 된다.
@@ -109,40 +147,14 @@ export function kstToday(): string {
 // 진단 주기(일). 마지막으로 진단을 받은 날로부터 이만큼 지나야 다시 받을 수 있다.
 export const DIAGNOSIS_CYCLE_DAYS = 7;
 
-// 분석 창의 상한(일). 오래 쉬었다 돌아온 사람의 몇 달치를 통째로 긁으면 프롬프트가
-// 그만큼 커져 요금이 뛴다. 2주를 넘겨 거슬러 올라가지 않는다 — 그보다 오래된 오답은
-// "지금 무엇을 틀리고 있나"의 근거로도 약하다.
-export const DIAGNOSIS_MAX_WINDOW_DAYS = 14;
-
-// 진단 화면 그래프의 기본 기간 하한(일). 분석 창(analysisWindowDays)을 그대로 쓰면,
-// 진단을 받은 다음 날 들어온 사람의 창이 1일이 된다 — 일주일을 푼 사람 화면에 어제
-// 틀린 몇 문항만 남는다. 자동 확장 사다리는 그 창에 오답이 **하나도 없을 때만** 넓히므로
-// 어제 한 문제라도 틀렸으면 1일에 갇힌다. 그래서 그래프만 최소 7일을 보장한다.
-// 분석 창(요금이 걸린 쪽)은 이 값과 무관하게 analysisWindowDays 그대로다.
-export const GRAPH_MIN_WINDOW_DAYS = 7;
-
-// 이번 분석이 훑을 기간(일). 마지막 진단일부터 오늘까지, 최대 2주.
-//  - 9일 전에 받았으면 9일치
-//  - 4주 동안 안 받았어도 14일치까지만
-//  - 받은 적이 없으면 14일치
-export function analysisWindowDays(lastDiagnosisDate: string | null): number {
-  if (!lastDiagnosisDate) return DIAGNOSIS_MAX_WINDOW_DAYS;
-  const from = Date.parse(`${lastDiagnosisDate}T00:00:00Z`);
-  const to = Date.parse(`${kstToday()}T00:00:00Z`);
-  if (Number.isNaN(from) || Number.isNaN(to)) return DIAGNOSIS_MAX_WINDOW_DAYS;
-  const days = Math.round((to - from) / 86_400_000);
-  return Math.min(DIAGNOSIS_MAX_WINDOW_DAYS, Math.max(1, days));
-}
-
-// 마지막으로 리포트가 만들어진 날짜(YYYY-MM-DD). 분석 창의 시작점 — 그 뒤로 쌓인
-// 오답만 새로 본다. 없으면 null(처음 받는 사람).
-export async function getLastAnalyzedDate(
-  supabase: Supabase,
-  userId: string,
-): Promise<string | null> {
-  const latest = await getLatestReadyDiagnosis(supabase, userId);
-  return latest?.date ?? null;
-}
+// 분석 창(일). 진단이 보는 것은 **최근 7일 동안 틀린 문제**뿐이다 — 그래프의 기본 기간도,
+// 극복법이 실제로 훑는 기간도 같은 7일이다.
+//
+// 예전에는 "지난 진단 이후, 최대 2주"로 사람마다 창의 길이가 달랐다. 그래서 화면이
+// 매번 "최근 며칠"인지를 계산해 라벨에 박아야 했고(진단 다음 날 들어오면 1일이 됐다),
+// 그래프 기간과 분석 기간이 어긋나 "그래프에 있는데 왜 극복법에서 빠졌지"가 생겼다.
+// 고정 7일이면 화면·프롬프트·안내 문구가 전부 같은 숫자를 말한다.
+export const DIAGNOSIS_WINDOW_DAYS = 7;
 
 // 진단 주기는 달력 주(월~일)가 아니라 **본인이 마지막으로 받은 날 기준 7일**이다.
 // 달력 주로 끊으면 금요일에 처음 받은 사람이 이틀 뒤 월요일에 또 받게 되고, 반대로

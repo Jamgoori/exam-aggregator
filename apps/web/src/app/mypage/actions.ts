@@ -4,8 +4,6 @@ import { revalidatePath } from "next/cache";
 import { getSessionUser } from "@/lib/supabase/session";
 import {
   requestWeeklyDiagnosis,
-  getLastAnalyzedDate,
-  analysisWindowDays,
   normalizeConceptSelection,
   DIAGNOSIS_CYCLE_DAYS,
   type DiagnosisConceptSelection,
@@ -83,13 +81,10 @@ export async function requestDiagnosis(
   if (row?.id) {
     if (process.env.ANTHROPIC_DIAGNOSIS_SYNC === "1") {
       try {
-        // 분석 창: 마지막으로 리포트가 나온 날부터 오늘까지, 최대 2주. 9일 전에 받았으면
-        // 9일치, 한 달을 쉬었어도 14일치까지만 훑는다 — 창이 곧 프롬프트 크기이자
-        // 요금이다. (배치 경로는 크론에서도 도느라 세션이 없어 같은 계산을 자기가 한다.)
+        // 분석 창은 생성기가 정한다 — 언제나 최근 7일(DIAGNOSIS_WINDOW_DAYS)이다.
         const gen = await runDiagnosisForUser(
           row.id as string,
           user.id,
-          analysisWindowDays(await getLastAnalyzedDate(supabase, user.id)),
           // 개념을 직접 골랐으면 과목 제외 설정은 볼 필요가 없다(선택이 과목까지 정한다).
           selected.length > 0
             ? new Set<string>()

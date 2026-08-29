@@ -542,10 +542,16 @@ export type WrongQuestionSample = {
   // 문항(섞어풀기만 푼 경우 등)은 null.
   pickedChoice: number | null;
   pickedReason: string | null;
+  // 이 문항을 지금까지 몇 번 틀렸는지, 그리고 마지막에 맞혔는지(user_question_status).
+  // "두 번째로 같은 함정에 걸렸다"와 "한 번 틀리고 다음엔 맞혔다"는 진단이 달라야 한다.
+  wrongTimes: number;
+  resolved: boolean;
 };
 
-// 모델에 넣기 전 자르는 길이. 선지 해설은 길어서 앞부분만으로도 유형 판단에 충분하다.
-const SAMPLE_TEXT_MAX = 140;
+// 모델에 넣기 전 자르는 길이. 유형만 가려내던 때는 140자로 충분했지만, 이제는 "이
+// 선지를 고른 것이 무엇을 착각한 것인지"까지 써야 해서 근거가 문장 중간에서 잘리면
+// 모델이 앞부분만 보고 지어낸다. 문항당 몇백 자 늘어나는 만큼 입력 요금도 오른다.
+const SAMPLE_TEXT_MAX = 240;
 
 function truncate(s: string | null | undefined, max = SAMPLE_TEXT_MAX): string | null {
   const t = (s ?? "").trim();
@@ -709,11 +715,13 @@ export async function getWrongQuestionSamples(
       conceptKey,
       concept: displayByKey.get(conceptKey) ?? (row.keyword_title ?? "").trim(),
       subject,
-      questionText: truncate(row.question_text, 100),
+      questionText: truncate(row.question_text, 200),
       correctChoice: row.correct_choice_number,
       correctSummary: truncate(row.correct_choice_summary),
       pickedChoice,
       pickedReason: truncate(reason),
+      wrongTimes: status.wrong_count,
+      resolved: status.last_is_correct,
     };
   });
 }

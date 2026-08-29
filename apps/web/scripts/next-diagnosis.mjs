@@ -37,9 +37,9 @@ const COACH_PER_SUBJECT = 7;
 // (여기는 plain node 라 TypeScript 를 import 하지 못해 복제해 둔 것). 한쪽만 고치면
 // 같은 계정에 대해 배치와 앱이 서로 다른 개념 집합을 코칭한다.
 const DEFAULT_COACH_MAX_TOTAL = 15;
-const SAMPLES_PER_CONCEPT = 6;
+const SAMPLES_PER_CONCEPT = 8;
 // 모델에 넣기 전 자르는 길이(diagnosis-live.ts SAMPLE_TEXT_MAX 와 동일).
-const SAMPLE_TEXT_MAX = 140;
+const SAMPLE_TEXT_MAX = 240;
 
 function truncate(s, max = SAMPLE_TEXT_MAX) {
   const t = (s ?? "").trim();
@@ -448,13 +448,17 @@ async function main() {
       return {
         concept: p.concept,
         subject: subj?.name ?? null,
-        questionText: truncate(exp.question_text, 100),
+        questionText: truncate(exp.question_text, 200),
         correctChoice: exp.correct_choice_number ?? null,
         correctSummary: truncate(exp.correct_choice_summary),
         pickedChoice,
         pickedReason: choiceRow
           ? truncate([choiceRow.verdict_label, choiceRow.explanation].filter(Boolean).join(" — "))
           : null,
+        // 같은 문항을 몇 번 틀렸는지·지금은 맞히는지(diagnosis-live.ts 표본과 같은 필드).
+        // "다시 걸렸다"와 "한 번 보고 넘겼다"는 원인 분석이 달라야 한다.
+        wrongTimes: p.status.wrong_count,
+        resolved: p.status.last_is_correct,
       };
     });
   }

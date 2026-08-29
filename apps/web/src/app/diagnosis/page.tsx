@@ -8,9 +8,9 @@ import { isPremium } from "@/lib/membership";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 import {
   DIAGNOSIS_CYCLE_DAYS,
-  DIAGNOSIS_MAX_WINDOW_DAYS,
   DIAGNOSIS_MIN_ATTEMPTS,
   DIAGNOSIS_MIN_WRONG,
+  DIAGNOSIS_WINDOW_DAYS,
   getDiagnosisEligibility,
   getWeeklyDiagnosis,
   kstToday,
@@ -134,8 +134,9 @@ function Hero({ cta }: { cta: Cta }) {
         <span className="text-violet-600 dark:text-violet-400">틀리는 이유</span>를 봅니다
       </h1>
       <p className="max-w-md break-keep text-sm leading-7 text-zinc-600 dark:text-zinc-400">
-        최근에 틀린 문항을 개념 단위로 다시 세우고, 개념마다 &ldquo;왜 틀리는지 · 그래서
-        뭘 하면 되는지&rdquo;를 써 드려요. 따로 입력할 건 없어요.
+        최근 {DIAGNOSIS_WINDOW_DAYS}일에 틀린 문항을 개념 단위로 다시 세우고, 고른 개념마다
+        내가 고른 오답 하나하나를 짚어 &ldquo;왜 그렇게 골랐는지 · 그래서 뭘 하면 되는지&rdquo;를
+        써 드려요. 따로 입력할 건 없어요.
       </p>
       <Link
         href={cta.href}
@@ -169,7 +170,8 @@ const STEPS: { icon: ReactNode; title: string; body: string }[] = [
   {
     icon: <Lightbulb size={16} />,
     title: "극복법을 받아요",
-    body: "AI가 개념마다 극복법을 써 주고, 같은 개념 기출 5문제를 그 자리에서 풀 수 있어요.",
+    body:
+      "고른 개념마다 내 오답을 근거로 원인·극복 계획·시험장 체크리스트를 써 주고, 같은 개념 기출 5문제를 그 자리에서 풀 수 있어요.",
   },
 ];
 
@@ -200,7 +202,7 @@ function Steps() {
 // 접어 두되, 안에 들어가는 내용은 실제 동작 그대로 적는다.
 const RULES: { label: string; value: string }[] = [
   { label: "진단 주기", value: `${DIAGNOSIS_CYCLE_DAYS}일에 1회 (받은 날부터 ${DIAGNOSIS_CYCLE_DAYS}일)` },
-  { label: "분석 기간", value: `지난 진단 이후 · 최대 ${DIAGNOSIS_MAX_WINDOW_DAYS}일` },
+  { label: "분석 기간", value: `최근 ${DIAGNOSIS_WINDOW_DAYS}일 안에 틀린 문제에서 개념 선정` },
   {
     label: "극복법 개수",
     value: `직접 고른 개념에 한 번에 최대 ${COACH_MAX_TOTAL}개`,
@@ -237,8 +239,10 @@ const FAQ: { q: string; a: ReactNode }[] = [
     q: "오래전에 틀린 문제도 분석하나요?",
     a: (
       <>
-        극복법은 지난 진단 이후 최대 {DIAGNOSIS_MAX_WINDOW_DAYS}일치만 봐요. 그래프는 기간을
-        &lsquo;전체&rsquo;로 바꾸면 지금까지 쌓인 오답을 전부 놓고 볼 수 있어요.
+        극복법에 넣을 개념은 최근 {DIAGNOSIS_WINDOW_DAYS}일 안에 틀린 문제에서 골라요 — 지금
+        무엇에서 무너지는지를 보는 게 목적이라서요. 다만 그 개념의 근거로는 예전에 틀린 문항까지
+        같이 봅니다. 그래프는 기간을 &lsquo;전체&rsquo;로 바꾸면 지금까지 쌓인 오답을 전부 놓고
+        볼 수 있어요.
       </>
     ),
   },

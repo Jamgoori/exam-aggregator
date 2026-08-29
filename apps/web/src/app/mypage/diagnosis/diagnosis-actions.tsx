@@ -134,6 +134,8 @@ export type DiagnosisPickerConcept = {
   concept: string;
   conceptId: string | null;
   subject: string | null;
+  // 과목 탭의 키. 표시 이름(subject)은 겹칠 수 있어 탭은 slug 로 가른다.
+  subjectSlug: string | null;
   wrongCount: number;
   accuracyPct: number | null;
   scoreGainPct: number | null;
@@ -159,6 +161,10 @@ export function DiagnosisConceptPicker({
   const [confirming, setConfirming] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // 선택창의 과목 탭. 위쪽 대시보드의 과목 탭과 따로 논다 — "그래프는 국어를 보면서
+  // 극복법은 전 과목에서 고르는" 것이 자연스럽고, 반대로 묶어 두면 그래프를 좁혔다는
+  // 이유로 고를 수 있는 개념이 조용히 사라진다.
+  const [tab, setTab] = useState<string | null>(null);
 
   const full = selected.size >= COACH_MAX_TOTAL;
 
@@ -200,9 +206,24 @@ export function DiagnosisConceptPicker({
     });
   }
 
+  // 과목 탭 목록. 개념이 있는 과목만 세운다(고를 것이 없는 탭은 만들지 않는다).
+  const tabs: { slug: string; name: string }[] = [];
+  for (const c of concepts) {
+    const slug = c.subjectSlug ?? "";
+    if (tabs.some((t) => t.slug === slug)) continue;
+    tabs.push({ slug, name: c.subject ?? "기타" });
+  }
+
+  const visible = tab == null ? concepts : concepts.filter((c) => (c.subjectSlug ?? "") === tab);
+  // 지금 탭에 안 보이지만 이미 골라 둔 개수. 탭을 옮겨 다니며 고르면 "왜 3개라고 하지"가
+  // 되므로 밝혀 준다.
+  const hiddenSelected = concepts.filter(
+    (c) => selected.has(c.key) && !visible.some((v) => v.key === c.key),
+  ).length;
+
   // 과목별로 묶되 순서는 받은 그대로(많이 틀린 순)를 따른다.
   const groups: { subject: string; items: DiagnosisPickerConcept[] }[] = [];
-  for (const c of concepts) {
+  for (const c of visible) {
     const name = c.subject ?? "기타";
     const g = groups.find((x) => x.subject === name);
     if (g) g.items.push(c);
@@ -218,11 +239,27 @@ export function DiagnosisConceptPicker({
         </span>
       </p>
       <p className="mt-1 text-xs leading-relaxed text-violet-700/80 dark:text-violet-300/70">
-        고른 개념마다 &lsquo;어떤 유형에서 무너지는지 + 어떻게 극복할지&rsquo;를 만들어드려요.{" "}
+        고른 개념마다 <b className="font-bold">내가 실제로 고른 오답</b>을 하나씩 짚어 왜 그렇게
+        골랐는지 분석하고, 오늘부터의 극복 계획과 시험장 체크리스트까지 만들어드려요.{" "}
         <b className="font-bold">한 번에 {COACH_MAX_TOTAL}개까지</b> 고를 수 있고, 최근{" "}
-        {analysisDays}일 안에 틀린 문항만 분석해요. 만드는 데 보통 몇 분 걸리고, 다 되면 이
+        {analysisDays}일 안에 틀린 문제에서 고른 개념만 분석해요. 만드는 데 보통 몇 분 걸리고, 다 되면 이
         화면에 바로 떠요.
       </p>
+
+      {/* 과목 탭: 고를 개념이 여러 과목에 걸쳐 있으면 목록이 길어져 스크롤로만 찾게 된다.
+          준비 중인 과목부터 고르는 사람이 대부분이라 탭이 곧 "지금 급한 과목"이다. */}
+      {tabs.length > 1 && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          <PickerTab active={tab == null} onClick={() => setTab(null)}>
+            전체 과목
+          </PickerTab>
+          {tabs.map((t) => (
+            <PickerTab key={t.slug} active={tab === t.slug} onClick={() => setTab(t.slug)}>
+              {t.name}
+            </PickerTab>
+          ))}
+        </div>
+      )}
 
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <button
@@ -234,7 +271,7 @@ export function DiagnosisConceptPicker({
           disabled={pending}
           className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-violet-700 ring-1 ring-violet-200 transition-colors hover:bg-violet-100 disabled:opacity-60 dark:bg-zinc-900 dark:text-violet-300 dark:ring-violet-900/60"
         >
-          추천 {recommended.length}개로
+          추천 {recommended.length}개로 되돌리기
         </button>
         <button
           type="button"
@@ -245,12 +282,12 @@ export function DiagnosisConceptPicker({
           disabled={pending}
           className="rounded-full bg-white px-2.5 py-1 text-[11px] font-bold text-slate-500 ring-1 ring-slate-200 transition-colors hover:bg-slate-100 disabled:opacity-60 dark:bg-zinc-900 dark:text-zinc-400 dark:ring-zinc-700"
         >
-          전체 해제
+          전체 과목 해제
         </button>
       </div>
 
-      {/* 개념이 30개까지 올 수 있어 목록만 스크롤시킨다 — 카드가 화면을 통째로 밀어내면
-          아래 개념 카드로 내려가는 길이 멀어진다. */}
+      {/* 개념이 수십 개까지 올 수 있어 목록만 스크롤시킨다 — 카드가 화면을 통째로 밀어내면
+          아래(지난 진단 결과)로 내려가는 길이 멀어진다. */}
       <div className="mt-2.5 max-h-96 overflow-y-auto rounded-lg bg-white/70 p-1 dark:bg-zinc-900/50">
         {groups.map((g) => (
           <div key={g.subject} className="mb-1 last:mb-0">
@@ -297,6 +334,7 @@ export function DiagnosisConceptPicker({
         {selected.size === 0
           ? "개념을 하나 이상 골라주세요."
           : `${selected.size}/${COACH_MAX_TOTAL}개 선택${full ? " (상한이에요)" : ""}`}
+        {tab != null && hiddenSelected > 0 ? ` · 다른 과목에서 고른 ${hiddenSelected}개 포함` : ""}
         {requestedThisWeek && nextDate
           ? ` · 이번 주기는 ${nextDate.slice(5).replace("-", "/")}까지예요.`
           : ""}
@@ -342,5 +380,31 @@ export function DiagnosisConceptPicker({
         </button>
       )}
     </div>
+  );
+}
+
+// 선택창 안의 과목 탭 하나. 위 대시보드 칩과 색이 다른 건 여기가 보라색(극복법) 카드
+// 안이라서다 — 같은 파란 칩을 쓰면 카드 밖 그래프 칩과 헷갈린다.
+function PickerTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
+        active
+          ? "bg-violet-600 text-white"
+          : "bg-white text-violet-700 ring-1 ring-violet-200 hover:bg-violet-100 dark:bg-zinc-900 dark:text-violet-300 dark:ring-violet-900/60"
+      }`}
+    >
+      {children}
+    </button>
   );
 }

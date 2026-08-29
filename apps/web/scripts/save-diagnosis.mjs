@@ -54,6 +54,23 @@ function clampInt(v, lo, hi) {
 // 화면 타입에 맞게 정규화(불필요 필드 제거, 누락 필드 null). 리뉴얼된 대시보드용 필드
 // (mission/insights/frequency/accuracyPct/scores)도 있으면 실어 준다 — 전부 선택이라
 // 없으면 null/빈배열로 두고 화면이 알아서 대체·숨김한다.
+// 문자열 하나 다듬기(공백뿐이면 null). 극복법의 새 필드들이 전부 선택이라 필요하다.
+function trimmedOrNull(v) {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+// 배열을 상한까지 자르며 빈 항목을 버린다. 하나도 안 남으면 null(화면이 그 칸을 숨긴다).
+function mapList(v, max, map) {
+  if (!Array.isArray(v)) return null;
+  const out = [];
+  for (const item of v) {
+    const mapped = map(item);
+    if (mapped) out.push(mapped);
+    if (out.length >= max) break;
+  }
+  return out.length > 0 ? out : null;
+}
+
 function normalizeReport(report) {
   const mission =
     report.mission && typeof report.mission.headline === "string" && report.mission.headline.trim()
@@ -81,10 +98,35 @@ function normalizeReport(report) {
         )
         .map((c) => ({
           concept: String(c.concept).trim(),
+          conceptId: c.conceptId != null ? String(c.conceptId) : null,
           subject: c.subject != null ? String(c.subject) : null,
           subjectSlug: c.subjectSlug != null ? String(c.subjectSlug) : null,
           weakPattern: String(c.weakPattern).trim(),
           howToOvercome: String(c.howToOvercome).trim(),
+          // 깊은 진단(원인·문항별 근거·계획·체크리스트). 앱 경로(lib/diagnosis-coach.ts
+          // parseCoachingItems)와 같은 모양·같은 상한으로 담는다 — 없으면 null 이고
+          // 화면이 그만큼만 그린다(구버전 리포트도 그대로 뜬다).
+          rootCause: trimmedOrNull(c.rootCause),
+          evidence: mapList(c.evidence, 6, (e) =>
+            trimmedOrNull(e?.question) && trimmedOrNull(e?.insight)
+              ? {
+                  question: trimmedOrNull(e.question),
+                  myChoice: trimmedOrNull(e.myChoice),
+                  insight: trimmedOrNull(e.insight),
+                }
+              : null,
+          ),
+          steps: mapList(c.steps, 5, (st) =>
+            trimmedOrNull(st?.title) && trimmedOrNull(st?.detail)
+              ? {
+                  title: trimmedOrNull(st.title),
+                  detail: trimmedOrNull(st.detail),
+                  minutes: clampInt(st.minutes, 1, 600),
+                }
+              : null,
+          ),
+          checkpoints: mapList(c.checkpoints, 5, (v) => trimmedOrNull(v)),
+          trap: trimmedOrNull(c.trap),
         }))
     : [];
 
