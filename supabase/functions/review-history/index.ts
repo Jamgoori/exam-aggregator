@@ -11,7 +11,7 @@
 // 정답을 미리 볼 수 있게 되면 안 되기 때문이다.
 import { corsHeaders, json } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
-import { fetchQuestionMedia } from "../_shared/media.ts";
+import { fetchQuestionMedia, wantedFromItems } from "../_shared/media.ts";
 
 const LIST_LIMIT = 50;
 
@@ -83,7 +83,7 @@ Deno.serve(async (req) => {
   const items = (itemRows ?? []) as ItemRow[];
 
   const paperIds = [...new Set(items.map((i) => i.paper_id))];
-  const media = await fetchQuestionMedia(admin, paperIds);
+  const media = await fetchQuestionMedia(admin, paperIds, wantedFromItems(items));
 
   const answersByPaper = new Map<string, number[]>();
   {

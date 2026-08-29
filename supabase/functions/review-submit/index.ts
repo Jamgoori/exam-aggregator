@@ -3,7 +3,7 @@
 // 채점된 뷰(정답·출처 포함)를 돌려준다.
 import { corsHeaders, json, sanitizeSelectedChoice } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
-import { fetchQuestionMedia } from "../_shared/media.ts";
+import { fetchQuestionMedia, wantedFromItems } from "../_shared/media.ts";
 import { recordQuestionResults } from "../_shared/status.ts";
 import { attendanceQuestionCount, recordAttendance } from "../_shared/attendance.ts";
 import { resolveStatusTargets, statusTargetKey } from "../_shared/status-targets.ts";
@@ -156,7 +156,7 @@ Deno.serve(async (req) => {
   }
 
   // 결과 뷰: 이미지 + 정답/선택/제목/출처.
-  const media = await fetchQuestionMedia(admin, paperIds);
+  const media = await fetchQuestionMedia(admin, paperIds, wantedFromItems(items));
   const titleByPaper = new Map<string, string>();
   {
     const { data: papers } = await admin

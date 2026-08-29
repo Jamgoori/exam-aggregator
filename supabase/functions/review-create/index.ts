@@ -6,7 +6,7 @@
 // 단순화했다(user_question_status wrong_count>0 기준). 상세 규칙은 웹 참고.
 import { corsHeaders, json } from "../_shared/cbt.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
-import { fetchQuestionMedia } from "../_shared/media.ts";
+import { fetchQuestionMedia, wantedFromItems } from "../_shared/media.ts";
 import {
   pickReviewCandidates,
   type ReviewPickStrategy,
@@ -78,9 +78,11 @@ Deno.serve(async (req) => {
 
       // 항목이 비어 있는 세션(생성 중 실패로 남은 껍데기)은 재사용하지 않고 새로 만든다.
       if (rows.length > 0) {
-        const media = await fetchQuestionMedia(admin, [
-          ...new Set(rows.map((r) => r.paper_id)),
-        ]);
+        const media = await fetchQuestionMedia(
+          admin,
+          [...new Set(rows.map((r) => r.paper_id))],
+          wantedFromItems(rows),
+        );
         // 새로 만들 때와 같은 모양 — 정답·출처는 싣지 않는다.
         const items = rows.map((r) => {
           const m = media.get(r.paper_id)?.get(r.question_number);
@@ -96,28 +98,41 @@ Deno.serve(async (req) => {
   }
 
   // 내 오답 문항. wrong_count·last_answered_at 은 층 정원제 추출의 재료다.
-  let q = admin
-    .from("user_question_status")
-    .select("paper_id, question_number, wrong_count, last_answered_at")
-    .eq("user_id", userId)
-    .gt("wrong_count", 0);
-  if (onlyUnresolved) q = q.eq("last_is_correct", false);
-  const { data: statusRows, error } = await q;
-  if (error) return json({ error: "오답을 불러오지 못했어요." }, 500);
-
-  const rows = (statusRows ?? []) as {
+  //
+  // 1000행씩 이어받는다. PostgREST 응답은 range() 없이는 1000행에서 잘리고 그 자름은
+  // 에러가 아니다 — 오답이 2000행인 사용자는 그중 1000행만 후보가 됐고, 어떤 1000행이
+  // 남는지는 반환 순서에 달려 있어 정해져 있지도 않았다. 웹의 같은 수집
+  // (apps/web/src/lib/review-session.ts collectAllReviewCandidates)은 이미 이렇게 한다.
+  type StatusRow = {
     paper_id: string;
     question_number: number;
     wrong_count: number | null;
     last_answered_at: string | null;
-  }[];
+  };
+  const rows: StatusRow[] = [];
+  {
+    const SIZE = 1000;
+    for (let from = 0; ; from += SIZE) {
+      let q = admin
+        .from("user_question_status")
+        .select("paper_id, question_number, wrong_count, last_answered_at")
+        .eq("user_id", userId)
+        .gt("wrong_count", 0);
+      if (onlyUnresolved) q = q.eq("last_is_correct", false);
+      const { data, error } = await q.range(from, from + SIZE - 1);
+      if (error) return json({ error: "오답을 불러오지 못했어요." }, 500);
+      const page = (data ?? []) as StatusRow[];
+      rows.push(...page);
+      if (page.length < SIZE) break;
+    }
+  }
   if (rows.length === 0) {
     return json({ error: "다시 풀 오답이 없어요." }, 400);
   }
 
   // 이미지가 있는 문항만 출제 가능.
   const paperIds = [...new Set(rows.map((r) => r.paper_id))];
-  const media = await fetchQuestionMedia(admin, paperIds);
+  const media = await fetchQuestionMedia(admin, paperIds, wantedFromItems(rows));
   const candidates = rows
     .filter((r) => (media.get(r.paper_id)?.get(r.question_number)?.images.length ?? 0) > 0)
     .map((r) => ({
