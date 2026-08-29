@@ -7,7 +7,11 @@ import {
   parseCoachingItems,
   type CoachInput,
 } from "@/lib/diagnosis-coach";
-import { COACH_MAX_TOTAL, COACH_PER_SUBJECT } from "@/lib/diagnosis-limits";
+import {
+  COACH_MAX_TOTAL,
+  COACH_PER_SUBJECT,
+  conceptSelectionKey,
+} from "@/lib/diagnosis-limits";
 import {
   getDiagnosisAggregate,
   getWrongQuestionSamples,
@@ -16,6 +20,7 @@ import {
 } from "@/lib/diagnosis-live";
 import type {
   AiDiagnosisReport,
+  DiagnosisConceptSelection,
   DiagnosisWeakConcept,
   DiagnosisSubjectTrend,
   DiagnosisConceptCoaching,
@@ -93,7 +98,17 @@ function toSubjectTrends(agg: DiagnosisAggregate): DiagnosisSubjectTrend[] {
 //
 // excludedSubjectSlugs 는 사용자가 진단에서 뺀 과목이다. 빼는 만큼 남은 과목이 상한을
 // 더 깊게 쓴다.
-export function pickCoachTargets(agg: DiagnosisAggregate, excludedSubjectSlugs: Set<string>) {
+//
+// selected 가 있으면(화면에서 개념을 직접 체크한 경우) 아래 자동 선정은 건너뛰고 고른
+// 개념만 남긴다 — 사용자가 정한 것을 우리가 "더 시급한 것"으로 바꿔치면 체크박스가
+// 장식이 된다. 상한(COACH_MAX_TOTAL)은 요금 상한이라 그때도 그대로 적용된다.
+export function pickCoachTargets(
+  agg: DiagnosisAggregate,
+  excludedSubjectSlugs: Set<string>,
+  selected: DiagnosisConceptSelection[] | null = null,
+) {
+  if (selected && selected.length > 0) return pickSelectedConcepts(agg, selected);
+
   const bySubject = new Map<string, ConceptStat[]>();
   for (const c of agg.concepts) {
     const slug = c.subjectSlug ?? "";
@@ -119,6 +134,20 @@ export function pickCoachTargets(agg: DiagnosisAggregate, excludedSubjectSlugs: 
       if (picked.length >= COACH_MAX_TOTAL) break;
       if (g[rank]) picked.push(g[rank]);
     }
+  }
+  return picked;
+}
+
+// 사용자가 고른 개념만 추린다. 순서는 집계 순서(많이 틀린 순)를 그대로 따르고,
+// 이 기간에 오답이 없어 집계에 없는 개념은 조용히 빠진다 — 표본 문항이 없으면 모델이
+// 일반론밖에 못 내므로 요금만 나간다.
+function pickSelectedConcepts(agg: DiagnosisAggregate, selected: DiagnosisConceptSelection[]) {
+  const wanted = new Set(selected.map(conceptSelectionKey));
+  const picked: ConceptStat[] = [];
+  for (const c of agg.concepts) {
+    if (!wanted.has(conceptSelectionKey(c))) continue;
+    picked.push(c);
+    if (picked.length >= COACH_MAX_TOTAL) break;
   }
   return picked;
 }
@@ -159,6 +188,8 @@ export async function planCoaching(
   // 사용자가 진단에서 뺀 과목 slug. 극복법 대상에서만 빠진다 — 막대그래프는 무AI라
   // 그대로 다 보여준다.
   excludedSubjectSlugs: Set<string> = new Set(),
+  // 사용자가 요청할 때 고른 개념(ai_diagnoses.selected_concepts). null 이면 자동 선정.
+  selectedConcepts: DiagnosisConceptSelection[] | null = null,
 ): Promise<{ plan?: CoachingPlan; error?: string }> {
   const agg = await getDiagnosisAggregate(userId, { days: windowDays, widen: false });
 
@@ -168,9 +199,14 @@ export async function planCoaching(
     };
   }
 
-  const picked = pickCoachTargets(agg, excludedSubjectSlugs);
+  const picked = pickCoachTargets(agg, excludedSubjectSlugs, selectedConcepts);
   if (picked.length === 0) {
-    return { error: "진단할 과목을 하나 이상 선택해주세요(고른 과목에 최근 오답이 없어요)." };
+    return {
+      error:
+        selectedConcepts && selectedConcepts.length > 0
+          ? `고른 개념에 최근 ${windowDays}일 오답이 없어요. 개념을 다시 골라주세요.`
+          : "진단할 과목을 하나 이상 선택해주세요(고른 과목에 최근 오답이 없어요).",
+    };
   }
 
   const targets: CoachInput[] = picked.map((t) => ({
@@ -236,8 +272,14 @@ export async function runDiagnosisForUser(
   userId: string,
   windowDays: number,
   excludedSubjectSlugs: Set<string> = new Set(),
+  selectedConcepts: DiagnosisConceptSelection[] | null = null,
 ): Promise<{ status: "ready" | "pending"; error?: string }> {
-  const { plan, error } = await planCoaching(userId, windowDays, excludedSubjectSlugs);
+  const { plan, error } = await planCoaching(
+    userId,
+    windowDays,
+    excludedSubjectSlugs,
+    selectedConcepts,
+  );
   if (!plan) return { status: "pending", error };
 
   // 이 기능 전용 키다. 레포에 ANTHROPIC_API_KEY 를 읽는 곳이 이 파일 말고도 있다

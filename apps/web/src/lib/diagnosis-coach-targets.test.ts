@@ -92,3 +92,51 @@ test("전 과목을 빼면 빈 배열 — 빈 입력으로 API를 부르지 않�
   const picked = pickCoachTargets(aggOf(["a", "b"], 5), new Set(["a", "b"]));
   assert.equal(picked.length, 0);
 });
+
+// 개념을 직접 고른 경우(화면 체크박스). 자동 선정 규칙(과목당 상한·순위별 채우기)은
+// 통째로 비켜서고, 고른 것만 그대로 나가야 한다 — 우리가 "더 시급한 것"으로 바꿔치면
+// 체크박스가 장식이 된다. 단 전체 상한(=요금 상한)만은 그대로 걸린다.
+test("개념을 직접 고르면 고른 것만 대상이 된다", () => {
+  const agg = aggOf(["a", "b"], 5);
+  const picked = pickCoachTargets(agg, new Set(), [
+    { conceptId: "a-3", concept: "a-3" },
+    { conceptId: "b-1", concept: "b-1" },
+  ]);
+  assert.deepEqual(
+    picked.map((c) => c.concept).sort(),
+    ["a-3", "b-1"],
+  );
+});
+
+test("직접 고른 개념도 전체 상한을 넘지 않는다", () => {
+  const agg = aggOf(["a", "b", "c"], 12);
+  const picked = pickCoachTargets(
+    agg,
+    new Set(),
+    agg.concepts.map((c) => ({ conceptId: c.conceptId, concept: c.concept })),
+  );
+  assert.equal(picked.length, COACH_MAX_TOTAL);
+});
+
+test("직접 고르면 과목 제외 설정은 무시된다(선택이 과목까지 정한다)", () => {
+  const picked = pickCoachTargets(aggOf(["a", "b"], 5), new Set(["b"]), [
+    { conceptId: "b-0", concept: "b-0" },
+  ]);
+  assert.deepEqual(picked.map((c) => c.concept), ["b-0"]);
+});
+
+test("고른 개념이 이 기간 집계에 없으면 조용히 빠진다", () => {
+  // 표본 문항이 없는 개념을 프롬프트에 실으면 모델이 일반론밖에 못 낸다(요금만 나간다).
+  const picked = pickCoachTargets(aggOf(["a"], 3), new Set(), [
+    { conceptId: "a-0", concept: "a-0" },
+    { conceptId: "없는개념", concept: "없는개념" },
+  ]);
+  assert.deepEqual(picked.map((c) => c.concept), ["a-0"]);
+});
+
+test("정본 id가 없는 개념은 표기로 맞춘다", () => {
+  const agg = aggOf(["a"], 0);
+  agg.concepts = [{ ...concept("a", 1, 5), conceptId: null }];
+  const picked = pickCoachTargets(agg, new Set(), [{ conceptId: null, concept: "a-1" }]);
+  assert.equal(picked.length, 1);
+});

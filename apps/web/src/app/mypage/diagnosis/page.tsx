@@ -20,8 +20,14 @@ import {
   type SubjectStat,
   type SubjectConceptGroup,
 } from "@/lib/diagnosis-live";
-import { ConceptSolveButton, DiagnosisSubjectPicker } from "./diagnosis-actions";
-import { getDiagnosisPausedSubjectIds } from "@/lib/review-preferences";
+import {
+  ConceptSolveButton,
+  DiagnosisConceptPicker,
+  type DiagnosisPickerConcept,
+} from "./diagnosis-actions";
+import { getExcludedDiagnosisSubjectSlugs } from "@/lib/review-preferences";
+import { pickCoachTargets } from "@/lib/diagnosis-generate";
+import { conceptSelectionKey } from "@/lib/diagnosis-limits";
 import { isPremium } from "@/lib/membership";
 import { MembershipLockedPage } from "@/components/membership-upsell";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
@@ -93,10 +99,10 @@ export default async function DiagnosisPage({
   // 다만 그래프는 최소 7일을 보장한다(GRAPH_MIN_WINDOW_DAYS 주석 참고): 진단 다음 날
   // 들어오면 창이 1일이 되어 어제 푼 것만 남는데, 사다리는 오답이 0일 때만 넓혀서
   // 하루라도 틀렸으면 그대로 갇힌다.
-  const cycleDays = Math.max(
-    GRAPH_MIN_WINDOW_DAYS,
-    analysisWindowDays(await getLastAnalyzedDate(supabase, user.id)),
-  );
+  // 극복법이 실제로 훑는 기간(요금이 걸린 쪽). 선택창이 "최근 N일 오답만 분석해요"로
+  // 그대로 밝힌다 — 그래프 기간과 다를 수 있어서, 안 밝히면 "그래프에 있는데 왜 빠졌지"가 된다.
+  const analysisDays = analysisWindowDays(await getLastAnalyzedDate(supabase, user.id));
+  const cycleDays = Math.max(GRAPH_MIN_WINDOW_DAYS, analysisDays);
   const days = selected.key === "cycle" ? cycleDays : selected.days;
 
   // 과목 칩(?subject=). 응시한 과목 목록이 필요해서 한 번은 전체로 집계한다 — 필터를
@@ -143,15 +149,29 @@ export default async function DiagnosisPage({
     generating == null &&
     agg.concepts.length > 0 &&
     (await getDiagnosisEligibility(supabase, user.id)).eligible;
-  // 선택창에 뿌릴 과목별 오답 수(전체 기간 아님 — 지금 보고 있는 창 기준). 어떤 과목을
-  // 뺄지 판단하려면 그 과목에서 뭘 얼마나 틀렸는지가 같이 보여야 한다.
-  const wrongBySubjectSlug = new Map(all.bySubject.map((g) => [g.subjectSlug, g.totalWrong]));
-  const pickerSubjects = all.subjects.map((s) => ({
-    id: s.id,
-    name: s.name,
-    wrongCount: wrongBySubjectSlug.get(s.slug) ?? 0,
+  // 선택창(체크박스)에 뿌릴 개념 목록. 과목 칩(?subject=)으로 좁힌 agg 가 아니라 전체
+  // (all)를 쓴다 — 선택은 과목 필터와 무관한 "이번 진단에 넣을 것"이라, 칩을 걸어 둔 채
+  // 요청했다고 다른 과목이 조용히 빠지면 안 된다.
+  //
+  // 미리 체크해 둘 추천은 예전 자동 선정(pickCoachTargets)과 같은 규칙으로 뽑는다. 그대로
+  // 눌렀을 때의 결과가 예전과 같아야, 고르는 일이 "해도 되고 안 해도 되는" 것이 된다.
+  const recommendedKeys = new Set(
+    canGenerate
+      ? pickCoachTargets(all, await getExcludedDiagnosisSubjectSlugs(supabase, user.id)).map(
+          conceptSelectionKey,
+        )
+      : [],
+  );
+  const pickerConcepts: DiagnosisPickerConcept[] = all.concepts.map((c) => ({
+    key: conceptSelectionKey(c),
+    concept: c.concept,
+    conceptId: c.conceptId,
+    subject: c.subject,
+    wrongCount: c.wrongCount,
+    accuracyPct: c.accuracyPct,
+    scoreGainPct: c.scoreGainPct,
+    recommended: recommendedKeys.has(conceptSelectionKey(c)),
   }));
-  const excludedSubjectIds = [...(await getDiagnosisPausedSubjectIds(supabase, user.id))];
 
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-zinc-950">
@@ -194,8 +214,8 @@ export default async function DiagnosisPage({
             subjects={all.subjects}
             subjectSlug={subjectSlug}
             canGenerate={canGenerate}
-            pickerSubjects={pickerSubjects}
-            excludedSubjectIds={excludedSubjectIds}
+            pickerConcepts={pickerConcepts}
+            analysisDays={analysisDays}
             generatingSince={generating?.requestedAt ?? null}
           />
         )}
@@ -270,8 +290,8 @@ function Dashboard({
   subjects,
   subjectSlug,
   canGenerate,
-  pickerSubjects,
-  excludedSubjectIds,
+  pickerConcepts,
+  analysisDays,
   generatingSince,
 }: {
   agg: DiagnosisAggregate;
@@ -283,10 +303,10 @@ function Dashboard({
   subjectSlug: string | null;
   // 지금 극복법을 만들 수 있는 상태인지(자격·오답 있음·아직 극복법 없음).
   canGenerate: boolean;
-  // 선택창에 뿌릴 과목 목록(id·이름·이 기간 오답 수).
-  pickerSubjects: { id: string; name: string; wrongCount: number }[];
-  // 진단에서 뺀 과목 id.
-  excludedSubjectIds: string[];
+  // 선택창(체크박스)에 뿌릴 개념 목록.
+  pickerConcepts: DiagnosisPickerConcept[];
+  // 극복법이 실제로 훑는 기간(일). 그래프 기간과 다를 수 있어 선택창이 밝혀 준다.
+  analysisDays: number;
   // 극복법 배치를 제출한 시각(ISO). 값이 있으면 지금 만들어지는 중이다.
   generatingSince: string | null;
   coachingByConcept: Map<string, DiagnosisConceptCoaching>;
@@ -358,10 +378,10 @@ function Dashboard({
           개념별 정리 · 극복
         </SectionTitle>
         <GeneratingNotice since={generatingSince} />
-        {!hasCoaching && canGenerate && (
-          <DiagnosisSubjectPicker
-            subjects={pickerSubjects}
-            excludedSubjectIds={excludedSubjectIds}
+        {!hasCoaching && canGenerate && pickerConcepts.length > 0 && (
+          <DiagnosisConceptPicker
+            concepts={pickerConcepts}
+            analysisDays={analysisDays}
             requestedThisWeek={requestedThisWeek}
             nextDate={nextDate}
           />

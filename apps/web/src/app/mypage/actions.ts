@@ -6,14 +6,13 @@ import {
   requestWeeklyDiagnosis,
   getLastAnalyzedDate,
   analysisWindowDays,
+  normalizeConceptSelection,
   DIAGNOSIS_CYCLE_DAYS,
+  type DiagnosisConceptSelection,
 } from "@/lib/ai-diagnosis";
 import { runDiagnosisForUser } from "@/lib/diagnosis-generate";
 import { submitPendingDiagnoses } from "@/lib/diagnosis-batch";
-import {
-  getExcludedDiagnosisSubjectSlugs,
-  setDiagnosisSubjectPaused,
-} from "@/lib/review-preferences";
+import { getExcludedDiagnosisSubjectSlugs } from "@/lib/review-preferences";
 import { isPremium } from "@/lib/membership";
 import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 
@@ -25,28 +24,15 @@ export type RequestDiagnosisResult = {
   status?: "ready" | "queued" | "pending";
 };
 
-// 진단에서 분석할 과목 켜기/끄기. 맞춤 극복법은 과목당 7개·전체 15개 개념까지만
-// 만들어서(개념 수 = 요금), 준비하지 않는 과목이 그 자리를 차지하면 정작 필요한 과목이
-// 얕아진다. 저장만 하고 생성은 하지 않는다 — 고르는 동안 요금이 나가면 안 된다.
-export async function toggleDiagnosisSubject(
-  subjectId: string,
-  include: boolean,
-): Promise<{ error?: string; excludedSubjectIds?: string[] }> {
-  const { supabase, user } = await getSessionUser();
-  if (!user) return { error: "로그인 후 이용할 수 있어요." };
-  if (!isDiagnosisDevAllowed(user.email)) return { error: "AI 약점 진단은 아직 준비 중이에요." };
-
-  const res = await setDiagnosisSubjectPaused(supabase, user.id, subjectId, !include);
-  if (res.error) return { error: res.error };
-  revalidatePath("/mypage/diagnosis");
-  return { excludedSubjectIds: res.pausedSubjectIds };
-}
-
-// "AI 약점 진단 받기" 버튼. 자격을 확인하고 이번 주기 진단 요청(report=null 행)을 만든 뒤,
+// "맞춤 극복법 받기" 버튼. 화면에서 체크한 개념들을 받아 자격을 확인하고 이번 주기 진단 요청(report=null 행)을 만든 뒤,
 // 맞춤 극복법을 Message Batches API 에 실어 보낸다(요금 절반·비동기). 결과는 크론이나
 // 진단 페이지 진입이 수거해 report 를 채우고, 그때까지 화면에는 무AI 데이터층이 그대로
 // 떠 있는다. 배치에 싣지 못하면 요청 행만 pending 으로 남아 다음 크론이 다시 시도한다.
-export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
+export async function requestDiagnosis(
+  // 사용자가 체크한 개념들. 이 목록만 코칭한다(빈 배열이면 생성기가 알아서 고른다).
+  // 서버가 다시 상한까지 자른다 — 화면을 우회한 호출이 그대로 요금이 되면 안 된다.
+  selectedConcepts: DiagnosisConceptSelection[] = [],
+): Promise<RequestDiagnosisResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
@@ -61,7 +47,8 @@ export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
     return { error: "AI 약점 진단은 멤버십 기능이에요." };
   }
 
-  const res = await requestWeeklyDiagnosis(supabase, user.id);
+  const selected = normalizeConceptSelection(selectedConcepts);
+  const res = await requestWeeklyDiagnosis(supabase, user.id, selected);
   if (res.error) return res;
 
   // 이미 이번 주 리포트가 있으면(주 1회) 그대로 둔다.
@@ -78,7 +65,7 @@ export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
   since.setDate(since.getDate() - (DIAGNOSIS_CYCLE_DAYS - 1));
   const { data: row } = await supabase
     .from("ai_diagnoses")
-    .select("id")
+    .select("id, selected_concepts")
     .eq("user_id", user.id)
     .gte("diagnosis_date", since.toISOString().slice(0, 10))
     .order("diagnosis_date", { ascending: false })
@@ -103,7 +90,12 @@ export async function requestDiagnosis(): Promise<RequestDiagnosisResult> {
           row.id as string,
           user.id,
           analysisWindowDays(await getLastAnalyzedDate(supabase, user.id)),
-          await getExcludedDiagnosisSubjectSlugs(supabase, user.id),
+          // 개념을 직접 골랐으면 과목 제외 설정은 볼 필요가 없다(선택이 과목까지 정한다).
+          selected.length > 0
+            ? new Set<string>()
+            : await getExcludedDiagnosisSubjectSlugs(supabase, user.id),
+          // 방금 저장한 선택이 정본이다(요청 행에 박혀 있고 배치도 같은 값을 읽는다).
+          (row.selected_concepts as DiagnosisConceptSelection[] | null) ?? null,
         );
         status = gen.status;
         genError = gen.error;

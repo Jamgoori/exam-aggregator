@@ -8,7 +8,7 @@ import {
 } from "@/lib/ai-diagnosis";
 import { DIAGNOSIS_MODEL, parseCoachingItems } from "@/lib/diagnosis-coach";
 import { planCoaching, saveDiagnosisReport } from "@/lib/diagnosis-generate";
-import type { AiDiagnosisReport } from "@/lib/ai-diagnosis";
+import type { AiDiagnosisReport, DiagnosisConceptSelection } from "@/lib/ai-diagnosis";
 
 // 맞춤 극복법을 Message Batches API 로 만든다.
 //
@@ -45,7 +45,13 @@ type BatchItemContext = {
   targets: { concept: string; subject: string | null; subjectSlug: string | null }[];
 };
 
-type PendingDiagnosisRow = { id: string; user_id: string };
+type PendingDiagnosisRow = {
+  id: string;
+  user_id: string;
+  // 요청할 때 사용자가 고른 개념들. null 이면 생성기가 알아서 상위 개념을 고른다
+  // (구버전 요청·배치 스크립트로 만들어진 행).
+  selected_concepts: DiagnosisConceptSelection[] | null;
+};
 
 function client(): Anthropic | null {
   // 이 기능 전용 키(즉시 생성과 같은 변수). 없으면 배치를 내지 않는다 — 키가 없다고
@@ -114,7 +120,7 @@ export async function submitPendingDiagnoses(
   since.setDate(since.getDate() - (DIAGNOSIS_CYCLE_DAYS - 1));
   let query = admin
     .from("ai_diagnoses")
-    .select("id, user_id")
+    .select("id, user_id, selected_concepts")
     .is("report", null)
     .gte("diagnosis_date", since.toISOString().slice(0, 10))
     .order("requested_at", { ascending: true })
@@ -158,7 +164,10 @@ export async function submitPendingDiagnoses(
     const { plan, error } = await planCoaching(
       row.user_id,
       await windowDaysFor(row.user_id),
-      await excludedSubjectSlugsFor(row.user_id),
+      // 개념을 직접 고른 요청이면 과목 제외 설정은 볼 필요가 없다(선택이 이미 과목까지
+      // 정한다). 고르지 않은 구버전 요청만 예전처럼 과목 제외로 좁힌다.
+      row.selected_concepts?.length ? new Set<string>() : await excludedSubjectSlugsFor(row.user_id),
+      row.selected_concepts ?? null,
     );
     if (!plan) {
       skipped++;
