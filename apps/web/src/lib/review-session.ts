@@ -611,25 +611,41 @@ export async function collectConceptReviewCandidates(
   }
 
   // 2) question_id → (paper_id, question_number). 과목 제한이 있으면 임베드 FK로 필터.
-  const rows: { paper_id: string; question_number: number }[] = [];
+  //    id 도 함께 받는다 — 아래 3)에서 이미지 유무를 그 id 로 바로 확인한다.
+  const rows: { id: string; paper_id: string; question_number: number }[] = [];
   for (const ids of chunkIds(questionIds, 100)) {
     const q = subjectId
       ? admin
           .from("questions")
-          .select("paper_id, question_number, exam_papers!inner(subject_id)")
+          .select("id, paper_id, question_number, exam_papers!inner(subject_id)")
           .in("id", ids)
           .eq("exam_papers.subject_id", subjectId)
-      : admin.from("questions").select("paper_id, question_number").in("id", ids);
+      : admin.from("questions").select("id, paper_id, question_number").in("id", ids);
     const { data } = await q;
-    for (const r of (data ?? []) as { paper_id: string; question_number: number }[]) {
-      rows.push({ paper_id: r.paper_id, question_number: r.question_number });
+    for (const r of (data ?? []) as { id: string; paper_id: string; question_number: number }[]) {
+      rows.push({ id: r.id, paper_id: r.paper_id, question_number: r.question_number });
     }
   }
   if (rows.length === 0) return [];
 
   // 3) 이미지 있는(풀 수 있는) 문항만 + voided 제외.
+  //
+  // 여기서 알아야 하는 건 "이 문항에 이미지가 있나" 하나뿐이다. 예전에는 그걸 위해
+  // 문제지 축으로 되돌아가 fetchQuestionMedia(paperIds) 를 불렀는데, 그러면 그
+  // 문제지들의 **전체 문항 + 이미지 행**을 받아 후보 몇 개만 쓴다. 개념 후보는 서로
+  // 다른 기출에 흩어지므로 문제지 수가 곧 후보 수에 가깝다 — 상한(500)에 걸리는
+  // 개념이면 문제지 수백 장 × 문항 25~40개를 받아 500개를 골라내던 셈이다.
+  // question_images 는 question_id 로 키가 잡혀 있고(unique(question_id, order_index))
+  // 우리는 그 id 를 이미 2)에서 손에 넣었으니, 자식 테이블을 바로 친다.
   const paperIds = [...new Set(rows.map((r) => r.paper_id))];
-  const mediaByPaper = await fetchQuestionMedia(supabase, paperIds);
+  const withImages = new Set<string>();
+  for (const ids of chunkIds([...new Set(rows.map((r) => r.id))], 200)) {
+    const { data } = await admin
+      .from("question_images")
+      .select("question_id")
+      .in("question_id", ids);
+    for (const im of (data ?? []) as { question_id: string }[]) withImages.add(im.question_id);
+  }
 
   const voidedByPaper = new Map<string, Set<number>>();
   for (const ids of chunkIds(paperIds, 200)) {
@@ -645,7 +661,7 @@ export async function collectConceptReviewCandidates(
   const seen = new Set<string>();
   const items: { paperId: string; questionNumber: number }[] = [];
   for (const r of rows) {
-    if (!mediaByPaper.get(r.paper_id)?.get(r.question_number)?.images.length) continue;
+    if (!withImages.has(r.id)) continue;
     if (voidedByPaper.get(r.paper_id)?.has(r.question_number)) continue;
     const key = `${r.paper_id}#${r.question_number}`;
     if (seen.has(key)) continue;

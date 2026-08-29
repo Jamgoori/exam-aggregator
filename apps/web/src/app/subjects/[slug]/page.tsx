@@ -22,6 +22,32 @@ import {
   fetchPaperIdentitySignals,
 } from "@/lib/dedup-papers";
 import type { ExamPaper } from "@gongmoa/core";
+
+// 이 페이지가 문제지 행에서 실제로 쓰는 것만. 예전에는 `*, subjects(*), exam_types(*)`
+// 였는데, 카드가 안 읽는 컬럼(file_path·조회수 등)까지 다 받았고 무엇보다 과목·시행처
+// 객체를 **행마다 복제**해 받았다 — 과목은 어차피 이 페이지에 하나뿐이고 시행처는
+// 14개짜리 표라, 아래에서 이미 따로 받아 examTypeById 로 만들어 두고 있었다
+// (그 주석은 있는데 정작 임베드가 안 지워져 있었다).
+//
+// 남긴 컬럼의 근거: id/title/track/level/round 는 카드와 주소(paper-href),
+// subject_id/exam_type_id/year/round/level 은 dedup 키(paperDedupKey),
+// created_at 은 대표 선정의 타이브레이커(isBetterRepresentative)다. 하나라도 빠지면
+// 중복 시험지 합치기가 조용히 달라진다.
+const SUBJECT_PAPER_COLUMNS =
+  "id, title, level, track, year, round, created_at, subject_id, exam_type_id";
+
+type SubjectPaperRow = Pick<
+  ExamPaper,
+  | "id"
+  | "title"
+  | "level"
+  | "track"
+  | "year"
+  | "round"
+  | "created_at"
+  | "subject_id"
+  | "exam_type_id"
+>;
 import { getSubjectBySlug } from "@gongmoa/core";
 import type { Metadata } from "next";
 import { fetchSubjectFacets } from "@/lib/subject-facets";
@@ -141,14 +167,14 @@ export default async function SubjectPage({
   // 페이지를 자른다. SQL LIMIT/OFFSET으로 먼저 자르면 대표가 잘려나간 페이지에 걸려
   // 페이지 경계·총 개수가 흔들리므로, 합친 다음 메모리에서 페이지네이션한다.
   // PostgREST 기본 max_rows(1000)에 걸려 조용히 잘리지 않도록 1000건씩 이어받는다.
-  async function fetchAllSubjectPapers(): Promise<ExamPaper[]> {
+  async function fetchAllSubjectPapers(): Promise<SubjectPaperRow[]> {
     const BATCH_SIZE = 1000;
-    const rows: ExamPaper[] = [];
+    const rows: SubjectPaperRow[] = [];
     let start = 0;
     while (true) {
       let q = supabase
         .from("exam_papers")
-        .select("*, subjects(*), exam_types(*)")
+        .select(SUBJECT_PAPER_COLUMNS)
         .eq("subject_id", subject!.id);
       if (level) q = q.eq("level", level);
       if (selectedExamTypeIds.size > 0)
@@ -159,7 +185,7 @@ export default async function SubjectPage({
         .order("id", { ascending: true })
         .range(start, start + BATCH_SIZE - 1);
       if (error || !data || data.length === 0) break;
-      rows.push(...(data as unknown as ExamPaper[]));
+      rows.push(...(data as unknown as SubjectPaperRow[]));
       if (data.length < BATCH_SIZE) break;
       start += BATCH_SIZE;
     }
@@ -377,7 +403,8 @@ export default async function SubjectPage({
         {filteredPapers.map((paper) => (
           <ExamCard
             key={paper.id}
-            paper={paper}
+            // 시행처는 행마다 실어 오지 않고 여기서 붙인다(위 examTypeById).
+            paper={{ ...paper, exam_types: examTypeById.get(paper.exam_type_id) ?? null }}
             linkLevel={level}
             myRoundCount={myRoundCounts.get(paper.id)}
             isBookmarked={bookmarkedIds.has(paper.id)}

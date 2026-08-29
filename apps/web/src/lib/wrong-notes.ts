@@ -23,6 +23,7 @@ import {
   representativePaperIds,
 } from "@/lib/dedup-papers";
 import { applyExamTypeSubjectName, stripTrackFromTitle } from "@/lib/paper-title";
+import { inParallel } from "@/lib/in-parallel";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -45,30 +46,6 @@ export {
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-  return out;
-}
-
-// 이 파일의 조회는 대부분 "id 목록을 청크로 잘라 여러 번 왕복"하는 형태다. 예전엔 그
-// 청크를 for 루프로 하나씩 기다려서, 문제지가 많은 과목(국어처럼 거의 모든 시험유형에
-// 있는 과목)에서는 왕복 지연이 청크 수만큼 그대로 쌓였다. 동시에 돌리되, 한 사용자가
-// 커넥션을 독점하지 않도록 동시 실행 수는 제한한다.
-const QUERY_CONCURRENCY = 8;
-
-async function inParallel<T, R>(
-  items: T[],
-  run: (item: T) => Promise<R>,
-  limit = QUERY_CONCURRENCY,
-): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let cursor = 0;
-  async function worker() {
-    for (let i = cursor++; i < items.length; i = cursor++) {
-      out[i] = await run(items[i]);
-    }
-  }
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
-  );
   return out;
 }
 

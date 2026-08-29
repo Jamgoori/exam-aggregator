@@ -22,7 +22,6 @@ import {
 } from "@/lib/paper-search";
 import { getSubjectNameForQuery } from "@gongmoa/core";
 import type { Subject } from "@gongmoa/core";
-import type { ExamPaper } from "@gongmoa/core";
 
 const PAGE_SIZE = 24;
 // 과목 인덱스(ㄱㄴㄷ) 바로 윗줄의 묶음 버튼. 급수 넷은 exam_papers.level로,
@@ -599,7 +598,7 @@ export function HomeExamBrowser({
                       {papers.map((paper) => (
                         <ExamCard
                           key={paper.id}
-                          paper={paper as unknown as ExamPaper}
+                          paper={paper}
                           linkLevel={effectiveLevel}
                           myRoundCount={myRoundCounts[paper.id]}
                           isBookmarked={bookmarkedSet.has(paper.id)}
@@ -618,7 +617,7 @@ export function HomeExamBrowser({
             {visiblePapers.map((paper) => (
               <ExamCard
                 key={paper.id}
-                paper={paper as unknown as ExamPaper}
+                paper={paper}
                 linkLevel={effectiveLevel}
                 myRoundCount={myRoundCounts[paper.id]}
                 isBookmarked={bookmarkedSet.has(paper.id)}

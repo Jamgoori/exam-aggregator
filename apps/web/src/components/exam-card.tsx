@@ -7,7 +7,7 @@ import { getRoundTier } from "@/lib/round-tier";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
 import { paperHref, paperCbtHref } from "@/lib/paper-href";
-import type { ExamPaper, ExamType } from "@gongmoa/core";
+import type { ExamPaper } from "@gongmoa/core";
 
 // 카드가 실제로 읽는 필드만 요구한다 — 목록 화면마다 조회 범위가 달라서(시험별
 // 목록은 파일 경로·조회수 같은 걸 받아오지 않는다), 전체 ExamPaper를 요구하면
@@ -18,7 +18,11 @@ export type ExamCardPaper = Pick<
   ExamPaper,
   "id" | "title" | "track" | "level" | "round"
 > & {
-  exam_types?: ExamType | null;
+  // 카드가 읽는 건 시행처 이름 하나뿐이다(아래 examType.name). ExamType 전체를
+  // 요구하면 목록마다 다른 조회 모양이 이 타입에 안 맞아서, 호출부가
+  // `as unknown as ExamPaper` 로 타입 검사를 통째로 뚫게 된다 — 그 단언 뒤에서는
+  // 목록이 받아오지도 않는 필드를 카드에서 읽어도 컴파일이 통과한다.
+  exam_types?: { name: string } | null;
 };
 
 export function ExamCard({

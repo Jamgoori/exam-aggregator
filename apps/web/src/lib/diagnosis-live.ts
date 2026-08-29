@@ -1,6 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { compareKo } from "@gongmoa/core";
+import { inParallel } from "@/lib/in-parallel";
 
 // AI 약점 진단의 "결정적(무AI) 데이터층". 페이지 입장 즉시 그리는 과목별 개념 오답
 // 분포(막대그래프)와, 진단받기(온디맨드 API) 때 AI에 넣을 집계 입력을 같은 함수 하나로
@@ -611,7 +612,18 @@ export async function getWrongQuestionSamples(
   }
 
   // 해설(개념·발문·정답·선지해설). 대상 개념에 속한 문항만 남긴다.
-  const questionIds = [...questionIdByKey.values()];
+  //
+  // 조회 대상은 "이 사용자가 틀린 문항"이지 "그 문제지의 전체 문항"이 아니다.
+  // 예전에는 questionIdByKey 전체를 넘겨서, 오답 800개가 문제지 150장에 흩어진
+  // 사용자면 150 × 25~40 ≈ 4,500 문항의 해설을 받아 800개만 썼다. 이 select 에는
+  // choice_explanations(jsonb)·question_text 가 들어 있어 행 수가 곧 전송량이다.
+  // 아래 소비처(byConcept 루프)가 statusRows 로만 되짚으므로 결과는 완전히 같다.
+  const wantedQuestionIds = new Set<string>();
+  for (const st of statusRows) {
+    const id = questionIdByKey.get(questionKey(st.paper_id, st.question_number));
+    if (id) wantedQuestionIds.add(id);
+  }
+  const questionIds = [...wantedQuestionIds];
   type ExpRow = {
     question_id: string;
     concept_id: string | null;
@@ -622,7 +634,7 @@ export async function getWrongQuestionSamples(
     choice_explanations: ChoiceExplanation[] | null;
   };
   const expByQuestionId = new Map<string, ExpRow>();
-  for (const ids of chunk(questionIds, 100)) {
+  await inParallel(chunk(questionIds, 200), async (ids) => {
     const rows = await fetchAll<ExpRow>(
       admin,
       "question_explanations",
@@ -635,7 +647,7 @@ export async function getWrongQuestionSamples(
         : wantedTitles.has((r.keyword_title ?? "").trim());
       if (hit) expByQuestionId.set(r.question_id, r);
     }
-  }
+  });
   if (expByQuestionId.size === 0) return [];
 
   // 개념별로 후보를 모아 미극복 → 많이 틀린 순으로 자른다.

@@ -21,6 +21,7 @@ import { representativePaperIds } from "@/lib/dedup-papers";
 import { fetchQuestionMedia, fetchWrongNoteMarks } from "@/lib/wrong-notes";
 import { getReviewPrefs } from "@/lib/review-preferences";
 import { resolveStatusTargets, statusTargetKey } from "@/lib/status-targets";
+import { inParallel } from "@/lib/in-parallel";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
@@ -681,20 +682,36 @@ async function promotePendingItems(
   const admin = adminFactory();
   const nowIso = now.toISOString();
 
+  // 문항 번호로 접어 한 번에 던진다. 예전에는 승격 문항 하나당 UPDATE 한 번씩
+  // 순차로 나갔는데, 이 함수는 "오늘의 복습 시작"을 누른 뒤 세션이 열리기 전
+  // 대기 구간에 있다 — 왕복이 그대로 쌓여 보인다.
+  //
+  // 접어도 되는 이유: 심는 값(srs_due_at = nowIso)이 전부 같고, 조건이
+  // `.eq(question_number).in(paper_id).is(srs_due_at, null)` 이라 문항 번호가 같은
+  // 후보들의 paper_id 집합을 합쳐도 잡히는 행이 개별 UPDATE 의 합집합과 같다.
+  // `.is("srs_due_at", null)` 가드도 그대로 남아, 그 사이 다른 경로로 스케줄이
+  // 생긴 행은 여전히 덮어쓰지 않는다.
+  const papersByQuestionNumber = new Map<number, Set<string>>();
   for (const c of promoted) {
     const key = `${c.paperId}#${c.questionNumber}`;
     // 대표 키로 접힌 후보를 원본 행들로 되돌린다. 매핑이 없으면(이론상 없어야 하지만)
     // 대표 id로라도 시도한다.
-    const paperIds = pendingSources.get(key) ?? [c.paperId];
+    const set = papersByQuestionNumber.get(c.questionNumber) ?? new Set<string>();
+    for (const paperId of pendingSources.get(key) ?? [c.paperId]) set.add(paperId);
+    papersByQuestionNumber.set(c.questionNumber, set);
+  }
+
+  // 무제한 동시 실행은 하지 않는다 — 무료 티어 DB 라 한 사용자가 커넥션을
+  // 독점하면 안 된다(이 파일 위쪽 조회들과 같은 상한).
+  await inParallel([...papersByQuestionNumber], async ([questionNumber, paperIds]) => {
     await admin
       .from("user_question_status")
       .update({ srs_due_at: nowIso, updated_at: nowIso })
       .eq("user_id", userId)
-      .eq("question_number", c.questionNumber)
-      .in("paper_id", paperIds)
-      // 그 사이 다른 경로로 스케줄이 생겼으면 덮어쓰지 않는다.
+      .eq("question_number", questionNumber)
+      .in("paper_id", [...paperIds])
       .is("srs_due_at", null);
-  }
+  });
 }
 
 // 오늘 큐에 들어갈 (문제지, 문항) 목록. 세션 생성이 이걸 그대로 쓴다.
