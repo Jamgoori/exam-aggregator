@@ -277,6 +277,13 @@ export function HomeExamBrowser({
     () => matchSubjectIds(subjects, subjectQuery),
     [subjects, subjectQuery],
   );
+  // 아래 추천 목록은 순서가 있어야 해서 배열 그대로 쓰고, 문제지 필터는 멤버십
+  // 검사만 하므로 Set 으로 한 번 만들어 넘긴다(filterPapers 주석 참고). 검색어가
+  // 바뀔 때만 다시 만들어지므로 타이핑 한 글자당 한 번이다.
+  const matchedSubjectIdSet = useMemo(
+    () => new Set(matchedSubjectIds),
+    [matchedSubjectIds],
+  );
   // 검색창 아래 뜨는 과목 추천(구글 자동완성처럼). 아래 카드 그리드와 같은 매칭
   // 규칙(matchedSubjectIds)을 그대로 재사용해 "카드로 보이는 과목"과 "추천으로
   // 뜨는 과목"이 항상 같은 목록이 되게 한다. 너무 길면 스크롤 없이 훑을 수 없어
@@ -305,7 +312,7 @@ export function HomeExamBrowser({
         level: effectiveLevel,
         year: queryYear,
         examType: effectiveExamType,
-        matchedSubjectIds,
+        matchedSubjectIds: matchedSubjectIdSet,
         isSearching,
         favOnly: effectiveFavOnly,
         bookmarkedSubjectIds: bookmarkedSubjectSet,
@@ -315,7 +322,7 @@ export function HomeExamBrowser({
       effectiveLevel,
       queryYear,
       effectiveExamType,
-      matchedSubjectIds,
+      matchedSubjectIdSet,
       isSearching,
       effectiveFavOnly,
       bookmarkedSubjectSet,

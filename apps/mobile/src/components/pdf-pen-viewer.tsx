@@ -27,11 +27,52 @@ export const PEN_COLORS = ["#ef4444", "#2563eb", "#111827", "#16a34a"];
 export const DEFAULT_PEN_WIDTH = 3;
 
 type Point = { x: number; y: number }; // 정규화 0~1
-type Stroke = { color: string; width: number; points: Point[] };
+// bbox 는 지우개용 사전 필터. 획을 확정할 때 한 번 계산해 들고 있는다 — 지우개는
+// 손가락이 움직이는 동안 프레임마다 호출되는데, 매번 모든 획의 모든 점까지 거리를
+// 재면 (획 수 × 점 수)가 프레임마다 반복된다. 획 하나가 수백 점이고 페이지에 획이
+// 수십 개면 그게 초당 수십만 번이다. 대부분의 획은 손가락에서 멀리 있으므로,
+// 사각형 하나만 보고 통째로 건너뛰면 실제로 점을 훑는 획은 한두 개로 줄어든다.
+type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
+type Stroke = { color: string; width: number; points: Point[]; bounds: Bounds };
+
+function boundsOf(points: Point[]): Bounds {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
 const ERASE_RADIUS = 0.025; // 정규화 거리 임계값
+
+// 지우개가 이 획에 닿았는지. 먼저 bbox 로 거르고, 그다음에야 점을 훑는다.
+// 점 검사도 Math.hypot 대신 거리의 제곱을 쓴다 — hypot 은 오버플로 방지를 위해
+// 스케일링을 하느라 곱셈 두 번보다 훨씬 비싸고, 여기서는 임계값과의 대소 비교만
+// 필요해서 제곱근을 뽑을 이유가 없다.
+const ERASE_RADIUS_SQ = ERASE_RADIUS * ERASE_RADIUS;
+
+function strokeTouches(s: Stroke, p: Point): boolean {
+  const b = s.bounds;
+  if (
+    p.x < b.minX - ERASE_RADIUS ||
+    p.x > b.maxX + ERASE_RADIUS ||
+    p.y < b.minY - ERASE_RADIUS ||
+    p.y > b.maxY + ERASE_RADIUS
+  ) {
+    return false;
+  }
+  for (const q of s.points) {
+    const dx = q.x - p.x;
+    const dy = q.y - p.y;
+    if (dx * dx + dy * dy < ERASE_RADIUS_SQ) return true;
+  }
+  return false;
+}
 
 export function PdfPenViewer({ fileUrl }: { fileUrl: string }) {
   const colors = useColors();
@@ -66,19 +107,14 @@ export function PdfPenViewer({ fileUrl }: { fileUrl: string }) {
     if (points.length < 2) return;
     setStrokesByPage((prev) => ({
       ...prev,
-      [page]: [...(prev[page] ?? []), { color, width, points }],
+      [page]: [...(prev[page] ?? []), { color, width, points, bounds: boundsOf(points) }],
     }));
   }
 
   function eraseAt(p: Point) {
     setStrokesByPage((prev) => {
       const list = prev[page] ?? [];
-      const kept = list.filter(
-        (s) =>
-          !s.points.some(
-            (q) => Math.hypot(q.x - p.x, q.y - p.y) < ERASE_RADIUS,
-          ),
-      );
+      const kept = list.filter((s) => !strokeTouches(s, p));
       if (kept.length === list.length) return prev;
       return { ...prev, [page]: kept };
     });

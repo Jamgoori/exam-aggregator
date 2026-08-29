@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CONSONANTS, initialConsonant } from "@gongmoa/core";
+import { compareKo, CONSONANTS, initialConsonant } from "@gongmoa/core";
 import { JsonLd } from "@/components/json-ld";
 import { getSubjectIndex, type SubjectIndexEntry } from "@/lib/subject-index";
 import { getExamIndex, examHref } from "@/lib/exam-index";
@@ -40,7 +40,7 @@ function groupByConsonant(entries: SubjectIndexEntry[]) {
     const list = groups.get(key);
     if (!list || list.length === 0) return [];
     return [
-      { key, items: [...list].sort((a, b) => a.name.localeCompare(b.name, "ko")) },
+      { key, items: [...list].sort((a, b) => compareKo(a.name, b.name)) },
     ];
   });
 }

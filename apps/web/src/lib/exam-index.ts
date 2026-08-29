@@ -2,6 +2,7 @@ import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import { createPublicClient } from "@/lib/supabase/public";
 import { fetchAllExamPapers } from "@/lib/all-papers";
+import { compareKo } from "@gongmoa/core";
 import type { ExamType, Subject } from "@gongmoa/core";
 
 // 시행처(국가직·지방직 …) × 급수(9급·7급 …) 한 칸을 가리키는 "시험" 단위.
@@ -122,7 +123,7 @@ export async function getExamIndex(): Promise<{
     (a, b) =>
       a.examTypeOrder - b.examTypeOrder ||
       b.count - a.count ||
-      a.slug.localeCompare(b.slug, "ko"),
+      compareKo(a.slug, b.slug),
   );
 
   return { combos, totalCount: papers.length };
@@ -182,7 +183,7 @@ function compareSubjectNames(a: string, b: string): number {
     if (bi === -1) return -1;
     return ai - bi;
   }
-  return a.localeCompare(b, "ko");
+  return compareKo(a, b);
 }
 
 /**

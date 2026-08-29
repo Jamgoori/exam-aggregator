@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { logout } from "@/app/admin/actions";
 import { fetchQuestionMedia } from "@/lib/wrong-notes";
+import { compareKo } from "@gongmoa/core";
 
 // verify_question_answer() 대조에 실패해 verified=false로 남은 해설을 모아 보여주는
 // 화면. 해설 배치 루틴이 청크당 2회까지만 재시도하고 넘어가므로, 그 이후로는 여기
@@ -86,7 +87,7 @@ export default async function UnverifiedExplanationsPage() {
     const pa = a.questions!.exam_papers!;
     const pb = b.questions!.exam_papers!;
     return (
-      pa.title.localeCompare(pb.title, "ko") ||
+      compareKo(pa.title, pb.title) ||
       a.questions!.question_number - b.questions!.question_number
     );
   });

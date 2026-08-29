@@ -6,6 +6,7 @@
 // (모바일 오답노트는 지금 lib/mypage.ts 의 근사치라 웹과 숫자가 어긋난다 — 이 함수를
 //  쓰면 같은 규칙이 된다.)
 import type { ExamType, Subject } from "./types";
+import { compareKo } from "./collate";
 
 // 오답노트 화면들이 exam_papers에서 실제로 쓰는 필드만 추린 형태.
 export type WrongNotePaperInfo = {
@@ -223,7 +224,7 @@ export function buildWrongNoteGroups(
   groups.sort(
     (a, b) =>
       a.subject.display_order - b.subject.display_order ||
-      a.subject.name.localeCompare(b.subject.name, "ko"),
+      compareKo(a.subject.name, b.subject.name),
   );
   return groups;
 }

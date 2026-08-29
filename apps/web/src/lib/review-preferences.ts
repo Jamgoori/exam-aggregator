@@ -2,6 +2,7 @@ import "server-only";
 import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  compareKo,
   normalizeDailyLimit,
   spreadResumeDueDates,
   DAILY_LIMIT_OPTIONS,
@@ -259,7 +260,7 @@ export async function getReviewSubjectOptions(
     .sort(
       (a, b) =>
         b.scheduledCount + b.pendingCount - (a.scheduledCount + a.pendingCount) ||
-        a.name.localeCompare(b.name, "ko"),
+        compareKo(a.name, b.name),
     );
 }
 

@@ -2,6 +2,7 @@ import "server-only";
 import { cacheLife } from "next/cache";
 import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { compareKo } from "@gongmoa/core";
 import type { Subject } from "@gongmoa/core";
 import {
   buildWrongNoteGroups,
@@ -1007,7 +1008,7 @@ export async function getSubjectWrongNoteQuestions(
   // 세트문제 병합이 성립하도록 (제목, 번호) 순 안정 정렬. 화면이 다시 정렬한다.
   questions.sort(
     (a, b) =>
-      a.paperTitle.localeCompare(b.paperTitle, "ko") ||
+      compareKo(a.paperTitle, b.paperTitle) ||
       a.questionNumber - b.questionNumber,
   );
   const unresolvedCount = questions.filter((q) => !q.resolved).length;

@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { compareKo } from "@gongmoa/core";
 
 // AI 약점 진단의 "결정적(무AI) 데이터층". 페이지 입장 즉시 그리는 과목별 개념 오답
 // 분포(막대그래프)와, 진단받기(온디맨드 API) 때 AI에 넣을 집계 입력을 같은 함수 하나로
@@ -458,7 +459,7 @@ export async function getDiagnosisAggregate(
         return Math.round((e.wrongCount / denom) * 1000) / 10;
       })(),
     }))
-    .sort((a, b) => b.wrongCount - a.wrongCount || a.concept.localeCompare(b.concept))
+    .sort((a, b) => b.wrongCount - a.wrongCount || compareKo(a.concept, b.concept))
     // 전체 상위 N개. 코칭 대상을 과목당 7개까지 고르므로(diagnosis-generate.ts) 이 컷이
     // 30이면 문항을 많이 푼 과목이 30자리를 다 가져가 다른 과목의 7번째가 사라진다.
     // 화면은 어차피 과목당 6개만 그리고(BARS_PER_SUBJECT) 이 배열은 AI 프롬프트에

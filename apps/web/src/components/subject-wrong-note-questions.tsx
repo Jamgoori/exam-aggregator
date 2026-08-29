@@ -19,6 +19,7 @@ import {
 } from "@/components/wrong-note-mark-actions";
 import { levelColor } from "@/lib/level-colors";
 import type { SubjectWrongNoteQuestion } from "@/lib/wrong-notes";
+import { compareKo } from "@gongmoa/core";
 import type { ReviewPickStrategy } from "@gongmoa/core";
 
 type SortKey = "number" | "recent" | "frequent";
@@ -211,7 +212,7 @@ export function SubjectWrongNoteQuestions({
         const t = b.recentAt.localeCompare(a.recentAt);
         if (t !== 0) return t;
       }
-      return a.title.localeCompare(b.title, "ko") || a.minNumber - b.minNumber;
+      return compareKo(a.title, b.title) || a.minNumber - b.minNumber;
     });
 
     return groups.map((g) => g.card);

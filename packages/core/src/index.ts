@@ -13,6 +13,7 @@ export * from "./types";
 // 순수 로직 (플랫폼/클라이언트 비의존)
 export * from "./hangul";
 export * from "./format";
+export * from "./collate";
 export * from "./comment-constraints";
 export * from "./comments";
 export * from "./chat";

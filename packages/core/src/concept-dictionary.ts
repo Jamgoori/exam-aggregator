@@ -14,6 +14,7 @@
 // 조용히 "기타"로 뭉치지 않고 미매칭으로 남긴다 — 뭉치는 순간 진단이 죽는다.
 
 import { conceptKeyOf } from "./concept-key";
+import { compareKo } from "./collate";
 
 // 별칭 비교용 정규화. 표기 흔들림 중 "같은 글자인데 사이가 다른" 것만 지운다.
 // 의미 있는 절단(꼬리말·파생 접미사)은 하지 않는다 — 그건 concept-key.ts 의 일이고,
@@ -124,7 +125,7 @@ export function buildConceptDrafts(titles: TitleCount[]): ConceptDraft[] {
     draft.name = draft.aliases[0].title;
   }
 
-  return [...groups.values()].sort((a, b) => b.count - a.count || a.key.localeCompare(b.key, "ko"));
+  return [...groups.values()].sort((a, b) => b.count - a.count || compareKo(a.key, b.key));
 }
 
 // ── 검증 ─────────────────────────────────────────────────────────────────────

@@ -60,11 +60,15 @@ export function toChoseongOnly(text: string) {
   return result;
 }
 
+// 멤버십 검사 전용 집합. isChoseongQuery 는 검색어 글자마다 "이게 자음인가"를 묻는데,
+// 배열이면 그때마다 14개를 처음부터 훑는다. 목록 자체는 상수라 한 번만 만들면 된다.
+const CONSONANT_SET: ReadonlySet<string> = new Set(CONSONANTS);
+
 // 쿼리가 자음만으로 이루어져 있으면(예: "ㄱㅇ") 초성 검색으로 취급한다.
 export function isChoseongQuery(text: string) {
   const stripped = text.replace(/\s/g, "");
   if (!stripped) return false;
-  return [...stripped].every((ch) => (CONSONANTS as readonly string[]).includes(ch));
+  return [...stripped].every((ch) => CONSONANT_SET.has(ch));
 }
 
 export function matchesChoseong(title: string, query: string) {

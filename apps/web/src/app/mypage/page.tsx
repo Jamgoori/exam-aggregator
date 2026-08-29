@@ -29,6 +29,7 @@ import { getAttendanceSummary } from "@/lib/attendance";
 import { findUnfinishedDueSession } from "@/lib/review-session";
 import { getReviewSubjectOptions } from "@/lib/review-preferences";
 import {
+  compareKo,
   isPremiumMembership,
   membershipDaysLeft,
   trialDaysLeft,
@@ -608,7 +609,7 @@ function WrongNotesTab({
   // 문항 해설과 오늘의 복습(간격 반복)뿐이고, 그건 아래 잠금 카드가 알린다.
   if (!premium) {
     const freeSubjects = [...unresolvedBySubject.values()].sort(
-      (a, b) => b.unresolved - a.unresolved || a.name.localeCompare(b.name, "ko"),
+      (a, b) => b.unresolved - a.unresolved || compareKo(a.name, b.name),
     );
     return (
       <section id="wrong-notes" className="flex scroll-mt-4 flex-col gap-4">

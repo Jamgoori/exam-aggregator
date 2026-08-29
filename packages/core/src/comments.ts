@@ -1,4 +1,5 @@
 import type { Comment } from "./types";
+import { compareIso } from "./collate";
 
 // 댓글 스레드 — 웹·모바일 공유.
 //
@@ -44,7 +45,7 @@ export function buildCommentTree(comments: Comment[]): CommentNode[] {
   assign(roots, 1);
 
   const byCreated = (a: CommentNode, b: CommentNode) =>
-    a.created_at.localeCompare(b.created_at);
+    compareIso(a.created_at, b.created_at);
   const sortDeep = (nodes: CommentNode[]) => {
     nodes.sort(byCreated);
     for (const n of nodes) sortDeep(n.replies);
