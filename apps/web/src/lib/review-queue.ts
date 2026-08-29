@@ -5,7 +5,8 @@ import {
   buildDueQueue,
   conceptKeyOf,
   countBySubject,
-  duePriorityScore,
+  sortByPriority,
+  byPendingPriority,
   forecastDueByDay,
   srsDayIndex,
   newItemsForLimit,
@@ -419,16 +420,15 @@ export async function collectDueCandidates(
   {
     const window = Math.max(60, dailyLimit * CONCEPT_WINDOW_MULTIPLIER);
     const nowIso = now.toISOString();
-    const topDue = candidates
-      .filter((c) => c.dueAt <= nowIso)
-      .sort((a, b) => duePriorityScore(b, now) - duePriorityScore(a, now))
-      .slice(0, window);
-    const topPending = [...pending]
-      .sort(
-        (a, b) =>
-          b.wrongCount - a.wrongCount || (a.lastAnsweredAt < b.lastAnsweredAt ? -1 : 1),
-      )
-      .slice(0, window);
+    // 정렬 규칙은 core 것을 그대로 쓴다. 여기서 다시 적으면 창의 순서와 실제 큐의
+    // 순서가 갈려서, 창 경계에 걸린 문항의 개념 키가 붙기도 하고 안 붙기도 한다.
+    // sortByPriority 는 점수를 후보마다 한 번만 계산한다 — 예전에는 비교자 안에서
+    // duePriorityScore 를 불러 dueAt 의 Date 파싱이 비교 횟수만큼 반복됐다.
+    const topDue = sortByPriority(
+      candidates.filter((c) => c.dueAt <= nowIso),
+      now,
+    ).slice(0, window);
+    const topPending = [...pending].sort(byPendingPriority).slice(0, window);
 
     const questionIdOf = (paperId: string, questionNumber: number) =>
       mediaByPaper.get(paperId)?.get(questionNumber)?.questionId ?? null;

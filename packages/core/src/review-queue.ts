@@ -125,7 +125,11 @@ function byDueTiebreak(a: DueCandidate, b: DueCandidate): number {
 // 4만 번을 넘는다. 실측으로 4.16ms → 0.51ms (8.2배).
 //
 // 순서는 예전과 정확히 같다 — 점수 계산식도, 동점 처리도 그대로다.
-function sortByPriority(items: DueCandidate[], now: Date): DueCandidate[] {
+//
+// export 하는 이유: 조회 계층(apps/web/src/lib/review-queue.ts)도 "우선순위 상위 N개"를
+// 따로 뽑는 자리가 있는데, 거기서 정렬 규칙을 다시 적으면 두 순서가 갈린다. 큐를
+// 만드는 순서와 그 큐를 근사하는 창의 순서는 같아야 한다.
+export function sortByPriority(items: DueCandidate[], now: Date): DueCandidate[] {
   const todayIndex = srsDayIndex(now);
   const decorated = items.map((c) => ({ c, score: priorityScoreOn(todayIndex, c) }));
   decorated.sort((x, y) => y.score - x.score || byDueTiebreak(x.c, y.c));
@@ -302,7 +306,8 @@ function interleaveBySubject(items: DueCandidate[]): DueCandidate[] {
 }
 
 // 대기 풀에서 먼저 승격할 순서. 자주 틀린 것 먼저, 같으면 오래 안 본 것 먼저.
-function byPendingPriority(a: PendingCandidate, b: PendingCandidate): number {
+// (sortByPriority 와 같은 이유로 export 한다 — 조회 계층이 같은 순서를 써야 한다.)
+export function byPendingPriority(a: PendingCandidate, b: PendingCandidate): number {
   if (a.wrongCount !== b.wrongCount) return b.wrongCount - a.wrongCount;
   if (a.lastAnsweredAt !== b.lastAnsweredAt) return a.lastAnsweredAt < b.lastAnsweredAt ? -1 : 1;
   return a.paperId === b.paperId
