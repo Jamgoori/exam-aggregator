@@ -133,17 +133,30 @@ export async function fetchWrongAnswerRows(
 }
 
 const ATTEMPT_SELECT =
-  "id, created_at, score, total_questions, exam_papers(id, title, level, round, track, choice_count, subjects(*), exam_types(*))";
+  "id, created_at, score, total_questions, exam_papers(id, title, level, round, track, choice_count, subject_id, subjects(*), exam_types(*))";
 
+// 한 과목만 볼 때는 임베드를 inner 로 바꿔 그 과목 응시만 받는다. 문제지가 지워진
+// 응시는 어차피 집계에서 빠지므로(buildWrongNoteGroups) inner 로 미리 거르는 것이
+// 결과를 바꾸지 않는다.
+const ATTEMPT_SELECT_BY_SUBJECT = ATTEMPT_SELECT.replace("exam_papers(", "exam_papers!inner(");
+
+// 과목 오답노트가 쓰는 집계. subjectId 를 주면 그 과목 응시만 조회한다.
+//
+// 예전에는 언제나 전 과목을 다 만든 뒤 호출부가 .find 로 한 과목만 꺼내 썼다. 이
+// 함수의 유일한 호출부(getSubjectWrongNoteOverview)가 늘 한 과목만 쓰므로, 5~10과목을
+// 준비하는 사용자에게는 응시·오답 행·문항 상태·마크가 전부 5~10배로 오간 셈이다.
+// 조회 뒤의 그룹 조립도 화면에 안 쓰는 과목까지 다 돌았다.
 export async function getWrongNoteGroups(
   supabase: Supabase,
   userId: string,
+  subjectId?: string,
 ): Promise<WrongNoteSubjectGroup[]> {
-  const { data: attemptRows } = await supabase
+  let query = supabase
     .from("cbt_attempts")
-    .select(ATTEMPT_SELECT)
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
+    .select(subjectId ? ATTEMPT_SELECT_BY_SUBJECT : ATTEMPT_SELECT)
+    .eq("user_id", userId);
+  if (subjectId) query = query.eq("exam_papers.subject_id", subjectId);
+  const { data: attemptRows } = await query.order("created_at", { ascending: false });
 
   const attempts = (attemptRows ?? []) as unknown as WrongNoteAttemptRow[];
   if (attempts.length === 0) return [];
@@ -154,7 +167,9 @@ export async function getWrongNoteGroups(
       supabase,
       attempts.map((a) => a.id),
     ),
-    fetchWrongNoteMarks(supabase, userId),
+    // 마크도 여기 걸린 문제지로 좁힌다. 삭제 마크 키는 `${paperId}#${번호}` 라
+    // 이 문제지들 밖의 마크는 어차피 한 건도 안 걸린다 — 결과는 같고 전송만 준다.
+    fetchWrongNoteMarks(supabase, userId, paperIds),
     fetchQuestionStatusMap(supabase, userId, paperIds),
   ]);
   return buildWrongNoteGroups(attempts, wrongRows, marks.deleted, statusOverrides);
@@ -606,9 +621,8 @@ export async function getSubjectWrongNoteOverview(
   if (!subjectRow) return null;
   const subject = subjectRow as Subject;
 
-  const groups = await getWrongNoteGroups(supabase, userId);
-  const group = groups.find((g) => g.subject.id === subject.id);
-  return { subject, papers: group?.papers ?? [] };
+  const groups = await getWrongNoteGroups(supabase, userId, subject.id);
+  return { subject, papers: groups[0]?.papers ?? [] };
 }
 
 // ── 과목 문항 모아보기 (과목 오답을 문제지 경계 없이 문항 단위로 펼침) ──────────

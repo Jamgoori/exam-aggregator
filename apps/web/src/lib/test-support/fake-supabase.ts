@@ -7,7 +7,7 @@
 // 이미지까지 갖춘 fixture가 필요해 비용이 커진다.
 //
 // 그래서 PostgREST 빌더의 "이 코드가 실제로 쓰는 부분만" 흉내 낸다:
-//   .select(cols, { count, head }) · .eq · .neq · .is · .not(col,"is",null)
+//   .select(cols, { count, head }) · .eq(임베드 점표기 포함) · .neq · .is · .not(col,"is",null)
 //   .gt · .gte · .lt · .lte · .in · .order · .limit · .range · .maybeSingle
 //   .update(...)  · storage.from(...).getPublicUrl(...) · .rpc(name, args)
 //
@@ -62,7 +62,7 @@ class Query {
   }
 
   eq(column: string, value: unknown): this {
-    this.filters.push((r) => r[column] === value);
+    this.filters.push((r) => valueAt(r, column) === value);
     return this;
   }
 
@@ -176,6 +176,21 @@ class Query {
     }
     return Promise.resolve(result).then(onfulfilled, onrejected);
   }
+}
+
+// PostgREST 의 임베드 필터(`exam_papers.subject_id=eq.X`)를 흉내 낸다. 점이 있으면
+// 중첩 객체를 따라 내려간다 — 임베드가 배열이면 한 항목이라도 맞으면 통과시키는
+// 대신 첫 항목만 본다(이 레포의 임베드는 전부 1:1 이다).
+function valueAt(row: Row, column: string): unknown {
+  if (!column.includes(".")) return row[column];
+  let cur: unknown = row;
+  for (const part of column.split(".")) {
+    if (cur == null) return undefined;
+    if (Array.isArray(cur)) cur = cur[0];
+    if (cur == null || typeof cur !== "object") return undefined;
+    cur = (cur as Row)[part];
+  }
+  return cur;
 }
 
 function compare(a: unknown, b: string | number | unknown): number {
