@@ -44,3 +44,17 @@ export function checkChatBurst(recentCount: number): ChatGuardResult {
   }
   return { ok: true };
 }
+
+// ── 채팅 기록 초기화(관리자) ──────────────────────────────────────────────────
+//
+// 채팅방 전체 비우기는 되돌릴 수 없고 모든 사용자에게 즉시 보인다. 버튼 하나로
+// 실수하지 않도록 확인 문구를 그대로 입력하게 하고, 그 판정을 여기 순수 함수로 둔다
+// (도배 판정과 같은 이유 — 서버 액션은 DB 만 만지고 규칙은 여기 하나에 모은다).
+export const CHAT_CLEAR_CONFIRM_TEXT = "채팅 초기화";
+
+export function checkChatClearConfirmation(input: string): ChatGuardResult {
+  if (input.trim() !== CHAT_CLEAR_CONFIRM_TEXT) {
+    return { ok: false, error: `확인 문구 "${CHAT_CLEAR_CONFIRM_TEXT}"를 그대로 입력해주세요.` };
+  }
+  return { ok: true };
+}

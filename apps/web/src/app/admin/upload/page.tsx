@@ -59,6 +59,9 @@ export default async function UploadPage() {
       >
         AI 약점 진단 초기화하기 →
       </Link>
+      <Link href="/admin/chat" className="text-sm text-blue-600 underline dark:text-blue-400">
+        채팅 기록 초기화하기 →
+      </Link>
       <UploadForm
         subjects={(subjects ?? []) as Subject[]}
         examTypes={(examTypes ?? []) as ExamType[]}

@@ -110,6 +110,18 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
           setMessages((prev) => appendUnique(prev ?? [], rowToMessage(row)));
         },
       )
+      // 관리자가 기록을 지우면(admin/chat) 열어 둔 채팅창에서도 바로 사라지게 한다 —
+      // 지운 이유가 비방·개인정보일 때 새로고침할 때까지 남아 있으면 지운 의미가 없다.
+      // DELETE 페이로드에는 replica identity 기본값 탓에 기본키만 담겨 온다.
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "chat_messages" },
+        (payload) => {
+          const deletedId = (payload.old as { id?: string }).id;
+          if (!deletedId) return;
+          setMessages((prev) => (prev ? prev.filter((m) => m.id !== deletedId) : prev));
+        },
+      )
       .subscribe();
 
     return () => {
