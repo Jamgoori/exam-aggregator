@@ -1,11 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { BarChart3, Lightbulb, PenLine } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { isPremium } from "@/lib/membership";
-import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 import {
   DIAGNOSIS_CYCLE_DAYS,
   DIAGNOSIS_MIN_ATTEMPTS,
@@ -39,13 +37,6 @@ export default async function DiagnosisAboutPage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  // 개발 중 임시 게이트: 기능 자체가 이 계정에만 열려 있으므로 소개 페이지도 같이
-  // 닫아 둔다. 아직 아무도 쓸 수 없는 기능을 광고하면 문의만 쌓인다.
-  // 정식 오픈 시 이 블록을 지우면 (로그인 없이도 보이는) 공개 소개 페이지가 된다.
-  if (!isDiagnosisDevAllowed(user?.email)) {
-    redirect("/membership");
-  }
 
   const [premium, eligibility, weekly] = user
     ? await Promise.all([

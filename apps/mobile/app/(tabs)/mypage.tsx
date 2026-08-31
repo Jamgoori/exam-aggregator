@@ -30,7 +30,6 @@ import { AttendanceCard } from "../../src/components/attendance-card";
 import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
 import { useAuth } from "../../src/providers/auth-provider";
 import { useColors, type Colors } from "../../src/theme/colors";
-import { isDiagnosisDevAllowed } from "../../src/lib/diagnosis-dev-gate";
 
 type Tab = "history" | "bookmarks" | "wrong";
 
@@ -264,21 +263,19 @@ export default function MyPageScreen() {
         >
           <Text style={{ fontWeight: "600" }}>지난 기록</Text>
         </Pressable>
-        {isDiagnosisDevAllowed(session?.user.email) && (
-          <Pressable
-            onPress={() => router.push("/diagnosis")}
-            style={{
-              flex: 1,
-              borderWidth: 1,
-              borderColor: colors.primary,
-              borderRadius: 10,
-              paddingVertical: 12,
-              alignItems: "center",
-            }}
-          >
-            <Text style={{ color: colors.primary, fontWeight: "600" }}>AI 진단</Text>
-          </Pressable>
-        )}
+        <Pressable
+          onPress={() => router.push("/diagnosis")}
+          style={{
+            flex: 1,
+            borderWidth: 1,
+            borderColor: colors.primary,
+            borderRadius: 10,
+            paddingVertical: 12,
+            alignItems: "center",
+          }}
+        >
+          <Text style={{ color: colors.primary, fontWeight: "600" }}>AI 진단</Text>
+        </Pressable>
       </View>
     </View>
   );

@@ -1,5 +1,6 @@
 import {
   BookOpenCheck,
+  BrainCircuit,
   CalendarCheck,
   Crown,
   FileStack,
@@ -82,6 +83,16 @@ export const PRIMARY_NAV: NavItem[] = [
         },
       ]
     : []),
+  {
+    href: "/diagnosis",
+    label: "AI 약점 진단",
+    icon: BrainCircuit,
+    // 소개 페이지(/diagnosis)로 보낸다 — 결과 화면(/mypage/diagnosis)은 로그인·
+    // 오답이 쌓여 있어야 뜻이 있는 자리라, 처음 누른 사람에게는 "이게 뭘 해주는
+    // 기능인지"가 먼저 닿아야 한다. 두 경로 다 이 항목으로 활성 표시한다.
+    match: (p) => p.startsWith("/diagnosis") || p.startsWith("/mypage/diagnosis"),
+    hint: "왜 틀리는지 개념 단위로 분석",
+  },
   {
     href: "/membership",
     label: "멤버십",
