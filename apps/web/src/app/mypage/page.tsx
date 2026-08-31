@@ -30,6 +30,8 @@ import { findUnfinishedDueSession } from "@/lib/review-session";
 import { getReviewSubjectOptions } from "@/lib/review-preferences";
 import {
   isPremiumMembership,
+  isFreeForAll,
+  FREE_UNTIL_LABEL,
   membershipDaysLeft,
   trialDaysLeft,
   DUE_QUEUE_LIMIT,
@@ -125,11 +127,15 @@ const MEMBERSHIP_SOON_DAYS = 7;
 function MembershipTile({
   admin,
   premium,
+  freeForAll,
   daysLeft,
   expiryLabel,
 }: {
   admin: boolean;
   premium: boolean;
+  // 전면 무료 이벤트 기간인지. 이때는 남은 일수를 세지 않으므로(core 의 expiryDaysLeft)
+  // daysLeft 가 언제나 null 이라, 아무 말도 안 하면 "무제한"만 덩그러니 남는다.
+  freeForAll: boolean;
   // 며칠 남았는지(출처 무관). 무기한이거나 무료 회원이면 null.
   daysLeft: number | null;
   // "9월 29일" — 페이지 본문에서 이미 만들어 넘긴다(위 formatExpiry 주석 참고).
@@ -144,6 +150,8 @@ function MembershipTile({
   // 아니기 때문이다 — 출석으로 늘리는 길은 출석 탭·홈 팝업이 이미 안내한다.
   const { value, note }: { value: string; note: string | null } = admin
     ? { value: "무제한", note: "관리자 계정" }
+    : freeForAll
+      ? { value: "전체 무료", note: `${FREE_UNTIL_LABEL}까지` }
     : premium && daysLeft != null && expiryLabel
       ? { value: `${daysLeft}일`, note: `${expiryLabel}까지` }
       : premium
@@ -398,6 +406,7 @@ export default async function MyPage({
         <MembershipTile
           admin={admin}
           premium={premium}
+          freeForAll={isFreeForAll(now)}
           daysLeft={daysLeft}
           expiryLabel={membershipExpiry}
         />

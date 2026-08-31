@@ -10,6 +10,8 @@ import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 import {
   BASE_MONTHLY_PRICE,
   FREE_EXPLANATION_DAILY_PAPERS,
+  FREE_UNTIL_LABEL,
+  isFreeForAll,
   TRIAL_DAYS,
   allPlanPricing,
   formatWon,
@@ -48,6 +50,10 @@ export default async function MembershipPage({
   const [membership, admin] = user
     ? await Promise.all([getMembership(supabase, user.id), isAdminUser(supabase)])
     : [null, false];
+  // 전면 무료 이벤트 기간인지. 기간 중에는 로그인만 하면 누구나 프리미엄이라
+  // (isPremiumMembership 이 먼저 본다) 화면도 "결제하세요"가 아니라 "지금은 다
+  // 열려 있다"를 먼저 말해야 한다.
+  const freeForAll = isFreeForAll();
   const premium = admin || isPremiumMembership(membership);
   const daysLeft = admin ? null : trialDaysLeft(membership);
   // 출석 보상으로 열린 기간은 "체험"이 아니다 — 따로 세어 따로 말한다.
@@ -77,6 +83,7 @@ export default async function MembershipPage({
           <span className="text-blue-600 dark:text-blue-400">두 번은 안 틀리게</span>
         </h1>
         <CurrentStatus
+          freeForAll={freeForAll}
           premium={premium}
           admin={admin}
           daysLeft={daysLeft}
@@ -85,10 +92,41 @@ export default async function MembershipPage({
         />
       </header>
 
+      {/* 전면 무료 이벤트 배너. 날짜는 core 의 FREE_UNTIL_LABEL 하나에서 온다 —
+          여기에 직접 적으면 이벤트를 끝낼 때 상수만 바뀌고 이 문구는 옛 날짜를
+          계속 광고하게 된다. 가격표보다 위에 두는 건, 지금 이 페이지에 온 사람이
+          가장 먼저 알아야 할 사실이 "안 내도 된다"이기 때문이다. */}
+      {freeForAll && (
+        <section className="relative flex flex-col gap-2 overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 px-6 py-6 text-white shadow-lg shadow-indigo-500/20">
+          <span className="w-fit rounded-full bg-white/20 px-2.5 py-1 text-[11px] font-extrabold tracking-wide backdrop-blur-sm">
+            전면 무료 이벤트
+          </span>
+          <p className="break-keep text-2xl font-extrabold leading-tight sm:text-3xl">
+            {FREE_UNTIL_LABEL}까지
+            <br />
+            멤버십 전 기능 무료
+          </p>
+          <p className="break-keep text-sm leading-6 text-white/85">
+            결제도, 카드 등록도 없어요. 로그인만 하면 AI 약점 진단 · 오답노트 · 해설까지
+            전부 열립니다 &mdash; 이미 가입하신 분들도 자동으로 적용돼요.
+          </p>
+          <p className="break-keep text-xs leading-5 text-white/70">
+            아래 요금제는 이벤트가 끝난 뒤에 적용될 가격이에요. 지금은 결제하지 않으셔도
+            모두 이용하실 수 있어요.
+          </p>
+        </section>
+      )}
+
       {/* 요금제 */}
       <section className="flex flex-col gap-4">
         <SectionTitle>요금제</SectionTitle>
-        <MembershipPlans alreadyPremium={premium} paymentEnabled={paymentEnabled} />
+        {/* "연장하기"는 이미 멤버십이 있는 사람에게만 맞는 말이다. 로그인하지 않은
+            방문자도 전면 무료 기간에는 premium 으로 판정되므로(isPremiumMembership),
+            로그인 여부를 함께 봐야 처음 온 사람에게 "연장하기"가 뜨지 않는다. */}
+        <MembershipPlans
+          alreadyPremium={!!user && premium}
+          paymentEnabled={paymentEnabled}
+        />
       </section>
 
       {/* 무료 vs 멤버십 */}
@@ -97,27 +135,29 @@ export default async function MembershipPage({
         <FeatureTable rows={featureRowsFor(user?.email)} />
       </section>
 
-      {/* 체험 안내 — 기간은 core 의 TRIAL_DAYS 하나에서 온다. 이벤트가 끝나 상수를
-          되돌리면 이 문구도 같이 바뀐다(개월 수를 여기 적어두면 상수만 바뀌고 화면은
-          옛 기간을 계속 광고하게 된다). */}
-      <section className="flex flex-col gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-5 py-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
-        <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-emerald-900 dark:text-emerald-200">
-          <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-extrabold text-white">
-            이벤트
-          </span>
-          지금 시작하면 {Math.round(TRIAL_DAYS / 30)}달 무료
-        </p>
-        <p className="break-keep text-sm leading-6 text-emerald-800/90 dark:text-emerald-300/80">
-          이벤트 기간에 가입하시면 멤버십 전체를 {TRIAL_DAYS}일 동안 무료로 드려요.
-          가입하는 순간부터 바로 적용돼요 &mdash; 카드 등록 없고, 기간이 끝나도 자동으로
-          결제되지 않아요.
-        </p>
-      </section>
+      {/* 예전 체험(60일) 안내 — 전면 무료 이벤트가 끝나면 이 자리로 돌아온다.
+          기간은 core 의 TRIAL_DAYS 하나에서 온다(개월 수를 여기 적어두면 상수만
+          바뀌고 화면은 옛 기간을 계속 광고하게 된다). */}
+      {!freeForAll && (
+        <section className="flex flex-col gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/60 px-5 py-4 dark:border-emerald-900/60 dark:bg-emerald-950/20">
+          <p className="flex flex-wrap items-center gap-2 text-sm font-bold text-emerald-900 dark:text-emerald-200">
+            <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-extrabold text-white">
+              이벤트
+            </span>
+            지금 시작하면 {Math.round(TRIAL_DAYS / 30)}달 무료
+          </p>
+          <p className="break-keep text-sm leading-6 text-emerald-800/90 dark:text-emerald-300/80">
+            이벤트 기간에 가입하시면 멤버십 전체를 {TRIAL_DAYS}일 동안 무료로 드려요.
+            가입하는 순간부터 바로 적용돼요 &mdash; 카드 등록 없고, 기간이 끝나도 자동으로
+            결제되지 않아요.
+          </p>
+        </section>
+      )}
 
       {/* 자주 묻는 질문 */}
       <section className="flex flex-col gap-4">
         <SectionTitle>자주 묻는 질문</SectionTitle>
-        <Faq paymentEnabled={paymentEnabled} />
+        <Faq paymentEnabled={paymentEnabled} freeForAll={freeForAll} />
       </section>
 
       {user && (
@@ -151,12 +191,14 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 // 로그인한 사람에게 지금 자기 상태를 한 줄로. 이게 없으면 이미 결제한 사람이
 // 결제 페이지에서 자기가 회원인지 아닌지 알 수 없다.
 function CurrentStatus({
+  freeForAll,
   premium,
   admin,
   daysLeft,
   rewardDaysLeft,
   loggedIn,
 }: {
+  freeForAll: boolean;
   premium: boolean;
   admin: boolean;
   daysLeft: number | null;
@@ -181,6 +223,11 @@ function CurrentStatus({
   // 관리자는 멤버십과 무관하게 유료 기능을 쓴다 — "체험 N일 남음"을 보여주면 거짓말이 된다.
   if (admin) {
     return <StatusPill tone="blue">관리자 계정 · 모든 기능 이용 중</StatusPill>;
+  }
+  // 이벤트 기간에는 계정 상태를 따지지 않는다 — 체험을 이미 썼든 결제를 안 했든
+  // 지금 다 열려 있다. "N일 남음"을 띄우면 오히려 끊길 날을 걱정하게 만든다.
+  if (freeForAll) {
+    return <StatusPill tone="blue">전면 무료 기간 · 모든 기능 이용 중</StatusPill>;
   }
   if (premium && daysLeft != null) {
     return <StatusPill tone="blue">무료 체험 중 · {daysLeft}일 남음</StatusPill>;
@@ -340,8 +387,28 @@ function Cell({ value, highlight }: { value: string | boolean; highlight?: boole
 //
 // 첫 문답은 결제가 실제로 열렸는지에 따라 달라진다. 열린 뒤에도 "준비 중"이 남아
 // 있으면 결제한 사람이 자기 결제를 의심하게 된다.
-function faqItems(paymentEnabled: boolean): { q: string; a: React.ReactNode }[] {
+function faqItems(
+  paymentEnabled: boolean,
+  freeForAll: boolean,
+): { q: string; a: React.ReactNode }[] {
   return [
+  // 이벤트 기간에만 맨 앞에 둔다. 이 페이지에서 가장 많이 받을 질문이라
+  // 접혀 있더라도 첫 줄에 보여야 한다.
+  ...(freeForAll
+    ? [
+        {
+          q: `정말 ${FREE_UNTIL_LABEL}까지 다 무료인가요?`,
+          a: (
+            <>
+              네. 그 날까지는 <b>결제 없이 멤버십 전 기능</b>이 열려요 &mdash; AI 약점
+              진단, 오답노트 안에서 해설 보기, &ldquo;오늘의 복습&rdquo; 일정까지요.
+              이미 가입하신 분들도 따로 하실 일 없이 자동으로 적용됩니다. 카드 등록이
+              없으니 기간이 끝나도 자동으로 결제되지 않아요.
+            </>
+          ),
+        },
+      ]
+    : []),
   {
     q: "결제하면 바로 쓸 수 있나요?",
     a: paymentEnabled ? (
@@ -398,10 +465,16 @@ function faqItems(paymentEnabled: boolean): { q: string; a: React.ReactNode }[] 
   ];
 }
 
-function Faq({ paymentEnabled }: { paymentEnabled: boolean }) {
+function Faq({
+  paymentEnabled,
+  freeForAll,
+}: {
+  paymentEnabled: boolean;
+  freeForAll: boolean;
+}) {
   return (
     <div className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
-      {faqItems(paymentEnabled).map((item) => (
+      {faqItems(paymentEnabled, freeForAll).map((item) => (
         <details key={item.q} className="group py-3">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-bold text-zinc-800 dark:text-zinc-200">
             {item.q}

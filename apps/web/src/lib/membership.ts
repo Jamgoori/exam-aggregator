@@ -4,7 +4,7 @@ import {
   isPremiumMembership,
   isTrialUnstarted,
   membershipFromRow,
-  TRIAL_DAYS,
+  trialExpiresAt,
   type Membership,
 } from "@gongmoa/core";
 import type { createClient } from "@/lib/supabase/server";
@@ -86,7 +86,8 @@ export type MembershipRow = {
 export async function startTrialIfEligible(
   userId: string,
 ): Promise<MembershipRow | null> {
-  const expires = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  // 전면 무료 기간에는 그 종료일(FREE_UNTIL)까지, 끝난 뒤에는 예전처럼 60일.
+  const expires = trialExpiresAt();
 
   const { data } = await createAdminClient().rpc("start_trial_if_eligible", {
     p_user_id: userId,

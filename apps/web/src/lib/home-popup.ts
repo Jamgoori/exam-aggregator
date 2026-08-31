@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 
 // 홈 팝업 — 뜰 수 있는 안내를 한 판에 담아 좌우로 넘겨 보는 슬라이드.
 //
-// 홈에 뜰 수 있는 안내는 셋이다 — 개발 중 안내(beta-notice), 복습 유도(review-nudge),
-// 출석 이벤트 광고(attendance-promo). 예전에는 각자 자기 모달을 띄웠고, 조건이 겹치는
+// 홈에 뜰 수 있는 안내는 넷이다 — 전면 무료 이벤트(free-promo, 비회원 전용),
+// 개발 중 안내(beta-notice), 복습 유도(review-nudge), 출석 이벤트 광고(attendance-promo). 예전에는 각자 자기 모달을 띄웠고, 조건이 겹치는
 // 날에는 먼저 준비된 하나가 자리를 잡고 나머지는 조용히 물러났다. 겹쳐 뜨는 것보다야
 // 나았지만 물러난 안내는 그 방문에서 아예 닿지 못했고, 셋이 다 뜰 자격이 있는 날에는
 // 사용자가 세 번 방문해야 세 개를 다 보는 셈이었다.
@@ -37,6 +37,13 @@ export type HomePopupSlide = {
   onShown?: () => void;
   // 판 안에서 스크롤되는 본문.
   body: (controls: HomePopupControls) => ReactNode;
+  // 이 장의 머리가 짙은 색으로 꽉 차 있는지(전면 무료 이벤트의 히어로처럼). 판에
+  // 하나뿐인 닫기(X)가 그 위에 얹히므로, 켜져 있으면 X 를 반투명 칩으로 띄운다 —
+  // 흰 판 기준의 옅은 회색 아이콘은 짙은 색 위에서 거의 안 보인다.
+  darkHeader?: boolean;
+  // 판을 한 단계 넓게(sm 이상에서). 기본 폭은 글 읽기 좋은 24rem 인데, 이벤트 광고
+  // 처럼 한눈에 들어와야 하는 장은 그 폭에서 작아 보인다.
+  wide?: boolean;
   // 이 장이 잘리지 않으려면 판이 지켜야 하는 가로/세로 비율(선택). 비율이 고정된
   // 그림 한 장으로 된 장(출석 광고)이 쓴다 — 세로가 짧은 기기에서 판의 폭을 이
   // 비율만큼 함께 줄여야 그림이 판 밖으로 넘치지 않는다. 글로 된 장은 넘치면
@@ -49,10 +56,14 @@ export type HomePopupSlide = {
   footer?: (controls: HomePopupControls) => ReactNode;
 };
 
-// 자격 판정에 필요한, 서버만 아는 값들. 지금은 출석 광고가 어디로 보낼지(회원=출석
-// 현황 / 비회원=가입)뿐이다.
+// 자격 판정에 필요한, 서버만 아는 값들.
+//   attendanceHref — 출석 광고가 어디로 보낼지(회원=출석 현황 / 비회원=가입).
+//   signedIn       — 로그인했는지. 전면 무료 이벤트 광고가 비회원에게만 뜨는 데 쓴다
+//                    (이미 로그인한 사람에게는 이벤트가 이미 적용돼 있어서, 누를 것이
+//                    없는 광고가 다른 안내를 한 칸 뒤로 밀 뿐이다).
 export type HomePopupContext = {
   attendanceHref: string;
+  signedIn: boolean;
 };
 
 export type HomePopupSource = {

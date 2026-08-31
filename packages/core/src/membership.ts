@@ -7,6 +7,9 @@
 // 무료 기간은 계정당 한 번 주어지며 가입(첫 로그인) 순간부터 흐른다.
 //
 // 만료는 읽는 시점에 계산한다(크론 없음). expires_at이 지났으면 그 순간부터 free.
+//
+// 다만 지금은 **전면 무료 기간**(FREE_UNTIL)이다 — 그 시각까지는 위 규칙보다 앞서
+// 모두가 프리미엄으로 판정된다. 아래 isFreeForAll 주석 참고.
 
 // 출시 이벤트: 2달(60일) 무료. 이벤트가 끝나면 이 값을 되돌리면 되고, 그 시점에
 // 이미 시작된 무료 기간은 memberships.expires_at 에 날짜가 박혀 있어 영향받지 않는다
@@ -16,6 +19,39 @@
 // 고칠 것 — 한쪽만 고치면 웹으로 접속했을 때와 앱으로 접속했을 때 무료 기간이
 // 달라진다(무료 기간을 켜는 UPDATE 가 양쪽에 하나씩 있다).
 export const TRIAL_DAYS = 60;
+
+// 전면 무료 기간(2027-06-30 까지, KST). 이 기간에는 **계정 상태와 무관하게 모두**
+// 유료 기능을 쓴다 — 로그인만 하면 되고, 체험을 이미 소진했든 재가입자든 상관없다.
+// 판정은 isFreeForAll() 하나가 하고, isPremiumMembership 이 맨 앞에서 그걸 본다.
+//
+// 값은 "끝나는 순간"(경계 제외)이다. 6월 30일 하루를 통째로 쓰게 하려면 7월 1일
+// 0시(KST)가 되어야 한다 — 6월 30일 0시로 적으면 그날 아침에 이미 끊긴다.
+//
+// 기간이 끝나면 이 상수를 지우는 대신 과거 날짜로 두면 자동으로 예전(체험 60일)
+// 규칙으로 돌아간다. 그때 이미 부여된 memberships.expires_at 은 날짜가 박혀 있어
+// 영향받지 않는다(만료는 읽는 시점에 expires_at 으로만 판정한다).
+//
+// ⚠ 바꿀 때는 supabase/functions/_shared/membership.ts 의 FREE_UNTIL 도 반드시 함께
+// 고칠 것 — 한쪽만 고치면 웹은 열려 있는데 앱·Edge Function 은 잠기는 상태가 된다.
+export const FREE_UNTIL = "2027-07-01T00:00:00+09:00";
+
+// 화면에 쓰는 표기. "언제까지"를 각 화면이 따로 적으면 상수만 바꾸고 문구는 옛 날짜를
+// 계속 광고하게 된다.
+export const FREE_UNTIL_LABEL = "2027년 6월 30일";
+
+// 지금이 전면 무료 기간인가.
+export function isFreeForAll(now: Date = new Date()): boolean {
+  return now.getTime() < new Date(FREE_UNTIL).getTime();
+}
+
+// 무료 기간을 켤 때 박아 넣을 만료 시각. 전면 무료 기간에는 그 종료일까지 주고,
+// 기간이 지난 뒤에는 예전처럼 가입 시점 + TRIAL_DAYS 다. 둘 중 늦은 쪽을 쓰므로
+// 이벤트 막바지에 가입한 사람이 남은 며칠만 받고 끝나는 일이 없다.
+export function trialExpiresAt(now: Date = new Date()): Date {
+  const byDays = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  const promoEnd = new Date(FREE_UNTIL);
+  return promoEnd.getTime() > byDays.getTime() ? promoEnd : byDays;
+}
 
 // 무료 회원이 하루에 해설을 열어볼 수 있는 문제지 수. "문제지 3개"지 "3번"이 아니다 —
 // 오늘 이미 연 문제지를 다시 여는 건 카운트하지 않는다. 보던 해설을 다시 보려다
@@ -62,6 +98,21 @@ export function isPremiumMembership(
   membership: Membership | null | undefined,
   now: Date = new Date(),
 ): boolean {
+  // 전면 무료 기간에는 계정을 따지지 않는다. 행이 없는 사용자(트리거 이전 가입)나
+  // 체험을 이미 쓴 재가입자까지 한 번에 덮으려면 DB 값보다 먼저 봐야 한다.
+  if (isFreeForAll(now)) return true;
+  return hasOwnPremiumPeriod(membership, now);
+}
+
+// 계정 자체가 들고 있는 유효 기간이 살아 있는가 — 전면 무료 이벤트를 보지 않는다.
+// isPremiumMembership 은 이벤트 기간에 누구에게나 true 라, "이 사람이 원래부터 기간을
+// 갖고 있었나"를 물어야 하는 곳에서는 쓸 수 없다. 지금은 결제 계산(payment.ts)이 쓴다:
+// 이벤트 때문에 true 가 나오면 무료 회원의 결제가 "무기한 계정에 이어 붙이기"로
+// 오인돼 만료 없는 멤버십이 나간다.
+export function hasOwnPremiumPeriod(
+  membership: Membership | null | undefined,
+  now: Date = new Date(),
+): boolean {
   if (!membership || membership.tier !== "premium") return false;
   if (membership.expiresAt === null) return true;
   return new Date(membership.expiresAt).getTime() > now.getTime();
@@ -76,6 +127,10 @@ function expiryDaysLeft(
   now: Date,
   source?: MembershipSource,
 ): number | null {
+  // 전면 무료 기간에는 "N일 남음"을 말하지 않는다. 만료가 300일 뒤라 남은 일수를
+  // 세어봐야 의미가 없고, D-3 경고 같은 문구는 거짓 경보가 된다. 대신 화면은
+  // FREE_UNTIL_LABEL 로 "언제까지 무료인지"를 직접 말한다.
+  if (isFreeForAll(now)) return null;
   if (!membership) return null;
   if (source && membership.source !== source) return null;
   if (!membership.expiresAt) return null;

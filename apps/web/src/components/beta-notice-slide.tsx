@@ -8,7 +8,7 @@ import {
   MessageSquareWarning,
   Sparkles,
 } from "lucide-react";
-import { TRIAL_DAYS } from "@gongmoa/core";
+import { FREE_UNTIL_LABEL, isFreeForAll, TRIAL_DAYS } from "@gongmoa/core";
 import type { HomePopupControls, HomePopupSource } from "@/lib/home-popup";
 
 // 홈에 들어왔을 때 뜨는 "아직 개발 중" 안내. 로그인 여부는 보지 않는다 —
@@ -139,9 +139,21 @@ function BetaNoticeBody() {
             <Sparkles size={15} className="shrink-0" />
             멤버십 기능, 지금은 전부 무료예요
           </p>
+          {/* 전면 무료 이벤트 기간에는 "가입하면 60일"이 아니라 "언제까지 전부
+              무료"가 맞는 말이다. 날짜·기간 모두 core 상수에서 오므로 이벤트가
+              끝나면 아래 문장으로 저절로 돌아간다. */}
           <p className="mt-1.5 text-[13px] text-pretty text-emerald-800/90 dark:text-emerald-300/80">
-            가입하는 순간부터 <B tone="emerald">{TRIAL_DAYS}일</B> 동안 멤버십 전체가
-            열려요.
+            {isFreeForAll() ? (
+              <>
+                <B tone="emerald">{FREE_UNTIL_LABEL}까지</B> 멤버십 전체가 열려 있어요.
+                결제도 카드 등록도 없어요.
+              </>
+            ) : (
+              <>
+                가입하는 순간부터 <B tone="emerald">{TRIAL_DAYS}일</B> 동안 멤버십
+                전체가 열려요.
+              </>
+            )}
           </p>
           <ul className="mt-2.5 flex flex-col gap-1.5 text-[12.5px] text-emerald-900/85 dark:text-emerald-200/85">
             <Perk icon={<BookOpen size={13} />}>문제지 해설 제한 없이 보기</Perk>

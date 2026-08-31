@@ -5,6 +5,24 @@
 // 출시 이벤트: 2달(60일) 무료. packages/core/src/membership.ts 와 반드시 같은 값.
 export const TRIAL_DAYS = 60;
 
+// 전면 무료 기간(2027-06-30 까지, KST). 이 시각까지는 계정 상태와 무관하게 모두
+// 유료 기능을 쓴다 — 정본은 packages/core/src/membership.ts 의 FREE_UNTIL 이고,
+// **반드시 같은 값이어야 한다**. 한쪽만 고치면 웹은 열려 있는데 앱에서 부르는
+// Edge Function 만 잠긴다(화면을 여는 것과 API 를 여는 것은 다르다).
+export const FREE_UNTIL = "2027-07-01T00:00:00+09:00";
+
+export function isFreeForAll(now: Date = new Date()): boolean {
+  return now.getTime() < new Date(FREE_UNTIL).getTime();
+}
+
+// 무료 기간을 켤 때 박아 넣을 만료 시각. core 의 trialExpiresAt 포팅본 —
+// 전면 무료 기간에는 그 종료일까지, 끝난 뒤에는 가입 시점 + TRIAL_DAYS.
+export function trialExpiresAt(now: Date = new Date()): Date {
+  const byDays = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  const promoEnd = new Date(FREE_UNTIL);
+  return promoEnd.getTime() > byDays.getTime() ? promoEnd : byDays;
+}
+
 // 아직 무료 기간을 안 쓴 계정의 무료 기간을 켠다. 이벤트 안내가 "가입하는 순간부터"
 // 라서, 무언가를 하기 전에 이미 켜져 있어야 한다 — 아래 isPremiumUser 와 채점 경로
 // (status.ts)가 부른다.
@@ -17,7 +35,7 @@ export const TRIAL_DAYS = 60;
 // 실제로 켜졌을 때만 갱신된 행을 돌려준다(이미 켜졌거나·재가입자거나·실패면 null).
 // 호출부가 "정말 켜졌는지"를 지어내지 않고 DB 가 돌려준 값으로 판단하게 하려는 것.
 export async function startTrialIfEligible(admin: any, userId: string): Promise<any> {
-  const expires = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  const expires = trialExpiresAt();
 
   const { data } = await admin.rpc("start_trial_if_eligible", {
     p_user_id: userId,
@@ -45,6 +63,11 @@ export async function isPremiumUser(
   userId: string,
   email: string | null,
 ): Promise<boolean> {
+  // 전면 무료 기간에는 계정을 따지지 않는다 — 조회조차 하지 않고 연다. 체험을 이미
+  // 쓴 재가입자·행이 없는 옛 계정까지 웹과 똑같이 열려야 하기 때문이다
+  // (core 의 isPremiumMembership 과 같은 자리에 같은 검사가 있다).
+  if (isFreeForAll()) return true;
+
   // 관리자는 멤버십과 무관하게 유료 기능을 쓴다(검수·문의 대응). admins 는 email 이
   // 기본키인 화이트리스트라(웹의 is_admin() 과 같은 기준) service_role 로만 확인한다.
   if (email) {
