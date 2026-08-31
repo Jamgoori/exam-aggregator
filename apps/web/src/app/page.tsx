@@ -88,16 +88,22 @@ export default async function Home({
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
-      {/* 홈에 뜰 수 있는 안내(개발 중 안내·복습 유도·출석 이벤트 광고)를 한 판에 담아
+      {/* 홈에 뜰 수 있는 안내(전면 무료 이벤트·개발 중 안내·복습 유도·출석 이벤트
+          광고)를 한 판에 담아
           좌우로 넘겨 보는 슬라이드. 판을 띄울지, 어떤 장이 실릴지는 전부 마운트된 뒤에
           정한다 — 복습 요약처럼 무거운 조회를 홈 서버 렌더에 끼워 넣으면 팝업을 볼 일
           없는 사람까지 매번 그 값을 치른다. 로그인 여부로 미리 걸러내지도 않는다:
           개발 중 안내와 출석 광고는 비회원에게 더 필요하고(가입할 이유 자체다), 복습
           유도는 서버 액션이 비회원에게 빈 결과를 돌려주므로 저절로 빠진다.
-          출석 광고가 가는 곳만 갈린다 — 회원은 출석 현황, 비회원은 가입(로그인 화면으로
+          로그인 여부(signedIn)를 넘기는 건 전면 무료 이벤트 광고 하나 때문이다 —
+          그 장이 파는 것은 가입이라, 이미 로그인한 사람에게는 누를 것이 없다.
+          출석 광고가 가는 곳도 갈린다 — 회원은 출석 현황, 비회원은 가입(로그인 화면으로
           보내면 계정이 없는 사람이 막다른 길을 만난다).
           장을 싣고 넘기고 기록하는 규칙은 lib/home-popup.ts 참고. */}
-      <HomePopupSlider attendanceHref={userId ? "/mypage?tab=attendance" : "/signup"} />
+      <HomePopupSlider
+        attendanceHref={userId ? "/mypage?tab=attendance" : "/signup"}
+        signedIn={!!userId}
+      />
       <HomeExamBrowser
         heroText={
           <>

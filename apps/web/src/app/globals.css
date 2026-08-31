@@ -313,11 +313,70 @@ button:not(:disabled) {
   animation: drawer-in 0.26s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* 전면 무료 이벤트 팝업(components/free-promo-slide.tsx)의 연출 두 가지.
+   이 장은 비회원에게 한 번 뜨고 마는 광고라, 첫 3초 안에 "이건 다르다"가 보여야
+   한다 — 그래서 다른 안내 팝업과 달리 움직임을 준다.
+
+   1) promo-shine: 날짜 줄 위를 빛이 한 번씩 훑고 지나간다. 글자 자체를 그러데이션
+      으로 칠하고(bg-clip-text) 그 배경 위치를 움직이는 방식이라, 덧씌운 판이 없어
+      글자를 선택하거나 화면낭독기가 읽는 데 영향을 주지 않는다.
+   2) promo-hero/promo-cta: 히어로는 색이 아주 느리게 흐르고, 가입 버튼은 주기적으로
+      숨을 쉬듯 밝아진다. 시선이 마지막에 버튼에 머물게 하려는 것.
+
+   셋 다 장식이라 모션 최소화에서는 통째로 끈다(아래 media 블록). */
+@keyframes promo-shine {
+  0%,
+  60% {
+    background-position: 180% center;
+  }
+  100% {
+    background-position: -60% center;
+  }
+}
+
+.promo-shine {
+  background-size: 220% auto;
+  animation: promo-shine 3.6s ease-in-out infinite;
+}
+
+@keyframes promo-hero-drift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.promo-hero {
+  background-size: 180% 180%;
+  animation: promo-hero-drift 9s ease-in-out infinite;
+}
+
+@keyframes promo-cta-pulse {
+  0%,
+  70%,
+  100% {
+    box-shadow: 0 10px 15px -3px rgb(99 102 241 / 0.3);
+  }
+  85% {
+    box-shadow: 0 10px 24px -2px rgb(147 51 234 / 0.55);
+  }
+}
+
+.promo-cta {
+  animation: promo-cta-pulse 2.8s ease-in-out infinite;
+}
+
 /* 모션 최소화를 켠 사용자에게는 등장 효과를 끈다. */
 @media (prefers-reduced-motion: reduce) {
   .animate-modal-fade-in,
   .animate-modal-panel-in,
-  .animate-drawer-in {
+  .animate-drawer-in,
+  .promo-shine,
+  .promo-hero,
+  .promo-cta {
     animation: none;
   }
 }

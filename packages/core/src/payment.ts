@@ -5,7 +5,7 @@
 // 두 계산이 다른 파일에 흩어져 있으면 환불했는데 멤버십이 안 끊기거나(손해) 남은
 // 체험 기간까지 같이 날아가는(항의) 쪽으로 조용히 어긋난다.
 
-import { isPremiumMembership, type Membership } from "./membership";
+import { hasOwnPremiumPeriod, type Membership } from "./membership";
 
 // payments.status 의 정본. DB 의 check 제약(supabase/schema.sql)과 반드시 같은 집합.
 //   ready    — 주문만 만들어 둔 상태. 결제창을 띄우기 전.
@@ -52,16 +52,21 @@ export function addMonths(base: Date, months: number): Date {
 //
 // 만료가 없는 프리미엄(expiresAt === null, 무기한)에는 손대지 않는다. 여기에 날짜를
 // 박으면 무기한이던 계정이 유한해진다 — 늘리려고 한 결제가 오히려 뺏는 셈이 된다.
+//
+// 판정은 isPremiumMembership 이 아니라 hasOwnPremiumPeriod 로 한다 — 전면 무료
+// 이벤트(FREE_UNTIL) 기간에는 모두가 프리미엄이라, 이벤트를 보는 판정을 쓰면
+// 무료 회원의 결제가 "무기한 계정"으로 읽혀 만료 없는 멤버십이 나간다. 여기서
+// 물어야 하는 건 "이 계정이 원래 들고 있던 기간"이다.
 export function grantedExpiry(
   membership: Membership | null | undefined,
   months: number,
   now: Date = new Date(),
 ): string | null {
-  if (membership && isPremiumMembership(membership, now) && membership.expiresAt === null) {
+  if (membership && hasOwnPremiumPeriod(membership, now) && membership.expiresAt === null) {
     return null;
   }
   const current =
-    membership && isPremiumMembership(membership, now) && membership.expiresAt
+    membership && hasOwnPremiumPeriod(membership, now) && membership.expiresAt
       ? new Date(membership.expiresAt)
       : null;
   // 이미 지난 만료일에 이어 붙이면 안 된다(isPremiumMembership 이 걸러주지만,

@@ -8,33 +8,47 @@ import type {
   HomePopupSlide,
   HomePopupSource,
 } from "@/lib/home-popup";
+import { freePromoSource } from "./free-promo-slide";
 import { betaNoticeSource } from "./beta-notice-slide";
 import { reviewNudgeSource } from "./review-nudge-slide";
 import { attendancePromoSource } from "./attendance-promo-slide";
 
 // 홈 팝업 슬라이드 판. 규칙과 배경은 lib/home-popup.ts 머리말 참고.
 
+// 전면 무료 이벤트는 비회원에게만 뜨고 복습 유도는 회원에게만 뜨므로 둘이 한 판에
+// 같이 실릴 일은 없다 — 순서상 복습 유도 뒤지만, 비회원에게는 언제나 첫 장이다.
+// 개발 중 안내보다 앞에 두는 건, 처음 온 사람이 "미완성이라 바뀐다"는 양해보다
+// "지금 전부 무료다"를 먼저 봐야 남을 이유가 생기기 때문이다.
+//
 // 앞에 둔 것이 앞 장이 된다. 복습 유도를 맨 앞에 두는 건 그 장이 유일하게 "오늘 할 일"
 // 이기 때문이다 — 그 장이 뜬 사람은 이미 로그인해서 문제를 풀어본 사람이라, 처음 온
 // 사람에게 필요한 개발 중 안내보다 이쪽이 먼저 닿아야 한다. 처음 온 사람에게는 애초에
 // 복습 장이 안 뜨므로 개발 중 안내가 자연히 첫 장이 된다.
-const SOURCES: HomePopupSource[] = [reviewNudgeSource, betaNoticeSource, attendancePromoSource];
+const SOURCES: HomePopupSource[] = [
+  reviewNudgeSource,
+  freePromoSource,
+  betaNoticeSource,
+  attendancePromoSource,
+];
 
 // 한 박자 늦게 띄운다. 화면이 그려지는 순간 같이 덮으면 사용자가 뭘 열었는지도 모르는
 // 채로 닫기부터 누른다 — 도착한 화면을 먼저 보게 두는 것.
 const OPEN_DELAY_MS = 500;
 
-// 판의 최대 폭. 비율이 고정된 장이 실렸을 때만 쓴다 — 24rem(=max-w-sm, 글 폭의 기본)
-// 을 넘지 않으면서, 세로가 짧은 화면에서는 그 장이 통째로 들어갈 만큼 좁아진다.
-// 6.5rem 은 버튼 띠와 점(dot) 띠가 가져가는 높이.
-const PANEL_MAX_WIDTH = (aspect: number) => `min(24rem, calc((92dvh - 6.5rem) * ${aspect}))`;
+// 판의 최대 폭. 비율이 고정된 장이 실렸을 때만 쓴다 — 기본 폭(24rem=max-w-sm, 넓은
+// 판이 실렸으면 28rem=max-w-md)을 넘지 않으면서, 세로가 짧은 화면에서는 그 장이
+// 통째로 들어갈 만큼 좁아진다. 6.5rem 은 버튼 띠와 점(dot) 띠가 가져가는 높이.
+// 기본 폭을 인자로 받는 이유: 클래스(max-w-*)와 이 인라인 값이 어긋나면 인라인이
+// 이겨서, 넓은 장과 그림 장이 한 판에 실린 순간 판이 조용히 좁아진다.
+const PANEL_MAX_WIDTH = (aspect: number, base: string) =>
+  `min(${base}, calc((92dvh - 6.5rem) * ${aspect}))`;
 
 // 손가락이 이만큼(판 너비의 18%, 최소 40px) 움직여야 장을 넘긴다. 너무 짧으면 세로로
 // 스크롤하려던 손짓에도 장이 넘어간다.
 const SWIPE_RATIO = 0.18;
 const SWIPE_MIN_PX = 40;
 
-export function HomePopupSlider({ attendanceHref }: HomePopupContext) {
+export function HomePopupSlider({ attendanceHref, signedIn }: HomePopupContext) {
   const [slides, setSlides] = useState<HomePopupSlide[]>([]);
   const [index, setIndex] = useState(0);
   const [open, setOpen] = useState(false);
@@ -50,7 +64,7 @@ export function HomePopupSlider({ attendanceHref }: HomePopupContext) {
 
   useEffect(() => {
     let alive = true;
-    const ctx = { attendanceHref };
+    const ctx = { attendanceHref, signedIn };
 
     // 후보들에게 동시에 물어본다. 저장소만 보는 쪽은 즉시 답하고, 서버를 보는
     // 복습 유도만 늦게 온다 — 그 하나 때문에 나머지를 붙잡아 두지 않는다.
@@ -87,7 +101,7 @@ export function HomePopupSlider({ attendanceHref }: HomePopupContext) {
       alive = false;
       window.clearTimeout(id);
     };
-  }, [attendanceHref]);
+  }, [attendanceHref, signedIn]);
 
   const close = useCallback(() => {
     closed.current = true;
@@ -154,6 +168,9 @@ function HomePopupPanel({
 
   const active = slides[index];
   const many = slides.length > 1;
+  // 한 장이라도 넓은 판을 요구하면 넓힌다 — 넘길 때마다 판 폭이 바뀌면 내용이 아니라
+  // 창이 움직이는 것처럼 보인다.
+  const wide = slides.some((s) => s.wide);
   // 비율을 요구하는 장이 여럿이면 제일 좁은(세로로 긴) 쪽에 맞춘다 — 하나라도 잘리면
   // 안 되기 때문이다. 요구하는 장이 없으면 폭을 제한하지 않는다.
   const aspect = slides.reduce<number | null>(
@@ -291,8 +308,10 @@ function HomePopupPanel({
           인디케이터가 맨 아래 버튼 위에 겹친다. 그만큼 아래를 비워 둔다. */}
       <div
         onClick={(e) => e.stopPropagation()}
-        style={aspect ? { maxWidth: PANEL_MAX_WIDTH(aspect) } : undefined}
-        className="animate-modal-panel-in relative flex max-h-[92dvh] w-full max-w-sm flex-col overflow-hidden rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl ring-1 ring-zinc-900/5 sm:rounded-2xl sm:pb-0 dark:bg-zinc-900 dark:ring-white/10"
+        style={aspect ? { maxWidth: PANEL_MAX_WIDTH(aspect, wide ? "28rem" : "24rem") } : undefined}
+        className={`animate-modal-panel-in relative flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl ring-1 ring-zinc-900/5 sm:rounded-2xl sm:pb-0 dark:bg-zinc-900 dark:ring-white/10 ${
+          wide ? "max-w-md" : "max-w-sm"
+        }`}
       >
         {/* 닫기(X)는 판에 하나만 둔다. 장마다 다른 자리에 있으면 넘길 때마다 X 가
             옮겨 다녀서, 닫으려던 사람이 매번 눈으로 다시 찾아야 한다.
@@ -304,7 +323,7 @@ function HomePopupPanel({
           onClick={onClose}
           aria-label="닫기"
           className={`absolute top-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
-            active?.aspect != null
+            active?.aspect != null || active?.darkHeader
               ? "bg-zinc-900/25 text-white backdrop-blur-sm hover:bg-zinc-900/45"
               : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
           }`}
