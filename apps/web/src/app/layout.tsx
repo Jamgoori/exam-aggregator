@@ -217,9 +217,15 @@ export default function RootLayout({
         {process.env.NEXT_PUBLIC_GA_ID && (
           <GoogleAnalytics gaId={process.env.NEXT_PUBLIC_GA_ID} />
         )}
-        {process.env.NEXT_PUBLIC_CLARITY_ID && (
-          <MicrosoftClarity projectId={process.env.NEXT_PUBLIC_CLARITY_ID} />
-        )}
+        {/* 프로덕션에서만 켠다. 로컬(.env.local 에 ID 가 있는 개발자 PC)과 프리뷰 배포도
+            같은 Clarity 프로젝트로 기록되던 탓에, 실제 데이터에 localhost:3000 주소와
+            개발 중 눌러본 클릭이 섞여 들어와 있었다. 표본이 하루 수십 세션인 규모에서는
+            이런 몇 건이 rage click·이탈률 순위를 통째로 뒤집는다. */}
+        {process.env.NEXT_PUBLIC_CLARITY_ID &&
+          process.env.NODE_ENV === "production" &&
+          (process.env.VERCEL_ENV ?? "production") === "production" && (
+            <MicrosoftClarity projectId={process.env.NEXT_PUBLIC_CLARITY_ID} />
+          )}
       </body>
     </html>
   );
