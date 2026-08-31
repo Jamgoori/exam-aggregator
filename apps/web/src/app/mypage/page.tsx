@@ -30,6 +30,7 @@ import { findUnfinishedDueSession } from "@/lib/review-session";
 import { getReviewSubjectOptions } from "@/lib/review-preferences";
 import {
   isPremiumMembership,
+  isAttendanceOpen,
   isFreeForAll,
   FREE_UNTIL_LABEL,
   membershipDaysLeft,
@@ -53,6 +54,13 @@ import {
 import type { ExamPaper, Subject } from "@gongmoa/core";
 
 const TAB_KEYS: MyPageTabKey[] = ["wrong-notes", "history", "attendance", "bookmarks"];
+
+// 지금 열 수 있는 탭인지. 출석체크는 전면 무료 이벤트 동안 닫혀 있어(core 의
+// isAttendanceOpen) ?tab=attendance 로 들어와도 기본 탭으로 떨어뜨린다 — 예전 링크나
+// 북마크로 들어온 사람이 빈 화면을 만나지 않게.
+function isOpenTab(key: MyPageTabKey): boolean {
+  return key !== "attendance" || isAttendanceOpen();
+}
 
 type MyAttempt = {
   id: string;
@@ -219,9 +227,10 @@ export default async function MyPage({
     );
   }
 
-  const initialTab: MyPageTabKey = TAB_KEYS.includes(tab as MyPageTabKey)
-    ? (tab as MyPageTabKey)
-    : "wrong-notes";
+  const initialTab: MyPageTabKey =
+    TAB_KEYS.includes(tab as MyPageTabKey) && isOpenTab(tab as MyPageTabKey)
+      ? (tab as MyPageTabKey)
+      : "wrong-notes";
 
   const nickname =
     (user.user_metadata?.nickname as string | undefined) ??
@@ -329,7 +338,10 @@ export default async function MyPage({
   const tier = streakTier(streakDays);
 
   // 월간 출석 카드. 본인 행만 읽으므로(select-own) 세션 클라이언트로 충분하다.
-  const attendance = await getAttendanceSummary(supabase, user.id);
+  // 기능이 닫혀 있으면 조회조차 하지 않는다 — 그릴 화면이 없다.
+  const attendance = isAttendanceOpen()
+    ? await getAttendanceSummary(supabase, user.id)
+    : null;
 
   // 오늘의 복습(멤버십 전용). 무료 사용자에게는 요약을 조회하지도 않는다 — 못 누르는
   // 숫자는 압박만 되고, 후보 수집이 이미지 조회까지 도는 무거운 작업이라 값이다.
@@ -414,7 +426,7 @@ export default async function MyPage({
 
       <MyPageTabs
         initialTab={initialTab}
-        attendance={<AttendanceCard {...attendance} />}
+        attendance={attendance && <AttendanceCard {...attendance} />}
         bookmarks={
           <BookmarksTab
             papers={bookmarkedPapers}

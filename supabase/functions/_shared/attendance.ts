@@ -8,6 +8,15 @@
 // 같은 처리).
 // deno-lint-ignore-file no-explicit-any
 
+import { isFreeForAll } from "./membership.ts";
+
+// packages/core/src/attendance.ts 의 isAttendanceOpen 과 반드시 같은 규칙.
+// 전면 무료 이벤트 동안에는 출석체크를 닫는다(보상이 멤버십 일수뿐인데 이미 모두
+// 열려 있어 줄 것이 없고, 그대로 두면 이벤트 종료일 뒤로 유료 기간이 쌓인다).
+export function isAttendanceOpen(now: Date = new Date()): boolean {
+  return !isFreeForAll(now);
+}
+
 // packages/core/src/attendance.ts 의 ATTENDANCE_MIN_QUESTIONS 와 반드시 같은 값.
 export const ATTENDANCE_MIN_QUESTIONS = 10;
 
@@ -57,6 +66,9 @@ export async function recordAttendance(
   userId: string,
   questionCount: number,
 ): Promise<void> {
+  // 닫혀 있는 동안에는 기록도 지급도 하지 않는다(웹 lib/attendance.ts 와 같은 자리에
+  // 같은 검사). 한쪽만 막으면 앱으로 푼 사람에게만 도장이 계속 찍힌다.
+  if (!isAttendanceOpen()) return;
   if (!Number.isFinite(questionCount) || questionCount <= 0) return;
 
   const now = new Date();

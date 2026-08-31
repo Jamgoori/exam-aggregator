@@ -37,14 +37,23 @@ export function MyPageTabs({
   wrongNotes,
 }: {
   initialTab: MyPageTabKey;
-  attendance: ReactNode;
+  // null 이면 출석체크 탭 자체를 그리지 않는다(전면 무료 이벤트 동안 기능이 닫혀
+  // 있다 — core 의 isAttendanceOpen). 탭만 남기고 안을 비우면 눌러도 아무것도 없는
+  // 칸이 되고, 라벨을 지우는 것보다 그게 더 고장처럼 보인다.
+  attendance: ReactNode | null;
   bookmarks: ReactNode;
   history: ReactNode;
   wrongNotes: ReactNode;
 }) {
+  // 지금 실제로 그릴 탭들. 출석체크가 닫혀 있으면(attendance === null) 목록에서 뺀다.
+  const tabs = TABS.filter((t) => t.key !== "attendance" || attendance !== null);
   const searchParams = useSearchParams();
-  // 주소에 tab 이 없으면(그냥 /mypage) 서버가 고른 기본 탭을 쓴다.
-  const tabFromUrl = toTabKey(searchParams.get("tab")) ?? initialTab;
+  // 주소에 tab 이 없으면(그냥 /mypage) 서버가 고른 기본 탭을 쓴다. 닫힌 탭을 가리키는
+  // 주소(?tab=attendance)로 들어온 경우에도 서버가 이미 기본 탭으로 떨어뜨려 보내지만,
+  // 클라이언트에서 주소만 바뀌는 경로가 있어 여기서도 한 번 더 거른다.
+  const urlTab = toTabKey(searchParams.get("tab"));
+  const tabFromUrl =
+    urlTab && tabs.some((t) => t.key === urlTab) ? urlTab : initialTab;
 
   const [activeTab, setActiveTab] = useState<MyPageTabKey>(tabFromUrl);
   // 렌더 중에 이전 값과 비교해 맞춘다(리액트가 권장하는 "prop 이 바뀌면 state 를
@@ -72,10 +81,10 @@ export function MyPageTabs({
 
   return (
     <>
-      {/* 모바일에서는 네 칸을 같은 너비로 나눠 한 줄에 넣고(줄바꿈·가로 스크롤 없음),
+      {/* 모바일에서는 칸을 같은 너비로 나눠 한 줄에 넣고(줄바꿈·가로 스크롤 없음),
           넓은 화면에서는 글자 길이만큼만 차지하는 알약 모양으로 돌아간다. */}
       <div className="flex gap-1 border-b border-zinc-200 pb-3 sm:gap-2 dark:border-zinc-700">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             type="button"
@@ -98,9 +107,11 @@ export function MyPageTabs({
       <div className={activeTab === "history" ? "contents" : "hidden"}>
         {history}
       </div>
-      <div className={activeTab === "attendance" ? "contents" : "hidden"}>
-        {attendance}
-      </div>
+      {attendance !== null && (
+        <div className={activeTab === "attendance" ? "contents" : "hidden"}>
+          {attendance}
+        </div>
+      )}
       <div className={activeTab === "bookmarks" ? "contents" : "hidden"}>
         {bookmarks}
       </div>

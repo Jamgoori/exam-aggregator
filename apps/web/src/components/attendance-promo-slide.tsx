@@ -5,6 +5,7 @@ import {
   ATTENDANCE_MILESTONES,
   ATTENDANCE_MIN_QUESTIONS,
   ATTENDANCE_MONTHLY_MAX_DAYS,
+  isAttendanceOpen,
   kstDateKey,
 } from "@gongmoa/core";
 import { PROMO_SIZE } from "@/lib/attendance-promo-size";
@@ -65,8 +66,10 @@ function markHiddenToday(): void {
 
 export const attendancePromoSource: HomePopupSource = {
   id: "attendance-promo",
+  // 출석체크가 닫혀 있는 동안(전면 무료 이벤트)에는 광고 자체를 싣지 않는다 —
+  // 눌러 봐야 도장이 찍히지 않는 화면으로 보내게 된다.
   resolve: ({ attendanceHref }: HomePopupContext) =>
-    shouldSkip()
+    !isAttendanceOpen() || shouldSkip()
       ? null
       : {
           id: "attendance-promo",
