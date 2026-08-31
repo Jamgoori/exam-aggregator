@@ -11,6 +11,7 @@ import {
 } from "@gongmoa/core";
 import { startMembershipCheckout } from "@/app/membership/actions";
 import { isUserCanceled, loadTossPayments } from "@/lib/toss-browser";
+import { clarityEvent, clarityTag, clarityUpgrade } from "@/lib/clarity";
 
 // 요금제 선택 + 결제 버튼. 가격·할인율은 전부 @gongmoa/core 의 요금제 정의에서
 // 계산해 온다 — 이 파일에 숫자를 적지 말 것.
@@ -40,23 +41,34 @@ export function MembershipPlans({
   const current = PLANS.find((p) => p.plan.id === selected)!;
 
   async function startCheckout() {
+    // 이중 클릭 방지가 계측보다 먼저 와야 한다 — 뒤에 두면 한 번의 결제 시도가
+    // checkout_start 두 건으로 세어져 퍼널 수치가 부풀려진다.
+    if (pending) return;
+
+    // Clarity 계측. 결제는 드물게 일어나므로 표본 녹화에서 빠지기 쉬운데, 정작
+    // 리플레이를 봐야 하는 건 이 세션들이다. 그래서 이벤트를 남기고 세션을 올린다.
+    clarityTag("plan", selected);
+    clarityEvent("checkout_start");
+    clarityUpgrade("checkout_start");
+
     if (!paymentEnabled) {
+      // "준비 중" 안내를 본 사람은 결제하려다 못 한 사람이다 — 전환 퍼널에서
+      // 결제창을 열어본 사람과 절대 섞으면 안 된다.
+      clarityEvent("checkout_unavailable");
       setNotice(true);
       return;
     }
-    // 이중 클릭 방지. 막지 않으면 주문이 두 건 만들어지고, 사용자는 자기가 뭘 결제한
-    // 건지 모르는 채 결제창을 두 번 보게 된다.
-    if (pending) return;
-
     setPending(true);
     setError(null);
     try {
       const result = await startMembershipCheckout(selected);
       if (!result.ok) {
         if (result.needsLogin) {
+          clarityEvent("checkout_needs_login");
           router.push(`/login?next=${encodeURIComponent("/membership")}`);
           return;
         }
+        clarityEvent("checkout_error");
         setError(result.error);
         return;
       }
@@ -74,9 +86,15 @@ export function MembershipPlans({
           card: { useEscrow: false, flowMode: "DEFAULT" },
         });
       // 여기까지 오면 결제창이 리다이렉트를 맡는다(성공/실패 주소로 브라우저가 이동).
+      clarityEvent("checkout_widget_opened");
     } catch (e) {
       // 사용자가 스스로 창을 닫은 것은 오류가 아니다 — 아무 말도 하지 않는 게 맞다.
-      if (!isUserCanceled(e)) {
+      // 다만 분석에서는 "직접 취소"와 "창이 안 열림"을 반드시 갈라야 한다. 둘을 한
+      // 덩어리로 세면 결제 실패율이 실제보다 훨씬 나빠 보인다.
+      if (isUserCanceled(e)) {
+        clarityEvent("checkout_canceled");
+      } else {
+        clarityEvent("checkout_open_failed");
         setError("결제창을 열지 못했어요. 잠시 후 다시 시도해주세요.");
       }
     } finally {

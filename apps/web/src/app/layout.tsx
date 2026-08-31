@@ -8,9 +8,10 @@ import { SiteFooter } from "@/components/site-footer";
 import { ReviewFab } from "@/components/review-fab";
 import { ChatFab } from "@/components/chat-fab";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
+import { ClarityTags } from "@/components/clarity-tags";
 import { createClient } from "@/lib/supabase/server";
 import { getMembership } from "@/lib/membership";
-import { isPremiumMembership } from "@gongmoa/core";
+import { hasOwnPremiumPeriod, isFreeForAll, isPremiumMembership } from "@gongmoa/core";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site-url";
 import { JsonLd } from "@/components/json-ld";
 import "./globals.css";
@@ -100,9 +101,20 @@ async function StreamedSiteHeader() {
   const isAdmin = claims ? (await supabase.rpc("is_admin")).data === true : false;
   // 관리자는 멤버십 레코드와 무관하게 유료 기능을 다 쓰므로, 배지도 멤버십 페이지의
   // "관리자 계정" 취급과 맞춰 멤버십으로 본다.
-  const isPremium = claims
-    ? isAdmin || isPremiumMembership(await getMembership(supabase, claims.sub))
-    : false;
+  const membership = claims ? await getMembership(supabase, claims.sub) : null;
+  const isPremium = membership ? isAdmin || isPremiumMembership(membership) : false;
+
+  // Clarity 세션에 달 회원 등급. isPremium을 그대로 쓰면 안 된다 — 전면 무료 기간에는
+  // isPremiumMembership이 로그인한 모두에게 참이라, 태그가 전원 "premium"이 되어
+  // 세그먼트를 나누는 의미가 사라진다. 그래서 이벤트를 빼고 "이 계정이 원래 들고 있는
+  // 기간"(hasOwnPremiumPeriod)과 그 출처를 적고, 이벤트 여부는 free_event로 따로 둔다.
+  const clarityMembership = !membership
+    ? "guest"
+    : isAdmin
+      ? "admin"
+      : hasOwnPremiumPeriod(membership)
+        ? (membership.source ?? "premium")
+        : "free";
 
   const headerUser = claims
     ? {
@@ -121,6 +133,14 @@ async function StreamedSiteHeader() {
       {/* 스크롤을 내리면 따라오는 "복습 N" 버튼. 로그인한 사람에게만 붙인다 —
           비로그인 방문자에게는 셀 것도 없는데 조회만 한 번 더 도는 셈이다. */}
       {headerUser && <ReviewFab />}
+      {/* Clarity 세션 꼬리표. 대시보드에서 "무료 회원만", "비회원만" 처럼 세그먼트를
+          갈라 볼 수 있게 한다. 개인을 특정하는 값은 싣지 않는다. */}
+      <ClarityTags
+        tags={{
+          membership: clarityMembership,
+          free_event: isFreeForAll() ? "on" : "off",
+        }}
+      />
     </>
   );
 }

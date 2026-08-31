@@ -29,6 +29,7 @@
     "split-by-subject-header": "node scripts/split-by-subject-header.mjs",
     "split-by-toc": "node scripts/split-by-toc.mjs",
     "split-fire": "node scripts/split-fire-paper.mjs",
+    "clarity": "node --env-file=.env.local scripts/clarity-insights.mjs",
     "test": "TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --test src/lib/*.test.ts"
   },
   "dependencies": {

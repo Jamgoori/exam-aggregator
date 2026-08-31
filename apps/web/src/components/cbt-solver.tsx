@@ -43,6 +43,7 @@ import {
   useContentZoom,
 } from "@/components/question-view-gestures";
 import { SingleQuestionView } from "@/components/single-question-view";
+import { clarityEvent, clarityTag, clarityUpgrade } from "@/lib/clarity";
 import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
 import {
   clampOmrSplit,
@@ -400,6 +401,26 @@ export function CbtSolver({
   const { countdown, elapsedSeconds, started, startError, startedAtRef, resetTimer, requestStart } =
     useCbtTimer(paperId, !result);
   useLeaveConfirmation(!result);
+
+  // Clarity 계측. CBT는 이 사이트에서 제일 오래 머무는 화면이라 이탈이 어디서 나는지가
+  // 곧 제품 문제다. 시작·채점을 이벤트로 남기고 문제지를 태그로 달아, 대시보드에서
+  // "시작했지만 채점까지 못 간 세션"만 골라 리플레이를 볼 수 있게 한다.
+  //
+  // 문제지 제목은 개인정보가 아니고(공개된 기출문제 이름), 이게 없으면 어떤 문제지에서
+  // 막히는지 URL의 UUID만 남아 사람이 읽을 수 없다.
+  useEffect(() => {
+    if (!started) return;
+    clarityTag("paper", paperTitle);
+    clarityEvent("cbt_start");
+    // 시작한 세션은 표본에서 빠지면 안 된다 — 끝까지 푼 사람이 드물수록 더 그렇다.
+    clarityUpgrade("cbt_start");
+  }, [started, paperTitle]);
+
+  // 보기 모드는 바뀔 때마다 걸어둔다(같은 키를 여러 번 걸면 값이 쌓인다) — 전체보기와
+  // 문제별 보기 중 어디서 헤매는지를 나눠 보려면 세션마다 실제로 쓴 모드가 필요하다.
+  useEffect(() => {
+    clarityTag("cbt_view_mode", viewMode);
+  }, [viewMode]);
   // 문항 이미지는 지금 보고 있는 문제부터 순서대로 미리 받아둔다. 예전에는 문제별
   // 보기를 켜는 순간 전 문항을 한꺼번에 요청했는데, 그러면 눈앞의 1번 문제가 나머지
   // 수십~수백 장과 대역폭을 나눠 쓰느라 오히려 늦게 떴다.
@@ -491,9 +512,24 @@ export function CbtSolver({
         answers,
       });
       if (res.error) {
+        // 채점 실패는 흔치 않지만 나면 치명적이다(푼 걸 날린다). 이벤트로 남겨야
+        // 대시보드에서 그 세션만 뽑아 무슨 상황이었는지 볼 수 있다.
+        clarityEvent("cbt_submit_error");
+        clarityUpgrade("cbt_submit_error");
         setError(res.error);
         return;
       }
+      // 다 못 풀고 낸 경우와 끝까지 푼 경우를 나눠 본다. 문항 수는 문제지마다 달라
+      // 절대 수는 비교가 안 되므로 비율 구간으로 적는다.
+      clarityTag(
+        "cbt_completion",
+        answeredCount === totalQuestions
+          ? "all"
+          : answeredCount * 2 >= totalQuestions
+            ? "half_or_more"
+            : "under_half",
+      );
+      clarityEvent("cbt_submit");
       setOmrOpen(false);
       setResult(res);
     });

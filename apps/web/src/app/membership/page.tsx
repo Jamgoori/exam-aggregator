@@ -4,6 +4,7 @@ import { Check, Minus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { MembershipPlans } from "@/components/membership-plans";
+import { ClarityTags } from "@/components/clarity-tags";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
 import { isTossConfigured } from "@/lib/toss";
 import {
@@ -63,6 +64,12 @@ export default async function MembershipPage({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-10 px-4 pb-16 pt-6 sm:pt-10">
+      {/* 어느 화면의 유도 배너를 타고 결제 페이지에 왔는지. next 는 우리가 만든
+          내부 경로이고(sanitizeNextPath 로 검증된다) 개인정보가 아니다. 이게 없으면
+          "해설 잠금에서 온 사람"과 "메뉴로 그냥 들른 사람"이 한 덩어리로 섞여,
+          어떤 유도가 실제로 먹히는지 영영 알 수 없다. */}
+      <ClarityTags tags={{ membership_entry: backHref ?? "direct" }} />
+
       {backHref && (
         <Link
           href={backHref}
