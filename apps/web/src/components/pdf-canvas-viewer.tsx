@@ -323,16 +323,26 @@ export function PdfCanvasViewer({
   useEffect(() => {
     const el = scrollWrapperRef.current;
     if (!el) return;
+    // 폭이 바뀔 때마다 PDF 전 페이지를 다시 그리는데, 모바일 전체보기에서 OMR 경계선을
+    // 손가락으로 끄는 동안에는 폭이 프레임마다 바뀐다. 그대로 두면 끄는 내내 재렌더가
+    // 쌓여 화면이 멈춘 듯 버벅이므로, 폭이 멎은 뒤 한 번만 그린다.
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const observer = new ResizeObserver(() => {
-      const width = el.clientWidth;
-      // 세로 스크롤바는 항상 있으니 clientWidth는 zoom을 바꿔도 흔들리지 않는다
-      // (가로 스크롤바는 clientHeight만 깎음). 실제 레이아웃 폭이 바뀔 때만 반영한다.
-      if (width > 0) {
-        setRenderWidth((prev) => (Math.abs(prev - width) > 1 ? width : prev));
-      }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const width = el.clientWidth;
+        // 세로 스크롤바는 항상 있으니 clientWidth는 zoom을 바꿔도 흔들리지 않는다
+        // (가로 스크롤바는 clientHeight만 깎음). 실제 레이아웃 폭이 바뀔 때만 반영한다.
+        if (width > 0) {
+          setRenderWidth((prev) => (Math.abs(prev - width) > 1 ? width : prev));
+        }
+      }, 150);
     });
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      if (timer) clearTimeout(timer);
+      observer.disconnect();
+    };
   }, []);
 
   // 문제별 풀기 → 전체보기로 전환돼 이 뷰어가 다시 보이게 되는 순간, ResizeObserver가

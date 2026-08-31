@@ -19,6 +19,7 @@ import {
   Maximize,
   Minimize,
   PenLine,
+  PanelRightClose,
   X,
   ZoomIn,
   ZoomOut,
@@ -43,6 +44,12 @@ import {
 } from "@/components/question-view-gestures";
 import { SingleQuestionView } from "@/components/single-question-view";
 import { MIN_ATTEMPT_SECONDS } from "@/lib/cbt-attempt";
+import {
+  clampOmrSplit,
+  DEFAULT_OMR_SPLIT,
+  readStoredOmrSplit,
+  storeOmrSplit,
+} from "@/lib/cbt-omr-split";
 import { resolveInitialCbtViewMode, type CbtViewMode } from "@/lib/cbt-view-mode";
 import { formatDuration } from "@gongmoa/core";
 
@@ -114,6 +121,67 @@ function useFullscreen(ref: RefObject<HTMLElement | null>) {
   }, [ref]);
 
   return { isFullscreen, supported, toggle };
+}
+
+// 모바일 전체보기에서 OMR을 오른쪽에 붙여 쓸 때, 시험지와 OMR 사이 경계선을
+// 끌어 폭을 바꾸는 훅. 손가락으로 끄는 동작이라 pointer capture 로 경계선이
+// 포인터를 붙잡아, 끄는 도중 시험지 위로 넘어가도 시험지가 같이 밀리지 않게 한다.
+function useOmrSplit(containerRef: RefObject<HTMLElement | null>) {
+  const [ratio, setRatio] = useState(DEFAULT_OMR_SPLIT);
+  const ratioRef = useRef(DEFAULT_OMR_SPLIT);
+  const draggingRef = useRef(false);
+
+  // 저장된 폭은 localStorage에만 있어 서버 렌더에서는 알 수 없다. 첫 렌더는 기본값,
+  // 마운트 뒤에 기기에 저장된 값으로 맞춘다(의도적인 마운트 후 setState).
+  useEffect(() => {
+    const stored = readStoredOmrSplit();
+    ratioRef.current = stored;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRatio(stored);
+  }, []);
+
+  const apply = useCallback((next: number) => {
+    const clamped = clampOmrSplit(next);
+    ratioRef.current = clamped;
+    setRatio(clamped);
+  }, []);
+
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    draggingRef.current = true;
+  }, []);
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!draggingRef.current) return;
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect || rect.width === 0) return;
+      apply((rect.right - e.clientX) / rect.width);
+    },
+    [apply, containerRef],
+  );
+
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    storeOmrSplit(ratioRef.current);
+  }, []);
+
+  // 키보드(외장 키보드를 붙인 태블릿 등)로도 폭을 조절할 수 있어야 한다.
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      apply(ratioRef.current + (e.key === "ArrowLeft" ? 0.05 : -0.05));
+      storeOmrSplit(ratioRef.current);
+    },
+    [apply],
+  );
+
+  return { ratio, onPointerDown, onPointerMove, onPointerUp, onKeyDown };
 }
 
 // 페이지에 들어오면 곧바로 재기 시작하는 대신 5초 카운트다운을 보여주고, 그
@@ -279,6 +347,8 @@ export function CbtSolver({
   const clearSingleDrawingRef = useRef<() => void>(() => {});
   const pdfWrapperRef = useRef<HTMLDivElement>(null);
   const solverRootRef = useRef<HTMLDivElement>(null);
+  const splitRef = useRef<HTMLDivElement>(null);
+  const omrSplit = useOmrSplit(splitRef);
   const { zoom, zoomIn, zoomOut, handlePinchZoom } = useExamZoom(pdfWrapperRef);
   const {
     isFullscreen,
@@ -454,6 +524,12 @@ export function CbtSolver({
   const prevQuestionIndex = prevGroupNumbers ? prevGroupNumbers[0] - 1 : null;
   const nextQuestionIndex = groupLastNumber < totalQuestions ? groupLastNumber : null;
 
+  // 모바일(lg 미만)에서 "답안 입력"을 열었을 때 어떤 모양으로 보여줄지. 전체보기는
+  // 시험지를 계속 보면서 표기해야 해서 좌우 분할, 문제별 풀기는 문제와 선택지가
+  // 이미 한 화면에 있어서 예전처럼 바텀시트로 띄운다.
+  const sideOmr = omrOpen && viewMode === "full";
+  const sheetOmr = omrOpen && viewMode !== "full";
+
   return (
     // SiteHeaderGate가 lg 이상에서는 전역 사이트 헤더(약 65px)를 그대로 보여주는데,
     // 100dvh는 그 헤더를 포함한 뷰포트 전체 높이라서 그만큼을 빼주지 않으면
@@ -579,8 +655,13 @@ export function CbtSolver({
               </div>
               <button
                 type="button"
-                onClick={() => setOmrOpen(true)}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 lg:hidden"
+                onClick={() => setOmrOpen((open) => !open)}
+                aria-pressed={omrOpen}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium lg:hidden ${
+                  omrOpen
+                    ? "bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200"
+                    : "bg-blue-600 text-white hover:bg-blue-700"
+                }`}
               >
                 답안 입력
               </button>
@@ -672,7 +753,7 @@ export function CbtSolver({
           탭을 바꿔도 언마운트하지 않고 숨기기만 한다(다시 보일 때마다 처음부터 다시
           불러오는 것을 피하기 위함). */}
       <div className="flex min-h-0 flex-1 justify-center">
-        <div className="flex min-h-0 w-full max-w-7xl">
+        <div ref={splitRef} className="flex min-h-0 w-full max-w-7xl">
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
             <div
               ref={pdfWrapperRef}
@@ -749,6 +830,61 @@ export function CbtSolver({
             )}
           </div>
 
+          {/* 모바일 전체보기에서는 OMR을 바텀시트로 시험지 위에 덮지 않고, 화면을
+              좌우로 쪼개 오른쪽에 붙인다 — 시험지를 보면서 답을 표기할 수 있어야
+              하기 때문. 가운데 경계선을 끌면 둘의 폭이 바뀌고, 그 폭은 기기에
+              저장돼 다음에도 그대로 열린다. */}
+          {sideOmr && (
+            <>
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="시험지와 답안 입력 폭 조절"
+                tabIndex={0}
+                onPointerDown={omrSplit.onPointerDown}
+                onPointerMove={omrSplit.onPointerMove}
+                onPointerUp={omrSplit.onPointerUp}
+                onPointerCancel={omrSplit.onPointerUp}
+                onKeyDown={omrSplit.onKeyDown}
+                style={{ touchAction: "none" }}
+                className="flex w-3 shrink-0 cursor-col-resize touch-none items-center justify-center bg-zinc-100 active:bg-zinc-200 lg:hidden dark:bg-zinc-800 dark:active:bg-zinc-700"
+              >
+                <span className="h-10 w-0.5 rounded-full bg-zinc-400 dark:bg-zinc-500" />
+              </div>
+              <div
+                style={{ width: `${omrSplit.ratio * 100}%` }}
+                className="flex min-h-0 shrink-0 flex-col border-l border-zinc-200 bg-white lg:hidden dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                <div className="flex shrink-0 items-center justify-between gap-1 border-b border-zinc-100 px-2 py-1.5 dark:border-zinc-700">
+                  <h2 className="truncate text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                    답안 입력
+                  </h2>
+                  <button
+                    type="button"
+                    aria-label="답안 입력 닫기"
+                    onClick={() => setOmrOpen(false)}
+                    className="rounded-lg p-1 text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
+                  >
+                    <PanelRightClose size={16} />
+                  </button>
+                </div>
+                <OmrPanel
+                  className="flex min-h-0 flex-1 flex-col"
+                  compact
+                  totalQuestions={totalQuestions}
+                  choiceCount={choiceCount}
+                  answers={answers}
+                  answeredCount={answeredCount}
+                  onSelect={selectChoice}
+                  onSubmit={handleSubmit}
+                  submitting={isPending}
+                  error={error}
+                  resultByQuestion={result ? resultByQuestion : null}
+                />
+              </div>
+            </>
+          )}
+
           <OmrPanel
             className="hidden w-[240px] shrink-0 flex-col border-l border-zinc-200 lg:flex dark:border-zinc-700"
             totalQuestions={totalQuestions}
@@ -764,7 +900,7 @@ export function CbtSolver({
         </div>
       </div>
 
-      {omrOpen && (
+      {sheetOmr && (
         <div className="fixed inset-0 z-40 flex flex-col justify-end lg:hidden">
           <button
             type="button"
