@@ -10,6 +10,7 @@ import {
   attendanceMilestonesReached,
   attendanceProgress,
   daysInMonthKey,
+  isAttendanceOpen,
   kstDateKey,
   kstMonthKey,
   nextAttendanceMilestone,
@@ -172,4 +173,13 @@ test("실제로 풀면 그대로 센다", () => {
 test("이상한 값은 0 으로 떨어뜨린다", () => {
   assert.equal(attendanceQuestionCount({ answeredCount: NaN, elapsedSeconds: 600 }), 0);
   assert.equal(attendanceQuestionCount({ answeredCount: 10, elapsedSeconds: NaN }), 0);
+});
+
+// ── 이벤트 기간 동안 출석체크는 닫혀 있다 ───────────────────────────────────
+// 보상이 멤버십 일수뿐인데 그 기간엔 이미 모두에게 열려 있어서 줄 것이 없고,
+// 그대로 두면 이벤트 종료일 뒤로 붙는 유료 기간이 조용히 쌓인다.
+test("isAttendanceOpen: 전면 무료 기간에는 닫히고, 끝나면 다시 열린다", () => {
+  assert.equal(isAttendanceOpen(new Date("2026-09-01T00:00:00+09:00")), false);
+  assert.equal(isAttendanceOpen(new Date("2027-06-30T23:59:59+09:00")), false);
+  assert.equal(isAttendanceOpen(new Date("2027-07-01T00:00:00+09:00")), true);
 });

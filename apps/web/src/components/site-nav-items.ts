@@ -13,6 +13,7 @@ import {
   UserRound,
   type LucideIcon,
 } from "lucide-react";
+import { isAttendanceOpen, isFreeForAll } from "@gongmoa/core";
 
 // 헤더 메뉴바가 쓰는 항목 정의. 데스크톱 메뉴바·모바일 드로어·계정 드롭다운이
 // 전부 이 한 곳을 읽는다 — 세 군데에 각자 링크를 적어두면 메뉴가 하나 늘 때마다
@@ -63,22 +64,33 @@ export const PRIMARY_NAV: NavItem[] = [
     match: (p) => p.startsWith("/mypage/wrong-notes"),
     hint: "틀린 문제 복습하기",
   },
-  {
-    href: "/mypage?tab=attendance",
-    label: "출석체크",
-    icon: CalendarCheck,
-    // ?tab=attendance 는 경로가 /mypage 그대로라 활성 판별을 걸 수 없다(계정 메뉴의
-    // 즐겨찾기 항목과 같은 처리). 문제를 풀면 서버가 자동으로 도장을 찍으므로 이
-    // 항목은 "그 결과를 보러 가는" 링크다.
-    match: () => false,
-    hint: "출석 채우고 멤버십 받기",
-  },
+  // 출석체크는 기능이 열려 있을 때만 메뉴에 둔다(core 의 isAttendanceOpen —
+  // 전면 무료 이벤트 동안에는 닫혀 있다). 항목을 남겨두면 도장이 찍히지 않는
+  // 화면으로 "출석 채우고 멤버십 받기"라며 보내게 된다. 이벤트가 끝나면 이 줄이
+  // 저절로 다시 살아난다.
+  ...(isAttendanceOpen()
+    ? [
+        {
+          href: "/mypage?tab=attendance",
+          label: "출석체크",
+          icon: CalendarCheck,
+          // ?tab=attendance 는 경로가 /mypage 그대로라 활성 판별을 걸 수 없다(계정
+          // 메뉴의 즐겨찾기 항목과 같은 처리). 문제를 풀면 서버가 자동으로 도장을
+          // 찍으므로 이 항목은 "그 결과를 보러 가는" 링크다.
+          match: () => false,
+          hint: "출석 채우고 멤버십 받기",
+        },
+      ]
+    : []),
   {
     href: "/membership",
     label: "멤버십",
     icon: Crown,
     match: (p) => p.startsWith("/membership"),
-    hint: "해설·복습 이용권",
+    // 이벤트 기간에는 힌트로 "지금은 무료"를 먼저 말한다. 라벨(멤버십)만 보고
+    // "돈 내라는 메뉴"로 읽고 지나치면, 정작 그 안에 있는 게 무료라는 사실이
+    // 닿지 않는다. 이벤트가 끝나면 원래 설명으로 저절로 돌아간다.
+    hint: isFreeForAll() ? "지금은 전부 무료예요" : "해설·복습 이용권",
   },
 ];
 

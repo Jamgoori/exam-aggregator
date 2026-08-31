@@ -2,6 +2,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ATTENDANCE_MIN_QUESTIONS,
+  isAttendanceOpen,
   attendanceMilestonesReached,
   kstDateKey,
   kstMonthKey,
@@ -27,6 +28,11 @@ export async function recordAttendance(
   userId: string,
   questionCount: number,
 ): Promise<void> {
+  // 출석체크가 닫혀 있는 동안(전면 무료 이벤트)에는 기록도 지급도 하지 않는다.
+  // 이유는 core 의 isAttendanceOpen 머리말에 있다. Edge Function 쪽(_shared/
+  // attendance.ts)에도 같은 검사가 같은 자리에 있다 — 한쪽만 막으면 앱으로 푼
+  // 사람에게만 도장이 계속 찍힌다.
+  if (!isAttendanceOpen()) return;
   if (!Number.isFinite(questionCount) || questionCount <= 0) return;
 
   const admin = createAdminClient();
