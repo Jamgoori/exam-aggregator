@@ -2,8 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   CHAT_BURST_LIMIT,
+  CHAT_CLEAR_CONFIRM_TEXT,
   CHAT_MIN_INTERVAL_MS,
   checkChatBurst,
+  checkChatClearConfirmation,
   checkChatFlood,
 } from "./chat";
 
@@ -42,4 +44,13 @@ test("burst 한도 미만이면 통과", () => {
 test("burst 한도에 닿으면 거절", () => {
   const result = checkChatBurst(CHAT_BURST_LIMIT);
   assert.equal(result.ok, false);
+});
+
+test("확인 문구가 정확히 같으면 초기화 통과(앞뒤 공백은 허용)", () => {
+  assert.deepEqual(checkChatClearConfirmation(`  ${CHAT_CLEAR_CONFIRM_TEXT} `), { ok: true });
+});
+
+test("확인 문구가 다르면 초기화 거절", () => {
+  assert.equal(checkChatClearConfirmation("초기화").ok, false);
+  assert.equal(checkChatClearConfirmation("").ok, false);
 });

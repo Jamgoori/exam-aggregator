@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { currentCycleStartDate, DIAGNOSIS_CYCLE_DAYS } from "@/lib/ai-diagnosis";
 import { optimizePdf } from "@/lib/optimize-pdf";
+import { checkChatClearConfirmation } from "@gongmoa/core";
 
 export async function login(formData: FormData) {
   const email = String(formData.get("email") ?? "");
@@ -306,4 +307,56 @@ async function findUserIdByEmail(
     if (users.length < 1000) return null;
   }
   return null;
+}
+
+// ── 채팅 기록 초기화(관리자) ──────────────────────────────────────────────────
+//
+// 채팅방은 공개된 공간이라 비방·개인정보·도배가 남으면 지울 수단이 있어야 한다.
+// chat_messages 는 anon/authenticated 의 쓰기 권한이 없어(schema.sql) service_role
+// 로만 지울 수 있으므로, 이 액션이 유일한 통로다.
+//
+// 범위는 둘 중 하나다: 방 전체 비우기, 또는 한 계정이 남긴 메시지만 지우기(특정
+// 사용자의 도배를 치울 때). 전체 비우기는 되돌릴 수 없어서 확인 문구를 요구한다.
+export type ClearChatState = { error?: string; message?: string };
+
+export async function clearChatHistory(
+  _prevState: ClearChatState | undefined,
+  formData: FormData,
+): Promise<ClearChatState> {
+  const supabase = await createClient();
+  const guard = await requireAdmin(supabase);
+  if ("error" in guard) return { error: guard.error };
+
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const admin = createAdminClient();
+
+  // 이메일이 있으면 그 계정 메시지만, 비어 있으면 방 전체. 전체일 때만 확인 문구를
+  // 받는다 — 한 사람 것을 지우는 일은 되돌릴 수 없어도 파장이 그 사람에 그친다.
+  let userId: string | null = null;
+  let label: string;
+  if (email) {
+    userId = await findUserIdByEmail(admin, email);
+    if (!userId) return { error: `${email} 계정을 찾지 못했어요.` };
+    label = email;
+  } else {
+    const confirmCheck = checkChatClearConfirmation(String(formData.get("confirm") ?? ""));
+    if (!confirmCheck.ok) return { error: confirmCheck.error };
+    label = "채팅방 전체";
+  }
+
+  // 지우기 전에 몇 건인지 센다(결과 문구에 그대로 쓴다). 0건이면 삭제를 건너뛴다.
+  let countQuery = admin.from("chat_messages").select("id", { count: "exact", head: true });
+  if (userId) countQuery = countQuery.eq("user_id", userId);
+  const { count, error: countError } = await countQuery;
+  if (countError) return { error: "채팅 기록을 읽지 못했어요." };
+  if (!count) return { message: `${label}: 지울 메시지가 없어요.` };
+
+  // PostgREST 는 필터 없는 delete 를 거부한다 — 전체 삭제도 "항상 참"인 조건을 붙인다.
+  const deleteQuery = admin.from("chat_messages").delete();
+  const { error: deleteError } = userId
+    ? await deleteQuery.eq("user_id", userId)
+    : await deleteQuery.not("id", "is", null);
+  if (deleteError) return { error: "초기화에 실패했어요." };
+
+  return { message: `${label}: 메시지 ${count}건을 지웠어요.` };
 }
