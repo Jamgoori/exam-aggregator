@@ -16,7 +16,6 @@ import {
 } from "@/lib/diagnosis-batch";
 import { getExcludedDiagnosisSubjectSlugs } from "@/lib/review-preferences";
 import { isPremium } from "@/lib/membership";
-import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 
 export type RequestDiagnosisResult = {
   error?: string;
@@ -37,11 +36,6 @@ export async function requestDiagnosis(
 ): Promise<RequestDiagnosisResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
-
-  // 개발 중 임시 게이트: 이 계정 외에는 AI 호출 자체를 막는다.
-  if (!isDiagnosisDevAllowed(user.email)) {
-    return { error: "AI 약점 진단은 아직 준비 중이에요." };
-  }
 
   // 진단은 멤버십 기능이다. 배너를 숨기는 것과 별개로 여기서도 막는다 — 생성은
   // AI 호출이 실제로 도는 경로라, 화면을 우회해 부르면 그대로 비용이 나간다.

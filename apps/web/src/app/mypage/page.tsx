@@ -23,7 +23,6 @@ import { ScrollToHash } from "@/components/scroll-to-hash";
 import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-card";
 import { AttendanceCard } from "@/components/attendance-card";
 import { getMembership, isAdminUser } from "@/lib/membership";
-import { isDiagnosisDevAllowed } from "@/lib/diagnosis-dev-gate";
 import { getDueReviewSummary } from "@/lib/review-queue";
 import { getAttendanceSummary } from "@/lib/attendance";
 import { findUnfinishedDueSession } from "@/lib/review-session";
@@ -448,7 +447,6 @@ export default async function MyPage({
             groups={wrongNoteGroups}
             unresolvedBySubject={unresolvedBySubject}
             reviewDue={reviewDue}
-            showDiagnosis={isDiagnosisDevAllowed(user.email)}
           />
         }
       />
@@ -615,13 +613,11 @@ function WrongNotesTab({
   groups,
   unresolvedBySubject,
   reviewDue,
-  showDiagnosis,
 }: {
   premium: boolean;
   groups: WrongNoteSubjectGroup[];
   unresolvedBySubject: Map<string, { name: string; slug: string; unresolved: number; due: number }>;
   reviewDue: ReviewDueCardProps;
-  showDiagnosis: boolean;
 }) {
   // 무료 회원: 오답노트는 열람도 정리도 섞어풀기도 그대로 쓴다. 다만 무거운
   // 집계(buildWrongNoteGroups)는 돌리지 않았으므로 과목 카드를 이미 계산해 둔
@@ -676,7 +672,7 @@ function WrongNotesTab({
           </div>
         )}
         <ReviewDueCard {...reviewDue} />
-        {showDiagnosis && <DiagnosisEntryLink />}
+        <DiagnosisEntryLink />
       </section>
     );
   }
@@ -760,13 +756,14 @@ function WrongNotesTab({
         </div>
       )}
       <ReviewDueCard {...reviewDue} />
-      {showDiagnosis && <DiagnosisEntryLink />}
+      <DiagnosisEntryLink />
     </section>
   );
 }
 
-// 개발 중 임시 진입점: lks2354@gmail.com 계정에만 보이는 AI 약점 진단 링크.
-// 정식 오픈 시 diagnosis-dev-gate 와 함께 걷어내고 모든 회원에게 노출할 것.
+// 오답노트 탭 안의 AI 약점 진단 진입점. 모든 회원에게 보인다 — 멤버십이 없는
+// 사람이 눌러도 진단 페이지가 멤버십 안내를 대신 띄우므로, 여기서 미리 숨기지
+// 않는다(기능이 있다는 사실 자체가 닿아야 한다).
 function DiagnosisEntryLink() {
   return (
     <Link
