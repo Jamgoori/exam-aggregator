@@ -71,7 +71,7 @@ export async function fetchNoticePage(page: number) {
   const supabase = createPublicClient();
   const from = (page - 1) * NOTICES_PAGE_SIZE;
 
-  const [{ data, count }, pinnedResult] = await Promise.all([
+  const [{ data, count }, pinnedResult, { count: pinnedCount }] = await Promise.all([
     supabase
       .from("notices")
       .select(NOTICE_LIST_COLUMNS, { count: "exact" })
@@ -85,6 +85,10 @@ export async function fetchNoticePage(page: number) {
           .eq("is_pinned", true)
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as unknown[] }),
+    // 고정 공지도 "전체 N건"에는 포함돼야 한다 — 번호 매김·페이지 수는 계속
+    // 고정을 뺀 개수로 계산하지만(위 주석 참고), 화면에 보여줄 총 건수는
+    // 고정 여부와 무관하게 실제로 몇 건이 등록됐는지를 나타내야 한다.
+    supabase.from("notices").select("id", { count: "exact", head: true }).eq("is_pinned", true),
   ]);
 
   const total = count ?? 0;
@@ -97,6 +101,7 @@ export async function fetchNoticePage(page: number) {
     items,
     pinnedItems,
     total,
+    grandTotal: total + (pinnedCount ?? 0),
     totalPages: Math.max(1, Math.ceil(total / NOTICES_PAGE_SIZE)),
   };
 }
