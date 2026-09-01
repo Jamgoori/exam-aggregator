@@ -64,7 +64,6 @@ export default async function NoticeDetailPage({
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-400 dark:text-zinc-500">
             <span>{formatDateTime(notice.createdAt)}</span>
-            {notice.updatedAt && <span>(수정됨)</span>}
             <span>조회 {notice.viewCount}</span>
           </div>
         </header>

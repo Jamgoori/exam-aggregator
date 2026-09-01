@@ -80,7 +80,7 @@ export default async function NoticesPage({
   const { page: pageParam } = await searchParams;
   const page = Math.max(1, Number(pageParam) || 1);
 
-  const [{ items, pinnedItems, total, totalPages }, canWrite] = await Promise.all([
+  const [{ items, pinnedItems, total, grandTotal, totalPages }, canWrite] = await Promise.all([
     fetchNoticePage(page),
     isNoticeAdmin(),
   ]);
@@ -102,7 +102,7 @@ export default async function NoticesPage({
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          전체 <span className="font-semibold text-zinc-700 dark:text-zinc-200">{total}</span>건
+          전체 <span className="font-semibold text-zinc-700 dark:text-zinc-200">{grandTotal}</span>건
         </p>
         {canWrite && (
           <Link
