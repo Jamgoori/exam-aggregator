@@ -101,12 +101,31 @@ async function main() {
   console.error(`감사 대상 정답표: ${targetKeys.length}장`);
 
   // AI 해설이 저장한 정답 번호 (제3의 증인). 문제지·문항번호로 찾는다.
-  const explRows = await pageAll(
-    supabase,
-    "question_explanations",
-    "question_id, correct_choice_number, verified",
-  );
-  const questionRows = await pageAll(supabase, "questions", "id, paper_id, question_number");
+  // 전량 offset 페이징은 해설 8만 건 시점부터 statement timeout에 걸리므로(2026-09-02
+  // 실측), 감사 대상 시험의 문제지에 속한 문항만 .in()으로 좁혀서 받는다.
+  const targetTypeIds = new Set(targetKeys.map((k) => k.exam_type_id));
+  const targetPaperIds = papers
+    .filter((p) => targetTypeIds.has(p.exam_type_id))
+    .map((p) => p.id);
+  const questionRows = [];
+  for (let i = 0; i < targetPaperIds.length; i += 50) {
+    const { data, error } = await supabase
+      .from("questions")
+      .select("id, paper_id, question_number")
+      .in("paper_id", targetPaperIds.slice(i, i + 50));
+    if (error) throw new Error(`questions 조회 실패: ${error.message}`);
+    questionRows.push(...(data ?? []));
+  }
+  const explRows = [];
+  const questionIds = questionRows.map((q) => q.id);
+  for (let i = 0; i < questionIds.length; i += 200) {
+    const { data, error } = await supabase
+      .from("question_explanations")
+      .select("question_id, correct_choice_number, verified")
+      .in("question_id", questionIds.slice(i, i + 200));
+    if (error) throw new Error(`question_explanations 조회 실패: ${error.message}`);
+    explRows.push(...(data ?? []));
+  }
   const questionById = new Map(questionRows.map((q) => [q.id, q]));
   const aiByPaperQn = new Map();
   for (const e of explRows) {

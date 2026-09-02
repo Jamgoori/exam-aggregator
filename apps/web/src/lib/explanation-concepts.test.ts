@@ -134,10 +134,14 @@ function fakeSupabase() {
           return {
             in(column: string, values: string[]) {
               const set = new Set(values);
-              return Promise.resolve({
-                data: tables[table].filter((r) => set.has(r[column])),
-                error: null,
-              });
+              const rows = tables[table].filter((r) => set.has(r[column]));
+              // 실제 PostgREST처럼 range 로 페이지를 잘라 준다 (selectIn 이 range 로
+              // 1,000행 넘는 응답을 끝까지 받는지 확인하는 용도).
+              return {
+                range(from: number, to: number) {
+                  return Promise.resolve({ data: rows.slice(from, to + 1), error: null });
+                },
+              };
             },
           };
         },

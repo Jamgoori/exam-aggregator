@@ -64,16 +64,24 @@ function normalizeConceptAlias(title) {
     .replace(/[\s·,、/()[\]{}<>"'“”‘’:;~\-–—.]/g, "");
 }
 
-// PostgREST의 .in() 은 URL 길이 제한이 있어 나눠 던진다.
+// PostgREST의 .in() 은 URL 길이 제한이 있어 나눠 던진다. 응답도 기본 1,000행에서
+// 잘리므로(concept_aliases는 과목 몇 개만 합쳐도 넘는다 — 2026-09-02 실측: 배치에
+// 과목이 많으면 뒤쪽 과목의 별칭이 통째로 빠져 "unmatched"로 보고됐다) range로 끝까지 받는다.
 async function selectIn(supabase, table, columns, column, values) {
   const rows = [];
+  const PAGE = 1000;
   for (let i = 0; i < values.length; i += 200) {
-    const { data, error } = await supabase
-      .from(table)
-      .select(columns)
-      .in(column, values.slice(i, i + 200));
-    if (error) throw new Error(`${table} 조회 실패: ${error.message}`);
-    rows.push(...(data ?? []));
+    const slice = values.slice(i, i + 200);
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from(table)
+        .select(columns)
+        .in(column, slice)
+        .range(from, from + PAGE - 1);
+      if (error) throw new Error(`${table} 조회 실패: ${error.message}`);
+      rows.push(...(data ?? []));
+      if ((data ?? []).length < PAGE) break;
+    }
   }
   return rows;
 }
