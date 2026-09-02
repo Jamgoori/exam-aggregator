@@ -43,6 +43,11 @@ export function getPaperDisplayTitle(
 // 쓴다: 카드에는 배지·버튼이 이미 맥락을 주지만, 검색 결과에 뜨는 글 제목은
 // "무엇을 볼 수 있는 글인지"까지 말해야 하기 때문이다.
 //
+// "기출문제"를 빼지 않는다 — 수험생이 실제로 치는 검색어는 압도적으로 "기출"
+// 계열이라(국회직 8급 행정학 기출), <title> 에서 그 단어가 빠지면 가장 큰 유입
+// 검색어를 놓친다. "기출문제 해설" 은 그 자체로 흔한 검색어라 두 축을 한 제목으로
+// 잡는다.
+//
 // 해설이 아직 없는 문제지에도 같은 제목을 붙인다 — 문제지마다 제목 모양이
 // 갈리면 목록·공유 카드·검색 결과가 들쭉날쭉해지고, 해설이 채워질 때마다
 // 색인된 제목이 바뀌는 편이 더 손해다.
@@ -50,5 +55,5 @@ export function getPaperDocumentTitle(
   title: string,
   track: string | null | undefined,
 ): string {
-  return `${getPaperDisplayTitle(title, track)} 문제 해설`;
+  return `${getPaperDisplayTitle(title, track)} 기출문제 해설`;
 }
