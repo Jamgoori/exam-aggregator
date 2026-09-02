@@ -30,12 +30,50 @@ import {
 import { JsonLd } from "@/components/json-ld";
 import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 import {
+  getNewestPaperSlugs,
   getPaper,
   getPaperDetailData,
   getRelatedPapersData,
 } from "./paper-detail-data";
 import type { ExamPaper } from "@gongmoa/core";
 import type { Metadata } from "next";
+
+// 빌드에서 미리 만들어 둘 문제지 수. 최신 시험부터 이만큼이다(홈 목록 순서).
+//
+// 전부(4,300장) 만들 수는 없다 — 프리렌더 산출물이 장당 305KB(PPR postponed 데이터
+// 194KB)라 통째로 만들면 1.1GB, 힙 8GB 로도 빌드가 OOM 으로 죽는다(3,604장에서
+// SIGABRT, 2026-08-18 실측). 과목 184장은 19MB · 30초로 끝났으니 이 정도면 빌드에
+// 1분 안팎이 더 붙는다.
+const PRERENDERED_PAPER_COUNT = 200;
+
+/**
+ * 문제지 주소 일부를 빌드에 미리 알려준다. **이 함수가 없으면 Googlebot 이 받는
+ * 문제지 HTML 에 <title>·canonical 이 없다** — 아래 사정 때문이다.
+ *
+ * Next 는 주소를 모르는 동적 라우트를 "fallback 셸" 하나로 만들어 모든 문제지에
+ * 돌려쓴다. 주소를 모르니 generateMetadata 를 돌릴 수 없어 그 셸의 <head> 에는
+ * 제목·정본이 없고, Vercel CDN 은 그 셸을 캐시해 크롤러에게도 그대로 내준다
+ * (과목 페이지 /subjects/[slug] 의 generateStaticParams 주석에 UA 별 실측이 있다).
+ * 서치콘솔에서 색인 페이지가 ~650 → 83 으로 떨어졌을 때 남은 83 이 정확히
+ * "셸에 메타데이터가 박힌 페이지"(홈·시험·과목)뿐이었다(2026-08-28 자료).
+ *
+ * 여기 실린 주소는 빌드에서 완성본(제목·정본이 <head> 에 있는 HTML)이 되고, 실리지
+ * 않은 주소는 next.config 의 partialPrefetching 덕에 첫 요청 뒤 백그라운드에서
+ * 완성본으로 승격된다(Next 16.3 "ISR with Cache Components"). 그래서 목록이 전체를
+ * 덮을 필요는 없다 — 크롤러가 자주 오는 최신 시험을 앞에 두는 정도면 된다.
+ *
+ * 두 조건이 함께 있어야 <head> 에 들어간다: (1) 이 함수로 주소를 알고, (2)
+ * generateMetadata 가 기다리는 데이터가 전부 캐시돼 있을 것(getPaper →
+ * getSlugMap·fetchPaperById 둘 다 'use cache'). searchParams 를 generateMetadata 에서
+ * 읽으면 (2)가 깨진다 — 과목 페이지 주석 참고.
+ *
+ * 주소 목록은 홈·사이트맵과 같은 집합(중복 시험지를 합친 대표)이고 최신 시험이
+ * 앞에 온다(getNewestPaperSlugs).
+ */
+export async function generateStaticParams() {
+  const slugs = await getNewestPaperSlugs(PRERENDERED_PAPER_COUNT);
+  return slugs.map((id) => ({ id }));
+}
 
 export async function generateMetadata({
   params,

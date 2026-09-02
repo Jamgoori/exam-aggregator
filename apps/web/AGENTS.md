@@ -65,6 +65,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   미국 IP 에서 오므로, 예외가 빠지면 403 이 계속 나가 색인이 통째로 사라진다.
   `/payments/**`·`/auth/**`·`/api/**` 를 차단 대상에 넣지 말 것 (결제 승인
   리다이렉트를 막으면 돈만 빠진 주문이 남는다). 국가를 모를 때는 언제나 통과시킬 것.
+- **검색 색인(SEO)**: `next.config.ts` 의 `htmlLimitedBots` 에 Googlebot 을 넣지 말 것 —
+  Vercel 이 Googlebot 에는 캐시 우회를 적용하지 않아, 넣는 순간 Googlebot 이 받는
+  HTML 에서 `<title>`·canonical 이 통째로 사라진다(2026-08-28 색인 ~650 → 83 의 원인).
+  `partialPrefetching: true` 를 끄지 말 것 — 문제지 4,300장 대부분은 빌드에 안 실리고
+  첫 방문 뒤 승격으로 `<head>` 에 메타데이터를 얻는다. 동적 라우트를 새로 만들면
+  `generateStaticParams`(한 건 이상) + `generateMetadata` 가 쓰는 조회는 전부
+  `'use cache'` + 공개 클라이언트로 둘 것(`searchParams`·`cookies()` 를 읽으면 셸에서
+  빠진다). 확인은 UA 를 Googlebot 으로 바꿔 받은 HTML 의 `<head>` 를 직접 볼 것.
 - **다운로드 집계**: `download-counting.ts` 의 봇 목록(`NON_HUMAN_UA`)에 `naver`·`daum`·
   `kakaotalk` 을 넣지 말 것 — 셋 다 크롤러가 아니라 **인앱 브라우저**의 UA 표식이라
   (`NAVER(inapp;...)`, `KAKAOTALK 10.x`, `DaumApps/...`) 넣는 순간 국내 모바일 유입이
