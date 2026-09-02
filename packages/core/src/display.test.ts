@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getPaperDisplayTitle, stripTrackFromTitle } from "./paper-title";
+import {
+  getPaperDisplayTitle,
+  getPaperDocumentTitle,
+  stripTrackFromTitle,
+} from "./paper-title";
 import {
   applyExamTypeSubjectName,
   getSubjectDisplayName,
@@ -16,6 +20,18 @@ import type { Subject } from "./types";
 // "무엇을 보여줄지" 판정은 전부 여기서 나온다.
 
 // ── 제목 ────────────────────────────────────────────────────────────────
+test("상세페이지 글 제목은 표시 제목 뒤에 '문제 해설'을 붙인다", () => {
+  assert.equal(
+    getPaperDocumentTitle("2024 국회직 8급 행정학", null),
+    "2024 국회직 8급 행정학 문제 해설",
+  );
+  // 표시 제목 규칙(직류 제거·괄호 풀기)은 그대로 통과시킨다.
+  assert.equal(
+    getPaperDocumentTitle("2026 법원직 9급 (전산서기보) 한국사", "전산서기보"),
+    "2026 법원직 9급 한국사 문제 해설",
+  );
+});
+
 test("법원직 제목에서는 직류를 뗀다", () => {
   assert.equal(
     getPaperDisplayTitle("2026 법원직 9급 (전산서기보) 한국사", "전산서기보"),

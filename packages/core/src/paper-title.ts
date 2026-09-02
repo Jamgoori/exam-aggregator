@@ -37,3 +37,18 @@ export function getPaperDisplayTitle(
     : named;
   return unwrapParentheses(base);
 }
+
+// 문제지 한 장을 "글"로 부를 때의 제목 — 상세페이지 <title>·h1·구조화 데이터가
+// 모두 이 형태를 쓴다. 카드 목록은 여전히 짧은 표시 제목(getPaperDisplayTitle)만
+// 쓴다: 카드에는 배지·버튼이 이미 맥락을 주지만, 검색 결과에 뜨는 글 제목은
+// "무엇을 볼 수 있는 글인지"까지 말해야 하기 때문이다.
+//
+// 해설이 아직 없는 문제지에도 같은 제목을 붙인다 — 문제지마다 제목 모양이
+// 갈리면 목록·공유 카드·검색 결과가 들쭉날쭉해지고, 해설이 채워질 때마다
+// 색인된 제목이 바뀌는 편이 더 손해다.
+export function getPaperDocumentTitle(
+  title: string,
+  track: string | null | undefined,
+): string {
+  return `${getPaperDisplayTitle(title, track)} 문제 해설`;
+}
