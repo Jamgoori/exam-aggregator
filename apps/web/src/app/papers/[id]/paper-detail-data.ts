@@ -4,6 +4,7 @@ import { cacheLife, cacheTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createPublicClient } from "@/lib/supabase/public";
 import { resolvePaperId } from "@/lib/paper-slug-map";
+import { fetchAllExamPapers } from "@/lib/all-papers";
 import { compareLevels } from "@/lib/level-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
@@ -19,6 +20,7 @@ import type {
   MyCbtRecordItem,
   RoundAverage,
 } from "@/components/my-cbt-record-modal";
+import { getPaperSlug } from "@gongmoa/core";
 import type { AnswerKey, Comment, ExamPaper } from "@gongmoa/core";
 
 const RELATED_PAPERS_LIMIT = 12;
@@ -70,6 +72,26 @@ async function fetchPaperById(id: string): Promise<ExamPaper | null> {
     .eq("id", id)
     .single();
   return data as ExamPaper | null;
+}
+
+/**
+ * 최신 시험부터 `limit` 장의 문제지 주소(slug). page.tsx 의 generateStaticParams 가
+ * 빌드에서 미리 만들 주소를 고르는 데 쓴다.
+ *
+ * 홈·사이트맵과 같은 목록(fetchAllExamPapers)을 쓴다 — 중복 시험지를 대표 한 장으로
+ * 합친 뒤라 주소 집합이 사이트맵과 같고, 최신 시험이 앞에 온다. 빌드 시점에 도는
+ * 함수라 쿠키 없는 공개 클라이언트여야 하고, 'use cache' 가 있어야 프리렌더 중의
+ * 조회로 취급된다(홈 데이터와 같은 태그·수명).
+ */
+export async function getNewestPaperSlugs(limit: number): Promise<string[]> {
+  "use cache";
+  cacheLife({ revalidate: 3600 });
+  cacheTag("home-data");
+
+  const { papers } = await fetchAllExamPapers(createPublicClient());
+  return papers
+    .slice(0, limit)
+    .map((p) => getPaperSlug(p.title, p.round, p.track));
 }
 
 // 상세페이지 상단(제목·버튼·평점·댓글)에 필요한 데이터만 모아서 돌려준다.
