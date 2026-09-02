@@ -21,7 +21,11 @@ import { CommentsSection } from "@/components/comments-section";
 import { ExamCard } from "@/components/exam-card";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { MyCbtRecordModal } from "@/components/my-cbt-record-modal";
-import { getPaperDisplayTitle, getSubjectDisplayName } from "@/lib/paper-title";
+import {
+  getPaperDisplayTitle,
+  getPaperDocumentTitle,
+  getSubjectDisplayName,
+} from "@/lib/paper-title";
 import {
   paperHref,
   paperCbtHref,
@@ -83,11 +87,10 @@ export async function generateMetadata({
   const { id } = await params;
   const paper = await getPaper(id);
   if (!paper) return {};
-  const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
 
   const subject = paper.subjects;
   const examType = paper.exam_types;
-  const title = `${displayTitle} 기출문제`;
+  const title = getPaperDocumentTitle(paper.title, paper.track);
   const description = `${examType?.name ?? ""} ${paper.level ?? ""} ${paper.year}년 ${subject?.name ?? ""} 기출문제를 정답과 함께 무료로 열람·다운로드하세요.`
     .replace(/\s+/g, " ")
     .trim();
@@ -181,7 +184,7 @@ export default async function PaperDetailPage({
             },
             {
               "@type": "LearningResource",
-              name: `${displayTitle} 기출문제`,
+              name: getPaperDocumentTitle(paper.title, paper.track),
               url: absoluteUrl(paperHref(paper)),
               inLanguage: "ko-KR",
               learningResourceType: "기출문제",
@@ -260,7 +263,7 @@ export default async function PaperDetailPage({
 
         <div>
           <h1 className="text-[27px] font-bold leading-snug sm:text-3xl">
-            {displayTitle}
+            {getPaperDocumentTitle(paper.title, paper.track)}
           </h1>
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
             {examType?.name}
