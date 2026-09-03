@@ -100,8 +100,58 @@ returned rows: [{"exam_type_id":"b8c7b0ef-0308-4840-952c-551d4b01ff87","level":n
 
 1~18행은 위 표와 동일하게 그대로다 (기존 행 변경·삭제 없음).
 
-## 6. `next-explanation-chunk.mjs --target-size 1` — 실행 중
+## 6. `next-explanation-chunk.mjs --target-size 1` — `done: false`, 해경 청크가 나온다
 
-`apps/web` 에서 `node scripts/next-explanation-chunk.mjs --target-size 1` 실행 중이다
-(읽기 전용 확인 완료: `insert/update/upsert/delete/rpc` 호출 없음, Storage 는
-`getPublicUrl` 만 — 업로드 없음). 결과가 나오는 대로 이 절을 갱신한다.
+`apps/web` 에서 `node scripts/next-explanation-chunk.mjs --target-size 1` 을 한 번
+실행했다. 실행 전 읽기 전용임을 확인했다: `insert`/`update`/`upsert`/`delete`/`rpc`
+호출이 하나도 없고, Storage 는 `supabase.storage.from("exam-papers").getPublicUrl()`
+만 쓴다 (업로드 없음). exit code 0, stderr 비어 있음. 15분 안에 끝났다.
+
+핵심: **`done` 이 `true` → `false` 로 바뀌었고, 나온 청크가 해경 문제지다.** 등록 직전
+까지 순방향·역방향 둘 다 `done:true` (잔여 0) 였으니, 이 변화는 방금 넣은 priority 19
+행이 실제로 배치 순회에 편입됐다는 뜻이다. `level` 이 null 인데도 문제지가 잡혔으므로
+`.is("level", null)` 경로도 정상 동작한다 (조용한 스킵 아님).
+
+```json
+{
+  "done": false,
+  "paper": {
+    "id": "076c73a5-562f-4d39-b3c1-5ec96fb0d255",
+    "title": "2013 해경 2차 (경정) 국제법",
+    "year": 2013,
+    "level": null
+  },
+  "subject": { "id": "e7c99e7a-5bba-4586-8653-c42c7a58a7f5", "name": "국제법" },
+  "concepts": [ /* 국제법 정본 개념 27개 — 국제법 총론 5, 국가 5, 국가의 관할 영역 6,
+                   개인과 국제기구 5, 분쟁해결과 무력사용 6 */ ],
+  "questions": [
+    {
+      "question_id": "da7a89d1-50a1-4003-aeb7-e3415e024b72",
+      "question_number": 1,
+      "image_urls": [
+        "https://xbcwpyadeufgraerlcps.supabase.co/storage/v1/object/public/exam-papers/questions/076c73a5-562f-4d39-b3c1-5ec96fb0d255/01.webp"
+      ]
+    }
+  ]
+}
+```
+
+`concepts` 는 지면 때문에 이름만 줄였고 나머지 필드는 원문 그대로다. 청크는
+`--target-size 1` 대로 1문항이고, 해당 과목(국제법)의 정본 개념 목록이 함께 실려 있다.
+
+## 남는 것
+
+- 이 등록으로 해설 배치가 해경(문제지 772장·문항 20,160개)·소방(277장·5,535개)을
+  집기 시작한다. 순방향은 해경 앞에서부터, 역방향은 소방 뒤에서부터.
+- 큐만 넣었을 뿐 해설은 하나도 만들지 않았다 (`question_explanations` 무변경).
+- `apps/web/scripts/sql/2026-09-03-explanation-queue-haegyeong-sobang.sql` 은 이제
+  이미 반영된 상태다. 재실행해도 안전하게 아무것도 넣지 않는다 (`not exists` 가드).
+- `explanation-prompt.md` 1300자 상한은 여전히 레포 사본만 고쳐진 상태다 — Storage
+  원본 재배포는 소유자 몫이고 이번 작업 범위 밖이라 건드리지 않았다.
+
+## 작업 범위 확인
+
+한 것: `explanation_batch_priority` INSERT 2건, 확인용 SELECT
+(`exam_types`, `explanation_batch_priority`), 읽기 전용 청크 스크립트 1회 실행.
+
+안 한 것: 다른 테이블 쓰기, `question_explanations` 저장, Storage 업로드, DDL, 삭제.
