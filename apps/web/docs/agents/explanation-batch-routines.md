@@ -51,7 +51,11 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
   직렬(법원직·기상직·국회직·군무원·계리직·경찰)과 5급 그룹을 전부 등록했다. 알아둘 것:
   - **이 테이블에 없는 (exam_type_id, level) 그룹은 영원히 처리되지 않는다.** 새
     직렬·시험지를 업로드하면 `node --env-file=.env.local scripts/explanation-queue-status.mjs`
-    (소유자 전용, service role)로 미등록 그룹을 확인하고 행을 추가할 것.
+    (이 감사 스크립트는 소유자 전용 — service role 키가 필요하다)로 미등록 그룹을 확인하고
+    행을 추가할 것. **행 추가 자체는 service role 이 필요 없다** — 2026-09-03 실측으로
+    해설봇 계정(publishable key + 로그인)의 RLS 로도 INSERT 가 통과했다(201 Created,
+    재조회로 확인). 즉 큐 등록은 루틴 환경에서도 할 수 있고, service role 이 꼭 필요한
+    것은 현황 감사 스크립트 쪽이다.
   - **"최후순위" 그룹은 목록 맨 뒤가 아니라 잔여량 기준 정중앙에 둔다.** 역방향
     루틴이 맨 뒤에서부터 시작하므로, 맨 뒤 = 역방향이 가장 먼저 집는 자리다. 순/역이
     마지막에 수렴하는 곳은 앞뒤 잔여량이 같아지는 중간 지점이고, 그래서 5급 3종
@@ -71,8 +75,9 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
   등록·비제외 문항 80,065건 전부 해설 있음)이었는데, `exam_papers` 에는 있으나 큐에
   행이 없어 통째로 빠져 있던 그룹이 둘 있었다 — 해경(문제지 772장·문항 20,160개)과
   소방(277장·5,535개), 둘 다 해설 0건. 등록 SQL 은
-  `scripts/sql/2026-09-03-explanation-queue-haegyeong-sobang.sql` (소유자가
-  `supabase db query --linked` 로 실행, 재실행 안전). priority 는 해경 19·소방 20 —
+  `scripts/sql/2026-09-03-explanation-queue-haegyeong-sobang.sql` (기록·재현용, 재실행
+  안전). 실제 등록은 루틴 환경에서 해설봇 계정으로 supabase-js INSERT 2건을 날려서 했고,
+  재조회로 18행 → 20행을 확인했다. priority 는 해경 19·소방 20 —
   기존 18개 그룹의 잔여가 0이라 실제 작업이 이 둘뿐이고, 역방향이 소방을 끝낸 뒤
   해경을 뒤에서부터 먹어서 두 방향이 해경 안쪽에서 만난다(앞뒤 몫이 대략 절반씩).
   같은 실측에서 확인한 것 둘 더: `question_explanations` 전체(80,345)와 큐 등록·비제외
@@ -81,10 +86,14 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
 - **해설 분량 상한 1000자 → 1300자 (2026-09-03).** `explanation-prompt.md` 의 "분량"
   절을 `300~1300자`(핵심 키워드 200~350자, 선지 각 70~200자)로 올렸다. 상한은 여유이지
   목표가 아니라는 문장도 같이 넣었다 — 짧게 끝나는 문항을 채워 늘리면 품질이 떨어진다.
-  **레포 사본만 고친 상태다.** 배치가 실제로 쓰는 원본은 Storage(`exam-papers` 버킷
-  `_batch-scripts/explanation-prompt.md`)라, 소유자가 service role 로 재배포하기 전까지
-  배치는 여전히 1000자 상한으로 쓴다. 저장 스크립트·DB·화면 어디에도 길이 제한은
-  없으므로(2026-09-03 확인) 프롬프트 재배포만 하면 그대로 반영된다.
+  배치가 실제로 쓰는 원본은 Storage(`exam-papers` 버킷
+  `_batch-scripts/explanation-prompt.md`)이고, **소유자가 같은 날 재배포까지 마쳤다**
+  (레포 사본과 바이트 동일, 14,131 바이트 확인). 저장 스크립트·DB·화면 어디에도 길이
+  제한은 없어(2026-09-03 확인) 프롬프트가 유일한 통제점이다. 재배포는 service role 키로
+  Storage object 엔드포인트에 `x-upsert: true` POST 하는 방식이며, 루틴 환경·원격 세션은
+  egress 정책과 키 부재로 이 경로를 쓸 수 없다 — 소유자 로컬에서 해야 한다.
+  같은 재배포로 정본 개념(`concept`) 절도 함께 배포됐다(그 전까지 배치는 `concept` 을
+  안 써 보냈다).
 - **순방향/역방향은 양 끝에서 좁혀오는 방식.** 순방향은 문항 목록 앞에서부터,
   역방향은 `--reverse` 플래그로 뒤에서부터 진행해 중간에서 만난다(`done:true`).
   `--reverse`는 2026-07-18부터 스크립트에 정식 내장이다 (그 전엔 역방향 루틴이
@@ -128,10 +137,11 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
     같이 **한쪽만 고치지 말 것**(배치가 붙이는 개념과 백필이 붙이는 개념이 조용히
     달라진다). `apps/web/src/lib/explanation-concepts.test.ts`가 두 구현이 어긋나면
     실패한다.
-  - **프롬프트 쪽 반영은 아직 안 됐다.** `concept` 필드를 쓰라고 지시하는 건
-    `explanation-prompt.md`인데 그 원본은 Storage에 있다(아래 항목). 레포 사본만
-    고쳐 둔 상태라, **소유자가 Storage에 재배포하기 전까지 배치는 `concept`을 안
-    써 보낸다** — 스크립트는 그 상태에서도 정상 동작한다(그냥 안 붙을 뿐).
+  - **프롬프트 쪽 반영은 2026-09-03 재배포로 끝났다.** `concept` 필드를 쓰라고 지시하는
+    건 `explanation-prompt.md`이고 그 원본은 Storage에 있는데(아래 항목), 2026-08-12부터
+    2026-09-03까지는 레포 사본만 고쳐진 상태여서 배치가 `concept`을 안 써 보냈다 —
+    그 기간에 생성된 해설은 `concept_id`가 비어 있으니 필요하면 `apply-concepts`로
+    백필할 것. 스크립트는 어느 상태에서든 정상 동작한다(그냥 안 붙을 뿐).
   - 그 테스트는 스크립트를 직접 import 하지 않고 **`main()` 호출만 떼어낸 사본**을
     만들어 검사한다. 실행 가드(`import.meta.url === argv[1]`)를 넣는 편이 짧지만,
     그 가드가 어긋나면 루틴이 조용히 0건 저장으로 끝난다 — 그래서 스크립트 쪽은
