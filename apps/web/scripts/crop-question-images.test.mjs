@@ -20,7 +20,9 @@ import {
   FIXTURE_QUESTION_COUNT,
   FIXTURE_MERGED_SETS,
   FIXTURE_STRIP_SET,
+  TIGHT_GUTTER,
   TIGHT_QUESTION_LINES,
+  WIDE_GUTTER,
 } from "./lib/make-crop-fixture.mjs";
 import {
   extractQuestionsFromPdf,
@@ -55,6 +57,14 @@ async function profile(buffer) {
   let blocks = 0;
   let firstInk = -1;
   let lastInk = -1;
+  let inkLeft = width;
+  let inkRight = -1;
+  for (let x = 0; x < width; x++) {
+    if (colCover[x] > 0) {
+      if (x < inkLeft) inkLeft = x;
+      inkRight = x;
+    }
+  }
   for (let y = 0; y < height; y++) {
     if (rowHasInk[y] && (y === 0 || !rowHasInk[y - 1])) blocks++;
     if (rowHasInk[y]) {
@@ -72,6 +82,9 @@ async function profile(buffer) {
     blocks,
     firstInk,
     lastInk,
+    // 잉크가 실제로 걸쳐 있는 가로 폭. 이미지 폭은 normalizeWidths 가 흰 여백으로
+    // 맞추므로, 본문이 깎였는지는 이 값으로 봐야 한다.
+    inkWidth: inkRight < 0 ? 0 : inkRight - inkLeft + 1,
     // 크롭을 위에서 아래까지 관통하는 열 = 지면 테두리·칼럼 구분선.
     ruleColumns: colCover.filter((c) => c / inkHeight >= RULE_COVER).length,
   };
@@ -215,19 +228,56 @@ test("한 문제지 안에서 이미지 폭이 모두 같다", async () => {
   assert.equal(widths.size, 1, `폭이 갈렸다: ${[...widths]}`);
 });
 
+// 문항마다 나와야 하는 잉크 덩어리(=줄) 수.
+// 일반 문항 6줄(발문 1 + 부연 1 + 선지 4).
+// 병합 세트 = 안내문 1 + 지문 상자 1덩어리 + 문항 2개 × 6줄 = 14.
+// 지시문 재사용형 = 안내문 스트립 1 + 6.
+const EXPECTED_BLOCKS = new Map([
+  [1, 6], [2, 6], [3, 14], [4, 14], [5, 6], [6, 6],
+  [7, 14], [8, 14], [9, 7], [10, 7], [11, 6],
+  // 12번은 꼬리말 바로 위까지 내려오는 문항 — 꼬리말이 남으면 줄 수가 늘어난다.
+  [12, TIGHT_QUESTION_LINES], [13, 6],
+]);
+
 test("문항마다 기대한 줄(잉크 덩어리) 수가 그대로 나온다", async () => {
-  // 일반 문항 6줄(발문 1 + 부연 1 + 선지 4).
-  // 병합 세트 = 안내문 1 + 지문 상자 1덩어리 + 문항 2개 × 6줄 = 14.
-  // 지시문 재사용형 = 안내문 스트립 1 + 6.
-  const expected = new Map([
-    [1, 6], [2, 6], [3, 14], [4, 14], [5, 6], [6, 6],
-    [7, 14], [8, 14], [9, 7], [10, 7], [11, 6],
-    // 12번은 꼬리말 바로 위까지 내려오는 문항 — 꼬리말이 남으면 줄 수가 늘어난다.
-    [12, TIGHT_QUESTION_LINES], [13, 6],
-  ]);
   for (const c of framed) {
     const p = await profile(c.image);
-    assert.equal(p.blocks, expected.get(c.number), `${c.number}번 줄 수가 다르다`);
+    assert.equal(p.blocks, EXPECTED_BLOCKS.get(c.number), `${c.number}번 줄 수가 다르다`);
+  }
+});
+
+test("칼럼이 지면 폭 절반에 걸치고 칼럼 간격이 좁은 조판", async () => {
+  // 실측 재현(2008 법원직 9급 상법): 우측 칼럼이 지면 폭 절반과 1pt 안팎으로
+  // 겹치는데 1쪽만 절반보다 오른쪽이라, 문서는 2단으로 맞게 보면서 2·3쪽 우측
+  // 마커만 좌측 칼럼에 섞였다. 그러면 좌측 문항의 아래 경계가 남의 칼럼 마커로
+  // 잡혀 **본문 한복판에서 잘린다**(제보: 문11이 선지 ② 중간에서 끊김). 게다가
+  // 좌측 본문 끝·구분선·우측 칼럼 시작이 2pt 안에 붙어 있어, 크롭 경계가 좌측
+  // 본문을 깎거나 우측 크롭이 구분선을 물고 들어왔다.
+  const opts = { scale: SCALE, expectedCount: FIXTURE_QUESTION_COUNT };
+  const tight = await extractQuestionsFromPdf(
+    await buildFixturePdf({ gutter: TIGHT_GUTTER }),
+    opts,
+  );
+  assert.equal(tight.length, FIXTURE_QUESTION_COUNT);
+  for (const c of tight) {
+    const p = await profile(c.image);
+    assert.equal(p.blocks, EXPECTED_BLOCKS.get(c.number), `${c.number}번 줄 수가 다르다`);
+    assert.equal(p.ruleColumns, 0, `${c.number}번에 칼럼 구분선이 남았다`);
+  }
+
+  // 같은 본문을 여유 있는 간격으로만 다시 놓은 대조군과 견준다. 좌측 칼럼은 폭이
+  // 같아 글자가 한 자도 안 달라지므로, 잉크 폭이 줄었다면 좁은 간격 때문에 본문
+  // 오른쪽 끝이 깎였다는 뜻이다(수정 전 실측: 한 글자 ≒ 24px).
+  const wide = await extractQuestionsFromPdf(await buildFixturePdf({ gutter: WIDE_GUTTER }), opts);
+  const wideByNumber = new Map(wide.map((c) => [c.number, c]));
+  const LEFT_COLUMN_ONLY = [1, 2, 3, 4, 9, 10, 12];
+  for (const n of LEFT_COLUMN_ONLY) {
+    const a = await profile(tight.find((c) => c.number === n).image);
+    const b = await profile(wideByNumber.get(n).image);
+    assert.ok(
+      Math.abs(a.inkWidth - b.inkWidth) <= 3,
+      `${n}번 잉크 폭이 칼럼 간격에 따라 달라졌다 (${a.inkWidth} vs ${b.inkWidth})`,
+    );
   }
 });
 

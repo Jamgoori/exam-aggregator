@@ -67,7 +67,7 @@ function fit(font, text, size, maxWidth) {
   return out;
 }
 
-function drawFrame(page, font, { frame, header, footer }) {
+function drawFrame(page, font, { frame, header, footer, ruleX = FIXTURE_LAYOUT.columnRuleX }) {
   const L = FIXTURE_LAYOUT;
   if (frame) {
     page.drawRectangle({
@@ -79,8 +79,8 @@ function drawFrame(page, font, { frame, header, footer }) {
       borderColor: rgb(0, 0, 0),
     });
     page.drawLine({
-      start: { x: L.columnRuleX, y: 26 },
-      end: { x: L.columnRuleX, y: PAGE_H - 26 },
+      start: { x: ruleX, y: 26 },
+      end: { x: ruleX, y: PAGE_H - 26 },
       thickness: RULE_W,
       color: rgb(0, 0, 0),
     });
@@ -99,7 +99,7 @@ function drawFrame(page, font, { frame, header, footer }) {
 }
 
 // 한 칼럼에 문항/지문을 위에서 아래로 흘려 넣는 커서.
-function columnCursor(page, font, x, topY) {
+function columnCursor(page, font, x, topY, width = FIXTURE_LAYOUT.columnTextWidth) {
   let y = topY;
   return {
     get y() {
@@ -108,7 +108,7 @@ function columnCursor(page, font, x, topY) {
     line(text, opts = {}) {
       const indent = opts.indent ?? 0;
       const size = opts.size ?? BODY_SIZE;
-      page.drawText(fit(font, text, size, FIXTURE_LAYOUT.columnTextWidth - indent), {
+      page.drawText(fit(font, text, size, width - indent), {
         x: x + indent,
         y,
         size,
@@ -126,14 +126,14 @@ function columnCursor(page, font, x, topY) {
       page.drawRectangle({
         x: x + 6,
         y: top - height,
-        width: FIXTURE_LAYOUT.columnTextWidth - 12,
+        width: width - 12,
         height,
         borderWidth: RULE_W,
         borderColor: rgb(0, 0, 0),
       });
       let ty = top - 14;
       for (const t of lines) {
-        page.drawText(fit(font, t, BODY_SIZE, FIXTURE_LAYOUT.columnTextWidth - 28), {
+        page.drawText(fit(font, t, BODY_SIZE, width - 28), {
           x: x + 14,
           y: ty,
           size: BODY_SIZE,
@@ -175,26 +175,38 @@ function passage(cursor, from, to, lineCount) {
 //
 // opts.frame=false 로 테두리·구분선 없는 조판을 만든다 — 실선 제거 로직이 실선
 // 없는 문제지를 건드리지 않는지 확인하는 대조군이다.
-export async function buildFixturePdf({ frame = true, header = true, footer = true } = {}) {
+export async function buildFixturePdf({
+  frame = true,
+  header = true,
+  footer = true,
+  gutter = null,
+} = {}) {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const L = FIXTURE_LAYOUT;
+  const g = gutter ?? {
+    leftWidth: L.columnTextWidth,
+    rightWidth: L.columnTextWidth,
+    ruleX: L.columnRuleX,
+    rightTextXByPage: [L.rightTextX, L.rightTextX, L.rightTextX],
+  };
   const frameOpts = (n) => ({
     frame,
+    ruleX: g.ruleX,
     header: header ? { left: "KOREAN 25MUN", right: "TYPE A" } : null,
     footer: footer ? `KOREAN 23 - ${n}` : null,
   });
 
   const p1 = pdf.addPage([PAGE_W, PAGE_H]);
   drawFrame(p1, font, frameOpts(1));
-  const p1L = columnCursor(p1, font, L.leftTextX, L.bodyTopY);
+  const p1L = columnCursor(p1, font, L.leftTextX, L.bodyTopY, g.leftWidth);
   question(p1L, 1);
   question(p1L, 2);
   passage(p1L, 3, 4, 7);
   question(p1L, 3);
   question(p1L, 4);
 
-  const p1R = columnCursor(p1, font, L.rightTextX, L.bodyTopY);
+  const p1R = columnCursor(p1, font, g.rightTextXByPage[0], L.bodyTopY, g.rightWidth);
   question(p1R, 5);
   question(p1R, 6);
   passage(p1R, 7, 8, 5);
@@ -202,14 +214,14 @@ export async function buildFixturePdf({ frame = true, header = true, footer = tr
 
   const p2 = pdf.addPage([PAGE_W, PAGE_H]);
   drawFrame(p2, font, frameOpts(2));
-  const p2L = columnCursor(p2, font, L.leftTextX, L.bodyTopY);
+  const p2L = columnCursor(p2, font, L.leftTextX, L.bodyTopY, g.leftWidth);
   question(p2L, 8);
   // 지시문 재사용형: 안내문 바로 아래에 첫 문항이 붙는다(지문 없음).
   p2L.line("[9~10] Choose the expression that fits each blank below.");
   question(p2L, 9);
   question(p2L, 10);
 
-  const p2R = columnCursor(p2, font, L.rightTextX, L.bodyTopY);
+  const p2R = columnCursor(p2, font, g.rightTextXByPage[1], L.bodyTopY, g.rightWidth);
   question(p2R, 11);
 
   // 3쪽: 마지막 문항이 **꼬리말 가까이까지** 내려오는 지면. 꼬리말 감지는 "바로 위
@@ -219,13 +231,36 @@ export async function buildFixturePdf({ frame = true, header = true, footer = tr
   // 확정된 꼬리말과 글자·위치가 같으면 값을 채우는 로직을 이 지면이 검사한다.
   const p3 = pdf.addPage([PAGE_W, PAGE_H]);
   drawFrame(p3, font, frameOpts(3));
-  const p3L = columnCursor(p3, font, L.leftTextX, L.bodyTopY);
+  const p3L = columnCursor(p3, font, L.leftTextX, L.bodyTopY, g.leftWidth);
   question(p3L, 12, { bodyLines: TIGHT_BODY_LINES });
-  const p3R = columnCursor(p3, font, L.rightTextX, L.bodyTopY);
+  const p3R = columnCursor(p3, font, g.rightTextXByPage[2], L.bodyTopY, g.rightWidth);
   question(p3R, 13);
 
   return Buffer.from(await pdf.save());
 }
+
+// 칼럼 사이가 붙어 있는 조판(실측 재현: 2008 법원직 9급 상법).
+//   - 우측 칼럼이 지면 폭 절반(297.5)과 1pt 안팎으로 겹친다. **1쪽만 절반보다
+//     오른쪽**(298.9)이고 2·3쪽은 왼쪽(297.4)이라, 문서는 2단으로 맞게 판정되면서
+//     2·3쪽 우측 마커만 좌측 칼럼에 섞여 들어간다 → 좌측 문항의 아래 경계가 남의
+//     칼럼 마커로 잡혀 본문 한복판에서 잘린다.
+//   - 좌측 본문 끝 → 구분선 → 우측 칼럼 시작이 2pt 안에 다 들어 있다 → 크롭
+//     경계가 좌측 본문을 깎거나 우측 크롭에 구분선을 물고 들어온다.
+export const TIGHT_GUTTER = {
+  leftWidth: 253,
+  rightWidth: 253,
+  ruleX: 295.8,
+  rightTextXByPage: [298.9, 297.4, 297.4],
+};
+// 같은 본문을 여유 있는 칼럼 간격으로만 다시 놓은 대조군. 좌측 칼럼 폭이 같아
+// 좌측 문항의 글자가 한 자도 안 달라진다 — 두 결과의 잉크 폭을 견주면 좁은 간격
+// 때문에 본문이 깎였는지 바로 드러난다.
+export const WIDE_GUTTER = {
+  leftWidth: 253,
+  rightWidth: 230,
+  ruleX: 310,
+  rightTextXByPage: [318, 318, 318],
+};
 
 // 3쪽 좌단 문항의 부연 줄 수 — 마지막 줄이 꼬리말 바로 위(줄간격의 2.1배 미만)에
 // 오도록 맞춘 값이다.

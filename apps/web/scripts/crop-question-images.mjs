@@ -1024,6 +1024,7 @@ async function makePageContext(page, markerData, scale, opts) {
   const pageRules = await findPageVerticalRules(pageImage, scale);
   // 1단 조판은 한 칼럼이 지면 전체 폭이므로 좌·우 줄을 함께 봐야 한다.
   const boundsKeys = columnMode === "single" ? ["L", "R"] : null;
+  const boundsByKey = new Map();
   for (const colDef of columnDefs) {
     const bounds = computeColumnTextBounds(
       lines,
@@ -1032,6 +1033,7 @@ async function makePageContext(page, markerData, scale, opts) {
       footerInkTopY,
     );
     if (!bounds) continue;
+    boundsByKey.set(colDef.key, bounds);
     for (const rule of pageRules) {
       const rx0 = rule.x0 / scale;
       const rx1 = rule.x1 / scale;
@@ -1056,6 +1058,74 @@ async function makePageContext(page, markerData, scale, opts) {
     if (colDef.xRightPt - colDef.xLeftPt < 1) {
       colDef.xLeftPt = PAGE_MARGIN_X;
       colDef.xRightPt = pageWidthPt - PAGE_MARGIN_X;
+    }
+  }
+
+  // 칼럼 사이 여백이 아주 좁은 조판 보정(2단 전용).
+  //
+  // 위의 실선 처리는 "본문 x 범위에서 RULE_TEXT_MARGIN_PT(6pt) 넘게 떨어진 실선"만
+  // 본다. 그런데 좌측 본문 끝 → 구분선 → 우측 칼럼 시작이 2pt 안팎으로 붙어 있는
+  // 조판이 있어(실측: 2008 법원직 9급 — 좌측 본문 293.6 / 구분선 295.7~296.0 /
+  // 우측 마커 297.4) 그 조건에 아예 안 걸린다. 그러면 두 가지가 같이 어긋난다:
+  //   - 우측 크롭에 구분선이 통째로 들어온다(세로 실선은 이미지 위아래를 관통해
+  //     세로 여백 제거·머리글 제거를 무력화한다 — 문서의 (1)항 참고).
+  //   - 좌측 크롭 경계가 computeColumnCropX 의 물러남(8pt) + COLUMN_GAP(4pt) 만큼
+  //     당겨져 본문 오른쪽 끝 한 글자를 잘라먹는다.
+  // 구분선과 "우측 칼럼이 시작되는 x"(마커는 언제나 칼럼 왼쪽 끝에 붙는다)를
+  // 기준으로 두 경계를 다시 잡는다. 판단 재료가 없으면(마커가 한쪽에만 있거나
+  // 본문 범위를 못 믿으면) 손대지 않는다.
+  if (columnMode === "double") {
+    const leftCol = columnDefs.find((c) => c.key === "L");
+    const rightCol = columnDefs.find((c) => c.key === "R");
+    if (leftCol?.markers.length > 0 && rightCol?.markers.length > 0) {
+      const leftStartX = Math.min(...leftCol.markers.map((m) => m.x));
+      const rightStartX = Math.min(...rightCol.markers.map((m) => m.x));
+      // 두 칼럼 마커 사이를 지나는 세로 실선 = 칼럼 구분선(지면 테두리는 이 밖에
+      // 있다). 여럿이면 우측 칼럼에 가장 가까운 것을 쓴다.
+      const gutterRule = pageRules
+        .map((r) => ({ x0: r.x0 / scale, x1: r.x1 / scale }))
+        .filter((r) => r.x0 > leftStartX && r.x1 < rightStartX)
+        .sort((a, b) => a.x0 - b.x0)
+        .pop();
+      // 좌측 본문 끝. computeColumnTextBounds 를 그대로 쓰면 안 된다 — 1쪽 표제처럼
+      // 지면 폭 전체를 쓰는 줄이 좌측 칼럼 줄로 잡혀 값을 우측 칼럼 너머까지
+      // 밀어올린다(실측: 2008 법원직 9급 1쪽 "【상 법 25문】" 이 x=350 까지). 우측
+      // 칼럼 시작을 넘는 줄은 좌측 칼럼 본문이 아니므로 줄 단위로 빼고 잰다.
+      const leftLineEnds = lines
+        .filter(
+          (l) =>
+            l.col === "L" &&
+            typeof l.right === "number" &&
+            l.right < rightStartX &&
+            (headerInkBottomY === null || headerInkBottomY === undefined || l.y < headerInkBottomY) &&
+            (footerInkTopY === null || footerInkTopY === undefined || l.y > footerInkTopY),
+        )
+        .map((l) => l.right);
+      const leftTextEnd =
+        leftLineEnds.length >= RULE_MIN_BODY_LINES ? Math.max(...leftLineEnds) : null;
+      if (gutterRule) {
+        // 좌측: 구분선 왼쪽으로. 본문을 깎게 되면 손대지 않는다.
+        if (leftTextEnd === null || gutterRule.x0 - RULE_CLEARANCE_PT >= leftTextEnd) {
+          leftCol.xRightPt = Math.min(leftCol.xRightPt, gutterRule.x0 - RULE_CLEARANCE_PT);
+        }
+        // 우측: 구분선 오른쪽으로. 칼럼이 시작되는 x 는 절대 넘지 않는다.
+        rightCol.xLeftPt = Math.max(
+          rightCol.xLeftPt,
+          Math.min(gutterRule.x1 + RULE_CLEARANCE_PT, rightStartX),
+        );
+      }
+      // 좌측 크롭은 적어도 제 본문 끝까지는 담아야 한다 — 구분선(있으면)과 우측
+      // 칼럼 시작 앞까지만 넓힌다.
+      if (leftTextEnd !== null) {
+        // 구분선이 있으면 그게 곧 경계다(우측 칼럼 시작에서 더 물러날 이유가 없다).
+        const ceiling = gutterRule
+          ? gutterRule.x0 - RULE_CLEARANCE_PT
+          : rightStartX - COLUMN_GAP;
+        leftCol.xRightPt = Math.max(
+          leftCol.xRightPt,
+          Math.min(leftTextEnd + RULE_CLEARANCE_PT, ceiling),
+        );
+      }
     }
   }
 
@@ -1494,6 +1564,8 @@ function detectFooters(pageDataList) {
   const empty = pageDataList.map(() => null);
   if (pageDataList.length < 2) return empty;
   const buckets = new Map();
+  // 여백 조건에는 못 미치지만 문구·위치가 되풀이되는 후보(아래 참고).
+  const weakBuckets = new Map();
   for (let i = 0; i < pageDataList.length; i++) {
     const data = pageDataList[i];
     const lines = data.lines ?? [];
@@ -1509,12 +1581,22 @@ function detectFooters(pageDataList) {
       if (start === 0) continue; // 칼럼 전체가 한 덩어리 = 꼬리말이 아니다
       const block = arr.slice(start);
       if (block.length > FOOTER_MAX_LINES) continue;
-      if (arr[start - 1].y - arr[start].y <= lead * FOOTER_GAP_RATIO) continue;
       if (block[0].y >= zoneTop) continue;
+      // 앞 여백이 넉넉하면(FOOTER_GAP_RATIO) 그것만으로 꼬리말로 본다. 좁으면
+      // 버리지 않고 **같은 문구·같은 자리가 여러 페이지에 되풀이되는지**로 다시
+      // 가른다(weakBuckets) — 마지막 문항이 꼬리말 가까이 내려오는 조판에서는
+      // 여백이 줄간격의 1.7배밖에 안 되기도 한다(실측: 2008 법원직 9급 — 본문
+      // y=65.6, 꼬리말 "상 법 (3-2)" y=43.0. 세 쪽 모두 같은 자리·같은 문구인데
+      // 여백만으로는 못 걸러 쪽번호가 문15·20·25 이미지에 남았다).
+      const strongGap = arr[start - 1].y - arr[start].y > lead * FOOTER_GAP_RATIO;
+      const blockText = block.map((l) => normalizeRunningText(l.text ?? "")).join("|");
       for (const l of block) {
         const key = Math.round(l.y / FOOTER_Y_TOLERANCE_PT);
-        if (!buckets.has(key)) buckets.set(key, { perPage: new Map(), texts: new Set() });
-        const b = buckets.get(key);
+        const target = strongGap ? buckets : weakBuckets;
+        const bucketKey = strongGap ? `${key}` : `${key}|${blockText}`;
+        if (!target.has(bucketKey))
+          target.set(bucketKey, { perPage: new Map(), texts: new Set(), blockText });
+        const b = target.get(bucketKey);
         const prev = b.perPage.get(i);
         const cand = { inkTop: l.y + l.height, baseline: l.y };
         if (!prev || cand.inkTop > prev.inkTop) b.perPage.set(i, cand);
@@ -1528,7 +1610,10 @@ function detectFooters(pageDataList) {
   const minPages = Math.max(2, Math.ceil(pageDataList.length / 2));
   const result = empty;
   const confirmed = []; // { text, y }
-  for (const b of buckets.values()) {
+  // 문구가 빈 후보(숫자·기호뿐이라 정규화 결과가 비는 경우)는 되풀이를 근거로
+  // 삼을 수 없으니 약한 후보에서는 뺀다.
+  const weakConfirmed = [...weakBuckets.values()].filter((b) => b.blockText.replace(/\|/g, "") !== "");
+  for (const b of [...buckets.values(), ...weakConfirmed]) {
     if (b.perPage.size < minPages) continue;
     for (const [pageIdx, cand] of b.perPage) {
       if (result[pageIdx] === null || cand.inkTop > result[pageIdx].inkTop) result[pageIdx] = cand;
@@ -2262,6 +2347,18 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
   return cropped;
 }
 
+// 예전 경계(지면 폭 절반)와 실측 클러스터 경계(computeColumnSplitX)가 마커를 서로
+// 다른 칼럼으로 분류하는지 본다 — 하나라도 어긋나면 예전 경계의 칼럼 분류가 틀린
+// 것이고, 그 칼럼의 문항들은 아래 경계가 남의 마커로 잡혀 본문 한복판에서 잘린다.
+// 클러스터를 못 찾으면(1단이거나 마커가 너무 적으면) 판정하지 않는다(false).
+export function columnAssignmentDisagrees(pageMarkerDataList) {
+  const splitX = computeColumnSplitX(pageMarkerDataList);
+  if (splitX == null) return false;
+  return pageMarkerDataList.some((d) =>
+    d.markers.some((m) => (m.x >= splitX) !== (m.x >= d.pageWidthPt / 2)),
+  );
+}
+
 // PDF 버퍼 전체를 문항별로 잘라 { number, image } 목록을 반환한다. 페이지 순회,
 // 정렬, 번호 중복 검사까지 여기서 끝내고, 호출자는 결과를 업로드/DB 반영만 하면
 // 된다 — main()의 단일 문제지 흐름과 batch-crop-questions.mjs의 여러 문제지 순회가
@@ -2287,8 +2384,8 @@ export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage, ex
   } catch (err) {
     legacyError = err;
   }
-  // 개수가 맞아도 legacy를 그대로 믿으면 안 되는 경우가 하나 있다: legacy가 이
-  // 문서를 1단으로 판정했는데 실측 마커는 뚜렷하게 두 칼럼으로 갈리는 경우다.
+  // 개수가 맞아도 legacy를 그대로 믿으면 안 되는 경우가 있다: 예전 경계(지면 폭
+  // 절반)와 실측 클러스터 경계가 마커를 서로 다른 칼럼으로 보내는 경우다.
   // legacy의 1단/2단 판정은 "마커 x가 지면 절반보다 오른쪽에 하나라도 있는가"인데,
   // 우측 칼럼이 지면 절반보다 아주 살짝 왼쪽에서 시작하는 조판이 있다(실측: 법원직
   // 9급 — 지면 폭 595, 절반 297.5인데 우측 칼럼 마커가 x=297.4). 그러면 우측 마커가
@@ -2296,13 +2393,24 @@ export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage, ex
   // 지면 전체 폭을 한 장에 담은 이미지가 나온다 — 문서가 경고하는 "개수만 맞고
   // 반쪽인" 사고 그대로다. 실측 마커 x가 80pt 이상 떨어진 두 무리를 이루면
   // (computeColumnSplitX가 값을 돌려주면) 그건 2단이 확실하므로 legacy를 버린다.
-  const legacyMisreadAsSingle =
-    legacyResult &&
-    legacyResult.columnMode === "single" &&
-    computeColumnSplitX(legacyResult.markerData ?? []) != null;
+  //
+  // 1단 오판은 이 어긋남이 **모든** 우측 마커에서 한꺼번에 터진 경우일 뿐이다.
+  // 페이지마다 우측 칼럼 x가 미세하게 달라 어떤 페이지는 절반보다 오른쪽,
+  // 어떤 페이지는 왼쪽에서 시작하면 2단으로는 맞게 보면서 **그 페이지의 우측
+  // 마커만** 좌측으로 섞인다(실측: 2008 법원직 9급 — 1쪽 우측은 x=298.9 라
+  // 2단으로 판정되는데 2·3쪽 우측은 x=297.4 라 좌측으로 분류됐다. 그러면 좌측
+  // 칼럼 안에서 9·13·10·14… 로 번호가 뒤섞여, 각 문항의 아래 경계가 "바로
+  // 아래에 있는 다른 칼럼의 마커"로 잡힌다 — 문11이 선지 ② 한복판에서 잘린
+  // 사용자 제보가 이것이다. 개수는 25/25 로 맞아 아무 경고도 안 난다).
+  //
+  // 그래서 판정 기준을 "1단이냐"가 아니라 **마커 하나라도 두 경계가 서로 다른
+  // 칼럼으로 보내느냐**로 넓힌다(1단 오판은 그 특수한 경우로 자연히 포함된다).
+  const legacyMisreadColumns = legacyResult
+    ? columnAssignmentDisagrees(legacyResult.markerData ?? [])
+    : false;
   if (
     legacyResult &&
-    !legacyMisreadAsSingle &&
+    !legacyMisreadColumns &&
     (expectedCount == null || legacyResult.length === expectedCount)
   ) {
     return legacyResult;
