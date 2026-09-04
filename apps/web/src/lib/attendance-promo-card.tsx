@@ -29,7 +29,7 @@ export const PROMO_CONTENT_TYPE = "image/png";
 
 const INK = "#0f172a";
 const MUTED = "#64748b";
-const BRAND = "#2563eb";
+const BRAND = "#12b382";
 const REWARD = "#f59e0b";
 
 export async function renderAttendancePromoCard() {
@@ -74,7 +74,7 @@ export async function renderAttendancePromoCard() {
             display: "flex",
             flexDirection: "column",
             padding: "56px 56px 40px",
-            backgroundImage: "linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%)",
+            backgroundImage: "linear-gradient(135deg, #06664a 0%, #12b382 100%)",
           }}
         >
           <div style={{ display: "flex" }}>
@@ -83,7 +83,7 @@ export async function renderAttendancePromoCard() {
                 display: "flex",
                 fontSize: 26,
                 fontWeight: 700,
-                color: "#1d4ed8",
+                color: "#06664a",
                 backgroundColor: "#ffffff",
                 borderRadius: 999,
                 padding: "10px 24px",
@@ -108,7 +108,7 @@ export async function renderAttendancePromoCard() {
             <span>{title2}</span>
           </div>
 
-          <div style={{ display: "flex", marginTop: 18, fontSize: 28, color: "#dbeafe" }}>
+          <div style={{ display: "flex", marginTop: 18, fontSize: 28, color: "#d1fae5" }}>
             {lead}
           </div>
         </div>
@@ -189,7 +189,7 @@ export async function renderAttendancePromoCard() {
               marginBottom: 8,
               padding: "26px 20px",
               borderRadius: 24,
-              backgroundColor: "#eff6ff",
+              backgroundColor: "#ecfdf5",
             }}
           >
             <span style={{ fontSize: 34, fontWeight: 700, color: INK }}>{maxLine}</span>

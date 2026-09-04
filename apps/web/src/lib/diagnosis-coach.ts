@@ -10,7 +10,7 @@ import type {
 // 맞춤 극복법(AI)의 프롬프트와 응답 파싱. 이 파일만이 "모델에게 뭘 물어보는지"를 안다.
 //
 // 따로 떼어 둔 이유는 같은 질문을 두 경로가 쓰기 때문이다:
-//  - 즉시 생성(lib/diagnosis-generate.ts) — 눌렀을 때 그 자리에서 Messages API 1콜
+//  - 즉시 생성(lib/diagnosis-generate.ts) — 눌렀을 때 그 자리에서 Messages API 로 개념마다 1콜
 //  - 배치 생성(lib/diagnosis-batch.ts)   — Message Batches API 로 모아 보내고 나중에 수거
 // 프롬프트가 두 벌이 되면 같은 사용자가 경로에 따라 다른 품질의 극복법을 받게 되고,
 // 한쪽만 고친 채 배포되는 사고가 반드시 난다. 문구를 고칠 일이 있으면 여기만 고칠 것.
@@ -206,15 +206,15 @@ export function buildCoachingParams(
 
   return {
     model: DIAGNOSIS_MODEL,
-    // 개념 15개 × (원인 분석 + 문항별 근거 + 계획 + 체크리스트)면 예전 상한(16K)으로는
-    // 잘린다. 잘린 JSON 은 파싱에서 조용히 실패해 극복법이 0개가 되고, 생성은 주기당
-    // 1회라 그 주가 통째로 빈다(요금은 이미 나갔다). 상한은 지출 목표가 아니라 안전망이다.
+    // 응답 상한은 실은 개념 수에 따라 잡는다(아래 maxTokensFor). 잘린 JSON 은 파싱에서
+    // 조용히 실패해 그 요청의 극복법이 0개가 되고, 생성은 주기당 1회라 그 개념은 그 주가
+    // 통째로 빈다(요금은 이미 나갔다). 상한은 지출 목표가 아니라 안전망이다.
     //
     // ⚠️ 이 값이 21,333(=128K/6)을 넘으면 SDK 가 **비스트리밍 요청을 아예 거부한다**
-    // (client.calculateNonstreamingTimeout: 10분 넘을 요청은 스트리밍 필수). 배치 경로는
-    // 비동기라 상관없지만, 즉시 경로(diagnosis-generate.ts)는 그래서 messages.stream 을
-    // 쓴다 — 그쪽을 messages.create 로 되돌리면 이 상한에서 즉시 예외가 난다.
-    max_tokens: 48000,
+    // (client.calculateNonstreamingTimeout: 10분 넘을 요청은 스트리밍 필수). 개념 1개짜리
+    // 요청(기본 경로)은 그 아래지만, 즉시 경로(diagnosis-generate.ts)는 여전히
+    // messages.stream 을 쓴다 — 여러 개념을 한 요청에 싣는 경우까지 같은 코드가 감당한다.
+    max_tokens: maxTokensFor(targets.length),
     // effort 는 그대로 비용이다(thinking 토큰이 출력 요금으로 붙는다). 여러 문항의 오답
     // 선지에서 공통 원인을 찾는 일이라 high 가 이상적이지만, 요금 대비 체감을 보고
     // medium 으로 운영한다 — 프롬프트와 스키마(원인·근거·계획·체크리스트)는 그대로라
@@ -232,6 +232,22 @@ export function buildCoachingParams(
       },
     ],
   };
+}
+
+// 요청 하나의 max_tokens. 개념 하나의 진단(원인·문항별 근거 최대 6개·계획 5단계·
+// 체크리스트)은 JSON 으로 2~3K 토큰이고, adaptive thinking 이 쓰는 토큰이 **같은 상한
+// 안에서** 함께 세어진다. 그래서 개념 수와 무관한 몫(thinking + 여유)을 바닥으로 깔고
+// 개념마다 본문 몫을 더한다 — 개념 1개면 16K, 예전처럼 10개를 한 요청에 실으면 예전
+// 상한(48K)에서 멈춘다.
+//
+// 기본 경로는 이제 개념 1개 = 요청 1건이다(diagnosis-generate.ts planCoaching). 여러
+// 개념을 한 요청에 싣는 호출은 남겨 두되(테스트·수동 경로), 그때도 잘리지 않게 한다.
+const MAX_TOKENS_BASE = 12_000;
+const MAX_TOKENS_PER_CONCEPT = 4_000;
+const MAX_TOKENS_CAP = 48_000;
+
+export function maxTokensFor(conceptCount: number): number {
+  return Math.min(MAX_TOKENS_CAP, MAX_TOKENS_BASE + MAX_TOKENS_PER_CONCEPT * Math.max(1, conceptCount));
 }
 
 // 문자열 하나를 다듬어 돌려준다(공백뿐이면 null).

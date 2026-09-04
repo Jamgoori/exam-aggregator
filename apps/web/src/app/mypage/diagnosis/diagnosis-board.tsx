@@ -283,7 +283,11 @@ function RangeChip({
 // 상태만 묻는 이유는 진단 렌더가 무겁기 때문이다(집계 포함) — 그래서 폴링은 싸고,
 // 새로 그리는 일은 끝나는 순간 딱 한 번 일어난다. 결과가 하나씩 붙지 않고 전부 함께
 // 나타나는 것도 그래서다.
-const POLL_MS = 20_000;
+//
+// 간격이 10초인 이유: 배치가 개념별 요청으로 갈라진 뒤로는(lib/diagnosis-batch.ts)
+// 전체가 몇 분 안에 끝나는 게 보통이라, 20초 간격이면 다 된 결과를 평균 10초씩 묵히는
+// 셈이었다. 한 번 묻는 비용은 DB 두 번 + 배치 상태 조회 하나뿐이다.
+const POLL_MS = 10_000;
 
 function useCoachingReadyRefresh(requestedAt: string | null) {
   const router = useRouter();
@@ -341,9 +345,9 @@ function GeneratingNotice({
 }) {
   const { requestedAt, conceptCount } = generating;
   const minutes = useElapsedMinutes(requestedAt);
-  // 배치가 늦어지는 일은 있다(보장은 24시간이다). 5~10분이라고 안내해 놓고 15분이
+  // 배치가 늦어지는 일은 있다(보장은 24시간이다). "몇 분"이라고 안내해 놓고 10분이
   // 지나도 같은 말을 하고 있으면 그때부터는 화면이 거짓말을 하는 것이다.
-  const slow = minutes != null && minutes >= 15;
+  const slow = minutes != null && minutes >= 10;
   return (
     <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-4 dark:border-violet-900/50 dark:bg-violet-950/20">
       <p className="flex items-center gap-2 text-sm font-bold text-violet-900 dark:text-violet-200">
@@ -355,7 +359,7 @@ function GeneratingNotice({
         틀린 문항 하나씩 짚어 가며 분석하는 중이에요.{" "}
         {slow
           ? "예상보다 오래 걸리고 있어요. 그대로 두시면 다 되는 대로 나타나요."
-          : "보통 5~10분 걸려요."}
+          : "개념마다 따로 분석해서 보통 몇 분 안에 끝나요."}
       </p>
       {/* 진행률을 알 수 없는 작업이라(배치가 언제 끝나는지 API가 알려주지 않는다) 좌우로
           흐르는 인디케이터만 둔다 — 가짜 퍼센트를 그리면 90%에서 멈춘 것처럼 보인다. */}

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionUser } from "@/lib/supabase/session";
 import { getSuggestionViewer } from "@/lib/suggestions";
+import { createNotification, notificationPreview } from "@/lib/notifications";
 import {
   canDeleteSuggestion,
   canDeleteSuggestionComment,
@@ -196,6 +197,13 @@ export async function answerSuggestion(input: {
   if (!viewer.isAdmin) return { error: "권한이 없어요." };
 
   const admin = createAdminClient();
+  const { data: post } = await admin
+    .from("suggestions")
+    .select("user_id, title")
+    .eq("id", id)
+    .maybeSingle();
+  if (!post) return { error: "글을 찾을 수 없어요." };
+
   const { error } = await admin
     .from("suggestions")
     .update({
@@ -205,6 +213,18 @@ export async function answerSuggestion(input: {
     })
     .eq("id", id);
   if (error) return { error: "답변 등록에 실패했어요." };
+
+  // 건의를 남긴 사람에게 알린다 — 답변이 달렸는지 확인하러 매번 게시판에 들어와
+  // 보게 만들 이유가 없다(이 알림이 이 기능의 원래 목적에 가장 가깝다).
+  await createNotification({
+    userId: post.user_id as string,
+    type: "suggestion_answer",
+    actorId: viewer.userId ?? "",
+    actorNickname: "운영자",
+    title: (post.title as string) ?? "건의글",
+    preview: notificationPreview(validated.answer),
+    link: `/suggestions/${id}`,
+  });
 
   revalidateSuggestion(id);
   return { success: true, id };
@@ -227,7 +247,7 @@ export async function createSuggestionComment(input: {
 
   const { data: post } = await admin
     .from("suggestions")
-    .select("user_id, is_secret")
+    .select("user_id, is_secret, title")
     .eq("id", suggestionId)
     .maybeSingle();
   if (!post) return { error: "글을 찾을 수 없어요." };
@@ -261,6 +281,18 @@ export async function createSuggestionComment(input: {
     content: validated.content,
   });
   if (error) return { error: "댓글 등록에 실패했어요." };
+
+  // 글쓴이에게 알림. 실패해도 댓글은 이미 달렸으므로 여기서 되돌리지 않는다
+  // (lib/notifications.ts 의 createNotification 주석).
+  await createNotification({
+    userId: post.user_id as string,
+    type: "suggestion_comment",
+    actorId: user.id,
+    actorNickname: nickname,
+    title: (post.title as string) ?? "건의글",
+    preview: notificationPreview(validated.content),
+    link: `/suggestions/${suggestionId}`,
+  });
 
   revalidateSuggestion(suggestionId);
   return { success: true, id: suggestionId };

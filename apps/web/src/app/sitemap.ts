@@ -7,8 +7,9 @@ import { getExamIndex, examHref } from "@/lib/exam-index";
 import { paperHref } from "@/lib/paper-href";
 import { absoluteUrl } from "@/lib/site-url";
 
-// 홈은 클라이언트 검색 UI라 문제지 3천여 장으로 가는 <a> 링크가 HTML에 거의 없다.
-// 즉 사이트맵이 사실상 유일한 색인 경로다 — 여기서 빠진 문제지는 검색에 안 뜬다.
+// 기출문제 목록(/papers)은 클라이언트 검색 UI라 문제지 3천여 장으로 가는 <a> 링크가
+// HTML에 거의 없다. 즉 사이트맵이 사실상 유일한 색인 경로다 — 여기서 빠진 문제지는
+// 검색에 안 뜬다. (홈은 소개 랜딩이라 시험별·과목별 허브로 가는 링크만 있다.)
 //
 // 중복 시험지(직류만 다른 같은 시험지)는 fetchAllExamPapers가 이미 대표 한 장으로
 // 합쳐서 돌려준다. 합치기 전 목록을 그대로 실으면 같은 내용의 URL이 여러 개 올라가
@@ -60,6 +61,14 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "daily",
       priority: 1,
     },
+    // 기출문제 검색·목록(app/papers/page.tsx). 원래 홈이 이 화면이었고 "공무원
+    // 기출문제" 류 검색어의 착지 지점이라 홈 바로 다음 우선순위로 둔다.
+    {
+      url: absoluteUrl("/papers"),
+      lastModified: newest,
+      changeFrequency: "daily",
+      priority: 0.95,
+    },
     // 요금제 안내(app/membership/page.tsx). 로그인 없이 서버 렌더되는 정적 문서라
     // 색인해도 문제가 없고, "공모아 요금제/가격"으로 찾는 사람의 착지 지점이다.
     {
@@ -73,6 +82,15 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
       url: absoluteUrl("/notices"),
       changeFrequency: "weekly",
       priority: 0.5,
+    },
+    // 자유게시판 목록(app/board/page.tsx). 공지사항과 같은 이유로 공개다. 개별
+    // 글까지 사이트맵에 싣지는 않는다 — 사람이 쓴 글은 수·품질이 들쭉날쭉해서
+    // 목록 한 장을 크롤러의 입구로 두고 거기서 따라가게 하는 편이 낫다(목록은
+    // 최신순이라 새 글이 언제나 첫 페이지에 있다).
+    {
+      url: absoluteUrl("/board"),
+      changeFrequency: "daily",
+      priority: 0.6,
     },
     // 과목 목록 허브(app/subjects/page.tsx). 개별 과목 페이지로 가는 링크를 전부
     // 담고 있어서, 크롤러가 여기 한 장만 읽어도 과목 수백 장을 발견한다.

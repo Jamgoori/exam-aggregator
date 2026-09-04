@@ -76,11 +76,21 @@ export default async function MembershipPage({
       <header className="flex flex-col items-center gap-3 text-center">
         {/* 좁은 화면에서 두 줄로 딱 떨어지게 줄바꿈을 직접 넣는다. 브라우저에 맡기면
             "두 번은 안" / "틀리게" 처럼 어정쩡한 데서 접힌다. sm 이상은 한 줄. */}
-        <h1 className="break-keep text-3xl font-extrabold leading-tight text-zinc-900 dark:text-zinc-100">
-          한 번 틀린 문제,{" "}
-          <br className="sm:hidden" />
-          <span className="text-blue-600 dark:text-blue-400">두 번은 안 틀리게</span>
-        </h1>
+        {/* 이벤트 기간에는 이 페이지에 온 사람이 가장 먼저 알아야 할 사실이
+            "안 내도 된다"라, 헤드라인부터 그 말을 한다. 끝나면 원래 문장으로 돌아간다. */}
+        {freeForAll ? (
+          <h1 className="break-keep text-3xl font-extrabold leading-tight text-zinc-900 dark:text-zinc-100">
+            지금은 결제할 게 없어요,{" "}
+            <br className="sm:hidden" />
+            <span className="text-blue-600 dark:text-blue-400">로그인만 하세요</span>
+          </h1>
+        ) : (
+          <h1 className="break-keep text-3xl font-extrabold leading-tight text-zinc-900 dark:text-zinc-100">
+            한 번 틀린 문제,{" "}
+            <br className="sm:hidden" />
+            <span className="text-blue-600 dark:text-blue-400">두 번은 안 틀리게</span>
+          </h1>
+        )}
         <CurrentStatus
           freeForAll={freeForAll}
           premium={premium}
@@ -113,6 +123,15 @@ export default async function MembershipPage({
             아래 요금제는 이벤트가 끝난 뒤에 적용될 가격이에요. 지금은 결제하지 않으셔도
             모두 이용하실 수 있어요.
           </p>
+          {/* 이 배너를 읽은 사람의 다음 행동 하나. 비회원은 로그인(끝나면 문제지 목록),
+              회원은 바로 문제지 목록 — 요금제를 읽고 나갈 이유가 없다. */}
+          <Link
+            href={user ? "/papers" : `/login?next=${encodeURIComponent("/papers")}`}
+            className="mt-2 inline-flex w-fit items-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-bold text-indigo-700 shadow-sm transition-colors hover:bg-indigo-50"
+          >
+            {user ? "문제 풀러 가기" : "로그인하고 시작하기"}
+            <span aria-hidden>→</span>
+          </Link>
         </section>
       )}
 

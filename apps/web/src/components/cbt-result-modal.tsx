@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Trophy } from "lucide-react";
 import type { CbtSubmitResult } from "@/app/papers/actions";
+import { DiagnosisProgress } from "@/components/diagnosis-progress";
 import { formatDuration } from "@gongmoa/core";
 
 // 채점이 끝나면 화면 전체를 덮고 점수/정답률/풀이시간을 보여주는 결과 모달.
@@ -41,6 +42,16 @@ export function CbtResultModal({
             </p>
           </div>
         </div>
+        {/* 채점 직후가 "다음에 또 올 이유"를 심을 유일한 순간이다 — 진단이 몇 회차
+            뒤에 열리는지(또는 지금 열렸는지)를 여기서 말한다. 값이 없으면(집계 실패)
+            줄을 비운다. */}
+        {result.diagnosisProgress && (
+          <DiagnosisProgress
+            attemptCount={result.diagnosisProgress.attemptCount}
+            wrongCount={result.diagnosisProgress.wrongCount}
+            compact
+          />
+        )}
         {/* 틀린 문제가 있으면 채점 직후가 복습 효과가 가장 클 때라, 회차 오답노트로
             바로 이어지는 버튼을 가장 눈에 띄는 자리에 둔다. */}
         {result.attemptId &&

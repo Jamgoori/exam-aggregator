@@ -1,8 +1,4 @@
 import type { NextConfig } from "next";
-// Next 가 "메타데이터를 <head> 에 넣어 줘야 하는 봇" 목록으로 쓰는 기본 정규식.
-// 여기에 Googlebot 을 더하려면 기본값을 통째로 다시 써야 해서(설정값은 교체이지
-// 추가가 아니다) 소스 문자열을 가져다 쓴다.
-import { HTML_LIMITED_BOT_UA_RE_STRING } from "next/dist/shared/lib/router/utils/is-bot";
 
 const nextConfig: NextConfig = {
   // 모노레포 공유 패키지(@gongmoa/core)는 TS 소스로 배포되므로 Next 가 직접
@@ -12,22 +8,49 @@ const nextConfig: NextConfig = {
   // Suspense 경계 뒤에서 스트리밍한다. 정적 셸을 미리 만들어 첫 표시가 빨라지고,
   // 경계가 빠진 곳은 빌드가 에러로 잡아준다.
   cacheComponents: true,
-  // **Googlebot 에게도 메타데이터를 스트리밍하지 말고 <head> 에 담아 보낸다.**
+  // **주소를 미리 알려주지 않은 동적 라우트도 첫 방문 뒤에는 주소별 정적 페이지로
+  // 승격시킨다** (Next 16.3 의 "ISR with Cache Components").
   //
-  // generateMetadata 가 동적인 페이지에서 Next 는 <title>·description·canonical 을
-  // 셸 이후에 스트리밍하고, 그것을 <head> 로 옮기는 일은 클라이언트 React 가 한다.
-  // Next 기본값은 "Googlebot 은 JS 를 실행하니 그래도 된다"이지만, 실제로는 그
-  // 페이지가 렌더링 대기열에 들어가야 제목과 정본을 보게 된다 — 색인이 늦어지고
-  // "발견됨 - 현재 색인되지 않음"에 그대로 쌓인다.
+  // 문제지 상세(/papers/[id]) 4,300장은 빌드에서 전부 프리렌더할 수 없어(장당 305KB,
+  // 전부 만들면 힙 8GB 로도 OOM) generateStaticParams 에 일부만 싣는다. 나머지는
+  // 주소를 모르는 채 만든 공용 fallback 셸로 나가는데, 이 옵션이 없으면 그 셸이
+  // 영원히 공용으로 남는다 — 주소를 모르니 generateMetadata 가 못 돌아 <head> 에
+  // 제목·정본이 없고, CDN 은 그 셸을 그대로 캐시해 크롤러에게 내준다. 켜 두면 첫
+  // 요청 뒤 백그라운드에서 그 주소의 완성본(제목·정본이 <head> 에 박힌 것)을 만들어
+  // 캐시에 넣고, 다음 요청부터는 그것을 내준다.
   //
-  // 실측(2026-08-18, /papers/*·/subjects/*): Googlebot UA 로 받은 HTML 에는
-  // <title>·canonical 이 하나도 없고, 같은 주소를 Yeti(네이버)·Bingbot·브라우저로
-  // 받으면 정상으로 들어 있었다. 두 UA 의 차이는 이 목록뿐이다.
+  // 부수 효과: <Link> 프리페치가 링크마다가 아니라 라우트마다 한 번(App Shell)만
+  // 나간다. 문제지 카드가 수십 장 깔리는 홈·과목 페이지에서는 오히려 요청이 준다.
+  partialPrefetching: true,
+  // 서버 액션 요청 본문 상한. 기본값이 **1MB** 라, 그대로 두면 게시판 사진·프로필
+  // 사진 업로드가 휴대폰 사진(보통 2~5MB) 한 장에 그냥 막힌다(에디터에서 "사진"을
+  // 눌러도 아무 일이 없던 원인).
   //
-  // 대가는 Googlebot 요청이 PPR 정적 셸 캐시를 건너뛰고 매번 동적으로 렌더된다는
-  // 것이다. 두 라우트 모두 어차피 쿠키를 읽어 매 요청 렌더되므로 늘어나는 비용은
-  // 사실상 없고, 색인이 걸린 문제라 이쪽이 남는 장사다.
-  htmlLimitedBots: new RegExp(`Googlebot|${HTML_LIMITED_BOT_UA_RE_STRING}`),
+  // 4MB 로 잡은 이유: Vercel 서버리스 함수의 요청 본문 상한이 4.5MB 라 그보다 크게
+  // 잡아도 플랫폼에서 먼저 잘린다. 대신 브라우저가 올리기 전에 긴 변 1600px 로 줄여
+  // 보내므로(lib/prepare-image-upload.ts) 실제로는 수백 KB 밖에 오가지 않는다 —
+  // 이 값은 그 축소가 실패한 파일(브라우저가 못 여는 형식 등)을 위한 여유다.
+  experimental: {
+    serverActions: { bodySizeLimit: "4mb" },
+  },
+  // **htmlLimitedBots 에 Googlebot 을 넣지 말 것.** 2026-08-18 에 넣었다가 되돌렸다.
+  //
+  // 의도는 "Googlebot 에게도 메타데이터를 스트리밍하지 말고 <head> 에 담자"였는데,
+  // Vercel 은 이 목록의 캐시 우회 규칙을 네이버(Yeti)·빙에는 적용하면서 Googlebot
+  // 에는 적용하지 않는다(실측 2026-08-18·2026-09-02: Yeti·Bingbot x-vercel-cache=BYPASS,
+  // Googlebot 은 HIT). 그래서 Googlebot 은 CDN 이 캐시한 셸을 받고 함수는 그 뒤를
+  // 이어 그리는데, 함수는 "이 UA 는 블로킹 메타데이터 대상"이라고 믿어 스트리밍
+  // 자리(<div hidden>)에 메타데이터를 넣지 않는다. 결과는 최악이다 — 셸의 <head>
+  // 에도 없고 본문에도 없어서, Googlebot 이 받는 HTML 에는 <title>·canonical·robots
+  // 가 어디에도 없다(RSC 페이로드 안에만 있다). 같은 주소를 브라우저 UA 로 받으면
+  // 본문 끝에 <title>·<link rel=canonical> 이 HTML 로 실려 온다(React 가 hoist 한다).
+  //
+  // 서치콘솔 실측: 이 상태로 일주일 뒤 색인 페이지가 ~650 → 83 으로 떨어졌다.
+  // 남은 83 은 제목·정본이 셸에 미리 박힌 홈·시험·과목 페이지뿐이었다.
+  //
+  // 기본값(Googlebot 은 스트리밍 대상)으로 두면 Googlebot 도 브라우저와 같은 HTML
+  // 을 받는다. 근본 해결은 위의 partialPrefetching + 각 라우트의 generateStaticParams
+  // 로 셸 자체에 메타데이터를 박는 것이고, 이 목록은 그 보조가 아니라 방해였다.
   // www 는 정본이 아니다. Vercel 대시보드에서 www.gongmoa.kr 을 redirect 로 잡아두면
   // 여기까지 오지도 않지만, 대시보드 설정이 빠졌을 때 같은 문서가 두 주소로 200 을
   // 주며 색인이 갈리는 것을 코드에서도 막아둔다. host 매칭이라 프리뷰·로컬은 무관.
@@ -50,6 +73,17 @@ const nextConfig: NextConfig = {
         destination: "/exams/:exam",
         permanent: true,
       },
+      // 기출문제 검색·목록은 2026-09 에 홈(/)에서 /papers 로 옮겼다(홈은 사이트
+      // 소개 랜딩). 홈 시절의 검색 파라미터 주소(/?q=국어, /?level=9급&page=2 …)는
+      // 공유 링크·북마크·검색 결과에 남아 있으므로 파라미터를 그대로 들고 /papers 로
+      // 301 한다 — destination 에 쿼리를 쓰지 않으면 Next 가 원래 쿼리를 그대로
+      // 넘겨준다. 파라미터가 하나도 없는 "/" 는 랜딩이므로 건드리지 않는다.
+      ...["q", "level", "type", "page", "fav"].map((key) => ({
+        source: "/",
+        has: [{ type: "query" as const, key }],
+        destination: "/papers",
+        permanent: true,
+      })),
     ];
   },
   async headers() {

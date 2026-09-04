@@ -21,7 +21,11 @@ import { CommentsSection } from "@/components/comments-section";
 import { ExamCard } from "@/components/exam-card";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { MyCbtRecordModal } from "@/components/my-cbt-record-modal";
-import { getPaperDisplayTitle, getSubjectDisplayName } from "@/lib/paper-title";
+import {
+  getPaperDisplayTitle,
+  getPaperDocumentTitle,
+  getSubjectDisplayName,
+} from "@/lib/paper-title";
 import {
   paperHref,
   paperCbtHref,
@@ -30,12 +34,50 @@ import {
 import { JsonLd } from "@/components/json-ld";
 import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 import {
+  getNewestPaperSlugs,
   getPaper,
   getPaperDetailData,
   getRelatedPapersData,
 } from "./paper-detail-data";
 import type { ExamPaper } from "@gongmoa/core";
 import type { Metadata } from "next";
+
+// 빌드에서 미리 만들어 둘 문제지 수. 최신 시험부터 이만큼이다(홈 목록 순서).
+//
+// 전부(4,300장) 만들 수는 없다 — 프리렌더 산출물이 장당 305KB(PPR postponed 데이터
+// 194KB)라 통째로 만들면 1.1GB, 힙 8GB 로도 빌드가 OOM 으로 죽는다(3,604장에서
+// SIGABRT, 2026-08-18 실측). 과목 184장은 19MB · 30초로 끝났으니 이 정도면 빌드에
+// 1분 안팎이 더 붙는다.
+const PRERENDERED_PAPER_COUNT = 200;
+
+/**
+ * 문제지 주소 일부를 빌드에 미리 알려준다. **이 함수가 없으면 Googlebot 이 받는
+ * 문제지 HTML 에 <title>·canonical 이 없다** — 아래 사정 때문이다.
+ *
+ * Next 는 주소를 모르는 동적 라우트를 "fallback 셸" 하나로 만들어 모든 문제지에
+ * 돌려쓴다. 주소를 모르니 generateMetadata 를 돌릴 수 없어 그 셸의 <head> 에는
+ * 제목·정본이 없고, Vercel CDN 은 그 셸을 캐시해 크롤러에게도 그대로 내준다
+ * (과목 페이지 /subjects/[slug] 의 generateStaticParams 주석에 UA 별 실측이 있다).
+ * 서치콘솔에서 색인 페이지가 ~650 → 83 으로 떨어졌을 때 남은 83 이 정확히
+ * "셸에 메타데이터가 박힌 페이지"(홈·시험·과목)뿐이었다(2026-08-28 자료).
+ *
+ * 여기 실린 주소는 빌드에서 완성본(제목·정본이 <head> 에 있는 HTML)이 되고, 실리지
+ * 않은 주소는 next.config 의 partialPrefetching 덕에 첫 요청 뒤 백그라운드에서
+ * 완성본으로 승격된다(Next 16.3 "ISR with Cache Components"). 그래서 목록이 전체를
+ * 덮을 필요는 없다 — 크롤러가 자주 오는 최신 시험을 앞에 두는 정도면 된다.
+ *
+ * 두 조건이 함께 있어야 <head> 에 들어간다: (1) 이 함수로 주소를 알고, (2)
+ * generateMetadata 가 기다리는 데이터가 전부 캐시돼 있을 것(getPaper →
+ * getSlugMap·fetchPaperById 둘 다 'use cache'). searchParams 를 generateMetadata 에서
+ * 읽으면 (2)가 깨진다 — 과목 페이지 주석 참고.
+ *
+ * 주소 목록은 홈·사이트맵과 같은 집합(중복 시험지를 합친 대표)이고 최신 시험이
+ * 앞에 온다(getNewestPaperSlugs).
+ */
+export async function generateStaticParams() {
+  const slugs = await getNewestPaperSlugs(PRERENDERED_PAPER_COUNT);
+  return slugs.map((id) => ({ id }));
+}
 
 export async function generateMetadata({
   params,
@@ -45,11 +87,10 @@ export async function generateMetadata({
   const { id } = await params;
   const paper = await getPaper(id);
   if (!paper) return {};
-  const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
 
   const subject = paper.subjects;
   const examType = paper.exam_types;
-  const title = `${displayTitle} 기출문제`;
+  const title = getPaperDocumentTitle(paper.title, paper.track);
   const description = `${examType?.name ?? ""} ${paper.level ?? ""} ${paper.year}년 ${subject?.name ?? ""} 기출문제를 정답과 함께 무료로 열람·다운로드하세요.`
     .replace(/\s+/g, " ")
     .trim();
@@ -143,7 +184,7 @@ export default async function PaperDetailPage({
             },
             {
               "@type": "LearningResource",
-              name: `${displayTitle} 기출문제`,
+              name: getPaperDocumentTitle(paper.title, paper.track),
               url: absoluteUrl(paperHref(paper)),
               inLanguage: "ko-KR",
               learningResourceType: "기출문제",
@@ -222,7 +263,7 @@ export default async function PaperDetailPage({
 
         <div>
           <h1 className="text-[27px] font-bold leading-snug sm:text-3xl">
-            {displayTitle}
+            {getPaperDocumentTitle(paper.title, paper.track)}
           </h1>
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
             {examType?.name}
@@ -246,13 +287,22 @@ export default async function PaperDetailPage({
             열기 버튼들은 연한 파랑으로 통일한다. CBT를 지원하지 않는 문제지는
             primary 자리가 비므로 문제 열기가 단색을 물려받는다. */}
         {hasCbtAnswers && (
-          <Link
-            href={paperCbtHref(paper)}
-            className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-4 text-lg font-medium text-white hover:bg-blue-700"
-          >
-            <Monitor size={20} />
-            온라인에서 풀기
-          </Link>
+          <>
+            <Link
+              href={paperCbtHref(paper)}
+              className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-4 text-lg font-medium text-white hover:bg-blue-700"
+            >
+              <Monitor size={20} />
+              온라인에서 풀기
+            </Link>
+            {/* 버튼을 누르기 전에 "누르면 무슨 일이 생기는지"를 한 줄로. 비로그인은
+                누르는 순간 로그인 화면을 만나므로 그 사실을 여기서 미리 말한다 —
+                예고 없이 튕기면 "속았다", 미리 알면 "절차"다. */}
+            <p className="-mt-1 text-center text-xs text-zinc-500 dark:text-zinc-500">
+              제출 즉시 채점 · 틀린 문제는 오답노트에 자동 저장
+              {!loggedIn && " · 구글·카카오 1초 로그인"}
+            </p>
+          </>
         )}
 
         <div className="flex items-stretch gap-2">

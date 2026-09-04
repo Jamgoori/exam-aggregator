@@ -4,6 +4,8 @@ import Link from "next/link";
 import { GraduationCap } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { MobileNav } from "@/components/mobile-nav";
+import { NotificationBell } from "@/components/notification-bell";
+import type { HeaderUser } from "@/components/site-nav-items";
 
 // 사이트 공통 헤더 = 메뉴바.
 //
@@ -24,7 +26,7 @@ import { MobileNav } from "@/components/mobile-nav";
 export function SiteHeader({
   user,
 }: {
-  user: { nickname: string; isAdmin: boolean; isPremium: boolean } | null | "pending";
+  user: HeaderUser | null | "pending";
 }) {
   const pending = user === "pending";
 
@@ -34,32 +36,27 @@ export function SiteHeader({
         <Link
           href="/"
           aria-label="공모아 홈"
-          // 홈에서 페이지네이션으로 여러 페이지째 보고 있을 때 이 로고를 눌러도,
-          // HomeExamBrowser의 페이지 상태는 history.replaceState로만 URL과
-          // 동기화될 뿐 Next 라우터가 모르는 값이라 같은 "/"로의 Link는 아무
-          // 리렌더도 트리거하지 않아 이전 페이지에 그대로 머물렀다. 이미 홈에
-          // 있을 때는 라우팅 대신 커스텀 이벤트로 그 상태를 직접 1페이지로
-          // 되돌린다. usePathname()은 안 쓴다 — pending(인증 확정 전) 상태의
-          // 이 헤더는 layout의 Suspense 폴백으로 정적 셸에 그대로 구워지는데,
-          // 그 경로에서 라우터 훅을 호출하면(값을 안 써도) 정적 셸 자체가
-          // 사라진다(위 pending 관련 주석 참고). 클릭 시점에 window.location만
-          // 읽으면 이 문제를 피한다.
-          onClick={(e) => {
-            if (window.location.pathname === "/") {
-              e.preventDefault();
-              window.history.replaceState(null, "", "/");
-              window.dispatchEvent(new Event("gongmoa:home-reset"));
-            }
-          }}
+          // 로고는 언제나 홈(랜딩)으로 간다. 검색 목록이 홈에 살던 시절에는 여기서
+          // 목록을 1페이지로 되돌리는 이벤트를 쏘았는데, 목록이 /papers 로 옮겨간
+          // 뒤로 그 일은 메뉴의 "기출문제" 항목(mobile-nav.tsx)이 맡는다.
+          // usePathname()은 안 쓴다 — pending(인증 확정 전) 상태의 이 헤더는
+          // layout의 Suspense 폴백으로 정적 셸에 그대로 구워지는데, 그 경로에서
+          // 라우터 훅을 호출하면(값을 안 써도) 정적 셸 자체가 사라진다(위 pending
+          // 관련 주석 참고).
           className="mr-1 flex shrink-0 items-center gap-2 rounded-lg focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:outline-none"
         >
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-600/25">
+          {/* 로고 색은 홈(랜딩)의 팔레트(초록 accent)를 따른다 — 사이트 안 도구 화면의
+              파랑과 달리, 로고는 어느 화면에서나 "공모아"라는 브랜드 하나만 가리킨다. */}
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#12b382] text-white shadow-sm shadow-[#12b382]/30">
             <GraduationCap size={22} />
           </span>
-          <span className="text-2xl font-bold dark:text-zinc-100">공모아</span>
+          <span className="text-2xl font-bold text-[#12b382]">공모아</span>
         </Link>
 
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {/* 알림 종은 로그인한 사람에게만. 서버가 확정한 로그인 여부를 그대로
+              쓰므로(비로그인에게는 렌더 자체가 없다) 알림 조회가 헛돌지 않는다. */}
+          {user && user !== "pending" && <NotificationBell />}
           <ThemeToggle />
           {pending ? (
             // 인증 확정 전. 실제로 들어올 햄버거 버튼과 같은 크기라 값이 도착해도

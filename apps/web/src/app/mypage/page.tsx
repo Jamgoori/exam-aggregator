@@ -20,8 +20,12 @@ import { ExamCard } from "@/components/exam-card";
 import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { ScrollToHash } from "@/components/scroll-to-hash";
+import { Avatar } from "@/components/user-menu";
+import { avatarUrl } from "@/lib/avatars";
 import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-card";
 import { AttendanceCard } from "@/components/attendance-card";
+import { DiagnosisProgress } from "@/components/diagnosis-progress";
+import { getDiagnosisEligibility, getWeeklyDiagnosis } from "@/lib/ai-diagnosis";
 import { getMembership, isAdminUser } from "@/lib/membership";
 import { getDueReviewSummary } from "@/lib/review-queue";
 import { getAttendanceSummary } from "@/lib/attendance";
@@ -336,6 +340,14 @@ export default async function MyPage({
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
 
+  // 상단 "다음 행동" 카드용. 진단 자격(응시 3회 또는 오답 15개)과 이번 주기 진단
+  // 유무 — 둘 다 count/단건 조회라 가볍다. 무료 회원에게도 보여준다: 잠긴 사실보다
+  // "세 번 풀면 열린다"가 먼저 닿아야 세 번 온다(진단 페이지가 멤버십 안내를 맡는다).
+  const [diagnosisEligibility, weeklyDiagnosis] = await Promise.all([
+    getDiagnosisEligibility(supabase, user.id),
+    getWeeklyDiagnosis(supabase, user.id),
+  ]);
+
   // 월간 출석 카드. 본인 행만 읽으므로(select-own) 세션 클라이언트로 충분하다.
   // 기능이 닫혀 있으면 조회조차 하지 않는다 — 그릴 화면이 없다.
   const attendance = isAttendanceOpen()
@@ -380,13 +392,39 @@ export default async function MyPage({
         <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">
           ← 홈으로
         </Link>
-        <h1 className="mt-2 text-3xl font-semibold">{nickname}님의 마이페이지</h1>
-        <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-500">
-          <Link href="/mypage/edit" className="text-blue-600 hover:underline dark:text-blue-400">
-            내 정보 수정
+        {/* 프로필 사진을 이름 옆에 둔다 — 사진을 올릴 수 있다는 사실을 알리는 자리가
+            "내 정보 수정" 안쪽뿐이면 아무도 모른다(아바타를 누르면 그 화면으로 간다). */}
+        <div className="mt-2 flex items-center gap-3">
+          <Link
+            href="/mypage/edit"
+            aria-label="프로필 사진 변경"
+            className="rounded-full focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:outline-none"
+          >
+            <Avatar
+              nickname={nickname}
+              avatarUrl={avatarUrl(user.user_metadata?.avatar_path as string | undefined)}
+              size="xl"
+            />
           </Link>
+          <div>
+            <h1 className="text-3xl font-semibold">{nickname}님의 마이페이지</h1>
+            <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-500">
+              <Link href="/mypage/edit" className="text-blue-600 hover:underline dark:text-blue-400">
+                내 정보 수정
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* 지금 이 사람이 할 다음 한 가지. 응시가 없으면 첫 모의고사, 있으면 진단까지
+          얼마나 남았는지(또는 진단 받기). 요약 타일 위에 두는 건 타일 넷을 읽고 나서
+          "그래서 뭘 하지"가 남지 않게 하려는 것이다. */}
+      <NextActionCard
+        attemptCount={myAttempts.length}
+        wrongCount={diagnosisEligibility.wrongCount}
+        weeklyStatus={weeklyDiagnosis?.status ?? null}
+      />
 
       <div className="flex flex-wrap gap-3">
         <div className="flex min-w-[7rem] flex-1 flex-col gap-1 rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700">
@@ -451,6 +489,58 @@ export default async function MyPage({
         }
       />
     </div>
+  );
+}
+
+// 상단 "다음 행동" 카드. 상태 기계는 셋뿐이다:
+//   응시 0회          → 첫 모의고사 풀기(/papers)
+//   자격 미달         → 진단까지 진행 바(응시 N/3 또는 오답 N/15)
+//   자격 충족         → 진단 받기 / 이번 주 진단 보기 / 준비 중(요청은 했고 생성 대기)
+function NextActionCard({
+  attemptCount,
+  wrongCount,
+  weeklyStatus,
+}: {
+  attemptCount: number;
+  wrongCount: number;
+  weeklyStatus: "ready" | "pending" | null;
+}) {
+  if (attemptCount === 0) {
+    return (
+      <Link
+        href="/papers"
+        className="group flex items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3.5 transition-colors hover:bg-blue-100 dark:border-blue-900/60 dark:bg-blue-950/30 dark:hover:bg-blue-950/50"
+      >
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+          <Trophy size={16} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-blue-900 dark:text-blue-100">
+            첫 모의고사를 풀어보세요
+          </span>
+          <span className="block text-xs text-blue-700/80 dark:text-blue-300/70">
+            제출 즉시 채점 · 틀린 문제는 오답노트에 자동 저장
+          </span>
+        </span>
+        <ChevronRight
+          size={16}
+          className="shrink-0 text-blue-400 transition-transform group-hover:translate-x-0.5"
+        />
+      </Link>
+    );
+  }
+  const eligibleLabel =
+    weeklyStatus === "ready"
+      ? "이번 주 약점 진단 보기"
+      : weeklyStatus === "pending"
+        ? "약점 진단 준비 중 · 개념 그래프 먼저 보기"
+        : "AI 약점 진단 받기";
+  return (
+    <DiagnosisProgress
+      attemptCount={attemptCount}
+      wrongCount={wrongCount}
+      eligibleLabel={eligibleLabel}
+    />
   );
 }
 
@@ -641,7 +731,7 @@ function WrongNotesTab({
               자동으로 정리돼요.
             </p>
             <Link
-              href="/"
+              href="/papers"
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700"
             >
               문제 풀러 가기
@@ -693,7 +783,7 @@ function WrongNotesTab({
             자동으로 정리돼요.
           </p>
           <Link
-            href="/"
+            href="/papers"
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700"
           >
             문제 풀러 가기

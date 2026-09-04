@@ -32,7 +32,8 @@ import type {
 //
 // 이 파일이 담당하는 것은 두 가지다:
 //  1) 리포트의 무AI 부분(요약·개념 목록·과목 추세)과 코칭 대상 선정 — 두 경로가 공유한다.
-//  2) **즉시 생성**(Messages API 1콜). 눌렀을 때 그 자리에서 결과를 채우는 경로다.
+//  2) **즉시 생성**(Messages API, 개념마다 1콜을 동시에). 눌렀을 때 그 자리에서 결과를
+//     채우는 경로다.
 // 기본 경로는 배치(lib/diagnosis-batch.ts, Message Batches API)다 — 주 1회짜리 기능이라
 // 몇 분 늦게 와도 되고 요금이 절반이다. 즉시 생성은 ANTHROPIC_DIAGNOSIS_SYNC=1 일 때만
 // 쓰며(운영 중 급히 결과를 확인해야 할 때의 탈출구), 실패하면 report 를 비운 채 pending 으로
@@ -177,10 +178,25 @@ function buildSummary(agg: DiagnosisAggregate): string {
 //
 // 만들 것이 없으면(그 기간에 오답이 없다·고른 과목에 오답이 없다) error 를 돌려준다 —
 // 빈 입력으로 모델을 부르면 요금만 나가므로 반드시 호출부에서 끊어야 한다.
+//
+// 요청은 **개념 하나당 하나**다. 예전에는 개념 10개를 한 요청에 실었는데, 모델은 한
+// 응답 안에서 개념을 앞에서부터 차례로 쓰므로 생성 시간이 개념 수에 정비례했다(10개면
+// 10개째가 끝날 때까지 아무것도 못 본다). 개념별로 갈라 동시에 보내면 전체는 가장 오래
+// 걸리는 개념 하나 시간으로 줄고, 프롬프트·모델·effort·스키마는 그대로라 극복법의 모양은
+// 같다 — 오히려 요청마다 thinking 이 그 개념 하나에만 쓰이고, 한 응답이 길어질수록 뒤쪽
+// 개념이 짧아지던 버릇도 사라진다. 한 요청이 잘리거나 실패해도 그 개념 하나만 빠진다.
+export type CoachingRequest = {
+  // targets 안에서 이 요청이 맡은 개념의 위치. 배치 custom_id 와 수거 시 정렬 키다.
+  index: number;
+  target: CoachInput;
+  params: Anthropic.MessageCreateParamsNonStreaming;
+};
+
 export type CoachingPlan = {
   report: Omit<AiDiagnosisReport, "conceptCoaching">;
   targets: CoachInput[];
-  params: Anthropic.MessageCreateParamsNonStreaming;
+  // 개념 하나당 요청 하나. targets 와 같은 순서.
+  requests: CoachingRequest[];
 };
 
 export async function planCoaching(
@@ -233,6 +249,18 @@ export async function planCoaching(
     SAMPLES_PER_CONCEPT,
   );
 
+  // 표본은 개념 키(정본 id 우선)로 나눈다 — 표시 이름은 과목이 다르면 겹칠 수 있다.
+  // buildCoachingParams 도 같은 키로 표본을 붙이므로, 개념 하나짜리 요청에는 그 개념의
+  // 표본만 넘긴다(전부 넘겨도 결과는 같지만 "이 요청이 무엇을 보는지"가 분명해진다).
+  const requests: CoachingRequest[] = targets.map((target, index) => ({
+    index,
+    target,
+    params: buildCoachingParams(
+      [target],
+      samples.filter((s) => s.conceptKey === conceptSelectionKey(target)),
+    ),
+  }));
+
   return {
     plan: {
       report: {
@@ -243,7 +271,7 @@ export async function planCoaching(
         insights: null,
       },
       targets,
-      params: buildCoachingParams(targets, samples),
+      requests,
     },
   };
 }
@@ -269,8 +297,8 @@ export async function saveDiagnosisReport(
   return error ? { error: "진단 저장에 실패했어요." } : {};
 }
 
-// 즉시 생성(Messages API 1콜). ANTHROPIC_DIAGNOSIS_SYNC=1 일 때만 호출부가 이 경로를
-// 탄다 — 평소에는 배치(lib/diagnosis-batch.ts)가 절반 요금으로 만든다.
+// 즉시 생성(Messages API, 개념마다 1콜을 동시에). ANTHROPIC_DIAGNOSIS_SYNC=1 일 때만
+// 호출부가 이 경로를 탄다 — 평소에는 배치(lib/diagnosis-batch.ts)가 절반 요금으로 만든다.
 // 성공하면 "ready", 만들지 못하면(키 미설정·API 실패) report 는 비운 채 "pending"을
 // 돌려준다(배치가 나중에 채운다).
 export async function runDiagnosisForUser(
@@ -289,18 +317,26 @@ export async function runDiagnosisForUser(
   const apiKey = process.env.ANTHROPIC_DIAGNOSIS_API_KEY;
   if (!apiKey) return { status: "pending" };
 
-  let conceptCoaching: DiagnosisConceptCoaching[] = [];
-  try {
-    // 스트리밍으로 받는다(결과는 finalMessage 로 한 번에 읽는다). 극복법은 개념 15개 ×
-    // 긴 진단이라 max_tokens 가 크고, SDK 는 그만한 비스트리밍 요청을 아예 거부한다
-    // (diagnosis-coach.ts max_tokens 주석 참고) — create 로 되돌리면 즉시 예외가 난다.
-    const stream = new Anthropic({ apiKey }).messages.stream(plan.params);
-    const response = await stream.finalMessage();
-    const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("");
-    conceptCoaching = parseCoachingItems(text, plan.targets);
-  } catch {
-    conceptCoaching = [];
-  }
+  // 개념별 요청을 **동시에** 보낸다(배치 경로와 같은 분할). 하나씩 기다리면 예전처럼
+  // 개념 수만큼 오래 걸리고, 서버리스 함수가 그 시간을 통째로 붙들고 있어야 한다.
+  // 한 요청이 실패하면 그 개념만 빠진다 — 배치 경로의 저장 규칙(유효한 것은 남기고
+  // 하나도 없을 때만 실패)과 같다.
+  //
+  // 스트리밍으로 받는다(결과는 finalMessage 로 한 번에 읽는다). 개념 1개짜리 요청의
+  // max_tokens 는 SDK 의 비스트리밍 상한 아래지만, 여러 개념을 한 요청에 싣는 경우까지
+  // 같은 코드가 감당하므로(diagnosis-coach.ts max_tokens 주석 참고) stream 을 유지한다.
+  const client = new Anthropic({ apiKey });
+  const settled = await Promise.allSettled(
+    plan.requests.map(async (r) => {
+      const response = await client.messages.stream(r.params).finalMessage();
+      const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+      return parseCoachingItems(text, [r.target]);
+    }),
+  );
+  // 요청 순서 = 개념 순서. 결과가 도착한 순서가 아니라 물어본 순서로 싣는다.
+  const conceptCoaching: DiagnosisConceptCoaching[] = settled.flatMap((s) =>
+    s.status === "fulfilled" ? s.value : [],
+  );
 
   // AI 코칭이 하나도 없으면 "생성 실패"로 보고 report를 비운 채 pending. 데이터층(막대그래프)은
   // 페이지가 라이브로 그리므로 사용자 경험이 완전히 비지는 않는다.
