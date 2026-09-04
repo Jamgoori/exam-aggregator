@@ -17,8 +17,14 @@ import { createClient } from "@/lib/supabase/server";
 import { HomePopupSlider } from "@/components/home-popup-slider";
 import { getLandingData } from "@/lib/landing-data";
 import { examHref, type ExamCombo } from "@/lib/exam-index";
-import { DIAGNOSIS_CYCLE_DAYS, DIAGNOSIS_MIN_ATTEMPTS } from "@/lib/ai-diagnosis";
-import { FREE_UNTIL_LABEL, TRIAL_DAYS } from "@gongmoa/core";
+import {
+  DIAGNOSIS_CYCLE_DAYS,
+  DIAGNOSIS_MIN_ATTEMPTS,
+  getDiagnosisEligibility,
+} from "@/lib/ai-diagnosis";
+import { computeDiagnosisProgress } from "@/lib/diagnosis-progress";
+import { computeStreakDays } from "@/lib/streak";
+import { FREE_UNTIL_LABEL, TRIAL_DAYS, kstDateKey } from "@gongmoa/core";
 import type { Metadata } from "next";
 
 // 홈 = 사이트 소개 랜딩.
@@ -146,8 +152,7 @@ function Hero({ totalCount }: { totalCount: number }) {
           <div className="mt-9 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
             <Link
               href="/papers"
-              className="inline-flex items-center justify-center gap-2 rounded-lg px-5 py-3.5 text-sm font-bold text-white shadow-lg transition-transform hover:-translate-y-0.5"
-              style={{ backgroundColor: NAVY, boxShadow: `0 10px 15px -3px ${NAVY}26` }}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#012854] px-5 py-3.5 text-sm font-bold text-white shadow-lg shadow-[#012854]/15 transition-transform hover:-translate-y-0.5 dark:bg-[#0a7d5b] dark:shadow-black/30"
             >
               기출문제 풀러가기
               <ArrowRight size={16} aria-hidden />
@@ -175,22 +180,110 @@ function Hero({ totalCount }: { totalCount: number }) {
           </div>
         </div>
 
-        <TodayStudyCard />
+        {/* 회원이면 진짜 내 숫자, 아니면 예시. 조회는 Suspense 뒤에서 — 정적 셸에는
+            예시 카드가 들어간다. */}
+        <Suspense fallback={<TodayStudyCard data={SAMPLE_TODAY_STUDY} sample />}>
+          <TodayStudy />
+        </Suspense>
       </div>
     </section>
   );
 }
 
-// "풀고 나면 이렇게 쌓인다"를 보여주는 학습 현황 예시. 마이페이지 요약 타일(CBT 응시
-// 수·연속 학습·남은 오답)과 AI 진단 자격(응시 N회)을 한 장에 담는다. 숫자는 예시라
-// aria-hidden 으로 낭독기에서 뺀다 — 낭독기 사용자에게는 왼쪽 본문이 같은 내용을 말한다.
-function TodayStudyCard() {
-  const days = ["월", "화", "수", "목", "금", "토", "일"];
-  const heights = [38, 55, 46, 72, 61, 88, 24];
-  const today = 5;
-  const attemptsSoFar = DIAGNOSIS_MIN_ATTEMPTS - 1;
+// ── 오늘의 학습 현황 카드 ─────────────────────────────────────────────────
+// 비회원에게는 "풀고 나면 이렇게 쌓인다"를 보여주는 예시(예시 화면 표기), 회원에게는
+// 진짜 내 숫자다 — 마이페이지 요약(응시·연속 학습)과 AI 진단 자격(응시 N/3)을 한 장에
+// 담는다. 로그인 여부와 조회는 Suspense 뒤(TodayStudy)에서 하고, 정적 셸에는 예시가
+// 들어간다. 회원은 예시가 잠깐 보였다가 제 숫자로 바뀐다(스트리밍).
+type TodayStudyData = {
+  todayAttempts: number;
+  // 전체 응시의 정답률(%). 응시가 없으면 null.
+  accuracyPct: number | null;
+  streakDays: number;
+  // 이번 주 월~일, 그날 푼 문항 수. 막대 높이는 이 배열의 최댓값 기준.
+  week: number[];
+  // 0=월 … 6=일 (KST)
+  todayIndex: number;
+  attemptCount: number;
+  wrongCount: number;
+};
+
+const SAMPLE_TODAY_STUDY: TodayStudyData = {
+  todayAttempts: 2,
+  accuracyPct: 84,
+  streakDays: 7,
+  week: [38, 55, 46, 72, 61, 88, 24],
+  todayIndex: 5,
+  attemptCount: DIAGNOSIS_MIN_ATTEMPTS - 1,
+  wrongCount: 5,
+};
+
+async function TodayStudy() {
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getClaims();
+  const userId = data?.claims.sub;
+  if (!userId) return <TodayStudyCard data={SAMPLE_TODAY_STUDY} sample />;
+
+  // 본인 응시만 돌아온다(RLS). 마이페이지가 같은 표를 통째로 읽으므로 양은 같은 수준.
+  const [{ data: rows }, eligibility] = await Promise.all([
+    supabase
+      .from("cbt_attempts")
+      .select("score, total_questions, created_at")
+      .eq("user_id", userId),
+    getDiagnosisEligibility(supabase, userId),
+  ]);
+  const attempts = (rows ?? []) as { score: number; total_questions: number; created_at: string }[];
+
+  const now = new Date();
+  const todayKey = kstDateKey(now);
+  // 이번 주 월요일(KST)부터 7일의 날짜 키. kstDateKey 는 "YYYY-MM-DD" 라 UTC 자정으로
+  // 파싱해 요일을 구해도 어긋나지 않는다.
+  const todayUtc = new Date(`${todayKey}T00:00:00Z`);
+  const mondayOffset = (todayUtc.getUTCDay() + 6) % 7;
+  const weekKeys = Array.from({ length: 7 }, (_, i) =>
+    new Date(todayUtc.getTime() + (i - mondayOffset) * 86_400_000).toISOString().slice(0, 10),
+  );
+  const week = weekKeys.map(() => 0);
+  let todayAttempts = 0;
+  let score = 0;
+  let total = 0;
+  for (const a of attempts) {
+    const key = kstDateKey(new Date(a.created_at));
+    if (key === todayKey) todayAttempts++;
+    const i = weekKeys.indexOf(key);
+    if (i >= 0) week[i] += a.total_questions ?? 0;
+    score += a.score ?? 0;
+    total += a.total_questions ?? 0;
+  }
+
   return (
-    <div aria-hidden className="relative mx-auto w-full max-w-md select-none lg:max-w-none">
+    <TodayStudyCard
+      data={{
+        todayAttempts,
+        accuracyPct: total > 0 ? Math.round((score / total) * 100) : null,
+        streakDays: computeStreakDays(attempts.map((a) => a.created_at)),
+        week,
+        todayIndex: mondayOffset,
+        attemptCount: eligibility.attemptCount,
+        wrongCount: eligibility.wrongCount,
+      }}
+    />
+  );
+}
+
+function TodayStudyCard({ data, sample = false }: { data: TodayStudyData; sample?: boolean }) {
+  const days = ["월", "화", "수", "목", "금", "토", "일"];
+  const weekMax = Math.max(1, ...data.week);
+  const weekTotal = data.week.reduce((a, b) => a + b, 0);
+  const progress = computeDiagnosisProgress({
+    attemptCount: data.attemptCount,
+    wrongCount: data.wrongCount,
+  });
+  return (
+    <div
+      aria-hidden={sample || undefined}
+      className="relative mx-auto w-full max-w-md lg:max-w-none"
+    >
       <div
         className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl sm:p-6 dark:border-zinc-800 dark:bg-zinc-950"
         style={{ boxShadow: `0 20px 25px -5px ${NAVY}1a` }}
@@ -204,33 +297,48 @@ function TodayStudyCard() {
               오늘의 학습 현황
             </h2>
           </div>
-          <div className="grid size-10 place-items-center rounded-full bg-[#e7f2fc] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
-            <Flame size={18} />
-          </div>
+          {sample ? (
+            <span className="rounded-full border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-bold text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
+              예시 화면
+            </span>
+          ) : (
+            <Link
+              href="/mypage"
+              className="grid size-10 place-items-center rounded-full bg-[#e7f2fc] text-zinc-700 transition-colors hover:bg-[#d3e8f8] dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              aria-label="마이페이지"
+            >
+              <Flame size={18} />
+            </Link>
+          )}
         </div>
 
         <div className="grid grid-cols-3 gap-3">
-          <MiniStat label="오늘 응시" value="2" unit="회차" />
-          <MiniStat label="정답률" value="84" unit="%" accent />
-          <MiniStat label="연속 학습" value="7" unit="일" />
+          <MiniStat label="오늘 응시" value={String(data.todayAttempts)} unit="회차" />
+          <MiniStat
+            label="정답률"
+            value={data.accuracyPct == null ? "–" : String(data.accuracyPct)}
+            unit={data.accuracyPct == null ? "" : "%"}
+            accent
+          />
+          <MiniStat label="연속 학습" value={String(data.streakDays)} unit="일" />
         </div>
 
         <div className="mt-5 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
           <div className="mb-3 flex justify-between text-xs">
             <span className="font-semibold text-zinc-900 dark:text-zinc-100">이번 주 학습량</span>
-            <span className="text-zinc-500">목표 200문제</span>
+            <span className="tabular-nums text-zinc-500">{weekTotal.toLocaleString("ko-KR")}문제</span>
           </div>
           {/* 막대 높이는 퍼센트다 — 퍼센트 높이는 부모 높이가 확정돼 있어야 풀리므로
               열마다 h-full 을 주고 아래 정렬(justify-end)로 바닥에 붙인다. 열에 높이가
-              없으면 막대가 0 으로 사라진다(실측). */}
+              없으면 막대가 0 으로 사라진다(실측). 0 인 날도 바닥선이 보이게 최소 4%. */}
           <div className="flex h-24 gap-2">
             {days.map((d, i) => (
               <div key={d} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
                 <div
                   className="w-full rounded-t"
                   style={{
-                    height: `${heights[i]}%`,
-                    backgroundColor: i === today ? ACCENT : `${NAVY}26`,
+                    height: `${Math.max(4, Math.round((data.week[i] / weekMax) * 88))}%`,
+                    backgroundColor: i === data.todayIndex ? ACCENT : `${NAVY}26`,
                   }}
                 />
                 <span className="text-[10px] leading-none text-zinc-500">{d}</span>
@@ -239,27 +347,53 @@ function TodayStudyCard() {
           </div>
         </div>
 
-        <div
-          className="mt-4 flex items-center gap-3 rounded-xl p-3"
-          style={{ backgroundColor: `${ACCENT}1a` }}
-        >
-          <div
-            className="grid size-9 shrink-0 place-items-center rounded-lg text-white"
-            style={{ backgroundColor: ACCENT }}
-          >
-            <BrainCircuit size={18} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
-              AI 약점 진단까지 응시 {attemptsSoFar}/{DIAGNOSIS_MIN_ATTEMPTS}
-            </p>
-            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-              한 회차만 더 풀면 틀리는 이유를 개념별로 알려드려요
-            </p>
-          </div>
-          <ChevronRight size={16} className="shrink-0 text-zinc-400" />
-        </div>
+        {/* 진단까지 남은 거리 또는 "받기". 회원에게는 실제 링크, 예시에서는 그림. */}
+        <DiagnosisRow
+          progress={progress}
+          href={sample ? undefined : progress.eligible ? "/mypage/diagnosis" : "/papers"}
+        />
       </div>
+    </div>
+  );
+}
+
+function DiagnosisRow({
+  progress,
+  href,
+}: {
+  progress: ReturnType<typeof computeDiagnosisProgress>;
+  href?: string;
+}) {
+  const body = (
+    <>
+      <div
+        className="grid size-9 shrink-0 place-items-center rounded-lg text-white"
+        style={{ backgroundColor: ACCENT }}
+      >
+        <BrainCircuit size={18} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+          {progress.eligible ? "AI 약점 진단 받기" : `AI 약점 진단까지 ${progress.label}`}
+        </p>
+        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+          {progress.eligible
+            ? "틀리는 이유를 개념별로 짚어 드려요"
+            : (progress.remainingHint ?? "").replace("진단이 열려요", "틀리는 이유를 개념별로 알려드려요")}
+        </p>
+      </div>
+      <ChevronRight size={16} className="shrink-0 text-zinc-400" />
+    </>
+  );
+  const cls = "mt-4 flex items-center gap-3 rounded-xl p-3";
+  const style = { backgroundColor: `${ACCENT}1a` };
+  return href ? (
+    <Link href={href} prefetch={false} className={`${cls} transition-opacity hover:opacity-90`} style={style}>
+      {body}
+    </Link>
+  ) : (
+    <div className={cls} style={style}>
+      {body}
     </div>
   );
 }
@@ -331,8 +465,7 @@ function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount
         </div>
         <Link
           href="/papers"
-          className="flex items-center gap-1 text-sm font-bold hover:underline"
-          style={{ color: NAVY }}
+          className="flex items-center gap-1 text-sm font-bold text-[#012854] hover:underline dark:text-emerald-300"
         >
           전체 기출문제 보기
           <ArrowRight size={14} aria-hidden />
@@ -356,8 +489,7 @@ function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount
         />
         <button
           type="submit"
-          className="rounded-lg px-4 py-2.5 text-sm font-bold text-white transition-colors"
-          style={{ backgroundColor: NAVY }}
+          className="rounded-lg bg-[#012854] px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#0a3a72] dark:bg-[#0a7d5b] dark:hover:bg-[#096b4e]"
         >
           검색
         </button>
@@ -393,10 +525,10 @@ function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount
       </div>
 
       <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold">
-        <Link href="/exams" className="hover:underline" style={{ color: NAVY }}>
+        <Link href="/exams" className="text-[#012854] hover:underline dark:text-emerald-300">
           시험별 전체 보기 →
         </Link>
-        <Link href="/subjects" className="hover:underline" style={{ color: NAVY }}>
+        <Link href="/subjects" className="text-[#012854] hover:underline dark:text-emerald-300">
           과목별 기출문제 →
         </Link>
       </div>
@@ -517,8 +649,7 @@ function ClosingCta({ freeForAll }: { freeForAll: boolean }) {
         </p>
         <Link
           href="/papers"
-          className="mt-6 inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-sm font-bold text-white shadow-lg transition-transform hover:-translate-y-0.5"
-          style={{ backgroundColor: NAVY, boxShadow: `0 10px 15px -3px ${NAVY}26` }}
+          className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[#012854] px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-[#012854]/15 transition-transform hover:-translate-y-0.5 dark:bg-[#0a7d5b] dark:shadow-black/30"
         >
           무료로 시작하기
           <ArrowRight size={16} aria-hidden />

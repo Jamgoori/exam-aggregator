@@ -116,7 +116,9 @@ export function SearchInput({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           onKeyDown={handleKeyDown}
-          placeholder="과목명으로 검색..."
+          // 과목명뿐 아니라 급수·연도·시행처를 섞어 쳐도 되는 검색창이라(parseSearchQuery),
+          // 그 사실을 설명 문장 대신 예시로 보여준다.
+          placeholder="예: 2024 국가직 행정법, 9급 국어"
           className="w-full text-base outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
         />
       </div>

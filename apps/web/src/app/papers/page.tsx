@@ -112,12 +112,11 @@ export default async function PapersPage({
               ) : (
                 "를 "
               )}
-              연도별·과목별로 정리했어요. 과목명·급수·연도를 섞어 검색할 수 있어요.
+              연도별·과목별로 정리했어요.
             </p>
             <p className="hidden text-zinc-600 sm:block dark:text-zinc-400">
               국가직·지방직·소방·경찰 등 주요 공무원 시험 기출문제를 연도별·과목별로
-              정리했어요. &ldquo;2024 국가직 행정법&rdquo;처럼 과목명·급수·연도를 섞어
-              검색할 수 있어요.
+              정리했어요.
             </p>
           </>
         }
