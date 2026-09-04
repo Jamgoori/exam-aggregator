@@ -1,9 +1,12 @@
 // 사용법:
 //   node --env-file=.env.local scripts/seed-mock-exam-history.mjs [이메일] [--reset] [--dry-run]
+//     [--subjects=컴퓨터일반,정보보호론] [--papers=30] [--score=60-90]
 //   기본 이메일 = lks2354@gmail.com
 //
 // 한 계정에 "최근 일주일 동안 국어·영어·컴퓨터일반·정보보호론을 각각 2026년부터
 // 최신 회차순으로 20회차씩 풀었고, 매 회차 70~90점을 받았다"는 응시 이력을 넣는다.
+// 과목·회차 수·점수 범위는 위 옵션으로 그때그때 바꾼다(진단 화면을 특정 과목 조합으로
+// 확인할 때가 많아서, 값을 고치는 대신 인자로 받는다).
 // AI 약점 진단(막대그래프·개념 카드·맞춤 극복법)과 오답노트를 실데이터에 가깝게
 // 확인하려는 용도다. seed-dummy-diagnosis.mjs 가 "개념 문항만" 골라 3회 응시를
 // 만드는 최소 시드라면, 이쪽은 문제지를 통째로 채점한 정식 회차를 쌓는다.
@@ -26,10 +29,10 @@ import { createClient } from "@supabase/supabase-js";
 
 const DEFAULT_EMAIL = "lks2354@gmail.com";
 
-// 시드할 과목(과목명 그대로). 순서는 로그 출력 순서일 뿐.
-const SUBJECT_NAMES = ["국어", "영어", "컴퓨터일반", "정보보호론"];
-// 과목당 회차 수와, 회차를 고를 때의 최신 연도 상한.
-const PAPERS_PER_SUBJECT = 20;
+// 시드할 과목(과목명 그대로). 순서는 로그 출력 순서일 뿐. --subjects= 로 덮어쓴다.
+const DEFAULT_SUBJECT_NAMES = ["국어", "영어", "컴퓨터일반", "정보보호론"];
+// 과목당 회차 수와, 회차를 고를 때의 최신 연도 상한. 회차 수는 --papers= 로 덮어쓴다.
+const DEFAULT_PAPERS_PER_SUBJECT = 20;
 const MAX_YEAR = 2026;
 // 최근 일주일 안에서 며칠에 걸쳐 풀지(SPREAD_DAYS), 마지막 회차를 며칠 전에 둘지
 // (LAST_ATTEMPT_DAYS_AGO). 둘 다 진단 화면의 기본 기간에 맞춰 고른 값이다:
@@ -41,12 +44,15 @@ const MAX_YEAR = 2026;
 const SPREAD_DAYS = 6;
 const LAST_ATTEMPT_DAYS_AGO = 2;
 // 점수(정답률 %) 하한·상한. 회차별 목표 점수는 이 사이에서만 움직인다.
-const SCORE_MIN = 70;
-const SCORE_MAX = 90;
+// --score=60-90 으로 덮어쓴다(아래 SCORE_CURVE 가 그 폭에 맞춰 늘어난다).
+const DEFAULT_SCORE_MIN = 70;
+const DEFAULT_SCORE_MAX = 90;
 
 // 과목별 점수 흐름(첫 회차 → 마지막 회차 목표 점수). 회차 순서는 "최신 회차부터"라
 // 첫 회차가 2026년 문제지다. 진단의 과목별 추세(up/down/flat)가 과목마다 다르게
-// 나오도록 일부러 다른 곡선을 준다.
+// 나오도록 일부러 다른 곡선을 준다. 값은 기본 폭(70~90) 기준이고, --score 로 폭을
+// 바꾸면 같은 비율로 새 폭에 옮겨 담는다(rescaleCurve) — 그러지 않으면 폭만 넓히고
+// 실제 점수는 예전 자리에 그대로 머물러 "60점짜리 회차가 왜 없지"가 된다.
 const SCORE_CURVE = {
   국어: { from: 73, to: 88 },
   영어: { from: 86, to: 74 },
@@ -147,14 +153,33 @@ function kstIso(daysAgo, hour, minute) {
   return new Date(kstMs - KST_OFFSET_MS).toISOString();
 }
 
-// 목표 정답률(%)을 실제 문항 수로 옮긴다. 반올림 때문에 70~90 밖으로 나가지 않게
+// 목표 정답률(%)을 실제 문항 수로 옮긴다. 반올림 때문에 점수 범위 밖으로 나가지 않게
 // 정답 수를 한 칸씩 당긴다(문항 수가 적은 문제지일수록 한 문항의 무게가 크다).
-function correctCountFor(total, targetPct) {
+function correctCountFor(total, targetPct, scoreMin, scoreMax) {
   let correct = Math.round((total * targetPct) / 100);
   const pct = (c) => (c / total) * 100;
-  while (correct > 0 && pct(correct) > SCORE_MAX) correct--;
-  while (correct < total && pct(correct) < SCORE_MIN) correct++;
+  while (correct > 0 && pct(correct) > scoreMax) correct--;
+  while (correct < total && pct(correct) < scoreMin) correct++;
   return Math.max(0, Math.min(total, correct));
+}
+
+// 기본 폭(70~90) 기준으로 적어 둔 곡선을 실제 점수 폭으로 옮긴다. 기본 폭 안에서의
+// 상대 위치(0~1)를 그대로 유지하므로 과목별 추세(오름/내림/평평)는 보존된다.
+function rescaleCurve({ from, to }, scoreMin, scoreMax) {
+  const span = DEFAULT_SCORE_MAX - DEFAULT_SCORE_MIN;
+  const at = (v) => scoreMin + ((v - DEFAULT_SCORE_MIN) / span) * (scoreMax - scoreMin);
+  return { from: at(from), to: at(to) };
+}
+
+// "60-90" → { min, max }. 형식이 틀리면 곧바로 세운다(잘못된 값으로 80회차를 넣고
+// 나서 알아채면 다시 --reset 부터 해야 한다).
+function parseScoreRange(raw) {
+  const m = /^(\d{1,3})-(\d{1,3})$/.exec(raw.trim());
+  if (!m) throw new Error(`--score 형식은 "60-90" 입니다: ${raw}`);
+  const min = Number(m[1]);
+  const max = Number(m[2]);
+  if (min >= max || max > 100) throw new Error(`--score 범위가 이상해요: ${raw}`);
+  return { min, max };
 }
 
 async function main() {
@@ -162,6 +187,26 @@ async function main() {
   const email = args.find((a) => !a.startsWith("--")) || DEFAULT_EMAIL;
   const doReset = args.includes("--reset");
   const dryRun = args.includes("--dry-run");
+  const opt = (name) => {
+    const hit = args.find((a) => a.startsWith(`--${name}=`));
+    return hit ? hit.slice(name.length + 3) : null;
+  };
+
+  const subjectNames = (opt("subjects") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const SUBJECT_NAMES = subjectNames.length > 0 ? subjectNames : DEFAULT_SUBJECT_NAMES;
+  const papersOpt = Number(opt("papers"));
+  const PAPERS_PER_SUBJECT =
+    Number.isInteger(papersOpt) && papersOpt > 0 ? papersOpt : DEFAULT_PAPERS_PER_SUBJECT;
+  const scoreOpt = opt("score");
+  const { min: SCORE_MIN, max: SCORE_MAX } = scoreOpt
+    ? parseScoreRange(scoreOpt)
+    : { min: DEFAULT_SCORE_MIN, max: DEFAULT_SCORE_MAX };
+  console.log(
+    `설정: 과목 ${SUBJECT_NAMES.join("·")} / 과목당 ${PAPERS_PER_SUBJECT}회차 / 점수 ${SCORE_MIN}~${SCORE_MAX}`,
+  );
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -271,9 +316,13 @@ async function main() {
   const summary = [];
 
   for (const { subject, papers, answersByPaper } of plan) {
-    const curve = SCORE_CURVE[subject.name] ?? { from: 75, to: 85 };
-    const baseHour = SUBJECT_HOUR[subject.name] ?? 10;
+    const curve = rescaleCurve(SCORE_CURVE[subject.name] ?? { from: 75, to: 85 }, SCORE_MIN, SCORE_MAX);
     const perDay = Math.ceil(papers.length / SPREAD_DAYS);
+    // 하루치가 끝나는 시각이 자정을 넘지 않게 시작 시각을 당긴다. 회차 수를 늘리면
+    // 하루에 푸는 양이 늘어 예전 시작 시각(예: 정보보호론 20시)으로는 다음 날 새벽까지
+    // 밀렸다 — 그러면 "며칠에 걸쳐 풀었다"는 날짜 분포가 하루씩 어긋난다.
+    const spanHours = Math.ceil(((perDay - 1) * 95 + 20) / 60);
+    const baseHour = Math.max(7, Math.min(SUBJECT_HOUR[subject.name] ?? 10, 23 - spanHours));
     const scores = [];
 
     papers.forEach((paper, i) => {
@@ -283,14 +332,14 @@ async function main() {
       const total = correctAnswers.length;
       const choiceCount = paper.choice_count ?? 4;
 
-      // 목표 점수: 곡선 + 회차 지터. 항상 70~90 안.
+      // 목표 점수: 곡선 + 회차 지터. 항상 점수 범위 안.
       const t = papers.length > 1 ? i / (papers.length - 1) : 0;
       const jitter = (rand01(`${userId}|${paper.id}|score`) - 0.5) * 8;
       const targetPct = Math.max(
         SCORE_MIN,
         Math.min(SCORE_MAX, curve.from + (curve.to - curve.from) * t + jitter),
       );
-      const correctTarget = correctCountFor(total, targetPct);
+      const correctTarget = correctCountFor(total, targetPct, SCORE_MIN, SCORE_MAX);
       const wrongTarget = total - correctTarget;
 
       // 어떤 문항을 틀릴지: 개념 약점 가중치 내림차순. voided 문항은 무조건 정답이라 제외.
