@@ -65,7 +65,7 @@ export const metadata: Metadata = {
 };
 
 export default async function Home() {
-  const { combos, totalCount, freeForAll } = await getLandingData();
+  const { combos, freeForAll } = await getLandingData();
 
   return (
     <div className="flex flex-col">
@@ -78,8 +78,8 @@ export default async function Home() {
       </Suspense>
 
       <TopBanner freeForAll={freeForAll} />
-      <Hero totalCount={totalCount} />
-      <PastQuestions combos={combos} totalCount={totalCount} />
+      <Hero />
+      <PastQuestions combos={combos} />
       <Diagnosis />
       <ClosingCta freeForAll={freeForAll} />
     </div>
@@ -123,7 +123,7 @@ function TopBanner({ freeForAll }: { freeForAll: boolean }) {
 }
 
 // ── 히어로 ───────────────────────────────────────────────────────────────────
-function Hero({ totalCount }: { totalCount: number }) {
+function Hero() {
   return (
     <section className="relative overflow-hidden border-b border-zinc-200 bg-[#e7f2fc]/45 dark:border-zinc-800 dark:bg-zinc-900/60">
       <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-16 lg:grid-cols-[1.08fr_.92fr] lg:px-6 lg:py-24">
@@ -143,8 +143,7 @@ function Hero({ totalCount }: { totalCount: number }) {
             <span style={{ color: ACCENT }}>공모아</span>에서 시작하세요.
           </h1>
           <p className="mt-6 max-w-lg text-pretty text-base leading-7 text-zinc-600 sm:text-lg dark:text-zinc-400">
-            공무원 기출문제 {totalCount.toLocaleString("ko-KR")}건을 온라인으로 풀고 바로
-            채점하세요.
+            공무원 기출문제를 온라인으로 풀고 바로 채점하세요.
             <br />
             틀린 문제는 오답노트에 자동으로 쌓이고, AI가 왜 틀리는지 개념 단위로 진단해
             드립니다.
@@ -513,7 +512,7 @@ const FEATURED_EXAMS: { slug: string; badge: string; color: string }[] = [
   { slug: "법원직-9급", badge: "9급", color: "#92400e" },
 ];
 
-function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount: number }) {
+function PastQuestions({ combos }: { combos: ExamCombo[] }) {
   const bySlug = new Map(combos.map((c) => [c.slug, c]));
   const featured = FEATURED_EXAMS.flatMap((f) => {
     const combo = bySlug.get(f.slug);
@@ -530,8 +529,7 @@ function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount
             원하는 기출문제를 찾아보세요
           </h2>
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-            국가직·지방직·경찰·소방 등 공무원 시험 기출문제 {totalCount.toLocaleString("ko-KR")}건을
-            한 곳에서
+            국가직·지방직·경찰·소방 등 공무원 시험 기출문제를 한 곳에서
           </p>
         </div>
         <Link
@@ -620,7 +618,7 @@ function Diagnosis() {
           <p className="text-sm font-bold" style={{ color: ACCENT }}>
             AI WEAKNESS DIAGNOSIS
           </p>
-          <h2 className="mt-3 max-w-lg text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
+          <h2 className="mt-3 max-w-lg text-[1.625rem] font-bold leading-tight tracking-tight sm:text-4xl">
             열심히만 하지 마세요.
             <br />
             약점을 알면 합격이 빨라집니다.
