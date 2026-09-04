@@ -56,3 +56,7 @@ db-backup-*.json
 
 # Claude Code 머신 로컬 설정 (배치 루틴 환경이 세션마다 생성 — 커밋 금지)
 .claude/settings.local.json
+
+# 크롭 회귀 검사·백필의 로컬 작업물 (리포트 JSON, 임시 스크립트·이미지 — 커밋 금지)
+crop-regression-report*.json
+/scripts/tmp/
