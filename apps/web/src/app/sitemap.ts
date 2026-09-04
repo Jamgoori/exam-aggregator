@@ -83,6 +83,15 @@ async function getSitemapEntries(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "weekly",
       priority: 0.5,
     },
+    // 자유게시판 목록(app/board/page.tsx). 공지사항과 같은 이유로 공개다. 개별
+    // 글까지 사이트맵에 싣지는 않는다 — 사람이 쓴 글은 수·품질이 들쭉날쭉해서
+    // 목록 한 장을 크롤러의 입구로 두고 거기서 따라가게 하는 편이 낫다(목록은
+    // 최신순이라 새 글이 언제나 첫 페이지에 있다).
+    {
+      url: absoluteUrl("/board"),
+      changeFrequency: "daily",
+      priority: 0.6,
+    },
     // 과목 목록 허브(app/subjects/page.tsx). 개별 과목 페이지로 가는 링크를 전부
     // 담고 있어서, 크롤러가 여기 한 장만 읽어도 과목 수백 장을 발견한다.
     {

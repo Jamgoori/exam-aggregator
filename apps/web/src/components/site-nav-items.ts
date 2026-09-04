@@ -1,4 +1,5 @@
 import {
+  Bell,
   BookOpenCheck,
   BrainCircuit,
   CalendarCheck,
@@ -6,6 +7,7 @@ import {
   FileStack,
   Library,
   Megaphone,
+  MessagesSquare,
   MessageSquarePlus,
   Receipt,
   Settings,
@@ -96,6 +98,16 @@ export const PRIMARY_NAV: NavItem[] = [
     hint: "왜 틀리는지 개념 단위로 분석",
   },
   {
+    // 자유게시판은 "자료를 찾는" 흐름은 아니지만 본줄에 둔다 — 계정 메뉴 안쪽에
+    // 넣으면 사람이 모여야 사는 기능이 하루 종일 아무도 안 열어보는 자리에 놓인다.
+    // 메뉴가 전부 서랍 안에 있어(site-header.tsx) 폭 때문에 줄이 넘칠 걱정도 없다.
+    href: "/board",
+    label: "자유게시판",
+    icon: MessagesSquare,
+    match: (p) => p.startsWith("/board"),
+    hint: "공시생끼리 이야기 나누기",
+  },
+  {
     href: "/membership",
     label: "멤버십",
     icon: Crown,
@@ -130,6 +142,14 @@ export const ACCOUNT_NAV: NavItem[][] = [
       label: "즐겨찾기",
       icon: Star,
       match: () => false,
+    },
+    // 알림함. 헤더의 종에서도 가지만(최근 8건 + "전체보기"), 종은 안 읽은 알림이
+    // 없으면 눈에 띄지 않아서 "예전 알림을 다시 보려면 어디로 가나"의 답이 필요하다.
+    {
+      href: "/notifications",
+      label: "알림",
+      icon: Bell,
+      match: (p) => p.startsWith("/notifications"),
     },
   ],
   [
@@ -168,7 +188,11 @@ export const ACCOUNT_NAV: NavItem[][] = [
   ],
 ];
 
-// 아바타에 넣을 글자. 이모지·서로게이트 쌍이 반으로 잘리지 않도록 코드포인트 단위로 자른다.
-export function avatarInitial(nickname: string): string {
-  return [...nickname.trim()][0] ?? "회";
-}
+// 헤더·서랍·계정 메뉴가 함께 쓰는 로그인 사용자 정보. 네 파일에 같은 모양을
+// 따로 적어두면 필드가 하나 늘 때마다 한 곳은 빠진 채로 배포된다.
+export type HeaderUser = {
+  nickname: string;
+  isAdmin: boolean;
+  isPremium: boolean;
+  avatarUrl: string | null;
+};

@@ -20,6 +20,8 @@ import { ExamCard } from "@/components/exam-card";
 import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
 import { MyPageTabs, type MyPageTabKey } from "@/components/mypage-tabs";
 import { ScrollToHash } from "@/components/scroll-to-hash";
+import { Avatar } from "@/components/user-menu";
+import { avatarUrl } from "@/lib/avatars";
 import { ReviewDueCard, type ReviewDueCardProps } from "@/components/review-due-card";
 import { AttendanceCard } from "@/components/attendance-card";
 import { DiagnosisProgress } from "@/components/diagnosis-progress";
@@ -390,11 +392,28 @@ export default async function MyPage({
         <Link href="/" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">
           ← 홈으로
         </Link>
-        <h1 className="mt-2 text-3xl font-semibold">{nickname}님의 마이페이지</h1>
-        <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-500">
-          <Link href="/mypage/edit" className="text-blue-600 hover:underline dark:text-blue-400">
-            내 정보 수정
+        {/* 프로필 사진을 이름 옆에 둔다 — 사진을 올릴 수 있다는 사실을 알리는 자리가
+            "내 정보 수정" 안쪽뿐이면 아무도 모른다(아바타를 누르면 그 화면으로 간다). */}
+        <div className="mt-2 flex items-center gap-3">
+          <Link
+            href="/mypage/edit"
+            aria-label="프로필 사진 변경"
+            className="rounded-full focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:outline-none"
+          >
+            <Avatar
+              nickname={nickname}
+              avatarUrl={avatarUrl(user.user_metadata?.avatar_path as string | undefined)}
+              size="xl"
+            />
           </Link>
+          <div>
+            <h1 className="text-3xl font-semibold">{nickname}님의 마이페이지</h1>
+            <div className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-500">
+              <Link href="/mypage/edit" className="text-blue-600 hover:underline dark:text-blue-400">
+                내 정보 수정
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
 

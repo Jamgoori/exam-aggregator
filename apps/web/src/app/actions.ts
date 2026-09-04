@@ -7,7 +7,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionUser } from "@/lib/supabase/session";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
-import { validateNickname } from "@gongmoa/core";
+import sharp from "sharp";
+import {
+  authorNickname,
+  avatarPublicUrl,
+  avatarUploadError,
+  AVATAR_SIZE,
+  validateNickname,
+} from "@gongmoa/core";
 
 // 로그인/가입은 소셜 로그인(구글·카카오)으로만 받는다. 이메일/비밀번호 방식은 계정 복구
 // (아이디·비밀번호 찾기)를 전부 자체 구현해야 해서 폐쇄했고, 복구·비밀번호 보안을
@@ -185,3 +192,112 @@ export async function setDefaultCbtViewMode(
   return { success: true };
 }
 
+
+// ── 프로필 사진 ─────────────────────────────────────────────────────────────
+// 이미지는 avatars 버킷(공개 읽기)에 두고 경로만 profiles.avatar_path 와
+// user_metadata.avatar_path 양쪽에 적는다 — 닉네임과 같은 이중 기록이다
+// (packages/core/src/avatar.ts 머리말 참고).
+//
+// 업로드를 클라이언트에서 버킷으로 직접 하지 않는 이유: 여기서 sharp 로 정사각형
+// 256px webp 로 다시 굽는다. 원본을 그대로 두면 8MB짜리 사진이 댓글마다 실려 나가고,
+// 확장자·MIME 도 사용자가 부르는 대로 남는다. 버킷에 쓰기 정책을 열지 않은 것도
+// 같은 이유다(schema.sql).
+
+export type AvatarResult = { error?: string; success?: boolean; avatarUrl?: string | null };
+
+export async function uploadAvatar(formData: FormData): Promise<AvatarResult> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인이 필요해요." };
+
+  const file = formData.get("file");
+  if (!(file instanceof File)) return { error: "이미지를 선택해주세요." };
+
+  // 클라이언트에서 이미 같은 함수로 걸러내지만, 폼을 직접 만들어 보내는 경로가
+  // 있으므로 서버가 최종 관문이다.
+  const invalid = avatarUploadError({ type: file.type, size: file.size });
+  if (invalid) return { error: invalid };
+
+  let resized: Buffer;
+  try {
+    // 정사각형으로 가운데를 잘라 굽는다(cover). 화면의 아바타가 전부 원형이라
+    // 비율이 다른 사진을 그대로 두면 브라우저마다 다르게 찌그러진다.
+    // animated: gif 를 첫 프레임만 쓰겠다는 뜻 — 움직이는 프로필 사진은 목록에서
+    // 눈이 그쪽으로만 끌린다.
+    resized = await sharp(Buffer.from(await file.arrayBuffer()))
+      .rotate()
+      .resize(AVATAR_SIZE, AVATAR_SIZE, { fit: "cover", position: "attention" })
+      .webp({ quality: 82 })
+      .toBuffer();
+  } catch {
+    return { error: "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요." };
+  }
+
+  const admin = createAdminClient();
+  const path = `${user.id}/${crypto.randomUUID()}.webp`;
+
+  const { error: uploadError } = await admin.storage
+    .from("avatars")
+    .upload(path, resized, { contentType: "image/webp", cacheControl: "31536000" });
+  if (uploadError) return { error: "업로드에 실패했어요. 잠시 후 다시 시도해주세요." };
+
+  // 예전 사진은 새 사진이 자리를 잡은 뒤에 지운다 — 먼저 지웠다가 업로드가 실패하면
+  // 사진만 사라진 계정이 된다.
+  const { data: previous } = await admin
+    .from("profiles")
+    .select("avatar_path")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  // profiles 행은 닉네임을 정할 때 만들어지지만(persistNickname), 그 이전에 만들어진
+  // 계정에는 없을 수 있다. 없으면 지금 만든다 — 없다고 사진 업로드가 실패하면
+  // 사용자로서는 이유를 알 길이 없다.
+  const { error: profileError } = previous
+    ? await admin.from("profiles").update({ avatar_path: path }).eq("user_id", user.id)
+    : await admin.from("profiles").insert({
+        user_id: user.id,
+        nickname: authorNickname(user.user_metadata?.nickname),
+        avatar_path: path,
+      });
+  if (profileError) {
+    await admin.storage.from("avatars").remove([path]);
+    return { error: "저장에 실패했어요." };
+  }
+
+  await supabase.auth.updateUser({ data: { avatar_path: path } });
+  // 헤더는 JWT 를 그대로 읽어 아바타를 그리므로(layout.tsx), 토큰을 갱신하지 않으면
+  // 다음 로그인 때까지 예전 사진이 남는다 — 닉네임 변경과 같은 처리.
+  await supabase.auth.refreshSession();
+
+  const stale = previous?.avatar_path as string | null | undefined;
+  if (stale && stale !== path) await admin.storage.from("avatars").remove([stale]);
+
+  revalidatePath("/", "layout");
+  return { success: true, avatarUrl: avatarPublicUrl(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "", path) };
+}
+
+export async function removeAvatar(): Promise<AvatarResult> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인이 필요해요." };
+
+  const admin = createAdminClient();
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("avatar_path")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const { error } = await admin
+    .from("profiles")
+    .update({ avatar_path: null })
+    .eq("user_id", user.id);
+  if (error) return { error: "삭제에 실패했어요." };
+
+  await supabase.auth.updateUser({ data: { avatar_path: null } });
+  await supabase.auth.refreshSession();
+
+  const path = profile?.avatar_path as string | null | undefined;
+  if (path) await admin.storage.from("avatars").remove([path]);
+
+  revalidatePath("/", "layout");
+  return { success: true, avatarUrl: null };
+}

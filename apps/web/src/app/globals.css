@@ -400,3 +400,111 @@ button:not(:disabled) {
     animation: none;
   }
 }
+
+/* 자유게시판 본문(서식 있는 HTML). 에디터(rich-text-editor.tsx)와 저장된 글의
+   표시(rich-text-content.tsx)가 같은 클래스를 쓴다 — 쓰는 동안 보이는 모습과
+   올린 뒤의 모습이 다르면 그 자체로 버그 신고가 된다.
+
+   Tailwind 프리플라이트가 h2·ul·blockquote 등의 기본 여백·글머리를 전부 지우기
+   때문에, 게시판 본문에서만 그 기본값을 되살린다(사이트의 다른 화면은 그대로 둔다). */
+.board-content > *:first-child {
+  margin-top: 0;
+}
+
+.board-content p {
+  margin: 0 0 0.5rem;
+  min-height: 1lh; /* 빈 줄(엔터)도 한 줄만큼 자리를 차지하게 */
+}
+
+.board-content h2 {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.board-content h3 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.board-content ul,
+.board-content ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.board-content ul {
+  list-style: disc;
+}
+
+.board-content ol {
+  list-style: decimal;
+}
+
+.board-content li {
+  margin: 0.15rem 0;
+}
+
+.board-content blockquote {
+  margin: 0.75rem 0;
+  border-left: 3px solid var(--color-blue-300);
+  padding: 0.25rem 0 0.25rem 0.85rem;
+  color: #52525b;
+}
+
+[data-theme="dark"] .board-content blockquote {
+  color: #a1a1aa;
+}
+
+.board-content a {
+  color: var(--color-blue-600);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+[data-theme="dark"] .board-content a {
+  color: var(--color-blue-400);
+}
+
+.board-content img {
+  display: block;
+  margin: 0.75rem 0;
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.75rem;
+}
+
+.board-content hr {
+  margin: 1.25rem 0;
+  border: 0;
+  border-top: 1px solid #e4e4e7;
+}
+
+[data-theme="dark"] .board-content hr {
+  border-top-color: #3f3f46;
+}
+
+.board-content pre,
+.board-content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.board-content pre {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  border-radius: 0.5rem;
+  background: #f4f4f5;
+  padding: 0.75rem 1rem;
+}
+
+[data-theme="dark"] .board-content pre {
+  background: #27272a;
+}
+
+/* 본문에 어떤 서식이 들어와도 가로 스크롤이 생기지 않게 한다(붙여넣은 긴 URL 등). */
+.board-content {
+  overflow-wrap: anywhere;
+}
