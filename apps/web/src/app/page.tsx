@@ -10,11 +10,12 @@ import {
   Check,
   ChevronRight,
   Flame,
-  Search,
   Sparkles,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { HomePopupSlider } from "@/components/home-popup-slider";
+import { HomeSearchBox } from "@/components/home-search-box";
+import type { SuggestibleSubject } from "@/lib/subject-suggestions";
 import { getLandingData } from "@/lib/landing-data";
 import { examHref, type ExamCombo } from "@/lib/exam-index";
 import {
@@ -65,7 +66,7 @@ export const metadata: Metadata = {
 };
 
 export default async function Home() {
-  const { combos, freeForAll } = await getLandingData();
+  const { combos, subjects, freeForAll } = await getLandingData();
 
   return (
     <div className="flex flex-col">
@@ -79,7 +80,7 @@ export default async function Home() {
 
       <TopBanner freeForAll={freeForAll} />
       <Hero />
-      <PastQuestions combos={combos} />
+      <PastQuestions combos={combos} subjects={subjects} />
       <Diagnosis />
       <ClosingCta freeForAll={freeForAll} />
     </div>
@@ -512,7 +513,13 @@ const FEATURED_EXAMS: { slug: string; badge: string; color: string }[] = [
   { slug: "법원직-9급", badge: "9급", color: "#92400e" },
 ];
 
-function PastQuestions({ combos }: { combos: ExamCombo[] }) {
+function PastQuestions({
+  combos,
+  subjects,
+}: {
+  combos: ExamCombo[];
+  subjects: SuggestibleSubject[];
+}) {
   const bySlug = new Map(combos.map((c) => [c.slug, c]));
   const featured = FEATURED_EXAMS.flatMap((f) => {
     const combo = bySlug.get(f.slug);
@@ -541,28 +548,14 @@ function PastQuestions({ combos }: { combos: ExamCombo[] }) {
         </Link>
       </div>
 
-      <form
-        action="/papers"
-        method="get"
-        role="search"
-        className="mt-8 flex items-center rounded-xl border border-zinc-200 bg-white p-1.5 shadow-sm dark:border-zinc-700 dark:bg-zinc-950"
-      >
-        <Search size={18} className="ml-2.5 shrink-0 text-zinc-400" aria-hidden />
-        <input
-          type="search"
-          name="q"
-          placeholder="예: 2025 국가직 행정법, 9급 국어"
-          aria-label="기출문제 검색"
-          autoComplete="off"
-          className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
-        />
-        <button
-          type="submit"
-          className="rounded-lg bg-[#012854] px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#0a3a72] dark:bg-[#0a7d5b] dark:hover:bg-[#096b4e]"
-        >
-          검색
-        </button>
-      </form>
+      {/* 검색창은 예전처럼 /papers 로 넘기는 GET 폼이지만, 과목명을 치는 동안에는
+          기출문제 목록의 검색창과 같은 과목 추천이 아래에 뜬다(누르면 그 과목
+          페이지로 곧장 간다). 시행처 이름은 "국가직 행정법"처럼 섞어 친 검색어에서
+          과목명만 떼어내는 데 쓴다. */}
+      <HomeSearchBox
+        subjects={subjects}
+        examTypeNames={[...new Set(combos.map((c) => c.examTypeName))]}
+      />
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {featured.map(({ slug, badge, color, combo: c }) => (
