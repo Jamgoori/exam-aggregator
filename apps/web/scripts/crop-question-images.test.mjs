@@ -17,6 +17,9 @@ import sharp from "sharp";
 
 import {
   buildFixturePdf,
+  buildTightRuleFixturePdf,
+  RULE_FIXTURE_QUESTION_COUNT,
+  LINES_PER_QUESTION,
   FIXTURE_QUESTION_COUNT,
   FIXTURE_MERGED_SETS,
   FIXTURE_STRIP_SET,
@@ -28,6 +31,7 @@ import {
   computeColumnTextBounds,
   computeHeaderInkBottomByPage,
   computeFooterInkTopByPage,
+  clampColumnToSeparator,
 } from "./crop-question-images.mjs";
 
 const SCALE = 3;
@@ -246,4 +250,66 @@ test("테두리 없는 조판에서는 내용이 그대로다(대조군)", async
   const framedWidth = [...framedProfiles.values()][0].width;
   const plainWidth = (await profile(unframed[0].image)).width;
   assert.ok(framedWidth < plainWidth, `테두리 크롭이 폭을 줄이지 못했다 (${framedWidth} vs ${plainWidth})`);
+});
+
+// ── 구분선이 본문에 바싹 붙고, 꼬리말이 괘선인 조판 ─────────────────────────
+//
+// 첫 픽스처(테두리 + 여유 있는 구분선)는 통과하면서 실측에서 깨지던 두 가지다.
+// 자세한 재현 이유는 make-crop-fixture.mjs 의 buildTightRuleFixturePdf 주석 참고.
+let tight;
+let tightWithFooter;
+
+test.before(async () => {
+  const opts = { scale: SCALE, expectedCount: RULE_FIXTURE_QUESTION_COUNT };
+  tight = await extractQuestionsFromPdf(await buildTightRuleFixturePdf(), opts);
+  tightWithFooter = await extractQuestionsFromPdf(
+    await buildTightRuleFixturePdf({ textFooter: true }),
+    opts,
+  );
+});
+
+test("clampColumnToSeparator: 본문 범위와 무관하게 구분선 바깥으로 당긴다", () => {
+  // 실측값(2011 법원직 9급 민법): 구분선 295.7~296.0pt, 우측 크롭 시작 293.4pt.
+  // 일반 실선 조건(본문에서 6pt 이상)으로는 절대 안 걸리는 배치다.
+  const rules = [{ x0: 887, x1: 888 }];
+  const right = clampColumnToSeparator({ key: "R", xLeftPt: 293.4, xRightPt: 589 }, rules, 3, 297.5);
+  assert.ok(right.xLeftPt > 888 / 3, "우측 크롭이 구분선 오른쪽에서 시작해야 한다");
+  const left = clampColumnToSeparator({ key: "L", xLeftPt: 6, xRightPt: 589 }, rules, 3, 297.5);
+  assert.ok(left.xRightPt < 887 / 3, "좌측 크롭이 구분선 왼쪽에서 끝나야 한다");
+  // 칼럼 경계에서 먼 세로선(지문 상자 테두리 등)은 건드리지 않는다.
+  const far = clampColumnToSeparator(
+    { key: "R", xLeftPt: 293.4, xRightPt: 589 },
+    [{ x0: 1200, x1: 1201 }],
+    3,
+    297.5,
+  );
+  assert.equal(far.xLeftPt, 293.4);
+});
+
+test("구분선이 우측 본문 바로 옆이어도 세로 실선이 남지 않는다", async () => {
+  assert.equal(tight.length, RULE_FIXTURE_QUESTION_COUNT);
+  for (const c of tight) {
+    const p = await profile(c.image);
+    assert.equal(p.ruleColumns, 0, `${c.number}번에 세로 실선이 남았다`);
+  }
+});
+
+test("글자 없는 하단 괘선은 이미지에 딸려 오지 않는다", async () => {
+  for (const c of tight) {
+    const p = await profile(c.image);
+    // 발문 1 + 부연 1 + 선지 4 = 6줄. 괘선이 남으면 7줄이 되고, 그 위 빈칸까지
+    // 통째로 붙어 이미지가 지면 바닥까지 늘어난다.
+    assert.equal(p.blocks, LINES_PER_QUESTION, `${c.number}번 잉크 덩어리 수`);
+    assert.equal(p.firstInk, PAD_PX);
+    assert.equal(p.height - 1 - p.lastInk, PAD_PX, `${c.number}번 아래에 빈칸이 남았다`);
+  }
+});
+
+test("꼬리말 y가 페이지마다 흔들려도 꼬리말이 남지 않는다", async () => {
+  assert.equal(tightWithFooter.length, RULE_FIXTURE_QUESTION_COUNT);
+  for (const c of tightWithFooter) {
+    const p = await profile(c.image);
+    assert.equal(p.blocks, LINES_PER_QUESTION, `${c.number}번 잉크 덩어리 수`);
+    assert.equal(p.height - 1 - p.lastInk, PAD_PX, `${c.number}번 아래에 군더더기가 남았다`);
+  }
 });

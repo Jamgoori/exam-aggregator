@@ -142,6 +142,19 @@ const RULE_MIN_BODY_LINES = 3;
 // 있으므로 믿지 않는다.
 const RULE_MAX_TRIM_PT = 80;
 
+// 칼럼 경계에서 이 거리 안에 있는 세로 실선은 "칼럼 구분선"으로 본다.
+const SEPARATOR_NEAR_PT = 20;
+// 구분선을 밀어낼 때 남길 여유. 우측 칼럼 본문이 구분선 바로 옆(실측 1.4pt)에
+// 붙는 조판이 있어 RULE_CLEARANCE_PT(1.5pt)보다 작게 잡는다 — 안티에일리어싱만
+// 걷어내면 되고, 크게 잡으면 본문 첫 글자를 깎는다.
+const SEPARATOR_CLEARANCE_PT = 0.7;
+
+// 맨 아래에 남은 **지면 가로 괘선**을 걷어낼 조건(픽셀 단계). 본문에서 한참
+// 떨어진 자리에 있는, 크롭 폭 대부분을 가로지르는 아주 얇은 줄만 지운다.
+const FOOTER_RULE_MAX_H_PT = 3;
+const FOOTER_RULE_MIN_GAP_PT = 20;
+const FOOTER_RULE_MIN_WIDTH_RATIO = 0.6;
+
 // 첫 본문 baseline 위에 남은 잉크 덩어리 중 이 높이 이하만 "머리글 잔해·괘선"으로
 // 보고 걷어낸다. 지문 상자처럼 큰 덩어리는 절대 건드리지 않기 위한 상한이다
 // (실측상 머리글 한 줄이 10~13pt, 괘선이 1pt 미만).
@@ -175,6 +188,32 @@ export function findVerticalRuleXs(greyData, width, height, { maxWidthPx, minCov
     x = end + 1;
   }
   return rules;
+}
+
+// **칼럼 구분선은 본문 x 범위 조건과 무관하게 언제나 크롭 밖으로 밀어낸다.**
+//
+// 일반 실선 처리(makePageContext 의 RULE_* 조건)는 "그 칼럼 본문 x 범위에서 6pt
+// 이상 떨어진 선"만 인정한다 — 지문 상자 테두리를 거르려는 조건이다. 그 대가로
+// 칼럼 사이 구분선이 통째로 빠져나간다:
+//   - 구분선은 우측 칼럼 본문 바로 왼쪽에 붙는다(실측: 2011 법원직 9급 민법 —
+//     구분선 295.7pt, 우측 본문 297.4pt. 6pt 조건에 못 미친다).
+//   - 한 줄이라도 반대쪽 칼럼으로 잘못 분류되면 그 칼럼 "본문 범위"가 구분선을
+//     삼켜 조건이 아예 성립하지 않는다(같은 문제지 우측 본문 범위가 267.6pt 부터).
+// 그래서 **칼럼 경계 근처(SEPARATOR_NEAR_PT)에 있는 지면 높이짜리 얇은 선**은
+// 구분선으로 확정하고 양쪽 칼럼을 그 바깥으로 당긴다. 인쇄된 구분선을 본문이
+// 넘어가는 조판은 없으므로 본문이 깎이지 않는다.
+export function clampColumnToSeparator(colDef, pageRules, scale, cropX) {
+  for (const rule of pageRules) {
+    const rx0 = rule.x0 / scale;
+    const rx1 = rule.x1 / scale;
+    if (Math.abs((rx0 + rx1) / 2 - cropX) > SEPARATOR_NEAR_PT) continue;
+    if (colDef.key === "L") {
+      colDef.xRightPt = Math.min(colDef.xRightPt, rx0 - SEPARATOR_CLEARANCE_PT);
+    } else {
+      colDef.xLeftPt = Math.max(colDef.xLeftPt, rx1 + SEPARATOR_CLEARANCE_PT);
+    }
+  }
+  return colDef;
 }
 
 // 렌더된 지면 한 장에서 세로 실선을 찾는다(findVerticalRuleXs 의 sharp 래퍼).
@@ -951,10 +990,89 @@ async function trimVerticalWhitespace(rawPng) {
     .toBuffer();
 }
 
+// 크롭 맨 아래에 남은 **지면 가로 괘선**을 흰색으로 덮는다.
+//
+// 꼬리말이 글자가 아니라 괘선인 조판이 있다(실측: 해경 계열 다수 — 표본 해경
+// 이미지의 26%). 괘선은 `lines` 에 없어서 좌표 단계의 꼬리말 감지
+// (computeFooterInkTopByPage)에 아예 안 잡히고, `dropInkBelowBaseline` 은
+// 꼬리말 baseline 이 있어야 도는데 그 baseline 도 없다. 그래서 칼럼 마지막 문항이
+// 지면 바닥까지 잘리고, **그 괘선이 "잉크"라 세로 여백 제거까지 무력화돼**
+// 본문과 괘선 사이 큰 빈칸이 그대로 남는다(실측: 2015 해경 3차 수학 5번 —
+// 내용은 위 1/4 뿐이고 나머지가 빈칸 + 맨 아래 괘선).
+//
+// 지우는 조건은 셋 다 만족할 때뿐이다 — 본문을 지우느니 괘선을 남긴다:
+//   (1) 맨 아래 덩어리가 아주 얇을 것(FOOTER_RULE_MAX_H_PT) — 글자는 이보다 두껍다
+//   (2) 바로 위 본문과 한참 떨어져 있을 것(FOOTER_RULE_MIN_GAP_PT)
+//   (3) 크롭 폭 대부분을 가로지를 것 — 짧은 밑줄·문장부호는 건드리지 않는다
+async function dropTrailingPageRule(rawPng, scale) {
+  const { data, info } = await sharp(rawPng)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  const rowHasInk = new Uint8Array(height);
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x] < 245) {
+        rowHasInk[y] = 1;
+        break;
+      }
+    }
+  }
+  let bottom = -1;
+  for (let y = height - 1; y >= 0; y--) {
+    if (rowHasInk[y]) {
+      bottom = y;
+      break;
+    }
+  }
+  if (bottom < 0) return null;
+  let top = bottom;
+  while (top > 0 && rowHasInk[top - 1]) top--;
+  let prevBottom = top - 1;
+  while (prevBottom >= 0 && !rowHasInk[prevBottom]) prevBottom--;
+  if (prevBottom < 0) return null; // 이 덩어리가 전부다 — 본문이므로 건드리지 않는다
+
+  if (bottom - top + 1 > FOOTER_RULE_MAX_H_PT * scale) return null;
+  if (top - prevBottom < FOOTER_RULE_MIN_GAP_PT * scale) return null;
+  let minX = width;
+  let maxX = -1;
+  for (let y = top; y <= bottom; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x] < 245) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+      }
+    }
+  }
+  if (maxX - minX + 1 < width * FOOTER_RULE_MIN_WIDTH_RATIO) return null;
+
+  return sharp(rawPng)
+    .composite([
+      {
+        input: {
+          create: {
+            width,
+            height: bottom - top + 1,
+            channels: 3,
+            background: "#ffffff",
+          },
+        },
+        top,
+        left: 0,
+      },
+    ])
+    .png()
+    .toBuffer();
+}
+
 async function finalizeQuestionImage(rawPng, scale) {
   const pad = Math.round(8 * scale);
   try {
-    const trimmed = await trimVerticalWhitespace(rawPng);
+    const deruled = (await dropTrailingPageRule(rawPng, scale)) ?? rawPng;
+    const trimmed = await trimVerticalWhitespace(deruled);
     if (!trimmed) {
       // 내용이 거의 없어 잉크 행을 못 찾으면 원본을 그대로 쓴다.
       return await sharp(rawPng).webp({ lossless: true }).toBuffer();
@@ -1048,6 +1166,13 @@ async function makePageContext(page, markerData, scale, opts) {
       footerInkTopY,
     );
     if (!bounds) continue;
+    if (process.env.CROP_DEBUG_RULES) {
+      console.log(
+        `[rules] col=${colDef.key} 본문 x=${bounds.minX.toFixed(1)}~${bounds.maxX.toFixed(1)} ` +
+          `크롭 x=${colDef.xLeftPt.toFixed(1)}~${colDef.xRightPt.toFixed(1)} ` +
+          `실선=${pageRules.map((r) => `${(r.x0 / scale).toFixed(1)}~${(r.x1 / scale).toFixed(1)}`).join(", ") || "(없음)"}`,
+      );
+    }
     for (const rule of pageRules) {
       const rx0 = rule.x0 / scale;
       const rx1 = rule.x1 / scale;
@@ -1067,6 +1192,9 @@ async function makePageContext(page, markerData, scale, opts) {
       ) {
         colDef.xRightPt = Math.min(colDef.xRightPt, rx0 - RULE_CLEARANCE_PT);
       }
+    }
+    if (columnMode !== "single") {
+      clampColumnToSeparator(colDef, pageRules, scale, cropX);
     }
     // 경계가 뒤집히면(있을 수 없지만) 손대지 않은 것으로 되돌린다.
     if (colDef.xRightPt - colDef.xLeftPt < 1) {
@@ -1510,6 +1638,7 @@ function detectFooters(pageDataList) {
   const empty = pageDataList.map(() => null);
   if (pageDataList.length < 2) return empty;
   const buckets = new Map();
+  const zoneCandidates = pageDataList.map(() => []);
   for (let i = 0; i < pageDataList.length; i++) {
     const data = pageDataList[i];
     const lines = data.lines ?? [];
@@ -1524,6 +1653,19 @@ function detectFooters(pageDataList) {
       while (start > 0 && arr[start - 1].y - arr[start].y <= lead * 1.5) start--;
       if (start === 0) continue; // 칼럼 전체가 한 덩어리 = 꼬리말이 아니다
       const block = arr.slice(start);
+      // 여백 조건과 무관하게, **지면 아래 구역의 맨 아래 얇은 덩어리**는
+      // 아래 "되풀이 문구" 확정의 후보로 따로 모아둔다(그 판정은 여백을 안 본다).
+      if (block.length <= FOOTER_MAX_LINES && block[0].y < zoneTop) {
+        for (const l of block) {
+          zoneCandidates[i].push({ y: l.y, height: l.height, text: l.text ?? "" });
+        }
+      }
+      if (process.env.CROP_DEBUG_FOOTER) {
+        console.log(
+          `[footer] p${i} col=${col} 줄수=${block.length} 간격=${((arr[start - 1].y - arr[start].y) / lead).toFixed(2)}배 ` +
+            `y=${block[0].y.toFixed(1)} zoneTop=${zoneTop.toFixed(1)} text=${JSON.stringify(block.map((l) => l.text).join("|"))}`,
+        );
+      }
       if (block.length > FOOTER_MAX_LINES) continue;
       if (arr[start - 1].y - arr[start].y <= lead * FOOTER_GAP_RATIO) continue;
       if (block[0].y >= zoneTop) continue;
@@ -1578,6 +1720,53 @@ function detectFooters(pageDataList) {
       if (!hit) continue;
       const cand = { inkTop: l.y + l.height, baseline: l.y };
       if (result[i] === null || cand.inkTop > result[i].inkTop) result[i] = cand;
+    }
+  }
+
+  // 되풀이 **문구**로 확정하기. 위의 y 버킷은 꼬리말이 페이지마다 거의 같은 y에
+  // 있다고 보는데, 그 자리가 페이지마다 흔들리는 조판이 있다(실측: 2021 법원직
+  // 9급 형법 — 꼬리말 y 가 33.6/23.4/33.6 으로 갈려 FOOTER_Y_TOLERANCE_PT(3pt)
+  // 버킷이 쪼개지고, 게다가 6쪽 중 2쪽은 앞 여백이 2.1배에 못 미쳐 후보에서도
+  // 빠졌다. 그래서 어느 버킷도 "절반 이상"을 못 채워 **문서 전체에서 꼬리말이
+  // 하나도 안 잡혔고**, 마지막 문항 크롭에 "전체 20-14"가 그대로 남았다).
+  //
+  // 머리글 감지와 같은 원리로 **문구가 페이지마다 같은지**로 가른다(숫자는 #으로
+  // 뭉갠다). 가져다 쓰는 y 는 언제나 **그 페이지에서 실제로 잰 값**이라, 다른
+  // 페이지의 y 를 옮겨 와 본문을 자르는 사고(2015 국가직 9급 수학)가 없다.
+  //
+  // 선지·마커로 보이는 줄은 후보에서 뺀다 — "① 없음 ② 1개 ③ 2개 ④ 3개" 같은
+  // 짧은 선지 줄은 지면 아래 구역의 맨 아래 덩어리이면서 문제지 내내 같은 문구일
+  // 수 있어(실측: 같은 문제지 3쪽 우측 칼럼), 안 거르면 **선지 한 줄이 통째로
+  // 잘려 나간다.**
+  const byText = new Map();
+  for (let i = 0; i < zoneCandidates.length; i++) {
+    for (const c of zoneCandidates[i]) {
+      const text = c.text ?? "";
+      // 선지 줄 거르기. **글리프가 들어 있다는 것만으로 거르면 안 된다** — 법원직
+      // 꼬리말이 "2교시 ①책형 전체 20-14"처럼 책형 표시에 ①을 쓴다. 선지 줄은
+      // 글리프로 시작하거나 여러 개를 나열한다는 점으로 가른다.
+      const trimmed = text.trim();
+      if (CHOICE_GLYPHS.some((g) => trimmed.startsWith(g))) continue;
+      if (CHOICE_GLYPHS.filter((g) => trimmed.includes(g)).length >= 2) continue;
+      if (QUESTION_MARKER_RE.test(trimmed) || BRACKET_QUESTION_MARKER_RE.test(trimmed)) continue;
+      const norm = normalizeRunningText(text);
+      if (!norm) continue;
+      if (!byText.has(norm)) byText.set(norm, new Map());
+      const perPage = byText.get(norm);
+      const cand = { inkTop: c.y + c.height, baseline: c.y };
+      const prev = perPage.get(i);
+      if (!prev || cand.inkTop > prev.inkTop) perPage.set(i, cand);
+    }
+  }
+  if (process.env.CROP_DEBUG_FOOTER) {
+    console.log(`[footer] minPages=${minPages} 문구후보=${[...byText.entries()].map(([t, m]) => `${JSON.stringify(t)}:${m.size}`).join(" ")}`);
+  }
+  for (const perPage of byText.values()) {
+    if (perPage.size < minPages) continue;
+    for (const [pageIdx, cand] of perPage) {
+      // **비어 있는 페이지만 채운다.** 이미 잡힌 값을 위로 올리면 그만큼 더
+      // 잘라내는 쪽이라, 여기서는 손대지 않는 쪽으로만 틀리게 둔다.
+      if (result[pageIdx] === null) result[pageIdx] = cand;
     }
   }
   return result;

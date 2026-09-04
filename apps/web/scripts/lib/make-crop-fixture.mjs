@@ -241,3 +241,60 @@ export const FIXTURE_MERGED_SETS = [
 ];
 // 안내문 스트립이 각 문항 위에 붙어야 하는 세트(지시문 재사용형).
 export const FIXTURE_STRIP_SET = [9, 10];
+
+// ── 두 번째 픽스처: 구분선이 본문에 바싹 붙고, 꼬리말이 글자가 아니라 괘선인 조판 ──
+//
+// 실측에서 이 두 가지가 첫 픽스처로는 안 잡혔다:
+//   (1) 칼럼 구분선이 **우측 칼럼 본문 바로 옆**(실측 1.7pt)에 있는 조판. 실선을
+//       "본문 x 범위에서 6pt 이상 떨어진 것"만 인정하면 이 선이 빠져나가 우측
+//       문항 이미지 왼쪽에 세로 실선이 남는다(실측: 2011 법원직 9급 민법,
+//       2016 해경 3차 영어).
+//   (2) 꼬리말이 텍스트가 아니라 **지면 하단 가로 괘선**인 조판. 좌표 단계의
+//       꼬리말 감지는 lines 만 보므로 이 괘선을 못 본다. 칼럼 마지막 문항이 지면
+//       바닥까지 잘리고, 괘선이 잉크라 세로 여백 제거까지 막혀 큰 빈칸이 남는다
+//       (실측: 해경 계열 — 표본의 26%).
+//   (3) 꼬리말 y 가 페이지마다 흔들리는 조판. y 버킷(3pt)이 쪼개져 "절반 이상의
+//       페이지"를 못 채우면 꼬리말이 문서 전체에서 하나도 안 잡힌다(실측:
+//       2021 법원직 9급 형법 — y 가 33.6/23.4/33.6).
+const TIGHT_RULE_TEXT_X = 299; // 구분선(297.5) 바로 오른쪽
+const BOTTOM_RULE_Y = 40;
+
+export const RULE_FIXTURE_QUESTION_COUNT = 6;
+
+export async function buildTightRuleFixturePdf({ textFooter = false } = {}) {
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const L = FIXTURE_LAYOUT;
+
+  for (let p = 0; p < 3; p++) {
+    const page = pdf.addPage([PAGE_W, PAGE_H]);
+    // 칼럼 구분선만 긋는다(지면 테두리는 없다).
+    page.drawLine({
+      start: { x: L.columnRuleX, y: 26 },
+      end: { x: L.columnRuleX, y: PAGE_H - 26 },
+      thickness: RULE_W,
+      color: rgb(0, 0, 0),
+    });
+    // 지면 하단 가로 괘선 — 글자 없는 꼬리말.
+    page.drawLine({
+      start: { x: L.borderLeftX, y: BOTTOM_RULE_Y },
+      end: { x: L.borderRightX, y: BOTTOM_RULE_Y },
+      thickness: RULE_W,
+      color: rgb(0, 0, 0),
+    });
+    if (textFooter) {
+      // y 를 페이지마다 흔들어 y 버킷 확정을 깨뜨린다(위 (3)).
+      page.drawText(`SESSION A TYPE 1 TOTAL 20 - 1${p}`, {
+        x: 200,
+        y: [33.6, 23.4, 33.6][p],
+        size: 9,
+        font,
+      });
+    }
+    const left = columnCursor(page, font, L.leftTextX, L.bodyTopY);
+    question(left, p * 2 + 1);
+    const right = columnCursor(page, font, TIGHT_RULE_TEXT_X, L.bodyTopY);
+    question(right, p * 2 + 2);
+  }
+  return Buffer.from(await pdf.save());
+}
