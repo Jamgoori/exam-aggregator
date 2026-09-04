@@ -641,7 +641,7 @@ function WrongNotesTab({
               자동으로 정리돼요.
             </p>
             <Link
-              href="/"
+              href="/papers"
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700"
             >
               문제 풀러 가기
@@ -693,7 +693,7 @@ function WrongNotesTab({
             자동으로 정리돼요.
           </p>
           <Link
-            href="/"
+            href="/papers"
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700"
           >
             문제 풀러 가기

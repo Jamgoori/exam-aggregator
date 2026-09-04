@@ -67,7 +67,7 @@ export function MyPageTabs({
 
   // 탭 버튼도 주소를 같이 고쳐둔다 — 새로고침하거나 주소를 복사해 열어도 보고 있던
   // 탭 그대로 열린다. 서버를 다시 부를 일이 없으므로 라우터 대신 history API 를
-  // 쓴다(home-exam-browser.tsx 와 같은 이유).
+  // 쓴다(exam-browser.tsx 와 같은 이유).
   //
   // prevTabFromUrl 은 건드리지 않는다 — 그 값은 "마지막으로 본 URL 의 tab" 이지
   // "마지막으로 고른 탭" 이 아니다. 여기서 같이 밀어두면, 주소만 바뀌고

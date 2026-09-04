@@ -6,7 +6,7 @@ import { Search } from "lucide-react";
 import type { Subject } from "@gongmoa/core";
 
 // 예전엔 이 컴포넌트가 직접 라우팅(router.push)까지 담당해서, 입력할 때마다
-// 디바운스 후 서버를 다시 왕복했다. 이제 필터링은 부모(HomeExamBrowser)가 받은
+// 디바운스 후 서버를 다시 왕복했다. 이제 필터링은 부모(ExamBrowser)가 받은
 // 문제지 목록을 그 자리에서 즉시 걸러내는 방식이라 디바운스 자체가 필요 없어졌고,
 // 이 컴포넌트는 순수하게 값을 보여주고 바뀐 값을 그대로 부모에 올려보내기만 한다.
 //
@@ -69,7 +69,7 @@ export function SearchInput({
   // 추천 목록 위에서 손을 떼는 순간 브라우저 기본 동작(포커스를 그 링크로 옮김)을
   // 막는다 — 입력창이 포커스를 계속 들고 있어야 이 추천창이 그대로 열려 있다.
   // 막아도 click 이벤트는 그대로 발생하므로 이동(Link 이동)은 정상 동작한다.
-  // (페이지 버튼의 keepFocus와 같은 트릭 — home-exam-browser.tsx 참고.)
+  // (페이지 버튼의 keepFocus와 같은 트릭 — exam-browser.tsx 참고.)
   const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

@@ -1,49 +1,20 @@
-// 홈 화면 스켈레톤: 히어로 문구 → 검색창 → 과목 탭 → 문제지 카드 그리드 순서로,
-// home-exam-browser.tsx가 그리는 실제 구도와 같은 자리를 잡아둔다.
+// 자기 loading.tsx 가 없는 라우트(과목·시험 허브, 요금제, 공지 등)가 공통으로 쓰는
+// 스켈레톤. 제목 한 줄과 문단, 그 아래 카드 몇 장 — 대부분의 안내형 페이지가 그 구도다.
+// 기출문제 목록은 자기 스켈레톤(papers/loading.tsx)을 따로 가진다.
 function Block({ className = "" }: { className?: string }) {
   return <div className={`skeleton rounded-lg ${className}`} />;
 }
 
-function ExamCardSkeleton() {
+export default function PageLoading() {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <Block className="h-5 w-10 rounded" />
-          <Block className="h-5 w-14 rounded" />
-        </div>
-        <Block className="h-7 w-7 shrink-0 rounded-full" />
-      </div>
-      <Block className="h-4 w-full" />
-      <div className="mt-auto flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-700">
-        <Block className="h-5 w-16 rounded-full" />
-        <Block className="h-4 w-16" />
-      </div>
-    </div>
-  );
-}
-
-export default function HomeLoading() {
-  return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
-      <div className="flex flex-col items-start gap-3">
-        <Block className="h-6 w-40 rounded-full" />
-        <Block className="h-10 w-72 sm:h-11 sm:w-96" />
-        <Block className="h-10 w-56 sm:h-11 sm:w-72" />
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
+      <div className="flex flex-col gap-3">
+        <Block className="h-9 w-64 sm:h-10 sm:w-80" />
         <Block className="h-4 w-full max-w-md" />
       </div>
-
-      <Block className="h-12 w-full rounded-xl" />
-
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 6 }, (_, i) => (
-          <Block key={i} className="h-8 w-16 rounded-full" />
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {Array.from({ length: 8 }, (_, i) => (
-          <ExamCardSkeleton key={i} />
+          <Block key={i} className="h-20 rounded-xl" />
         ))}
       </div>
     </div>
