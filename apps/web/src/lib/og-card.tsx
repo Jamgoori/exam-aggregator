@@ -7,11 +7,11 @@ import { SITE_NAME } from "@/lib/site-url";
 export const OG_SIZE = { width: 1200, height: 630 };
 export const OG_CONTENT_TYPE = "image/png";
 
-const BRAND = "#2563eb";
+const BRAND = "#12b382";
 const INK = "#0f172a";
 const MUTED = "#64748b";
-const CHIP_BG = "#eff6ff";
-const CHIP_INK = "#1d4ed8";
+const CHIP_BG = "#ecfdf5";
+const CHIP_INK = "#06664a";
 
 // 제목이 길면 두 줄을 넘겨 카드 밖으로 흘러나간다. satori 에는 줄 수를 세어
 // 줄여주는 기능이 없으므로 글자 수로 잘라내고, 길이에 따라 크기도 낮춘다.

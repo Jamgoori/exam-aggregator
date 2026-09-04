@@ -121,7 +121,9 @@ function Hero({ totalCount }: { totalCount: number }) {
   return (
     <section className="relative overflow-hidden border-b border-zinc-200 bg-[#e7f2fc]/45 dark:border-zinc-800 dark:bg-zinc-900/60">
       <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-16 lg:grid-cols-[1.08fr_.92fr] lg:px-6 lg:py-24">
-        <div className="relative z-10">
+        {/* lg 미만에서는 카드가 아래로 내려가 한 열이 되므로 글도 가운데로 모은다 —
+            왼쪽 정렬 글 + 가운데 카드가 세로로 쌓이면 화면이 한쪽으로 쏠려 보인다. */}
+        <div className="relative z-10 flex flex-col items-center text-center lg:items-start lg:text-left">
           <div
             className="mb-6 inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1.5 text-xs font-bold dark:bg-zinc-950"
             style={{ borderColor: `${ACCENT}40`, color: ACCENT }}
@@ -141,13 +143,13 @@ function Hero({ totalCount }: { totalCount: number }) {
             틀린 문제는 오답노트에 자동으로 쌓이고, AI가 왜 틀리는지 개념 단위로 진단해
             드립니다.
           </p>
-          <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+          <div className="mt-9 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
             <Link
               href="/papers"
               className="inline-flex items-center justify-center gap-2 rounded-lg px-5 py-3.5 text-sm font-bold text-white shadow-lg transition-transform hover:-translate-y-0.5"
               style={{ backgroundColor: NAVY, boxShadow: `0 10px 15px -3px ${NAVY}26` }}
             >
-              기출문제 풀어보기
+              기출문제 풀러가기
               <ArrowRight size={16} aria-hidden />
             </Link>
             <Link
@@ -157,7 +159,7 @@ function Hero({ totalCount }: { totalCount: number }) {
               AI 약점진단 알아보기
             </Link>
           </div>
-          <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-zinc-500 dark:text-zinc-500">
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-zinc-500 lg:justify-start dark:text-zinc-500">
             <span className="flex items-center gap-1.5">
               <Check size={14} style={{ color: ACCENT }} aria-hidden />
               무료로 시작
@@ -218,9 +220,12 @@ function TodayStudyCard() {
             <span className="font-semibold text-zinc-900 dark:text-zinc-100">이번 주 학습량</span>
             <span className="text-zinc-500">목표 200문제</span>
           </div>
-          <div className="flex h-24 items-end gap-2">
+          {/* 막대 높이는 퍼센트다 — 퍼센트 높이는 부모 높이가 확정돼 있어야 풀리므로
+              열마다 h-full 을 주고 아래 정렬(justify-end)로 바닥에 붙인다. 열에 높이가
+              없으면 막대가 0 으로 사라진다(실측). */}
+          <div className="flex h-24 gap-2">
             {days.map((d, i) => (
-              <div key={d} className="flex flex-1 flex-col items-center gap-1">
+              <div key={d} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
                 <div
                   className="w-full rounded-t"
                   style={{
@@ -228,7 +233,7 @@ function TodayStudyCard() {
                     backgroundColor: i === today ? ACCENT : `${NAVY}26`,
                   }}
                 />
-                <span className="text-[10px] text-zinc-500">{d}</span>
+                <span className="text-[10px] leading-none text-zinc-500">{d}</span>
               </div>
             ))}
           </div>
