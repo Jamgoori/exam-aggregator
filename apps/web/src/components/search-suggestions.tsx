@@ -153,7 +153,8 @@ export function SearchSuggestionList({
             role="option"
             aria-selected={highlighted === i}
             ref={(el) => {
-              itemRefs.current[i] = el;
+              // ref 배열은 부모가 만들어 넘긴다 — 타입상 null일 수 있어 확인 후 담는다.
+              if (itemRefs.current) itemRefs.current[i] = el;
             }}
             href={`/subjects/${s.slug}`}
             onMouseDown={keepFocus}
