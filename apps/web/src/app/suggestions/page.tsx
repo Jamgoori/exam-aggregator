@@ -8,6 +8,7 @@ import {
   SUGGESTIONS_PAGE_SIZE,
   type SuggestionListItem,
 } from "@/lib/suggestions";
+import { kstDayKey, KST_TIME_ZONE } from "@gongmoa/core";
 
 // 건의게시판 목록.
 //
@@ -23,15 +24,13 @@ export const metadata: Metadata = {
 
 function formatDate(iso: string) {
   const d = new Date(iso);
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
+  // 서버(UTC)에서 그려도 한국 날짜로 판정한다 — Date 의 getFullYear/getMonth/
+  // getDate 는 실행 환경 시간대를 따라서, 자정 근처 글의 "오늘" 판정이 어긋난다.
+  const sameDay = kstDayKey(d) === kstDayKey(new Date());
   // 오늘 글은 시:분으로 보여준다 — 게시판에서 "방금 올라온 글"이 눈에 띄어야 한다.
   return sameDay
-    ? d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString("ko-KR", { year: "2-digit", month: "2-digit", day: "2-digit" });
+    ? d.toLocaleTimeString("ko-KR", { timeZone: KST_TIME_ZONE, hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString("ko-KR", { timeZone: KST_TIME_ZONE, year: "2-digit", month: "2-digit", day: "2-digit" });
 }
 
 // 공지·일반 글이 번호 칸만 다르고 나머지 줄 구성은 같아서 하나로 그린다.

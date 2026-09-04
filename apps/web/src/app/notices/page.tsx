@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Megaphone, Pin, SquarePen } from "lucide-react";
 import { Pagination } from "@/components/pagination";
 import { fetchNoticePage, isNoticeAdmin, NOTICES_PAGE_SIZE, type NoticeListItem } from "@/lib/notices";
+import { kstDayKey, KST_TIME_ZONE } from "@gongmoa/core";
 
 // 공지사항 게시판 목록. 회원가입 없이도 전부 읽을 수 있는 공개 게시판이라
 // 검색 색인도 막지 않는다(robots.ts에 별도 disallow 없음, suggestions와 다른 점).
@@ -13,14 +14,12 @@ export const metadata: Metadata = {
 
 function formatDate(iso: string) {
   const d = new Date(iso);
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
+  // 서버(UTC)에서 그려도 한국 날짜로 판정한다 — Date 의 getFullYear/getMonth/
+  // getDate 는 실행 환경 시간대를 따라서, 자정 근처 글의 "오늘" 판정이 어긋난다.
+  const sameDay = kstDayKey(d) === kstDayKey(new Date());
   return sameDay
-    ? d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString("ko-KR", { year: "2-digit", month: "2-digit", day: "2-digit" });
+    ? d.toLocaleTimeString("ko-KR", { timeZone: KST_TIME_ZONE, hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString("ko-KR", { timeZone: KST_TIME_ZONE, year: "2-digit", month: "2-digit", day: "2-digit" });
 }
 
 function NoticeRow({ item, number }: { item: NoticeListItem; number: number | null }) {

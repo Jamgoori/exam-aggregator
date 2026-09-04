@@ -5,7 +5,12 @@ import { Pagination } from "@/components/pagination";
 import { Avatar } from "@/components/user-menu";
 import { BoardSearch } from "@/components/board-search";
 import { fetchBoardPage, type BoardListItem } from "@/lib/board";
-import { BOARD_CATEGORIES, boardCategoryLabel } from "@gongmoa/core";
+import {
+  BOARD_CATEGORIES,
+  boardCategoryLabel,
+  kstDayKey,
+  KST_TIME_ZONE,
+} from "@gongmoa/core";
 import { absoluteUrl } from "@/lib/site-url";
 
 // 자유게시판 목록.
@@ -20,17 +25,25 @@ export const metadata: Metadata = {
   alternates: { canonical: absoluteUrl("/board") },
 };
 
+// 시각은 언제나 한국 시간으로 그린다. 이 페이지는 서버 컴포넌트고 서버는 UTC 로
+// 돌기 때문에, timeZone 을 빼면 방금 올린 글이 9시간 전으로 보인다(core 의
+// KST_TIME_ZONE 주석). "오늘인가" 판정도 같은 이유로 KST 날짜 키를 비교한다.
 function formatDate(iso: string) {
   const d = new Date(iso);
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
+  const sameDay = kstDayKey(d) === kstDayKey(new Date());
   // 오늘 글은 시:분으로 — 게시판에서 "방금 올라온 글"이 눈에 띄어야 한다.
   return sameDay
-    ? d.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleDateString("ko-KR", { year: "2-digit", month: "2-digit", day: "2-digit" });
+    ? d.toLocaleTimeString("ko-KR", {
+        timeZone: KST_TIME_ZONE,
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : d.toLocaleDateString("ko-KR", {
+        timeZone: KST_TIME_ZONE,
+        year: "2-digit",
+        month: "2-digit",
+        day: "2-digit",
+      });
 }
 
 const CATEGORY_STYLE: Record<string, string> = {

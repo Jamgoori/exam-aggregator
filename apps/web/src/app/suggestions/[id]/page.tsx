@@ -11,6 +11,7 @@ import {
   fetchSuggestionComments,
   getSuggestionViewer,
 } from "@/lib/suggestions";
+import { KST_TIME_ZONE } from "@gongmoa/core";
 
 export const metadata: Metadata = {
   title: "건의게시판",
@@ -19,6 +20,7 @@ export const metadata: Metadata = {
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("ko-KR", {
+    timeZone: KST_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

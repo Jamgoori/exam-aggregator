@@ -5,6 +5,7 @@ import { Pin } from "lucide-react";
 import { NoticeComments } from "@/components/notice-comments";
 import { NoticeDeleteButton } from "@/components/notice-delete-button";
 import { countNoticeView, fetchNotice, fetchNoticeComments, getNoticeViewer } from "@/lib/notices";
+import { KST_TIME_ZONE } from "@gongmoa/core";
 
 export async function generateMetadata({
   params,
@@ -18,6 +19,7 @@ export async function generateMetadata({
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("ko-KR", {
+    timeZone: KST_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

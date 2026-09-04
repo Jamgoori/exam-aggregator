@@ -22,6 +22,17 @@ const nextConfig: NextConfig = {
   // 부수 효과: <Link> 프리페치가 링크마다가 아니라 라우트마다 한 번(App Shell)만
   // 나간다. 문제지 카드가 수십 장 깔리는 홈·과목 페이지에서는 오히려 요청이 준다.
   partialPrefetching: true,
+  // 서버 액션 요청 본문 상한. 기본값이 **1MB** 라, 그대로 두면 게시판 사진·프로필
+  // 사진 업로드가 휴대폰 사진(보통 2~5MB) 한 장에 그냥 막힌다(에디터에서 "사진"을
+  // 눌러도 아무 일이 없던 원인).
+  //
+  // 4MB 로 잡은 이유: Vercel 서버리스 함수의 요청 본문 상한이 4.5MB 라 그보다 크게
+  // 잡아도 플랫폼에서 먼저 잘린다. 대신 브라우저가 올리기 전에 긴 변 1600px 로 줄여
+  // 보내므로(lib/prepare-image-upload.ts) 실제로는 수백 KB 밖에 오가지 않는다 —
+  // 이 값은 그 축소가 실패한 파일(브라우저가 못 여는 형식 등)을 위한 여유다.
+  experimental: {
+    serverActions: { bodySizeLimit: "4mb" },
+  },
   // **htmlLimitedBots 에 Googlebot 을 넣지 말 것.** 2026-08-18 에 넣었다가 되돌렸다.
   //
   // 의도는 "Googlebot 에게도 메타데이터를 스트리밍하지 말고 <head> 에 담자"였는데,
