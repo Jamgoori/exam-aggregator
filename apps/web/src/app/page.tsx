@@ -17,11 +17,7 @@ import { createClient } from "@/lib/supabase/server";
 import { HomePopupSlider } from "@/components/home-popup-slider";
 import { getLandingData } from "@/lib/landing-data";
 import { examHref, type ExamCombo } from "@/lib/exam-index";
-import {
-  DIAGNOSIS_CYCLE_DAYS,
-  DIAGNOSIS_MIN_ATTEMPTS,
-  DIAGNOSIS_MIN_WRONG,
-} from "@/lib/ai-diagnosis";
+import { DIAGNOSIS_CYCLE_DAYS, DIAGNOSIS_MIN_ATTEMPTS } from "@/lib/ai-diagnosis";
 import { FREE_UNTIL_LABEL, TRIAL_DAYS } from "@gongmoa/core";
 import type { Metadata } from "next";
 
@@ -140,8 +136,10 @@ function Hero({ totalCount }: { totalCount: number }) {
           </h1>
           <p className="mt-6 max-w-lg text-pretty text-base leading-7 text-zinc-600 sm:text-lg dark:text-zinc-400">
             공무원 기출문제 {totalCount.toLocaleString("ko-KR")}건을 온라인으로 풀고 바로
-            채점하세요. 틀린 문제는 오답노트에 자동으로 쌓이고, AI가 왜 틀리는지 개념
-            단위로 진단해 드립니다.
+            채점하세요.
+            <br />
+            틀린 문제는 오답노트에 자동으로 쌓이고, AI가 왜 틀리는지 개념 단위로 진단해
+            드립니다.
           </p>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
             <Link
@@ -290,12 +288,27 @@ function MiniStat({
 // 검색창은 자바스크립트 없이도 동작하는 GET 폼이다 — /papers 가 ?q= 를 읽어 그
 // 검색어로 목록을 연다. 그 아래 카드는 시험(시행처+급수) 허브(/exams/*)로 가는
 // 서버 렌더 링크라 크롤러가 문제지 3천여 장까지 내려가는 첫 계단이기도 하다.
-const BADGE_COLORS = [NAVY, ACCENT, "#0369a1", "#b45309", "#be123c", "#566577"];
+//
+// 여섯 장은 고정이다(응시 인원이 많은 순이 아니라 "처음 온 사람이 찾는 순"): 지방직·
+// 국가직 9급이 절대다수, 그다음 7급, 경찰·소방은 시행처 자체가 시험명, 법원직은 별도
+// 과목 체계라 따로 찾는다. 건수·연도만 실제 색인(getExamIndex)에서 채우고, 색인에
+// 없는 시험(자료가 아직 없을 때)은 카드를 그리지 않는다 — 빈 페이지로 보내지 않는다.
+// 배지 색: 경찰은 제복의 청색, 소방은 적색. 나머지는 홈 팔레트에서 골랐다.
+const FEATURED_EXAMS: { slug: string; badge: string; color: string }[] = [
+  { slug: "지방직-9급", badge: "9급", color: ACCENT },
+  { slug: "국가직-9급", badge: "9급", color: NAVY },
+  { slug: "국가직-7급", badge: "7급", color: "#5b21b6" },
+  { slug: "경찰", badge: "경찰", color: "#1d4ed8" },
+  { slug: "소방", badge: "소방", color: "#dc2626" },
+  { slug: "법원직-9급", badge: "9급", color: "#92400e" },
+];
 
 function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount: number }) {
-  // 자료가 많은 시험 여섯을 앞세운다 — 처음 온 사람이 "내 시험이 있나"를 가장 빨리
-  // 확인하는 순서다. 나머지는 "시험별 전체 보기"로.
-  const top = [...combos].sort((a, b) => b.count - a.count).slice(0, 6);
+  const bySlug = new Map(combos.map((c) => [c.slug, c]));
+  const featured = FEATURED_EXAMS.flatMap((f) => {
+    const combo = bySlug.get(f.slug);
+    return combo ? [{ ...f, combo }] : [];
+  });
   return (
     <section id="problems" className="mx-auto w-full max-w-6xl px-4 py-16 lg:px-6 lg:py-20">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -346,17 +359,17 @@ function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount
       </form>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {top.map((c, i) => (
+        {featured.map(({ slug, badge, color, combo: c }) => (
           <Link
-            key={c.slug}
+            key={slug}
             href={examHref(c.slug)}
             className="group flex items-center gap-4 rounded-xl border border-zinc-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950"
           >
             <span
-              className="grid size-11 shrink-0 place-items-center rounded-lg text-sm font-bold text-white"
-              style={{ backgroundColor: BADGE_COLORS[i % BADGE_COLORS.length] }}
+              className="grid size-11 shrink-0 place-items-center rounded-lg text-sm font-bold text-white shadow-sm"
+              style={{ backgroundColor: color, boxShadow: `0 4px 10px -2px ${color}66` }}
             >
-              {c.level ?? c.examTypeName.slice(0, 2)}
+              {badge}
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{c.label}</p>
@@ -407,8 +420,7 @@ function Diagnosis() {
           <p className="mt-5 max-w-lg text-sm leading-6 text-white/70">
             온라인 응시와 복습에서 틀린 문항을 AI가 개념 단위로 다시 세우고, 내가 고른
             오답 하나하나를 근거로 &ldquo;왜 그렇게 골랐는지 · 그래서 뭘 하면 되는지&rdquo;를
-            써 드립니다. 응시 {DIAGNOSIS_MIN_ATTEMPTS}회 또는 오답 {DIAGNOSIS_MIN_WRONG}개부터,{" "}
-            {DIAGNOSIS_CYCLE_DAYS}일마다 한 번. 따로 입력할 건 없어요.
+            써 드립니다.
           </p>
           <Link
             href="/diagnosis"
@@ -437,8 +449,13 @@ function WeaknessReportCard() {
       { subject: "국어", concept: "문법", note: "안정적", pct: 82, weak: false },
     ];
   return (
-    <div aria-hidden className="rounded-2xl border border-white/15 bg-white/5 p-5">
-      <div className="flex items-center gap-3 border-b border-white/10 pb-4">
+    <div aria-hidden className="relative rounded-2xl border border-white/15 bg-white/5 p-5">
+      {/* 예시임을 카드 위에 박아 둔다 — 실제 내 리포트로 오해하고 "내 과목이 아닌데"
+          하며 나가는 일이 없게. */}
+      <span className="absolute right-4 top-4 rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white/80">
+        예시 화면
+      </span>
+      <div className="flex items-center gap-3 border-b border-white/10 pb-4 pr-16">
         <div
           className="grid size-10 place-items-center rounded-xl text-white"
           style={{ backgroundColor: ACCENT }}

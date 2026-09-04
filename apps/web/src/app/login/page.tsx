@@ -3,8 +3,7 @@ import { signInWithGoogle, signInWithKakao } from "@/app/actions";
 import { GoogleIcon } from "@/components/google-icon";
 import { KakaoIcon } from "@/components/kakao-icon";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
-import { BookOpenCheck, BrainCircuit, Check, Monitor } from "lucide-react";
-import { FREE_UNTIL_LABEL, isFreeForAll, TRIAL_DAYS } from "@gongmoa/core";
+import { BookOpenCheck, BrainCircuit, Monitor } from "lucide-react";
 import { DIAGNOSIS_MIN_ATTEMPTS } from "@/lib/ai-diagnosis-thresholds";
 
 export default async function LoginPage({
@@ -15,10 +14,8 @@ export default async function LoginPage({
   const { error, message, next: rawNext } = await searchParams;
   const next = sanitizeNextPath(rawNext);
   // CBT 를 누르다 여기로 튕겨 온 사람에게는 "이 문제지 바로 시작"이 로그인의 이유다.
-  // 그 외에는 일반 안내. (searchParams 를 읽은 뒤라 isFreeForAll 의 new Date 는 정적
-  // 셸 밖에서 돈다.)
+  // 그 외에는 일반 안내.
   const fromCbt = /^\/papers\/[^/]+\/cbt(\/|$)/.test(next);
-  const freeForAll = isFreeForAll();
 
   return (
     <div className="mx-auto flex max-w-sm flex-col gap-6 px-4 py-16 sm:py-24">
@@ -34,14 +31,8 @@ export default async function LoginPage({
       </div>
 
       {/* 이 화면이 최대 이탈 지점이다 — CBT 를 누르자마자 만나는 문이라, 왜 열어야
-          하는지를 문 앞에서 말한다. 무료 조건은 core 상수에서 온다. */}
+          하는지를 문 앞에서 말한다. */}
       <ul className="flex flex-col gap-2 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3.5 text-[13px] text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-100">
-        <li className="flex items-center gap-2 font-bold">
-          <Check size={15} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
-          {freeForAll
-            ? `${FREE_UNTIL_LABEL}까지 모든 기능 무료 · 결제·카드 등록 없음`
-            : `가입 후 ${TRIAL_DAYS}일 동안 모든 기능 무료`}
-        </li>
         <li className="flex items-center gap-2">
           <Monitor size={15} className="shrink-0 text-emerald-600 dark:text-emerald-400" />
           온라인 CBT 응시 기록과 회독이 계정에 남아요

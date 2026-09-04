@@ -48,9 +48,7 @@ export function SiteHeader({
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#12b382] text-white shadow-sm shadow-[#12b382]/30">
             <GraduationCap size={22} />
           </span>
-          <span className="text-2xl font-bold dark:text-zinc-100">
-            공<span className="text-[#12b382]">모아</span>
-          </span>
+          <span className="text-2xl font-bold text-[#12b382]">공모아</span>
         </Link>
 
         <div className="ml-auto flex shrink-0 items-center gap-1.5">

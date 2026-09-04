@@ -16,6 +16,7 @@ import {
 } from "@/lib/ai-diagnosis";
 import { COACH_MAX_TOTAL } from "@/lib/diagnosis-limits";
 import { DiagnosisProgress } from "@/components/diagnosis-progress";
+import { DiagnosisSampleReport } from "@/components/diagnosis-sample-report";
 
 export const metadata: Metadata = {
   title: "AI 약점 진단",
@@ -70,6 +71,9 @@ export default async function DiagnosisAboutPage() {
         />
       )}
       <Steps />
+      {/* 3단계를 읽고 나서 "그래서 결과가 어떻게 생겼는데"에 답하는 자리. 진단은 응시
+          3회 뒤에야 열리므로, 결과물을 미리 보여주지 않으면 세 번 올 이유가 없다. */}
+      <DiagnosisSampleReport />
       <Details />
     </div>
   );

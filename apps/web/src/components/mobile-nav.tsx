@@ -101,9 +101,7 @@ function MobileNavDrawer({
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#12b382] text-white">
               <GraduationCap size={18} />
             </span>
-            <span className="text-lg font-bold dark:text-zinc-100">
-              공<span className="text-[#12b382]">모아</span>
-            </span>
+            <span className="text-lg font-bold text-[#12b382]">공모아</span>
           </Link>
           <button
             ref={closeRef}
