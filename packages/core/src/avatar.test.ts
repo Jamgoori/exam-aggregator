@@ -34,4 +34,8 @@ test("공개 URL", () => {
     "https://p.supabase.co/storage/v1/object/public/avatars/u1/a.webp",
   );
   assert.equal(avatarPublicUrl("https://p.supabase.co", null), null);
+  // user_metadata 는 사용자가 직접 고칠 수 있으므로 서버가 만든 모양이 아니면 버린다.
+  assert.equal(avatarPublicUrl("https://p.supabase.co", "../exam-papers/2024/x.pdf"), null);
+  assert.equal(avatarPublicUrl("https://p.supabase.co", "u1/a.webp?x=1"), null);
+  assert.equal(avatarPublicUrl("https://p.supabase.co", "u1/a.png"), null);
 });

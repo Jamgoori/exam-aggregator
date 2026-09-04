@@ -49,7 +49,7 @@ export async function createNotification(input: CreateNotificationInput): Promis
     await admin.from("notifications").insert({
       user_id: input.userId,
       type: input.type,
-      actor_id: input.actorId,
+      actor_id: input.actorId || null,
       actor_nickname: input.actorNickname,
       title: input.title.slice(0, 100),
       preview: input.preview,
@@ -75,7 +75,7 @@ export async function createNotifications(
       targets.map((userId) => ({
         user_id: userId,
         type: input.type,
-        actor_id: input.actorId,
+        actor_id: input.actorId || null,
         actor_nickname: input.actorNickname,
         title: input.title.slice(0, 100),
         preview: input.preview,
@@ -87,6 +87,14 @@ export async function createNotifications(
   }
 }
 
+// 알림 링크는 서버가 만든 사이트 내부 경로뿐이어야 한다. 행은 service_role 만 쓰지만
+// (RLS), 혹시 다른 값이 들어 있어도 화면이 그 주소로 보내지 않게 한 번 더 좁힌다.
+function safeLink(link: unknown): string {
+  return typeof link === "string" && link.startsWith("/") && !link.startsWith("//")
+    ? link
+    : "/notifications";
+}
+
 function toItem(row: Record<string, unknown>): NotificationItem {
   return {
     id: row.id as string,
@@ -94,7 +102,7 @@ function toItem(row: Record<string, unknown>): NotificationItem {
     actorNickname: row.actor_nickname as string,
     title: row.title as string,
     preview: (row.preview as string) ?? "",
-    link: row.link as string,
+    link: safeLink(row.link),
     isRead: row.read_at !== null,
     createdAt: row.created_at as string,
   };

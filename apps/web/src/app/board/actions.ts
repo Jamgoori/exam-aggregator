@@ -8,6 +8,7 @@ import { boardImageOrigin, getBoardViewer } from "@/lib/board";
 import { createNotification, notificationPreview } from "@/lib/notifications";
 import {
   authorNickname,
+  BOARD_CONTENT_HTML_MAX,
   canDeleteBoardComment,
   canDeleteBoardPost,
   canEditBoardComment,
@@ -28,6 +29,15 @@ const HOURLY_COMMENT_LIMIT = 30;
 // 본문 이미지. 한 시간에 이만큼이면 사진 여러 장 붙인 글을 몇 개 써도 남는다.
 const HOURLY_IMAGE_LIMIT = 60;
 const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+// 받아주는 이미지 형식. SVG 는 뺀다 — 래스터로 구워 저장하니 스크립트가 남지는
+// 않지만, 파서(librsvg)가 외부 참조를 따라가는 경로를 애초에 열 이유가 없다.
+const IMAGE_ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
+// 디코딩 픽셀 상한(5천만 px ≈ 7000×7000). sharp 기본값(2.7억 px)은 서버리스 함수
+// 메모리(1GB 안팎)에서 한 장으로 OOM 을 낼 수 있는 크기다 — 압축 폭탄 방어.
+const IMAGE_MAX_PIXELS = 50_000_000;
+// 새니타이즈 **전** 원본 길이 상한. 검증은 새니타이즈된 결과에 대고 하지만, 원본이
+// 무한정 크면 새니타이저가 그만큼 CPU 를 쓴다. 서식 태그를 감안해 저장 상한의 4배.
+const RAW_HTML_MAX = BOARD_CONTENT_HTML_MAX * 4;
 // 본문 이미지의 가로 상한. 원본을 그대로 두면 4000px 짜리 사진이 목록·본문에
 // 그대로 실려 나간다(모바일에서 그게 곧 데이터 요금이다).
 const IMAGE_MAX_WIDTH = 1600;
@@ -72,6 +82,10 @@ export async function createBoardPost(input: {
 }): Promise<BoardResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  if (String(input.contentHtml ?? "").length > RAW_HTML_MAX) {
+    return { error: "본문이 너무 깁니다. 글을 나눠서 올려주세요." };
+  }
 
   // 순서가 중요하다: 새니타이즈 → 검증 → 저장. 검증을 원본에 대고 하면 "검사에는
   // 통과했는데 저장된 건 다른 것"이 되고, 그 틈이 곧 저장형 XSS 다.
@@ -131,6 +145,10 @@ export async function updateBoardPost(input: {
 
   const viewer = await getBoardViewer();
   if (!viewer.loggedIn) return { error: "로그인 후 이용할 수 있어요." };
+
+  if (String(input.contentHtml ?? "").length > RAW_HTML_MAX) {
+    return { error: "본문이 너무 깁니다. 글을 나눠서 올려주세요." };
+  }
 
   const sanitizedHtml = sanitizeRichText(input.contentHtml, {
     imageOrigins: [boardImageOrigin()],
@@ -249,7 +267,7 @@ export async function uploadBoardImage(
 
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) return { error: "이미지를 선택해주세요." };
-  if (!file.type.startsWith("image/")) return { error: "이미지 파일만 올릴 수 있어요." };
+  if (!IMAGE_ALLOWED_MIME.has(file.type)) return { error: "JPG·PNG·WEBP·GIF 이미지만 올릴 수 있어요." };
   if (file.size > IMAGE_MAX_BYTES) {
     return { error: `이미지는 ${IMAGE_MAX_BYTES / (1024 * 1024)}MB 이하로 올려주세요.` };
   }
@@ -270,7 +288,9 @@ export async function uploadBoardImage(
   try {
     // withoutEnlargement: 작은 이미지를 억지로 키우지 않는다(키우면 흐려지기만 한다).
     // rotate(): 휴대폰 사진의 EXIF 회전을 실제 픽셀에 반영한다 — 안 하면 눕는다.
-    processed = await sharp(Buffer.from(await file.arrayBuffer()))
+    processed = await sharp(Buffer.from(await file.arrayBuffer()), {
+      limitInputPixels: IMAGE_MAX_PIXELS,
+    })
       .rotate()
       .resize({ width: IMAGE_MAX_WIDTH, withoutEnlargement: true })
       .webp({ quality: 82 })

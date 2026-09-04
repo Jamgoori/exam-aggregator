@@ -62,6 +62,28 @@ test("이미지는 허용한 출처만 남는다", () => {
   assert.equal(sanitizeRichText(`<img src="${ORIGINS[0]}a.webp">`), "");
 });
 
+test("이미지 주소의 경로 탈출·쿼리는 막힌다", () => {
+  const base = ORIGINS[0];
+  // ../ 는 접두사 검사를 통과하지만 브라우저가 접어 올려 같은 호스트의 다른 주소가 된다.
+  assert.equal(sanitizeRichText(`<img src="${base}../../secret">`, { imageOrigins: ORIGINS }), "");
+  assert.equal(sanitizeRichText(`<img src="${base}a/%2e%2e/b.webp">`, { imageOrigins: ORIGINS }), "");
+  assert.equal(sanitizeRichText(`<img src="${base}a.webp?x=1">`, { imageOrigins: ORIGINS }), "");
+  assert.equal(sanitizeRichText(`<img src="${base}a.webp#f">`, { imageOrigins: ORIGINS }), "");
+  assert.equal(sanitizeRichText(`<img src="${base}">`, { imageOrigins: ORIGINS }), "");
+  // 정상 경로는 그대로.
+  assert.equal(
+    sanitizeRichText(`<img src="${base}u1/a.webp">`, { imageOrigins: ORIGINS }),
+    `<img src="${base}u1/a.webp">`,
+  );
+});
+
+test("속성값 안의 따옴표는 속성 경계를 깨지 못한다", () => {
+  const out = sanitizeRichText(`<a href='https://x.com/"onclick="alert(1)'>x</a>`);
+  // 하나의 href 값으로 남고(엔티티), onclick 속성은 생기지 않는다.
+  assert.ok(out.startsWith('<a href="https://x.com/&quot;onclick=&quot;alert(1)"'));
+  assert.ok(!/ onclick=/.test(out));
+});
+
 test("style 은 허용 속성·값만 남는다", () => {
   const out = sanitizeRichText(
     '<p style="color: red; position: fixed; background-image: url(javascript:1); text-align: center">글</p>',

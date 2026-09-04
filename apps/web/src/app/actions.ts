@@ -223,7 +223,9 @@ export async function uploadAvatar(formData: FormData): Promise<AvatarResult> {
     // 비율이 다른 사진을 그대로 두면 브라우저마다 다르게 찌그러진다.
     // animated: gif 를 첫 프레임만 쓰겠다는 뜻 — 움직이는 프로필 사진은 목록에서
     // 눈이 그쪽으로만 끌린다.
-    resized = await sharp(Buffer.from(await file.arrayBuffer()))
+    // limitInputPixels: 5천만 px 를 넘는 이미지는 디코딩 자체를 거절한다(압축 폭탄 —
+    // 5MB 짜리 PNG 하나가 펼치면 수 GB 가 될 수 있다).
+    resized = await sharp(Buffer.from(await file.arrayBuffer()), { limitInputPixels: 50_000_000 })
       .rotate()
       .resize(AVATAR_SIZE, AVATAR_SIZE, { fit: "cover", position: "attention" })
       .webp({ quality: 82 })

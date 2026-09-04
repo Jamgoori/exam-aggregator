@@ -135,8 +135,10 @@ export async function fetchBoardPage({
   if (keyword) {
     // 제목과 평문 본문 양쪽에서 찾는다. content_text 가 있는 이유가 이것이다 —
     // HTML 을 그대로 like 검색하면 태그 이름("span")이 검색어에 걸린다.
-    // %·, 는 or() 필터 문법에서 값 구분자와 겹치므로 미리 털어낸다.
-    const safe = keyword.replace(/[%,()]/g, " ").trim();
+    // PostgREST or() 필터 문법의 구분자(, 괄호)·따옴표·역슬래시·like 와일드카드(%)는
+    // 미리 털어낸다 — 남겨두면 검색어로 필터식을 조립하는 셈이 된다(공개 표라 새는
+    // 것은 없지만, 깨진 필터는 오류 → 빈 결과로 나간다).
+    const safe = keyword.replace(/[%,()"'\\]/g, " ").trim();
     if (safe) listQuery = listQuery.or(`title.ilike.%${safe}%,content_text.ilike.%${safe}%`);
   }
 

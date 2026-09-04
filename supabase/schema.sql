@@ -2726,20 +2726,16 @@ create index if not exists notifications_unread_idx
 
 alter table notifications enable row level security;
 
--- 본인 것만 읽고, 본인 것만 읽음 처리할 수 있다. 만들기(insert)는 서버 액션
--- (service_role)만 — 열어주면 아무나 남에게 알림을 보낼 수 있다.
+-- 본인 것만 읽는다. 쓰기(만들기·읽음 처리·삭제)는 전부 서버 액션(service_role)이
+-- 한다 — 읽음 처리까지 클라이언트에 열어주면 update 정책이 컬럼을 가리지 못해
+-- 자기 알림의 link·title 을 REST 로 아무 값으로나 바꿔둘 수 있다(자기 화면에서만
+-- 보이는 값이라 남에게 새지는 않지만, 열어둘 이유가 없다).
 drop policy if exists "select own notifications" on notifications;
 create policy "select own notifications" on notifications
   for select to authenticated using (auth.uid() = user_id);
 
+-- 예전 적용본에 있던 쓰기 정책은 지운다.
 drop policy if exists "update own notifications" on notifications;
-create policy "update own notifications" on notifications
-  for update to authenticated
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-
 drop policy if exists "delete own notifications" on notifications;
-create policy "delete own notifications" on notifications
-  for delete to authenticated using (auth.uid() = user_id);
 
-revoke insert on notifications from anon, authenticated;
+revoke insert, update, delete on notifications from anon, authenticated;

@@ -203,9 +203,23 @@ function stripControlChars(raw: string): string {
 function safeImageSrc(raw: string, origins: readonly string[]): string | null {
   const url = stripControlChars(raw);
   if (!url) return null;
-  if (!origins.some((origin) => origin && url.startsWith(origin))) return null;
+  const origin = origins.find((o) => o && url.startsWith(o));
+  if (!origin) return null;
   // 따옴표·꺾쇠가 섞인 주소는 속성 경계를 노린 것이라 통째로 버린다.
-  return /["'<>]/.test(url) ? null : url;
+  if (/["'<>]/.test(url)) return null;
+
+  // 접두사 검사만으로는 부족하다 — "…/board-images/../../다른경로" 는 접두사가 맞지만
+  // 브라우저가 ../ 를 접어 올려 같은 호스트의 **다른** 주소로 요청을 보낸다.
+  // 쿼리(?)·해시(#)·역슬래시(특수 스킴에서 / 로 취급)도 같은 이유로 막고, 경로
+  // 조각이 . / .. (퍼센트 인코딩 %2e 포함 — URL 표준이 점 조각으로 취급한다)이면 버린다.
+  const rest = url.slice(origin.length);
+  if (!rest || /[?#\\]/.test(rest)) return null;
+  const isDotSegment = (segment: string) => {
+    const normalized = segment.replace(/%2e/gi, ".");
+    return normalized === "." || normalized === "..";
+  };
+  if (rest.split("/").some(isDotSegment)) return null;
+  return url;
 }
 
 function sanitizeStyle(raw: string): string {

@@ -42,8 +42,20 @@ export function avatarInitial(nickname: string): string {
   return [...String(nickname ?? "").trim()][0] ?? "회";
 }
 
+// 서버가 만들어 넣는 경로의 모양. "{userId}/{uuid}.webp" 만 허용한다.
+//
+// user_metadata 는 로그인한 사용자가 supabase.auth.updateUser 로 **직접 바꿀 수 있는**
+// 값이다(닉네임과 같은 사정). 헤더는 그 값을 그대로 <img src> 에 붙이므로, 모양을
+// 여기서 잠가두지 않으면 같은 스토리지 호스트의 임의 경로(다른 버킷·쿼리 문자열)를
+// 자기 아바타 자리에 불러오게 만들 수 있다. 값이 이 모양이 아니면 사진 없음으로 본다.
+const AVATAR_PATH_RE = /^[A-Za-z0-9-]{1,64}\/[A-Za-z0-9-]{1,64}\.webp$/;
+
+export function isValidAvatarPath(path: unknown): path is string {
+  return typeof path === "string" && AVATAR_PATH_RE.test(path);
+}
+
 // 저장 경로 → 공개 URL. 버킷이 공개라 서명 없이 그대로 붙인다.
 export function avatarPublicUrl(supabaseUrl: string, path: string | null | undefined): string | null {
-  if (!path) return null;
+  if (!isValidAvatarPath(path)) return null;
   return `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/public/avatars/${path}`;
 }
