@@ -50,6 +50,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 // packages/core/src/concept-dictionary.ts 의 normalizeConceptAlias 와 같은 규칙이다.
 //
@@ -76,6 +77,142 @@ async function selectIn(supabase, table, columns, column, values) {
     rows.push(...(data ?? []));
   }
   return rows;
+}
+
+// ── 청크 간 교차 오염 차단 ─────────────────────────────────────────────────
+//
+// v3 병렬 배치(청크 3개 → 서브에이전트 3개 → 파일 3개 → 이 스크립트 한 번)에서
+// 서브에이전트가 남의 청크 문항 이미지를 읽고 쓴 해설이 제 문항 id 로 저장되는 사고가
+// 있었다(2026-09-04 전수 조사: 963행, docs/agents/explanation-batch-routines.md).
+// 지문은 늘 같았다 — **같은 문항 번호**의 서로 다른 문제지 문항 둘이 같은 배치에서
+// 사실상 같은 제목/발문의 해설을 받는다. 둘 중 하나는 확실히 남의 해설인데 어느 쪽인지는
+// 여기서 알 수 없으니, 그 쌍은 **둘 다 저장하지 않고** 보고만 한다. 안 저장된 문항은
+// 해설이 없는 채로 남아 다음 배치가 다시 집는다(다른 청크 조합에서 다시 만들면 대개
+// 정상으로 나온다).
+//
+// 다만 통합본 분리가 같은 페이지를 두 문제지에 넣은 경우(형법 ↔ 형법총론)는 두 문항이
+// 진짜로 같은 문항이라 해설이 같은 것이 정상이다. 그걸 여기서 막으면 그 문항들은 배치가
+// 돌 때마다 만들고 버리기를 반복한다. 그래서 의심 쌍은 대표 이미지를 실제로 받아
+// 해시를 비교하고, **이미지가 같으면 통과**시킨다(audit-explanation-crosstalk.mjs 와
+// 같은 판정).
+function normalizeForCompare(text) {
+  return (text ?? "")
+    .replace(/[\s　]/g, "")
+    .replace(/[·,.'"“”()[\]<>「」『』〈〉\-—–]/g, "");
+}
+
+// 두 글자 묶음(bigram) Dice 계수. 같은 문항을 두 에이전트가 따로 쓰면 제목 표기가
+// 갈리므로("광복 전후 정치 일정의 순서" ↔ "광복 전후 주요 사건의 순서") 완전 일치가
+// 아니라 유사도로 본다. 임계값은 감사 스크립트와 같은 0.35 — 남남인 제목은 0.15 를
+// 잘 넘지 않는다(실측).
+function titleSimilarity(a, b) {
+  if (a.length < 3 || b.length < 3) return 0;
+  if (a === b) return 1;
+  const bigrams = (s) => {
+    const out = new Map();
+    for (let i = 0; i < s.length - 1; i++) {
+      const g = s.slice(i, i + 2);
+      out.set(g, (out.get(g) ?? 0) + 1);
+    }
+    return out;
+  };
+  const ga = bigrams(a);
+  const gb = bigrams(b);
+  let shared = 0;
+  for (const [g, n] of ga) shared += Math.min(n, gb.get(g) ?? 0);
+  return (2 * shared) / (a.length - 1 + b.length - 1);
+}
+const CROSSTALK_TITLE_THRESHOLD = 0.35;
+
+async function imageHash(supabase, imagePath) {
+  const url = supabase.storage.from("exam-papers").getPublicUrl(imagePath).data.publicUrl;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const buf = Buffer.from(await res.arrayBuffer());
+  return createHash("sha1").update(buf).digest("hex");
+}
+
+// 저장 직전에 부른다. 돌려주는 값은 { blocked: Set<question_id>, pairs: [...] }.
+// 조회가 실패하면 막지 않고 저장을 계속한다 — 이 장치는 안전망이지 저장의 전제조건이
+// 아니다(해설 본문은 이 세션에서만 만들 수 있다).
+async function detectCrosstalk(supabase, items) {
+  const blocked = new Set();
+  const pairs = [];
+  if (items.length < 2) return { blocked, pairs };
+
+  const questionRows = await selectIn(
+    supabase,
+    "questions",
+    "id, paper_id, question_number",
+    "id",
+    items.map((i) => i.question_id),
+  );
+  const questionById = new Map(questionRows.map((q) => [q.id, q]));
+
+  const byNumber = new Map();
+  for (const item of items) {
+    const q = questionById.get(item.question_id);
+    if (!q) continue;
+    const list = byNumber.get(q.question_number);
+    if (list) list.push({ item, q });
+    else byNumber.set(q.question_number, [{ item, q }]);
+  }
+
+  const suspects = [];
+  for (const list of byNumber.values()) {
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i];
+        const b = list[j];
+        if (a.q.paper_id === b.q.paper_id) continue;
+        const titleScore = titleSimilarity(
+          normalizeForCompare(a.item.keyword_title),
+          normalizeForCompare(b.item.keyword_title),
+        );
+        const sameText =
+          normalizeForCompare(a.item.question_text).length >= 10 &&
+          normalizeForCompare(a.item.question_text) === normalizeForCompare(b.item.question_text);
+        if (titleScore >= CROSSTALK_TITLE_THRESHOLD || (sameText && titleScore >= 0.2)) {
+          suspects.push([a, b]);
+        }
+      }
+    }
+  }
+  if (suspects.length === 0) return { blocked, pairs };
+
+  const imageRows = await selectIn(
+    supabase,
+    "question_images",
+    "question_id, image_path, order_index",
+    "question_id",
+    suspects.flatMap(([a, b]) => [a.q.id, b.q.id]),
+  );
+  const coverImage = new Map();
+  for (const r of imageRows) {
+    if (r.order_index === 0) coverImage.set(r.question_id, r.image_path);
+  }
+
+  for (const [a, b] of suspects) {
+    const pathA = coverImage.get(a.q.id);
+    const pathB = coverImage.get(b.q.id);
+    let sameImage = false;
+    if (pathA && pathB) {
+      const [ha, hb] = await Promise.all([imageHash(supabase, pathA), imageHash(supabase, pathB)]);
+      sameImage = Boolean(ha && hb && ha === hb);
+    }
+    const record = {
+      question_number: a.q.question_number,
+      a: { question_id: a.q.id, paper_id: a.q.paper_id, keyword_title: a.item.keyword_title },
+      b: { question_id: b.q.id, paper_id: b.q.paper_id, keyword_title: b.item.keyword_title },
+      same_image: sameImage,
+    };
+    pairs.push(record);
+    if (!sameImage) {
+      blocked.add(a.q.id);
+      blocked.add(b.q.id);
+    }
+  }
+  return { blocked, pairs };
 }
 
 // concept 이름 → concept_id. 문항이 속한 과목 안에서만 찾는다 — 별칭은 과목 안에서만
@@ -233,10 +370,25 @@ async function main() {
     console.error(`개념 매칭 실패 — 개념 없이 저장을 계속한다: ${e?.message ?? e}`);
   }
 
+  // 교차 오염 의심 쌍은 둘 다 저장하지 않는다. 조회 실패는 막지 않고 넘어간다.
+  let crosstalk = { blocked: new Set(), pairs: [] };
+  try {
+    crosstalk = await detectCrosstalk(supabase, uniqueItems);
+  } catch (e) {
+    console.error(`교차 오염 검사 실패 — 검사 없이 저장을 계속한다: ${e?.message ?? e}`);
+  }
+  for (const pair of crosstalk.pairs) {
+    if (pair.same_image) continue;
+    console.error(
+      `교차 오염 의심 — 저장 안 함: #${pair.question_number} "${pair.a.keyword_title}" (${pair.a.question_id}) ↔ "${pair.b.keyword_title}" (${pair.b.question_id})`,
+    );
+  }
+
   const mismatched = [];
   const saved = [];
 
   for (const item of uniqueItems) {
+    if (crosstalk.blocked.has(item.question_id)) continue;
     const { data: verified, error: verifyError } = await supabase.rpc("verify_question_answer", {
       target_question_id: item.question_id,
       proposed_answer: item.correct_choice_number,
@@ -288,6 +440,8 @@ async function main() {
         mismatched,
         skipped_files: skippedFiles,
         deduplicated,
+        // 이미지가 다른데 해설이 같은 쌍 — 둘 다 저장하지 않았다. 다음 배치가 다시 집는다.
+        suspected_crosstalk: crosstalk.pairs.filter((p) => !p.same_image),
         concepts: conceptReport,
       },
       null,
