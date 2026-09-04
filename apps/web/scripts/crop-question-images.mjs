@@ -15,9 +15,25 @@ import { createCanvas } from "@napi-rs/canvas";
 import sharp from "sharp";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { QUESTION_IMAGE_UPLOAD_OPTIONS } from "./lib/question-image-upload.mjs";
+
+// pdfjs-dist 6부터 JBIG2·JPEG2000 이미지 디코더가 wasm 으로 빠져서, `wasmUrl` 을
+// 주지 않으면 그런 이미지가 든 XObject 를 **아무 에러 없이 통째로 건너뛴다**
+// (로그에 `Warning: getOperatorList - ignoring XObject: "JBig2Error: JBig2 failed
+// to initialize"` 만 남는다). 국내 시험지 PDF 는 선지 번호(①~⑤)·ㄱㄴㄷ 보기·도표를
+// JBIG2 흑백 이미지로 심어 놓은 조판이 흔해서, 이 값이 없으면 **선지 번호가 통째로
+// 빠진 문항 이미지**가 만들어진다(실측: 2022 국가직 9급 공직선거법 — 20문항 전부
+// 선지 번호 없음). 텍스트 레이어에는 원래부터 없는 글자라 개수·기하 검사로는
+// 절대 안 잡힌다 — 이미지를 눈으로 봐야만 보인다.
+//
+// 경로는 반드시 **설치된 pdfjs-dist 를 기준으로 절대경로**로 만든다(상대경로는
+// 워커 모듈 기준으로 해석돼 실행 위치에 따라 조용히 어긋난다).
+const require = createRequire(import.meta.url);
+export const PDF_WASM_URL =
+  path.join(path.dirname(require.resolve("pdfjs-dist/package.json")), "wasm") + path.sep;
 
 function parseArgs(argv) {
   const args = {};
@@ -2278,7 +2294,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
 // 예전 방식보다 인식 개수가 많으면) 그걸 쓴다. expectedCount를 안 넘기면(옛
 // 호출자와의 호환) 예전 방식이 에러 없이 끝나는 한 그대로 쓴다.
 export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage, expectedCount } = {}) {
-  const pdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
+  const pdf = await getDocument({ data: new Uint8Array(pdfBuffer), wasmUrl: PDF_WASM_URL }).promise;
 
   let legacyResult;
   let legacyError;

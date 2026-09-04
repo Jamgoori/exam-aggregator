@@ -9,6 +9,13 @@ import { GraduationCap } from "lucide-react";
 // 버전과 정확히 맞물리게 하기 위함.
 const WORKER_SRC = "/pdf.worker.min.mjs";
 
+// JBIG2·JPEG2000 디코더(wasm)도 같은 방식으로 public/ 에 복사해 둔다
+// (scripts/copy-pdfjs-assets.mjs). 이 경로를 getDocument에 주지 않으면 pdf.js가
+// 그런 이미지가 든 XObject를 **에러도 없이 건너뛴다** — 국내 시험지 PDF는 선지
+// 번호(①~⑤)·보기 상자를 JBIG2 흑백 이미지로 심어둔 조판이 흔해서, 없으면 화면에
+// 선지 번호가 통째로 안 보인다(실측: 2022 국가직 9급 공직선거법).
+const WASM_URL = "/pdf-wasm/";
+
 export type DrawTool = "move" | "pen" | "eraser";
 
 export const DEFAULT_PEN_WIDTH = 1.5;
@@ -422,6 +429,7 @@ export function PdfCanvasViewer({
           url: fileUrl,
           disableRange: true,
           disableStream: true,
+          wasmUrl: WASM_URL,
         }).promise;
         if (cancelled) return;
 
