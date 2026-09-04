@@ -2,6 +2,7 @@
 //         npm run audit-explanation-crosstalk -- --window 30 --json out.json
 //         npm run audit-explanation-crosstalk -- --no-images        (이미지 대조 생략, 빠름)
 //         npm run audit-explanation-crosstalk -- --json out.json --purge
+//         npm run audit-explanation-crosstalk -- --restore out.json   (지운 것 되돌리기)
 //
 // 해설 배치의 **교차 오염**(다른 문제지 문항의 해설이 남의 문항에 저장된 것)을 찾는다.
 // 기본은 읽기 전용이고, --purge 를 줄 때만 지운다(백업 필수 — 아래 참고).
@@ -29,7 +30,10 @@
 // 이미지를 봐야 알 수 있고 그건 배치가 하는 일이라, 둘 다 지워서 큐로 돌려보내는 편이
 // 안전하다(next-explanation-chunk.mjs 는 해설이 없는 문항을 다시 집는다 — 제자리였던
 // 쪽은 같은 해설이 다시 생길 뿐이다). 지우기 전에 --json 백업 파일에 지울 행 전체를
-// 적어 두며, 백업 경로 없이는 지우지 않는다.
+// 적어 두며, 백업 경로 없이는 지우지 않는다. 그 백업으로 되돌리는 길이 `--restore` 다
+// (배치가 다시 만들어 주기를 기다릴 수 없을 때의 비상구 — 이미 해설이 있는 문항은
+// 건드리지 않는다). 백업 JSON 은 해설 본문이 들어 있어 **커밋 금지**다(.gitignore 의
+// deploy-law-explanations 백업과 같은 이유).
 //
 // service role 키가 필요하다 (question_explanations 는 service_role 만 읽는다) —
 // 소유자 로컬 전용이고, 루틴 환경에서는 돌릴 수 없다.
@@ -37,7 +41,7 @@
 // 조회 주의: 이 테이블은 8만 행이 넘는다. created_at 정렬 + range 로 페이지를 넘기면
 // 8초 statement timeout 에 걸린다(실측). 그래서 id 키셋 페이지네이션으로 읽는다.
 
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
@@ -127,16 +131,65 @@ async function imageHash(supabase, imagePath) {
   return createHash("sha1").update(buf).digest("hex");
 }
 
+// --purge 로 지운 행을 백업 JSON 그대로 되돌린다. 이미 해설이 있는 문항(배치가 벌써
+// 다시 만든 것)은 건드리지 않는다 — 되살리려던 것이 오염된 옛 해설이었을 수 있다.
+// concept_id 가 null 인 행은 그 컬럼을 아예 빼고 넣는다(문서의 upsert 주의사항과 같은
+// 이유로, null 을 명시하면 백필로 붙은 개념을 지우는 경로가 생긴다).
+async function restore(supabase, backupPath) {
+  const parsed = JSON.parse(readFileSync(backupPath, "utf8"));
+  const rows = Array.isArray(parsed) ? parsed : (parsed.deletedRowBackup ?? []);
+  if (rows.length === 0) {
+    console.error(`${backupPath} 에 되돌릴 행이 없습니다.`);
+    process.exit(1);
+  }
+  let restored = 0;
+  let skipped = 0;
+  for (let i = 0; i < rows.length; i += 100) {
+    const slice = rows.slice(i, i + 100);
+    const { data: existing, error: existingError } = await supabase
+      .from("question_explanations")
+      .select("question_id")
+      .in(
+        "question_id",
+        slice.map((r) => r.question_id),
+      );
+    if (existingError) throw new Error(`기존 해설 조회 실패: ${existingError.message}`);
+    const taken = new Set((existing ?? []).map((r) => r.question_id));
+    const payload = slice
+      .filter((r) => !taken.has(r.question_id))
+      .map((r) => {
+        const row = { ...r };
+        if (row.concept_id == null) delete row.concept_id;
+        return row;
+      });
+    skipped += slice.length - payload.length;
+    if (payload.length === 0) continue;
+    const { error } = await supabase.from("question_explanations").insert(payload);
+    if (error) throw new Error(`복원 실패: ${error.message}`);
+    restored += payload.length;
+  }
+  console.log(`복원 ${restored}건 · 이미 해설이 있어 건너뜀 ${skipped}건`);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const known = new Set(["window", "json", "no-images", "purge"]);
+  const known = new Set(["window", "json", "no-images", "purge", "restore"]);
   for (const key of Object.keys(args)) {
     if (!known.has(key)) {
       console.error(
-        `알 수 없는 플래그: --${key} (지원: --window N, --json 경로, --no-images, --purge)`,
+        `알 수 없는 플래그: --${key} (지원: --window N, --json 경로, --no-images, --purge, --restore 경로)`,
       );
       process.exit(1);
     }
+  }
+  const restorePath = typeof args["restore"] === "string" ? args["restore"] : null;
+  if (args["restore"] === true) {
+    console.error("--restore 는 백업 JSON 경로가 필요합니다.");
+    process.exit(1);
+  }
+  if (restorePath && (args["purge"] || args["json"])) {
+    console.error("--restore 는 --purge/--json 과 함께 쓸 수 없습니다.");
+    process.exit(1);
   }
   const windowMinutes = Number(args["window"] ?? 30);
   if (!Number.isInteger(windowMinutes) || windowMinutes < 1 || windowMinutes > 1440) {
@@ -162,6 +215,11 @@ async function main() {
     process.exit(1);
   }
   const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+  if (restorePath) {
+    await restore(supabase, restorePath);
+    return;
+  }
 
   console.error("해설·문항·문제지를 읽는 중… (수 분 걸린다)");
   const explanations = await fetchAllByKeyset(
