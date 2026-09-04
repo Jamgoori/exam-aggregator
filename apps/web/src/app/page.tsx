@@ -6,29 +6,23 @@ import { Suspense } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
-  BookOpenCheck,
   BrainCircuit,
-  CalendarClock,
   Check,
-  Download,
-  FileStack,
-  FileText,
-  Monitor,
+  ChevronRight,
+  Flame,
   Search,
-  Shuffle,
-  Timer,
-  Users,
+  Sparkles,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { HomePopupSlider } from "@/components/home-popup-slider";
 import { getLandingData } from "@/lib/landing-data";
-import { examHref } from "@/lib/exam-index";
+import { examHref, type ExamCombo } from "@/lib/exam-index";
 import {
   DIAGNOSIS_CYCLE_DAYS,
   DIAGNOSIS_MIN_ATTEMPTS,
   DIAGNOSIS_MIN_WRONG,
 } from "@/lib/ai-diagnosis";
-import { FREE_EXPLANATION_DAILY_PAPERS, FREE_UNTIL_LABEL, TRIAL_DAYS } from "@gongmoa/core";
+import { FREE_UNTIL_LABEL, TRIAL_DAYS } from "@gongmoa/core";
 import type { Metadata } from "next";
 
 // 홈 = 사이트 소개 랜딩.
@@ -36,15 +30,22 @@ import type { Metadata } from "next";
 // 원래 홈은 기출문제 전체 목록(검색·필터·카드)이었다. 자료를 찾으러 온 사람에게는
 // 최적이었지만, 처음 온 수험생은 이 사이트를 "PDF 자료실"로만 읽고 나갔다 — 온라인
 // 응시(CBT)·오답노트·AI 약점 진단이 있다는 사실이 화면 어디에도 없었기 때문이다.
-// 그래서 목록은 /papers 로 옮기고(메뉴 "기출문제"), 홈은 딱 두 가지를 말한다:
-//   1) 로그인 한 번이면 전부 무료다 (전면 무료 이벤트 / 그 뒤로는 체험 기간)
-//   2) 세 번만 풀면 AI 가 내 약점을 개념 단위로 짚어준다
+// 그래서 목록은 /papers 로 옮기고(메뉴 "기출문제"), 홈은 위에서 아래로 이렇게 말한다:
+//   히어로(한 문장 + 오늘의 학습 현황 예시) → 기출문제 찾기(검색창 + 시험별 카드)
+//   → AI 약점 진단(짙은 판 + 약점 리포트 예시) → 마무리 CTA
 // 재방문자는 메뉴·푸터의 "기출문제"로 곧장 목록에 가고, 홈의 큰 버튼도 목록으로 간다.
 //
 // 본문은 전부 정적 셸이다 — 로그인 여부를 보는 것은 팝업 슬라이더 하나뿐이고 그건
-// Suspense 뒤에서 늦게 온다. 숫자(자료 수·응시 수)와 이벤트 여부는 lib/landing-data 의
-// 'use cache' 값이다. 여기 적힌 규칙 숫자(응시 3회·오답 15개·7일·하루 3개)는 손으로
-// 쓰지 않고 실제 규칙을 집행하는 상수에서 가져온다 — 화면만 옛 숫자를 광고하면 허위 안내다.
+// Suspense 뒤에서 늦게 온다. 숫자(자료 수)와 이벤트 여부는 lib/landing-data 의
+// 'use cache' 값이다. 여기 적힌 규칙 숫자(응시 3회·오답 15개·7일)는 손으로 쓰지 않고
+// 실제 규칙을 집행하는 상수에서 가져온다 — 화면만 옛 숫자를 광고하면 허위 안내다.
+//
+// 색은 이 페이지만의 팔레트를 쓴다(남색 primary + 초록 accent). 사이트의 파랑과 다른
+// 이유는 홈이 "제품 소개"라 나머지 화면(도구)과 톤을 달리 가져가려는 것 — 값은 아래
+// 상수 둘에 모아 두었다. hover 는 인라인 스타일로 색을 못 바꾸므로 투명도·이동만 준다.
+const NAVY = "#012854";
+const ACCENT = "#12b382";
+
 export const metadata: Metadata = {
   // 루트 레이아웃의 template("%s | 공모아")이 붙지 않도록 absolute로 준다.
   title: {
@@ -62,11 +63,10 @@ export const metadata: Metadata = {
 };
 
 export default async function Home() {
-  const { combos, totalCount, latestYear, totalDownloads, totalAttempts, freeForAll } =
-    await getLandingData();
+  const { combos, totalCount, freeForAll } = await getLandingData();
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-16 px-4 pt-8 pb-16 sm:gap-24 sm:pt-14">
+    <div className="flex flex-col">
       {/* 홈에 뜰 수 있는 안내(전면 무료 이벤트·개발 중 안내·복습 유도·출석 이벤트
           광고) 슬라이드. 어떤 장이 실릴지는 마운트된 뒤 클라이언트가 정하고, 로그인
           여부만 서버가 넘긴다 — 그 한 값 때문에 홈 전체가 동적이 되지 않도록 Suspense
@@ -75,18 +75,11 @@ export default async function Home() {
         <HomePopup />
       </Suspense>
 
-      <Hero
-        totalCount={totalCount}
-        latestYear={latestYear}
-        totalDownloads={totalDownloads}
-        totalAttempts={totalAttempts}
-        freeForAll={freeForAll}
-      />
-      <Steps />
-      <Features freeForAll={freeForAll} />
-      <ExamShortcuts combos={combos} />
-      <Faq combos={combos} freeForAll={freeForAll} />
-      <FinalCta freeForAll={freeForAll} />
+      <TopBanner freeForAll={freeForAll} />
+      <Hero totalCount={totalCount} />
+      <PastQuestions combos={combos} totalCount={totalCount} />
+      <Diagnosis />
+      <ClosingCta freeForAll={freeForAll} />
     </div>
   );
 }
@@ -107,518 +100,408 @@ async function HomePopup() {
   );
 }
 
-// ── 히어로 ───────────────────────────────────────────────────────────────────
-// 왼쪽은 한 문장 + 버튼 하나, 오른쪽은 "풀고 나면 이렇게 된다"를 보여주는 결과
-// 화면 예시. 처음 온 사람이 스크롤 없이 이 두 덩어리만 보고도 사이트가 뭘 해주는
-// 곳인지 알게 하는 것이 목표다.
-function Hero({
-  totalCount,
-  latestYear,
-  totalDownloads,
-  totalAttempts,
-  freeForAll,
-}: {
-  totalCount: number;
-  latestYear: number | null;
-  totalDownloads: number;
-  totalAttempts: number;
-  freeForAll: boolean;
-}) {
+// ── 상단 띠 ──────────────────────────────────────────────────────────────────
+// 지금 이 사이트에 온 사람이 가장 먼저 알아야 할 한 줄. 이벤트 중에는 "전부 무료",
+// 끝난 뒤에는 체험 기간을 말한다 — 날짜·기간은 core 상수에서 온다.
+function TopBanner({ freeForAll }: { freeForAll: boolean }) {
   return (
-    <section className="grid items-center gap-10 lg:grid-cols-[1.1fr_1fr] lg:gap-14">
-      <div className="flex flex-col items-start gap-5">
-        <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-          {freeForAll
-            ? `${FREE_UNTIL_LABEL}까지 모든 기능 무료`
-            : `가입 후 ${TRIAL_DAYS}일 동안 모든 기능 무료`}
-        </span>
-        <h1 className="break-keep text-[clamp(1.75rem,7vw,2.5rem)] font-extrabold leading-tight tracking-tight text-zinc-900 sm:text-5xl sm:leading-[1.15] dark:text-zinc-100">
-          기출은 풀고,
-          <br />
-          <span className="text-blue-600 dark:text-blue-400">틀린 이유</span>는 AI가 찾아드려요
-        </h1>
-        <p className="max-w-lg break-keep text-base leading-7 text-zinc-600 sm:text-lg sm:leading-8 dark:text-zinc-400">
-          국가직·지방직·경찰·소방 등 공무원 기출문제{" "}
-          <strong className="font-semibold text-zinc-800 dark:text-zinc-200">
-            {totalCount.toLocaleString("ko-KR")}건
-          </strong>
-          을 온라인으로 풀고 바로 채점하세요. 틀린 문제는 오답노트에 자동으로 쌓이고,
-          AI가 왜 틀리는지 개념 단위로 진단해 드려요.
-        </p>
-        <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row">
-          <Link
-            href="/papers"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-3.5 text-base font-bold text-white shadow-sm shadow-blue-600/25 transition-colors hover:bg-blue-700"
+    <div className="border-b border-zinc-200 bg-[#e7f2fc]/60 text-center text-xs font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+      <Link
+        href="/membership"
+        className="mx-auto flex max-w-6xl items-center justify-center gap-2 px-4 py-2 hover:text-zinc-900 dark:hover:text-zinc-200"
+      >
+        <span className="size-1.5 rounded-full" style={{ backgroundColor: ACCENT }} />
+        {freeForAll
+          ? `${FREE_UNTIL_LABEL}까지 멤버십 전 기능 무료, 로그인만 하면 돼요`
+          : `가입하면 ${TRIAL_DAYS}일 동안 멤버십 전 기능 무료`}
+        <ChevronRight size={14} aria-hidden />
+      </Link>
+    </div>
+  );
+}
+
+// ── 히어로 ───────────────────────────────────────────────────────────────────
+function Hero({ totalCount }: { totalCount: number }) {
+  return (
+    <section className="relative overflow-hidden border-b border-zinc-200 bg-[#e7f2fc]/45 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-16 lg:grid-cols-[1.08fr_.92fr] lg:px-6 lg:py-24">
+        <div className="relative z-10">
+          <div
+            className="mb-6 inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1.5 text-xs font-bold dark:bg-zinc-950"
+            style={{ borderColor: `${ACCENT}40`, color: ACCENT }}
           >
-            <Monitor size={18} />
-            무료로 모의고사 풀기
-            <ArrowRight size={16} aria-hidden />
-          </Link>
-          <Link
-            href="/exams"
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-200 px-6 py-3.5 text-base font-semibold text-zinc-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-blue-800 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
-          >
-            <Search size={17} />
-            시험별로 찾기
-          </Link>
+            <Sparkles size={14} aria-hidden />
+            수험생을 위한 가장 똑똑한 공부법
+          </div>
+          <h1 className="max-w-xl text-balance text-4xl font-bold leading-[1.15] tracking-[-0.04em] text-zinc-900 sm:text-5xl lg:text-6xl dark:text-zinc-50">
+            합격에 필요한 모든 것,
+            <br />
+            <span style={{ color: ACCENT }}>공모아</span>에서 시작하세요.
+          </h1>
+          <p className="mt-6 max-w-lg text-pretty text-base leading-7 text-zinc-600 sm:text-lg dark:text-zinc-400">
+            공무원 기출문제 {totalCount.toLocaleString("ko-KR")}건을 온라인으로 풀고 바로
+            채점하세요. 틀린 문제는 오답노트에 자동으로 쌓이고, AI가 왜 틀리는지 개념
+            단위로 진단해 드립니다.
+          </p>
+          <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+            <Link
+              href="/papers"
+              className="inline-flex items-center justify-center gap-2 rounded-lg px-5 py-3.5 text-sm font-bold text-white shadow-lg transition-transform hover:-translate-y-0.5"
+              style={{ backgroundColor: NAVY, boxShadow: `0 10px 15px -3px ${NAVY}26` }}
+            >
+              기출문제 풀어보기
+              <ArrowRight size={16} aria-hidden />
+            </Link>
+            <Link
+              href="/diagnosis"
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-5 py-3.5 text-sm font-bold text-zinc-900 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-800"
+            >
+              AI 약점진단 알아보기
+            </Link>
+          </div>
+          <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-zinc-500 dark:text-zinc-500">
+            <span className="flex items-center gap-1.5">
+              <Check size={14} style={{ color: ACCENT }} aria-hidden />
+              무료로 시작
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Check size={14} style={{ color: ACCENT }} aria-hidden />
+              기출·정답은 로그인 없이 열람
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Check size={14} style={{ color: ACCENT }} aria-hidden />
+              구글·카카오 1초 로그인
+            </span>
+          </div>
         </div>
-        <p className="text-xs text-zinc-500 dark:text-zinc-500">
-          기출문제·정답·PDF 다운로드는 로그인 없이 바로. 온라인 응시는 구글·카카오로
-          1초 로그인.
-        </p>
 
-        {/* 사회적 증거. 값은 60초 캐시(getHomeStats)라 "실시간"이라고 부르지 않는다. */}
-        <dl className="mt-2 grid w-full max-w-md grid-cols-3 gap-3">
-          <Stat icon={<FileStack size={16} />} label="기출문제" value={`${totalCount.toLocaleString("ko-KR")}건`} />
-          <Stat icon={<Download size={16} />} label="누적 다운로드" value={`${totalDownloads.toLocaleString("ko-KR")}회`} />
-          <Stat icon={<Users size={16} />} label="누적 응시" value={`${totalAttempts.toLocaleString("ko-KR")}회`} />
-        </dl>
+        <TodayStudyCard />
       </div>
-
-      <ResultPreview latestYear={latestYear} />
     </section>
   );
 }
 
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-0.5 rounded-xl border border-zinc-200 px-3 py-2.5 dark:border-zinc-800">
-      <dt className="flex items-center gap-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-500">
-        <span className="text-blue-500">{icon}</span>
-        {label}
-      </dt>
-      <dd className="truncate text-sm font-bold tabular-nums text-zinc-900 sm:text-base dark:text-zinc-100">
-        {value}
-      </dd>
-    </div>
-  );
-}
-
-// CBT 를 마치면 보게 되는 화면을 축약한 그림. 실제 결과 모달(cbt-result-modal.tsx)의
-// 세 칸(점수·정답률·풀이시간)과, 그 뒤에 이어지는 두 가지(오답노트 저장·AI 진단
-// 자격)를 한 장에 담는다. 숫자는 예시라 aria-hidden 으로 낭독기에서 뺀다 — 낭독기
-// 사용자에게는 왼쪽 본문이 같은 내용을 말한다.
-function ResultPreview({ latestYear }: { latestYear: number | null }) {
+// "풀고 나면 이렇게 쌓인다"를 보여주는 학습 현황 예시. 마이페이지 요약 타일(CBT 응시
+// 수·연속 학습·남은 오답)과 AI 진단 자격(응시 N회)을 한 장에 담는다. 숫자는 예시라
+// aria-hidden 으로 낭독기에서 뺀다 — 낭독기 사용자에게는 왼쪽 본문이 같은 내용을 말한다.
+function TodayStudyCard() {
+  const days = ["월", "화", "수", "목", "금", "토", "일"];
+  const heights = [38, 55, 46, 72, 61, 88, 24];
+  const today = 5;
   const attemptsSoFar = DIAGNOSIS_MIN_ATTEMPTS - 1;
   return (
     <div aria-hidden className="relative mx-auto w-full max-w-md select-none lg:max-w-none">
-      <div className="absolute -inset-4 -z-10 rounded-[2rem] bg-gradient-to-br from-blue-100 via-violet-50 to-transparent blur-2xl dark:from-blue-950/50 dark:via-violet-950/30" />
-      <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-xl shadow-zinc-900/5 sm:p-5 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold text-white">9급</span>
-            <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-              {latestYear ? `${latestYear}년 ` : ""}국가직 국어
-            </span>
+      <div
+        className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl sm:p-6 dark:border-zinc-800 dark:bg-zinc-950"
+        style={{ boxShadow: `0 20px 25px -5px ${NAVY}1a` }}
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold" style={{ color: ACCENT }}>
+              TODAY&apos;S STUDY
+            </p>
+            <h2 className="mt-1 text-lg font-bold text-zinc-900 dark:text-zinc-100">
+              오늘의 학습 현황
+            </h2>
           </div>
-          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-            채점 완료
-          </span>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <PreviewTile label="점수" value="85" unit="점" />
-          <PreviewTile label="정답률" value="85" unit="%" />
-          <PreviewTile label="풀이 시간" value="17:32" />
-        </div>
-
-        <div className="flex items-center gap-3 rounded-xl bg-zinc-50 px-3.5 py-3 dark:bg-zinc-800/60">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-950/60 dark:text-blue-300">
-            <BookOpenCheck size={16} />
-          </span>
-          <div className="min-w-0 text-[13px]">
-            <p className="font-bold text-zinc-900 dark:text-zinc-100">
-              틀린 3문항이 오답노트에 저장됐어요
-            </p>
-            <p className="text-zinc-500 dark:text-zinc-400">
-              해설을 보고, 잊을 때쯤 다시 풀어요
-            </p>
+          <div className="grid size-10 place-items-center rounded-full bg-[#e7f2fc] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+            <Flame size={18} />
           </div>
         </div>
 
-        <div className="rounded-xl border border-violet-200 bg-violet-50/70 px-3.5 py-3 dark:border-violet-900/60 dark:bg-violet-950/30">
-          <div className="flex items-center justify-between text-[13px]">
-            <p className="flex items-center gap-1.5 font-bold text-violet-800 dark:text-violet-200">
-              <BrainCircuit size={15} />
-              AI 약점 진단까지
+        <div className="grid grid-cols-3 gap-3">
+          <MiniStat label="오늘 응시" value="2" unit="회차" />
+          <MiniStat label="정답률" value="84" unit="%" accent />
+          <MiniStat label="연속 학습" value="7" unit="일" />
+        </div>
+
+        <div className="mt-5 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+          <div className="mb-3 flex justify-between text-xs">
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">이번 주 학습량</span>
+            <span className="text-zinc-500">목표 200문제</span>
+          </div>
+          <div className="flex h-24 items-end gap-2">
+            {days.map((d, i) => (
+              <div key={d} className="flex flex-1 flex-col items-center gap-1">
+                <div
+                  className="w-full rounded-t"
+                  style={{
+                    height: `${heights[i]}%`,
+                    backgroundColor: i === today ? ACCENT : `${NAVY}26`,
+                  }}
+                />
+                <span className="text-[10px] text-zinc-500">{d}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div
+          className="mt-4 flex items-center gap-3 rounded-xl p-3"
+          style={{ backgroundColor: `${ACCENT}1a` }}
+        >
+          <div
+            className="grid size-9 shrink-0 place-items-center rounded-lg text-white"
+            style={{ backgroundColor: ACCENT }}
+          >
+            <BrainCircuit size={18} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+              AI 약점 진단까지 응시 {attemptsSoFar}/{DIAGNOSIS_MIN_ATTEMPTS}
             </p>
-            <p className="font-bold tabular-nums text-violet-700 dark:text-violet-300">
-              응시 {attemptsSoFar}/{DIAGNOSIS_MIN_ATTEMPTS}
+            <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+              한 회차만 더 풀면 틀리는 이유를 개념별로 알려드려요
             </p>
           </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-violet-200/70 dark:bg-violet-900/50">
-            <div
-              className="h-full rounded-full bg-violet-600"
-              style={{ width: `${Math.round((attemptsSoFar / DIAGNOSIS_MIN_ATTEMPTS) * 100)}%` }}
-            />
-          </div>
-          <p className="mt-1.5 text-[11px] text-violet-700/80 dark:text-violet-300/70">
-            한 번만 더 풀면 틀리는 이유를 개념별로 알려드려요
-          </p>
+          <ChevronRight size={16} className="shrink-0 text-zinc-400" />
         </div>
       </div>
     </div>
   );
 }
 
-function PreviewTile({ label, value, unit }: { label: string; value: string; unit?: string }) {
+function MiniStat({
+  label,
+  value,
+  unit,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+  accent?: boolean;
+}) {
   return (
-    <div className="rounded-xl border border-zinc-100 px-2 py-2.5 dark:border-zinc-800">
-      <p className="text-[11px] text-zinc-500 dark:text-zinc-500">{label}</p>
-      <p className="text-xl font-extrabold tabular-nums text-zinc-900 dark:text-zinc-100">
+    <div className="rounded-xl bg-[#e7f2fc] p-3 dark:bg-zinc-800/70">
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">{label}</p>
+      <p
+        className="mt-2 text-xl font-bold tabular-nums text-zinc-900 dark:text-zinc-100"
+        style={accent ? { color: ACCENT } : undefined}
+      >
         {value}
-        {unit && <span className="ml-0.5 text-xs font-semibold text-zinc-500">{unit}</span>}
+        <span className="ml-0.5 text-xs font-medium">{unit}</span>
       </p>
     </div>
   );
 }
 
-// ── 3단계 ────────────────────────────────────────────────────────────────────
-// 이 사이트에서 일어나는 일의 순서. 각 단계의 조건(로그인·응시 횟수)은 여기서 미리
-// 말한다 — 문제지 앞에서 로그인 화면을 만나거나, 진단 버튼이 잠겨 있는 걸 보고 나서야
-// 알면 "속았다"가 되고, 미리 알면 "다음에 할 일"이 된다.
-function Steps() {
-  const steps: { icon: React.ReactNode; title: string; body: string; tag: string }[] = [
-    {
-      icon: <Timer size={18} />,
-      tag: "1단계 · 무료",
-      title: "실제 시험처럼 풉니다",
-      body: "타이머·OMR·필기 도구가 있는 온라인 CBT. 제출하면 즉시 채점되고 같은 문제지를 다시 풀면 회독이 쌓여요.",
-    },
-    {
-      icon: <BookOpenCheck size={18} />,
-      tag: "2단계 · 자동",
-      title: "틀린 문제는 오답노트로",
-      body: "따로 정리할 필요 없어요. 과목별로 모이고, 여러 번 틀린 문제부터 골라 섞어 풀 수 있어요.",
-    },
-    {
-      icon: <BrainCircuit size={18} />,
-      tag: `3단계 · 응시 ${DIAGNOSIS_MIN_ATTEMPTS}회부터`,
-      title: "AI가 틀리는 이유를 짚어줘요",
-      body: `응시 ${DIAGNOSIS_MIN_ATTEMPTS}회 또는 오답 ${DIAGNOSIS_MIN_WRONG}개가 쌓이면 ${DIAGNOSIS_CYCLE_DAYS}일마다 한 번, 내가 고른 오답을 근거로 약한 개념과 극복 계획을 써 드려요.`,
-    },
-  ];
-  return (
-    <section className="flex flex-col gap-6">
-      <SectionHeading
-        eyebrow="이렇게 됩니다"
-        title="푸는 것부터 진단까지, 세 단계"
-        description="따로 입력하거나 정리할 것은 없어요. 풀기만 하면 나머지는 자동으로 이어져요."
-      />
-      <ol className="grid gap-4 sm:grid-cols-3">
-        {steps.map((s, i) => (
-          <li
-            key={s.title}
-            className="relative flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900"
-          >
-            <div className="flex items-center justify-between">
-              <span
-                className={`flex h-9 w-9 items-center justify-center rounded-xl ${
-                  i === 2
-                    ? "bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-300"
-                    : "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300"
-                }`}
-              >
-                {s.icon}
-              </span>
-              <span className="text-[11px] font-bold text-zinc-400 dark:text-zinc-500">{s.tag}</span>
-            </div>
-            <p className="text-base font-bold text-zinc-900 dark:text-zinc-100">{s.title}</p>
-            <p className="break-keep text-[13px] leading-6 text-zinc-600 dark:text-zinc-400">{s.body}</p>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
+// ── 기출문제 찾기 ────────────────────────────────────────────────────────────
+// 검색창은 자바스크립트 없이도 동작하는 GET 폼이다 — /papers 가 ?q= 를 읽어 그
+// 검색어로 목록을 연다. 그 아래 카드는 시험(시행처+급수) 허브(/exams/*)로 가는
+// 서버 렌더 링크라 크롤러가 문제지 3천여 장까지 내려가는 첫 계단이기도 하다.
+const BADGE_COLORS = [NAVY, ACCENT, "#0369a1", "#b45309", "#be123c", "#566577"];
 
-// ── 기능 카드 ────────────────────────────────────────────────────────────────
-// 메뉴에 있는 기능을 전부 한 화면에 늘어놓는다. 무료/멤버십 표시는 /membership 의
-// 비교표(FEATURE_ROWS)와 같은 기준이어야 한다 — 여기서 다르게 말하면 어느 쪽이
-// 정본인지 알 수 없게 된다.
-function Features({ freeForAll }: { freeForAll: boolean }) {
-  const premiumTag = freeForAll ? "지금은 무료" : "멤버십";
-  const features: {
-    icon: React.ReactNode;
-    title: string;
-    body: string;
-    href: string;
-    tag: string;
-    tone: "blue" | "violet";
-  }[] = [
-    {
-      icon: <Monitor size={20} />,
-      title: "온라인 CBT",
-      body: "타이머와 OMR, 필기 도구까지. 전체 문제지로 풀거나 한 문항씩 넘기며 풀어요.",
-      href: "/papers",
-      tag: "무료",
-      tone: "blue",
-    },
-    {
-      icon: <BookOpenCheck size={20} />,
-      title: "오답노트",
-      body: "채점되는 순간 틀린 문제가 과목별로 모여요. 메모를 남기고 극복 여부를 기록해요.",
-      href: "/mypage?tab=wrong-notes",
-      tag: "무료",
-      tone: "blue",
-    },
-    {
-      icon: <Shuffle size={20} />,
-      title: "섞어풀기",
-      body: "여러 번 틀린 문제, 최근에 틀린 문제를 먼저 뽑아 한 세트로 다시 풀어요.",
-      href: "/mypage?tab=wrong-notes",
-      tag: "무료",
-      tone: "blue",
-    },
-    {
-      icon: <FileText size={20} />,
-      title: "문항별 해설",
-      body: `문항마다 왜 그 답인지 풀어 쓴 해설. 무료 회원은 하루 ${FREE_EXPLANATION_DAILY_PAPERS}개 문제지까지 볼 수 있어요.`,
-      href: "/papers",
-      tag: premiumTag,
-      tone: "violet",
-    },
-    {
-      icon: <CalendarClock size={20} />,
-      title: "오늘의 복습",
-      body: "잊을 때쯤 다시 나오는 간격 반복 일정. 매일 몇 문항만 풀면 오답이 기억으로 굳어요.",
-      href: "/mypage?tab=wrong-notes",
-      tag: premiumTag,
-      tone: "violet",
-    },
-    {
-      icon: <BrainCircuit size={20} />,
-      title: "AI 약점 진단",
-      body: "틀린 문제가 아니라 틀리는 이유를 개념 단위로. 내 오답을 근거로 극복 계획까지 써 줘요.",
-      href: "/diagnosis",
-      tag: premiumTag,
-      tone: "violet",
-    },
-  ];
+function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount: number }) {
+  // 자료가 많은 시험 여섯을 앞세운다 — 처음 온 사람이 "내 시험이 있나"를 가장 빨리
+  // 확인하는 순서다. 나머지는 "시험별 전체 보기"로.
+  const top = [...combos].sort((a, b) => b.count - a.count).slice(0, 6);
   return (
-    <section className="flex flex-col gap-6">
-      <SectionHeading
-        eyebrow="기능"
-        title="공모아에서 할 수 있는 것"
-        description={
-          freeForAll
-            ? `${FREE_UNTIL_LABEL}까지는 로그인만 하면 멤버십 기능까지 전부 열려 있어요.`
-            : `가입하면 ${TRIAL_DAYS}일 동안 멤버십 기능까지 전부 써 볼 수 있어요.`
-        }
-      />
-      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {features.map((f) => (
-          <li key={f.title}>
-            <Link
-              href={f.href}
-              className="group flex h-full flex-col gap-3 rounded-2xl border border-zinc-200 bg-white p-5 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
-            >
-              <div className="flex items-center justify-between">
-                <span
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                    f.tone === "violet"
-                      ? "bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-300"
-                      : "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300"
-                  }`}
-                >
-                  {f.icon}
-                </span>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                    f.tag === "무료" || freeForAll
-                      ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
-                      : "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
-                  }`}
-                >
-                  {f.tag}
-                </span>
-              </div>
-              <p className="text-base font-bold text-zinc-900 dark:text-zinc-100">{f.title}</p>
-              <p className="break-keep text-[13px] leading-6 text-zinc-600 dark:text-zinc-400">{f.body}</p>
-              <span className="mt-auto flex items-center gap-1 text-xs font-semibold text-blue-600 opacity-0 transition-opacity group-hover:opacity-100 dark:text-blue-400">
-                바로 가기 <ArrowRight size={13} />
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-// ── 시험별 바로가기 ──────────────────────────────────────────────────────────
-// 검색 목록(/papers)은 클라이언트 필터라 HTML 에 링크가 없다. 홈에서 시험 허브
-// (/exams/*)와 과목 허브(/subjects)로 가는 서버 렌더 링크를 깔아 두는 것이 크롤러가
-// 문제지 3천여 장까지 내려가는 첫 계단이다 — 사람에게도 "내 시험이 있나"를 한눈에
-// 확인하는 자리다.
-function ExamShortcuts({ combos }: { combos: { slug: string; label: string; count: number }[] }) {
-  return (
-    <section className="flex flex-col gap-6">
-      <SectionHeading
-        eyebrow="자료"
-        title="내 시험 기출문제 찾기"
-        description="시험을 고르면 연도별 기출문제로, 과목을 고르면 급수별 기출문제로 이어져요."
-      />
-      <ul className="flex flex-wrap gap-2">
-        {combos.map((c) => (
-          <li key={c.slug}>
-            <Link
-              href={examHref(c.slug)}
-              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-3.5 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-blue-800 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
-            >
-              {c.label}
-              <span className="text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
-                {c.count.toLocaleString("ko-KR")}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-      <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold">
-        <Link href="/subjects" className="text-blue-600 hover:underline dark:text-blue-400">
-          과목별 기출문제 →
-        </Link>
-        <Link href="/papers" className="text-blue-600 hover:underline dark:text-blue-400">
-          전체 검색 →
-        </Link>
-      </div>
-    </section>
-  );
-}
-
-// ── FAQ ──────────────────────────────────────────────────────────────────────
-// 처음 온 사람이 버튼을 누르기 전에 마음속으로 묻는 것들. 답은 전부 실제 동작 그대로 —
-// 숫자·기간은 상수에서 온다.
-function Faq({
-  combos,
-  freeForAll,
-}: {
-  combos: { label: string }[];
-  freeForAll: boolean;
-}) {
-  const items: { q: string; a: React.ReactNode }[] = [
-    {
-      q: "정말 무료인가요?",
-      a: freeForAll ? (
-        <>
-          기출문제·정답·PDF 다운로드·온라인 CBT·오답노트는 언제나 무료예요. 해설
-          무제한·오늘의 복습·AI 약점 진단 같은 멤버십 기능도 {FREE_UNTIL_LABEL}까지는
-          로그인만 하면 전부 열려요. 결제도 카드 등록도 없어요.
-        </>
-      ) : (
-        <>
-          기출문제·정답·PDF 다운로드·온라인 CBT·오답노트는 언제나 무료예요. 해설
-          무제한·오늘의 복습·AI 약점 진단 같은 멤버십 기능은 가입 후 {TRIAL_DAYS}일 동안
-          무료로 써 볼 수 있어요.
-        </>
-      ),
-    },
-    {
-      q: "왜 로그인해야 하나요?",
-      a: (
-        <>
-          응시 기록·회독·오답노트를 계정에 저장하려면 누가 풀었는지 알아야 해요. 구글이나
-          카카오 계정으로 한 번 누르면 끝이고, 이메일·비밀번호를 따로 만들지 않아요. 문제지를
-          보거나 내려받는 데는 로그인이 필요 없어요.
-        </>
-      ),
-    },
-    {
-      q: "어떤 시험이 있나요?",
-      a: <>{combos.map((c) => c.label).join(" · ")}. 새 시험은 시행 후 순차적으로 올라와요.</>,
-    },
-    {
-      q: "AI 약점 진단은 언제 받을 수 있나요?",
-      a: (
-        <>
-          온라인 응시 {DIAGNOSIS_MIN_ATTEMPTS}회 또는 오답 {DIAGNOSIS_MIN_WRONG}개가 쌓이면
-          열려요. 최근 {DIAGNOSIS_CYCLE_DAYS}일 안에 틀린 문항을 개념 단위로 다시 세우고,
-          {DIAGNOSIS_CYCLE_DAYS}일에 한 번 내가 고른 개념의 극복법을 받아요. 따로 입력할 건
-          없어요.
-        </>
-      ),
-    },
-  ];
-  return (
-    <section className="flex flex-col gap-6">
-      <SectionHeading eyebrow="궁금한 점" title="자주 묻는 질문" />
-      <div className="flex flex-col divide-y divide-zinc-100 overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
-        {items.map((item) => (
-          <details key={item.q} className="group px-5 py-4">
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[15px] font-bold text-zinc-900 [&::-webkit-details-marker]:hidden dark:text-zinc-100">
-              {item.q}
-              <span className="shrink-0 text-zinc-400 transition-transform group-open:rotate-90">
-                <ArrowRight size={16} />
-              </span>
-            </summary>
-            <p className="mt-3 break-keep text-[13px] leading-6 text-zinc-600 dark:text-zinc-400">
-              {item.a}
-            </p>
-          </details>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-// ── 마무리 CTA ───────────────────────────────────────────────────────────────
-function FinalCta({ freeForAll }: { freeForAll: boolean }) {
-  const perks = [
-    "온라인 CBT · 즉시 채점",
-    "오답노트 자동 저장",
-    `응시 ${DIAGNOSIS_MIN_ATTEMPTS}회부터 AI 약점 진단`,
-  ];
-  return (
-    <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 px-6 py-10 text-white shadow-lg shadow-indigo-500/20 sm:px-10 sm:py-14">
-      <div className="flex flex-col items-start gap-5">
-        <h2 className="break-keep text-2xl font-extrabold leading-tight sm:text-3xl">
-          오늘 한 회차만 풀어 보세요
-        </h2>
-        <ul className="flex flex-col gap-1.5 text-sm text-white/90 sm:flex-row sm:flex-wrap sm:gap-x-6">
-          {perks.map((p) => (
-            <li key={p} className="flex items-center gap-1.5">
-              <Check size={15} className="shrink-0" />
-              {p}
-            </li>
-          ))}
-        </ul>
+    <section id="problems" className="mx-auto w-full max-w-6xl px-4 py-16 lg:px-6 lg:py-20">
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <p className="text-sm font-bold" style={{ color: ACCENT }}>
+            PAST QUESTIONS
+          </p>
+          <h2 className="mt-2 text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl dark:text-zinc-50">
+            원하는 기출문제를 찾아보세요
+          </h2>
+          <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+            국가직·지방직·경찰·소방 등 공무원 시험 기출문제 {totalCount.toLocaleString("ko-KR")}건을
+            한 곳에서
+          </p>
+        </div>
         <Link
           href="/papers"
-          className="inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3.5 text-base font-bold text-blue-700 shadow-sm transition-colors hover:bg-blue-50"
+          className="flex items-center gap-1 text-sm font-bold hover:underline"
+          style={{ color: NAVY }}
         >
-          무료로 시작하기
-          <ArrowRight size={16} aria-hidden />
+          전체 기출문제 보기
+          <ArrowRight size={14} aria-hidden />
         </Link>
-        <p className="text-xs text-white/70">
+      </div>
+
+      <form
+        action="/papers"
+        method="get"
+        role="search"
+        className="mt-8 flex items-center rounded-xl border border-zinc-200 bg-white p-1.5 shadow-sm dark:border-zinc-700 dark:bg-zinc-950"
+      >
+        <Search size={18} className="ml-2.5 shrink-0 text-zinc-400" aria-hidden />
+        <input
+          type="search"
+          name="q"
+          placeholder="예: 2025 국가직 행정법, 9급 국어"
+          aria-label="기출문제 검색"
+          autoComplete="off"
+          className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
+        />
+        <button
+          type="submit"
+          className="rounded-lg px-4 py-2.5 text-sm font-bold text-white transition-colors"
+          style={{ backgroundColor: NAVY }}
+        >
+          검색
+        </button>
+      </form>
+
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {top.map((c, i) => (
+          <Link
+            key={c.slug}
+            href={examHref(c.slug)}
+            className="group flex items-center gap-4 rounded-xl border border-zinc-200 bg-white p-4 transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-950"
+          >
+            <span
+              className="grid size-11 shrink-0 place-items-center rounded-lg text-sm font-bold text-white"
+              style={{ backgroundColor: BADGE_COLORS[i % BADGE_COLORS.length] }}
+            >
+              {c.level ?? c.examTypeName.slice(0, 2)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{c.label}</p>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                기출문제 {c.count.toLocaleString("ko-KR")}개 ·{" "}
+                {c.years[c.years.length - 1]}~{c.years[0]}년
+              </p>
+            </div>
+            <ChevronRight
+              size={16}
+              className="shrink-0 text-zinc-300 transition-colors group-hover:text-zinc-500"
+              aria-hidden
+            />
+          </Link>
+        ))}
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold">
+        <Link href="/exams" className="hover:underline" style={{ color: NAVY }}>
+          시험별 전체 보기 →
+        </Link>
+        <Link href="/subjects" className="hover:underline" style={{ color: NAVY }}>
+          과목별 기출문제 →
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+// ── AI 약점 진단 ─────────────────────────────────────────────────────────────
+function Diagnosis() {
+  return (
+    <section
+      id="diagnosis"
+      className="border-y border-zinc-200 text-white dark:border-zinc-800"
+      style={{ backgroundColor: NAVY }}
+    >
+      <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-14 lg:grid-cols-[1fr_.75fr] lg:px-6 lg:py-16">
+        <div>
+          <p className="text-sm font-bold" style={{ color: ACCENT }}>
+            AI WEAKNESS DIAGNOSIS
+          </p>
+          <h2 className="mt-3 max-w-lg text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
+            열심히만 하지 마세요.
+            <br />
+            약점을 알면 합격이 빨라집니다.
+          </h2>
+          <p className="mt-5 max-w-lg text-sm leading-6 text-white/70">
+            온라인 응시와 복습에서 틀린 문항을 AI가 개념 단위로 다시 세우고, 내가 고른
+            오답 하나하나를 근거로 &ldquo;왜 그렇게 골랐는지 · 그래서 뭘 하면 되는지&rdquo;를
+            써 드립니다. 응시 {DIAGNOSIS_MIN_ATTEMPTS}회 또는 오답 {DIAGNOSIS_MIN_WRONG}개부터,{" "}
+            {DIAGNOSIS_CYCLE_DAYS}일마다 한 번. 따로 입력할 건 없어요.
+          </p>
+          <Link
+            href="/diagnosis"
+            className="mt-7 inline-flex items-center gap-2 rounded-lg px-5 py-3.5 text-sm font-bold text-white transition-opacity hover:opacity-90"
+            style={{ backgroundColor: ACCENT }}
+          >
+            무료로 진단 시작하기
+            <ArrowRight size={16} aria-hidden />
+          </Link>
+        </div>
+
+        <WeaknessReportCard />
+      </div>
+    </section>
+  );
+}
+
+// 진단 결과의 "취약 개념" 부분을 축약한 예시. 실제 리포트(mypage/diagnosis)는 개념마다
+// 내 정답률·출제 빈도·추세를 보여주고, 고른 개념에 극복 계획을 붙여 준다. 개념 이름은
+// 개념 사전에 있는 실제 축(과목 · keyword_title)의 모양을 따랐다. 숫자는 예시.
+function WeaknessReportCard() {
+  const rows: { subject: string; concept: string; note: string; pct: number; weak: boolean }[] =
+    [
+      { subject: "행정법총론", concept: "행정행위의 효력", note: "주의 필요", pct: 38, weak: true },
+      { subject: "영어", concept: "어휘·숙어", note: "보완 중", pct: 58, weak: false },
+      { subject: "국어", concept: "문법", note: "안정적", pct: 82, weak: false },
+    ];
+  return (
+    <div aria-hidden className="rounded-2xl border border-white/15 bg-white/5 p-5">
+      <div className="flex items-center gap-3 border-b border-white/10 pb-4">
+        <div
+          className="grid size-10 place-items-center rounded-xl text-white"
+          style={{ backgroundColor: ACCENT }}
+        >
+          <BrainCircuit size={18} />
+        </div>
+        <div>
+          <p className="text-sm font-bold">나의 약점 리포트</p>
+          <p className="text-xs text-white/55">최근 {DIAGNOSIS_CYCLE_DAYS}일 오답 기준 · 개념별 정답률</p>
+        </div>
+      </div>
+      <div className="flex flex-col gap-4 pt-5">
+        {rows.map((r) => (
+          <div key={r.concept} className="flex items-center gap-3">
+            <div className="w-20 shrink-0 text-xs text-white/70">{r.subject}</div>
+            <div className="flex-1">
+              <div className="mb-1.5 flex justify-between text-[11px]">
+                <span className="font-medium">{r.concept}</span>
+                <span className="text-white/50">{r.note}</span>
+              </div>
+              <div className="h-2 rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${r.pct}%`,
+                    backgroundColor: r.weak ? ACCENT : "rgba(255,255,255,0.5)",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-5 border-t border-white/10 pt-4 text-[11px] leading-5 text-white/55">
+        고른 개념마다 원인 · 극복 계획 · 시험장 체크리스트를 써 주고, 같은 개념 기출 5문제를
+        그 자리에서 풀 수 있어요.
+      </p>
+    </div>
+  );
+}
+
+// ── 마무리 ───────────────────────────────────────────────────────────────────
+function ClosingCta({ freeForAll }: { freeForAll: boolean }) {
+  return (
+    <section className="bg-[#e7f2fc]/40 dark:bg-zinc-900/60">
+      <div className="mx-auto flex max-w-6xl flex-col items-center px-4 py-14 text-center lg:px-6">
+        <h2 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+          공모아에서 합격을 준비하세요
+        </h2>
+        <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
           {freeForAll
             ? `${FREE_UNTIL_LABEL}까지 결제 없이 모든 기능을 쓸 수 있어요.`
             : `가입 후 ${TRIAL_DAYS}일 동안 결제 없이 모든 기능을 쓸 수 있어요.`}
         </p>
+        <Link
+          href="/papers"
+          className="mt-6 inline-flex items-center gap-2 rounded-lg px-6 py-3.5 text-sm font-bold text-white shadow-lg transition-transform hover:-translate-y-0.5"
+          style={{ backgroundColor: NAVY, boxShadow: `0 10px 15px -3px ${NAVY}26` }}
+        >
+          무료로 시작하기
+          <ArrowRight size={16} aria-hidden />
+        </Link>
       </div>
     </section>
-  );
-}
-
-function SectionHeading({
-  eyebrow,
-  title,
-  description,
-}: {
-  eyebrow: string;
-  title: string;
-  description?: string;
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="text-xs font-bold tracking-wide text-blue-600 dark:text-blue-400">{eyebrow}</p>
-      <h2 className="break-keep text-2xl font-extrabold tracking-tight text-zinc-900 sm:text-3xl dark:text-zinc-100">
-        {title}
-      </h2>
-      {description && (
-        <p className="max-w-2xl break-keep text-sm leading-6 text-zinc-600 sm:text-base dark:text-zinc-400">
-          {description}
-        </p>
-      )}
-    </div>
   );
 }
