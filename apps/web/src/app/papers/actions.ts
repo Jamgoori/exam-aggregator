@@ -278,6 +278,10 @@ export type CbtSubmitResult = CommentResult & {
   durationSeconds?: number;
   voidedQuestions?: number[];
   questionResults?: CbtQuestionResult[];
+  // 결과 모달의 "AI 약점 진단까지 응시 N/3" 진행 바용. 이번 응시까지 포함한 누적
+  // 응시 수와 한 번이라도 틀린 문항 수(getDiagnosisEligibility 와 같은 기준).
+  // 집계에 실패하면 빠지고, 모달은 그 줄을 그리지 않는다.
+  diagnosisProgress?: { attemptCount: number; wrongCount: number };
 };
 
 export type StartCbtAttemptResult = CommentResult & { startedAt?: string };
@@ -440,6 +444,27 @@ export async function submitCbtAttempt(input: {
     .eq("user_id", user.id)
     .eq("paper_id", paperId);
 
+  // 결과 모달에 "AI 약점 진단까지 응시 N/3"를 그리기 위한 누적치. 채점이 끝난 뒤라
+  // 방금 응시도 포함된다. 진단 자격 판정(lib/ai-diagnosis getDiagnosisEligibility)과
+  // 같은 두 집계다 — 부가 정보라 실패해도 채점 결과는 그대로 돌려준다.
+  let diagnosisProgress: CbtSubmitResult["diagnosisProgress"];
+  try {
+    const [{ count: attemptCount }, { count: wrongCount }] = await Promise.all([
+      admin
+        .from("cbt_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id),
+      admin
+        .from("user_question_status")
+        .select("paper_id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .gt("wrong_count", 0),
+    ]);
+    diagnosisProgress = { attemptCount: attemptCount ?? 0, wrongCount: wrongCount ?? 0 };
+  } catch {
+    // 무시: 진행 바 한 줄이 빠질 뿐이다.
+  }
+
   return {
     success: true,
     attemptId: attempt.id as string,
@@ -448,6 +473,7 @@ export async function submitCbtAttempt(input: {
     durationSeconds,
     voidedQuestions: [...voided],
     questionResults,
+    diagnosisProgress,
   };
 }
 

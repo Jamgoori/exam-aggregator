@@ -19,6 +19,7 @@ import { pickCoachTargets } from "@/lib/diagnosis-generate";
 import { conceptSelectionKey } from "@/lib/diagnosis-limits";
 import { isPremium } from "@/lib/membership";
 import { MembershipLockedPage } from "@/components/membership-upsell";
+import { DiagnosisProgress } from "@/components/diagnosis-progress";
 import { collectDiagnosisBatches, getPendingDiagnosisBatch } from "@/lib/diagnosis-batch";
 
 // AI 약점 진단. 입장 즉시 보이는 것은 전부 결정적 데이터(무AI):
@@ -241,11 +242,22 @@ async function EmptyState({
           ? "아직 분석할 오답 개념이 없어요. 문제를 조금 더 풀면 여기에 약점이 정리돼요."
           : (eligibility.hint ?? "조금 더 풀면 진단을 받을 수 있어요.")}
       </p>
+      {/* 자격 미달이면 "얼마나 남았는지"를 숫자로. 가장 빨리 채우는 길은 CBT 한 회차라
+          바를 누르면 문제지 목록으로 간다. */}
+      {!eligibility.eligible && (
+        <div className="w-full max-w-sm text-left">
+          <DiagnosisProgress
+            attemptCount={eligibility.attemptCount}
+            wrongCount={eligibility.wrongCount}
+            lockedHref="/papers"
+          />
+        </div>
+      )}
       <Link
-        href="/mypage?tab=wrong-notes"
+        href={eligibility.eligible ? "/mypage?tab=wrong-notes" : "/papers"}
         className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-blue-700"
       >
-        오답노트로 가기
+        {eligibility.eligible ? "오답노트로 가기" : "문제 풀러 가기"}
       </Link>
     </Card>
   );

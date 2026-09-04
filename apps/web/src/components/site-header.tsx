@@ -43,10 +43,14 @@ export function SiteHeader({
           // 관련 주석 참고).
           className="mr-1 flex shrink-0 items-center gap-2 rounded-lg focus-visible:ring-2 focus-visible:ring-blue-500/50 focus-visible:outline-none"
         >
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm shadow-blue-600/25">
+          {/* 로고 색은 홈(랜딩)의 팔레트(초록 accent)를 따른다 — 사이트 안 도구 화면의
+              파랑과 달리, 로고는 어느 화면에서나 "공모아"라는 브랜드 하나만 가리킨다. */}
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#12b382] text-white shadow-sm shadow-[#12b382]/30">
             <GraduationCap size={22} />
           </span>
-          <span className="text-2xl font-bold dark:text-zinc-100">공모아</span>
+          <span className="text-2xl font-bold dark:text-zinc-100">
+            공<span className="text-[#12b382]">모아</span>
+          </span>
         </Link>
 
         <div className="ml-auto flex shrink-0 items-center gap-1.5">

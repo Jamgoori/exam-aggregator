@@ -98,10 +98,12 @@ function MobileNavDrawer({
       >
         <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
           <Link href="/" onClick={onClose} className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#12b382] text-white">
               <GraduationCap size={18} />
             </span>
-            <span className="text-lg font-bold dark:text-zinc-100">공모아</span>
+            <span className="text-lg font-bold dark:text-zinc-100">
+              공<span className="text-[#12b382]">모아</span>
+            </span>
           </Link>
           <button
             ref={closeRef}

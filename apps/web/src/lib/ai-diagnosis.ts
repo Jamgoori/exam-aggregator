@@ -11,8 +11,10 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 // 콜드 스타트 문턱: 데이터가 빈약하면 진단이 뻔해져 신뢰를 깎으므로, 최소치를 넘겨야
 // 진단을 열어준다. (누적 오답 15개 또는 응시 3회)
-export const DIAGNOSIS_MIN_WRONG = 15;
-export const DIAGNOSIS_MIN_ATTEMPTS = 3;
+// 값 자체는 lib/ai-diagnosis-thresholds.ts 에 있다(클라이언트도 읽어야 해서). 여기서
+// 재노출해 기존 import 경로를 그대로 살린다.
+export { DIAGNOSIS_MIN_WRONG, DIAGNOSIS_MIN_ATTEMPTS } from "@/lib/ai-diagnosis-thresholds";
+import { DIAGNOSIS_MIN_WRONG, DIAGNOSIS_MIN_ATTEMPTS } from "@/lib/ai-diagnosis-thresholds";
 
 // 화면이 안정적으로 그리도록 구조화한 리포트. 생성기는 이 스키마에 맞춰 저장한다.
 // 자유 서술 마크다운이 아니라 필드로 받아, UI가 취약 개념→모아보기 딥링크 등으로

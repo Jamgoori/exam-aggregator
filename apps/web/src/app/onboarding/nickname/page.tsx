@@ -12,7 +12,10 @@ export default async function NicknameOnboardingPage({
   searchParams: Promise<{ next?: string; error?: string }>;
 }) {
   const { next: rawNext, error } = await searchParams;
-  const next = sanitizeNextPath(rawNext);
+  // 닉네임까지 정한 사람이 갈 곳이 없으면(직접 로그인 등) 소개 랜딩(/)이 아니라
+  // 문제지 목록으로 보낸다 — 이미 가입한 사람에게 소개는 한 번 더 읽을 글이 아니다.
+  const sanitized = sanitizeNextPath(rawNext);
+  const next = sanitized === "/" ? "/papers" : sanitized;
   const supabase = await createClient();
 
   const {
