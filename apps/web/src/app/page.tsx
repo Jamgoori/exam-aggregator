@@ -181,8 +181,9 @@ function Hero({ totalCount }: { totalCount: number }) {
         </div>
 
         {/* 회원이면 진짜 내 숫자, 아니면 예시. 조회는 Suspense 뒤에서 — 정적 셸에는
-            예시 카드가 들어간다. */}
-        <Suspense fallback={<TodayStudyCard data={SAMPLE_TODAY_STUDY} sample />}>
+            뼈대(스켈레톤)가 들어간다. 여기에 예시 카드를 두면 로그인한 사람도 남의
+            숫자를("예시 화면" 표시까지) 1초쯤 보고 나서야 제 숫자로 바뀐다. */}
+        <Suspense fallback={<TodayStudyCardSkeleton />}>
           <TodayStudy />
         </Suspense>
       </div>
@@ -193,8 +194,9 @@ function Hero({ totalCount }: { totalCount: number }) {
 // ── 오늘의 학습 현황 카드 ─────────────────────────────────────────────────
 // 비회원에게는 "풀고 나면 이렇게 쌓인다"를 보여주는 예시(예시 화면 표기), 회원에게는
 // 진짜 내 숫자다 — 마이페이지 요약(응시·연속 학습)과 AI 진단 자격(응시 N/3)을 한 장에
-// 담는다. 로그인 여부와 조회는 Suspense 뒤(TodayStudy)에서 하고, 정적 셸에는 예시가
-// 들어간다. 회원은 예시가 잠깐 보였다가 제 숫자로 바뀐다(스트리밍).
+// 담는다. 로그인 여부와 조회는 Suspense 뒤(TodayStudy)에서 하고, 정적 셸에는 같은
+// 크기의 뼈대(TodayStudyCardSkeleton)가 들어간다 — 도착하면 자리 이동 없이 내용만
+// 채워지고, 예시 숫자가 회원에게 잠깐 비치는 일도 없다.
 type TodayStudyData = {
   todayAttempts: number;
   // 전체 응시의 정답률(%). 응시가 없으면 null.
@@ -268,6 +270,75 @@ async function TodayStudy() {
         wrongCount: eligibility.wrongCount,
       }}
     />
+  );
+}
+
+// 카드가 도착하기 전 자리를 잡아 두는 뼈대. 아래 TodayStudyCard 와 바깥 상자·여백·
+// 글자 크기를 그대로 맞춰야 도착하는 순간 화면이 밀리지 않는다 (빈 칸 높이는 자리를
+// 대신하는 글자의 줄 높이와 같게: text-xs=h-4, text-xl=h-7). 제목처럼 누구에게나 같은
+// 글자는 그대로 두고, 사람마다 다른 값(숫자·막대·진단 문구)만 회색 칸으로 비워 둔다.
+function TodayStudyCardSkeleton() {
+  const days = ["월", "화", "수", "목", "금", "토", "일"];
+  const box = "rounded bg-zinc-200 dark:bg-zinc-800";
+  return (
+    <div className="relative mx-auto w-full max-w-md lg:max-w-none">
+      <div
+        className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl sm:p-6 dark:border-zinc-800 dark:bg-zinc-950"
+        style={{ boxShadow: `0 20px 25px -5px ${NAVY}1a` }}
+      >
+        <div className="animate-pulse" aria-hidden>
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold" style={{ color: ACCENT }}>
+                TODAY&apos;S STUDY
+              </p>
+              <h2 className="mt-1 text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                오늘의 학습 현황
+              </h2>
+            </div>
+            <div className={`size-10 rounded-full ${box}`} />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="rounded-xl bg-[#e7f2fc] p-3 dark:bg-zinc-800/70">
+                <div className={`h-4 w-12 ${box}`} />
+                <div className={`mt-2 h-7 w-14 ${box}`} />
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-5 rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+            <div className="mb-3 flex justify-between">
+              <div className={`h-4 w-20 ${box}`} />
+              <div className={`h-4 w-12 ${box}`} />
+            </div>
+            <div className="flex h-24 gap-2">
+              {days.map((d) => (
+                <div key={d} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
+                  <div
+                    className="w-full rounded-t bg-zinc-200 dark:bg-zinc-800"
+                    style={{ height: "36%" }}
+                  />
+                  <span className="text-[10px] leading-none text-zinc-400">{d}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div
+            className="mt-4 flex items-center gap-3 rounded-xl p-3"
+            style={{ backgroundColor: `${ACCENT}1a` }}
+          >
+            <div className={`size-9 shrink-0 rounded-lg ${box}`} />
+            <div className="min-w-0 flex-1">
+              <div className={`h-4 w-32 max-w-full ${box}`} />
+              <div className={`mt-0.5 h-4 w-44 max-w-full ${box}`} />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
