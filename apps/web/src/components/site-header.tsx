@@ -4,6 +4,8 @@ import Link from "next/link";
 import { GraduationCap } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { MobileNav } from "@/components/mobile-nav";
+import { NotificationBell } from "@/components/notification-bell";
+import type { HeaderUser } from "@/components/site-nav-items";
 
 // 사이트 공통 헤더 = 메뉴바.
 //
@@ -24,7 +26,7 @@ import { MobileNav } from "@/components/mobile-nav";
 export function SiteHeader({
   user,
 }: {
-  user: { nickname: string; isAdmin: boolean; isPremium: boolean } | null | "pending";
+  user: HeaderUser | null | "pending";
 }) {
   const pending = user === "pending";
 
@@ -52,6 +54,9 @@ export function SiteHeader({
         </Link>
 
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {/* 알림 종은 로그인한 사람에게만. 서버가 확정한 로그인 여부를 그대로
+              쓰므로(비로그인에게는 렌더 자체가 없다) 알림 조회가 헛돌지 않는다. */}
+          {user && user !== "pending" && <NotificationBell />}
           <ThemeToggle />
           {pending ? (
             // 인증 확정 전. 실제로 들어올 햄버거 버튼과 같은 크기라 값이 도착해도

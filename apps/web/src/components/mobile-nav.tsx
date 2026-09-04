@@ -9,7 +9,7 @@ import { signOutUser } from "@/app/actions";
 import { SignOutButton } from "@/components/sign-out-button";
 import { LoginLink } from "@/components/login-link";
 import { Avatar, MembershipBadge } from "@/components/user-menu";
-import { ACCOUNT_NAV, PRIMARY_NAV } from "@/components/site-nav-items";
+import { ACCOUNT_NAV, PRIMARY_NAV, type HeaderUser } from "@/components/site-nav-items";
 
 // 모바일 메뉴(햄버거 → 오른쪽에서 밀려 나오는 서랍).
 //
@@ -20,7 +20,7 @@ import { ACCOUNT_NAV, PRIMARY_NAV } from "@/components/site-nav-items";
 export function MobileNav({
   user,
 }: {
-  user: { nickname: string; isAdmin: boolean; isPremium: boolean } | null;
+  user: HeaderUser | null;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -57,7 +57,7 @@ function MobileNavDrawer({
   user,
   onClose,
 }: {
-  user: { nickname: string; isAdmin: boolean; isPremium: boolean } | null;
+  user: HeaderUser | null;
   onClose: () => void;
 }) {
   const pathname = usePathname();
@@ -121,7 +121,7 @@ function MobileNavDrawer({
               onClick={onClose}
               className="flex items-center gap-3 rounded-2xl bg-gradient-to-br from-blue-50 to-blue-50/30 px-3.5 py-3 transition-colors hover:from-blue-100/80 dark:from-blue-950/40 dark:to-blue-950/10 dark:hover:from-blue-950/60"
             >
-              <Avatar nickname={user.nickname} size="lg" />
+              <Avatar nickname={user.nickname} avatarUrl={user.avatarUrl} size="lg" />
               <div className="min-w-0">
                 <p className="flex items-center gap-1.5 truncate text-sm font-bold">
                   {user.nickname}님

@@ -10,6 +10,7 @@ import { ChatFab } from "@/components/chat-fab";
 import { MicrosoftClarity } from "@/components/microsoft-clarity";
 import { createClient } from "@/lib/supabase/server";
 import { getMembership } from "@/lib/membership";
+import { avatarUrl } from "@/lib/avatars";
 import { isPremiumMembership } from "@gongmoa/core";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site-url";
 import { JsonLd } from "@/components/json-ld";
@@ -112,6 +113,10 @@ async function StreamedSiteHeader() {
           "회원",
         isAdmin,
         isPremium,
+        // 프로필 사진 경로도 JWT 안에 있다(actions.ts 의 uploadAvatar 가 닉네임과
+        // 같이 user_metadata 에 적는다) — 헤더가 아바타 하나 때문에 DB 를 다시
+        // 보지 않게 하려는 것.
+        avatarUrl: avatarUrl(claims.user_metadata?.avatar_path as string | undefined),
       }
     : null;
 
