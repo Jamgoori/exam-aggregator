@@ -7,11 +7,12 @@ import {
   deleteSuggestionComment,
   updateSuggestionComment,
 } from "@/app/suggestions/actions";
-import { SUGGESTION_COMMENT_MAX } from "@gongmoa/core";
+import { SUGGESTION_COMMENT_MAX, KST_TIME_ZONE } from "@gongmoa/core";
 import type { SuggestionCommentItem } from "@/lib/suggestions";
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("ko-KR", {
+    timeZone: KST_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

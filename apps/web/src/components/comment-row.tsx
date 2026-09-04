@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { deleteComment } from "@/app/papers/actions";
 import type { Comment } from "@gongmoa/core";
+import { KST_TIME_ZONE } from "@gongmoa/core";
 
 // 댓글 한 줄(닉네임/날짜/본문 + 답글·수정·삭제 버튼). 삭제는 실수 방지를 위해
 // 같은 자리에서 한 번 더 확인받고, 비회원 댓글이면 비밀번호까지 받아 검증한다.
@@ -52,7 +53,7 @@ export function CommentRow({
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-bold">{comment.nickname}</span>
           <span className="text-[11px] text-zinc-400 dark:text-zinc-600">
-            {new Date(comment.created_at).toLocaleDateString("ko-KR")}
+            {new Date(comment.created_at).toLocaleDateString("ko-KR", { timeZone: KST_TIME_ZONE })}
             {comment.updated_at ? " (수정됨)" : ""}
           </span>
         </div>

@@ -21,6 +21,10 @@ import {
   Undo2,
 } from "lucide-react";
 import { uploadBoardImage } from "@/app/board/actions";
+import {
+  prepareImageUpload,
+  UPLOAD_BODY_LIMIT_BYTES,
+} from "@/lib/prepare-image-upload";
 
 // 자유게시판 글쓰기 에디터.
 //
@@ -36,6 +40,11 @@ import { uploadBoardImage } from "@/app/board/actions";
 //
 // styleWithCSS: 켜두면 크기·색이 <font size> 대신 <span style> 로 나온다. 꺼져 있는
 // 브라우저를 위해 새니타이저가 <font> 도 span 으로 옮겨 받는다(rich-text.ts).
+
+// 본문 이미지의 긴 변 상한. 서버가 다시 굽는 값(1600px)과 같게 맞춘다 — 여기서
+// 더 크게 보내봐야 서버에서 줄어들 뿐이고, 더 작게 보내면 서버가 못 살리는 화질이
+// 그대로 굳는다.
+const EDITOR_IMAGE_MAX_EDGE = 1600;
 
 const FONT_SIZES = [
   { label: "작게", value: "2" },
@@ -207,8 +216,19 @@ export function RichTextEditor({
     setError(null);
     setUploading(true);
     try {
+      // 브라우저에서 먼저 긴 변 1600px 로 줄여 보낸다. 원본(3~8MB)을 그대로 보내면
+      // 서버 액션 본문 상한에 걸려 **아무 일도 일어나지 않는다**
+      // (lib/prepare-image-upload.ts 머리말).
+      const prepared = await prepareImageUpload(file, { maxEdge: EDITOR_IMAGE_MAX_EDGE });
+      if (prepared.size > UPLOAD_BODY_LIMIT_BYTES) {
+        // 줄이기가 실패한 파일(브라우저가 못 여는 형식 등). 여기서 이유를 말해주지
+        // 않으면 사용자는 버튼이 고장 난 줄 안다.
+        setError("사진 용량이 너무 커서 올릴 수 없어요. 크기를 줄이거나 다른 사진을 써주세요.");
+        return;
+      }
+
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", prepared);
       const result = await uploadBoardImage(formData);
       if (result.error || !result.url) {
         setError(result.error ?? "이미지를 올리지 못했어요.");
@@ -216,6 +236,10 @@ export function RichTextEditor({
       }
       // 이미지 뒤에 문단을 하나 붙여, 사진 아래로 이어서 쓸 자리를 만든다.
       insertHtml(`<img src="${result.url}" alt=""><p><br></p>`);
+    } catch {
+      // 서버 액션 호출 자체가 실패하는 경로가 있다(요청이 플랫폼에서 거절되는 등).
+      // catch 가 없으면 그 실패가 조용히 삼켜져 "눌러도 아무 일이 없다"가 된다.
+      setError("사진을 올리지 못했어요. 잠시 후 다시 시도해주세요.");
     } finally {
       setUploading(false);
     }

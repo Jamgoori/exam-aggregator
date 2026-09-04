@@ -240,7 +240,14 @@ export async function uploadAvatar(formData: FormData): Promise<AvatarResult> {
   const { error: uploadError } = await admin.storage
     .from("avatars")
     .upload(path, resized, { contentType: "image/webp", cacheControl: "31536000" });
-  if (uploadError) return { error: "업로드에 실패했어요. 잠시 후 다시 시도해주세요." };
+  if (uploadError) {
+    console.error("[avatar] 업로드 실패:", uploadError.message);
+    return {
+      error: /bucket/i.test(uploadError.message)
+        ? "이미지 저장소가 아직 준비되지 않았어요. 운영자에게 알려주세요."
+        : "업로드에 실패했어요. 잠시 후 다시 시도해주세요.",
+    };
+  }
 
   // 예전 사진은 새 사진이 자리를 잡은 뒤에 지운다 — 먼저 지웠다가 업로드가 실패하면
   // 사진만 사라진 계정이 된다.

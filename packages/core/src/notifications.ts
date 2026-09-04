@@ -8,6 +8,8 @@
 // 알림 생성에 실패해도 원래 동작(댓글 등록)은 성공으로 끝내야 한다 — 알림은
 // 곁다리인데 그것 때문에 댓글이 안 달리면 본말이 전도된다.
 
+import { kstDayKey } from "./format";
+
 export const NOTIFICATION_TYPES = [
   "board_comment", // 내 게시글에 댓글
   "board_reply", // 내 댓글에 답글
@@ -68,8 +70,8 @@ export function relativeTimeLabel(iso: string, now: Date = new Date()): string {
   const day = Math.floor(hour / 24);
   if (day < 7) return `${day}일 전`;
 
-  const d = new Date(then);
-  return `${d.getFullYear() % 100}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(
-    d.getDate(),
-  ).padStart(2, "0")}`;
+  // 일주일이 넘으면 날짜로 보여준다. getFullYear/getMonth/getDate 는 실행 환경의
+  // 시간대를 따르므로 쓰지 않는다 — 서버(UTC)에서 그리면 하루가 어긋난다.
+  const [year, month, dayOfMonth] = kstDayKey(new Date(then)).split("-");
+  return `${year.slice(2)}.${month}.${dayOfMonth}`;
 }

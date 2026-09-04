@@ -21,7 +21,7 @@ import {
   hasLikedBoardPost,
 } from "@/lib/board";
 import { absoluteUrl } from "@/lib/site-url";
-import { boardCategoryLabel } from "@gongmoa/core";
+import { boardCategoryLabel, KST_TIME_ZONE } from "@gongmoa/core";
 
 // 글 상세. 본문 자체는 로그인 여부에 따라 달라지므로(수정·삭제 버튼, 좋아요 상태)
 // 캐시하지 않지만, **<head> 만은 셸에 미리 박아야 한다**.
@@ -70,6 +70,7 @@ export async function generateMetadata({
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("ko-KR", {
+    timeZone: KST_TIME_ZONE,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

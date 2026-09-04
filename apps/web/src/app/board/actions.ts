@@ -303,7 +303,18 @@ export async function uploadBoardImage(
   const { error } = await admin.storage
     .from("board-images")
     .upload(path, processed, { contentType: "image/webp", cacheControl: "31536000" });
-  if (error) return { error: "업로드에 실패했어요. 잠시 후 다시 시도해주세요." };
+  if (error) {
+    // 원인을 화면에 그대로 내보내지는 않지만(스토리지 내부 사정이다) 로그에는 남긴다 —
+    // 안 남기면 "업로드가 안 돼요" 신고 하나에 재현부터 다시 해야 한다.
+    console.error("[board] 이미지 업로드 실패:", error.message);
+    // 버킷이 없는 건 이용자가 다시 시도해서 풀릴 일이 아니라 설치가 덜 된 것이다
+    // (supabase/schema.sql 의 board-images 버킷 · scripts/sql 의 1회 적용본).
+    return {
+      error: /bucket/i.test(error.message)
+        ? "이미지 저장소가 아직 준비되지 않았어요. 운영자에게 알려주세요."
+        : "업로드에 실패했어요. 잠시 후 다시 시도해주세요.",
+    };
+  }
 
   return { url: `${boardImageOrigin()}${path}` };
 }

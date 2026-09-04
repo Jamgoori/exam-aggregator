@@ -10,7 +10,7 @@ import {
   deleteBoardComment,
   updateBoardComment,
 } from "@/app/board/actions";
-import { BOARD_COMMENT_MAX } from "@gongmoa/core";
+import { BOARD_COMMENT_MAX, KST_TIME_ZONE } from "@gongmoa/core";
 import type { BoardCommentItem } from "@/lib/board";
 
 // 자유게시판 댓글. 답글은 1단계까지만 들어간다(더 깊어지면 좁은 화면에서
@@ -18,6 +18,7 @@ import type { BoardCommentItem } from "@/lib/board";
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString("ko-KR", {
+    timeZone: KST_TIME_ZONE,
     year: "2-digit",
     month: "2-digit",
     day: "2-digit",
