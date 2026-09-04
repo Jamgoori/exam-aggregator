@@ -10,7 +10,6 @@ import {
   Check,
   ChevronRight,
   Flame,
-  Sparkles,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { HomePopupSlider } from "@/components/home-popup-slider";
@@ -108,16 +107,22 @@ async function HomePopup() {
 // 끝난 뒤에는 체험 기간을 말한다 — 날짜·기간은 core 상수에서 온다.
 function TopBanner({ freeForAll }: { freeForAll: boolean }) {
   return (
-    <div className="border-b border-zinc-200 bg-[#e7f2fc]/60 text-center text-xs font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+    <div className="border-b border-zinc-200 bg-[#e7f2fc]/60 text-center text-[11px] font-medium tracking-[-0.02em] text-zinc-600 sm:text-xs dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
       <Link
         href="/membership"
-        className="mx-auto flex max-w-6xl items-center justify-center gap-2 px-4 py-2 hover:text-zinc-900 dark:hover:text-zinc-200"
+        className="mx-auto flex max-w-6xl items-center justify-center gap-1.5 px-3 py-2 hover:text-zinc-900 sm:gap-2 sm:px-4 dark:hover:text-zinc-200"
       >
-        <span className="size-1.5 rounded-full" style={{ backgroundColor: ACCENT }} />
-        {freeForAll
-          ? `${FREE_UNTIL_LABEL}까지 멤버십 전 기능 무료, 로그인만 하면 돼요`
-          : `가입하면 ${TRIAL_DAYS}일 동안 멤버십 전 기능 무료`}
-        <ChevronRight size={14} aria-hidden />
+        <span
+          className="size-1.5 shrink-0 rounded-full"
+          style={{ backgroundColor: ACCENT }}
+        />
+        {/* 한 줄로 읽히는 안내 — 줄바꿈되면 띠가 두 줄이 되어 히어로를 밀어낸다. */}
+        <span className="min-w-0 truncate whitespace-nowrap">
+          {freeForAll
+            ? `${FREE_UNTIL_LABEL}까지 멤버십 전 기능 무료, 로그인만 하면 돼요`
+            : `가입하면 ${TRIAL_DAYS}일 동안 멤버십 전 기능 무료`}
+        </span>
+        <ChevronRight size={14} className="shrink-0" aria-hidden />
       </Link>
     </div>
   );
@@ -127,17 +132,10 @@ function TopBanner({ freeForAll }: { freeForAll: boolean }) {
 function Hero() {
   return (
     <section className="relative overflow-hidden border-b border-zinc-200 bg-[#e7f2fc]/45 dark:border-zinc-800 dark:bg-zinc-900/60">
-      <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-16 lg:grid-cols-[1.08fr_.92fr] lg:px-6 lg:py-24">
+      <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-8 lg:grid-cols-[1.08fr_.92fr] lg:px-6 lg:py-16">
         {/* lg 미만에서는 카드가 아래로 내려가 한 열이 되므로 글도 가운데로 모은다 —
             왼쪽 정렬 글 + 가운데 카드가 세로로 쌓이면 화면이 한쪽으로 쏠려 보인다. */}
         <div className="relative z-10 flex flex-col items-center text-center lg:items-start lg:text-left">
-          <div
-            className="mb-6 inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1.5 text-xs font-bold dark:bg-zinc-950"
-            style={{ borderColor: `${ACCENT}40`, color: ACCENT }}
-          >
-            <Sparkles size={14} aria-hidden />
-            수험생을 위한 가장 똑똑한 공부법
-          </div>
           <h1 className="max-w-xl text-balance text-4xl font-bold leading-[1.15] tracking-[-0.04em] text-zinc-900 sm:text-5xl lg:text-6xl dark:text-zinc-50">
             합격에 필요한 모든 것,
             <br />
