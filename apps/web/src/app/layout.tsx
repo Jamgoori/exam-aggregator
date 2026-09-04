@@ -161,7 +161,7 @@ export default function RootLayout({
                   "@type": "SearchAction",
                   target: {
                     "@type": "EntryPoint",
-                    urlTemplate: absoluteUrl("/?q={search_term_string}"),
+                    urlTemplate: absoluteUrl("/papers?q={search_term_string}"),
                   },
                   "query-input": "required name=search_term_string",
                 },

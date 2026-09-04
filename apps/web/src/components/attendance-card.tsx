@@ -302,7 +302,7 @@ function TodayLine({
             : "조금만 더 풀면 오늘 출석으로 반영돼요."}
         </p>
         <Link
-          href="/"
+          href="/papers"
           className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400"
         >
           문제 풀러 가기

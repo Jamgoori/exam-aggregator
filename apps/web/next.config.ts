@@ -62,6 +62,17 @@ const nextConfig: NextConfig = {
         destination: "/exams/:exam",
         permanent: true,
       },
+      // 기출문제 검색·목록은 2026-09 에 홈(/)에서 /papers 로 옮겼다(홈은 사이트
+      // 소개 랜딩). 홈 시절의 검색 파라미터 주소(/?q=국어, /?level=9급&page=2 …)는
+      // 공유 링크·북마크·검색 결과에 남아 있으므로 파라미터를 그대로 들고 /papers 로
+      // 301 한다 — destination 에 쿼리를 쓰지 않으면 Next 가 원래 쿼리를 그대로
+      // 넘겨준다. 파라미터가 하나도 없는 "/" 는 랜딩이므로 건드리지 않는다.
+      ...["q", "level", "type", "page", "fav"].map((key) => ({
+        source: "/",
+        has: [{ type: "query" as const, key }],
+        destination: "/papers",
+        permanent: true,
+      })),
     ];
   },
   async headers() {

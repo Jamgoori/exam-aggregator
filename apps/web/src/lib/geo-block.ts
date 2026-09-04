@@ -216,7 +216,7 @@ export function geoBlockHtml(country: string): string {
   h1 { font-size:1.25rem; margin:0 0 12px; }
   p { margin:0 0 10px; font-size:.9rem; line-height:1.7; opacity:.85; }
   code { font-size:.8rem; opacity:.6; }
-  a { color:#2563eb; }
+  a { color:#0a7d5b; }
 </style>
 <main>
   <h1>해외에서는 이용할 수 없어요</h1>

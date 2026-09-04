@@ -98,10 +98,10 @@ function MobileNavDrawer({
       >
         <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
           <Link href="/" onClick={onClose} className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#12b382] text-white">
               <GraduationCap size={18} />
             </span>
-            <span className="text-lg font-bold dark:text-zinc-100">공모아</span>
+            <span className="text-lg font-bold text-[#12b382]">공모아</span>
           </Link>
           <button
             ref={closeRef}
@@ -152,7 +152,18 @@ function MobileNavDrawer({
                 <Link
                   key={item.href}
                   href={item.href}
-                  onClick={onClose}
+                  onClick={() => {
+                    onClose();
+                    // 기출문제 목록(/papers)에서 여러 페이지째 보고 있을 때 같은
+                    // 항목을 다시 누르면 1페이지로 되돌린다. 목록의 페이지 상태는
+                    // history.replaceState로만 URL과 동기화될 뿐 Next 라우터가 모르는
+                    // 값이라, 같은 주소로의 Link는 아무 리렌더도 일으키지 않는다
+                    // (exam-browser.tsx 의 gongmoa:browser-reset 리스너).
+                    if (item.href === "/papers" && window.location.pathname === "/papers") {
+                      window.history.replaceState(null, "", "/papers");
+                      window.dispatchEvent(new Event("gongmoa:browser-reset"));
+                    }
+                  }}
                   aria-current={active ? "page" : undefined}
                   className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
                     active

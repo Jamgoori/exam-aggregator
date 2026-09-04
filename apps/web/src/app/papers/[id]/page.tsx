@@ -287,13 +287,22 @@ export default async function PaperDetailPage({
             열기 버튼들은 연한 파랑으로 통일한다. CBT를 지원하지 않는 문제지는
             primary 자리가 비므로 문제 열기가 단색을 물려받는다. */}
         {hasCbtAnswers && (
-          <Link
-            href={paperCbtHref(paper)}
-            className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-4 text-lg font-medium text-white hover:bg-blue-700"
-          >
-            <Monitor size={20} />
-            온라인에서 풀기
-          </Link>
+          <>
+            <Link
+              href={paperCbtHref(paper)}
+              className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-4 text-lg font-medium text-white hover:bg-blue-700"
+            >
+              <Monitor size={20} />
+              온라인에서 풀기
+            </Link>
+            {/* 버튼을 누르기 전에 "누르면 무슨 일이 생기는지"를 한 줄로. 비로그인은
+                누르는 순간 로그인 화면을 만나므로 그 사실을 여기서 미리 말한다 —
+                예고 없이 튕기면 "속았다", 미리 알면 "절차"다. */}
+            <p className="-mt-1 text-center text-xs text-zinc-500 dark:text-zinc-500">
+              제출 즉시 채점 · 틀린 문제는 오답노트에 자동 저장
+              {!loggedIn && " · 구글·카카오 1초 로그인"}
+            </p>
+          </>
         )}
 
         <div className="flex items-stretch gap-2">

@@ -41,11 +41,13 @@ export type NavItem = {
 // 달라지면 메뉴바가 눈앞에서 한 번 출렁인다.
 export const PRIMARY_NAV: NavItem[] = [
   {
-    href: "/",
+    // 검색·목록 페이지. 홈(/)은 사이트 소개 랜딩이라 메뉴에 두지 않는다 — 로고가
+    // 그 역할을 한다.
+    href: "/papers",
     label: "기출문제",
     icon: FileStack,
-    // 문제지 상세·CBT·해설은 전부 홈의 목록에서 들어가는 자리라 같은 메뉴로 묶는다.
-    match: (p) => p === "/" || p.startsWith("/papers"),
+    // 문제지 상세·CBT·해설은 전부 이 목록에서 들어가는 자리라 같은 메뉴로 묶는다.
+    match: (p) => p.startsWith("/papers"),
     hint: "검색·연도별로 찾기",
   },
   {

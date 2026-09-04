@@ -118,7 +118,7 @@ function PageButtons({
   );
 }
 
-export function HomeExamBrowser({
+export function ExamBrowser({
   heroText,
   papers,
   subjects,
@@ -137,9 +137,9 @@ export function HomeExamBrowser({
   totalDownloads,
   totalAttempts,
 }: {
-  // 배지/제목/소개 문단은 검색어와 무관한 정적 텍스트라 서버에서 그대로 렌더링해
-  // 넘겨받는다 — 검색 인터랙션(SearchInput)과 같은 히어로 섹션 안에
-  // 나란히 있어야 하는 원래 레이아웃을 유지하기 위한 슬롯이다.
+  // 제목/소개 문단은 검색어와 무관한 정적 텍스트라 서버에서 그대로 렌더링해
+  // 넘겨받는다 — 검색 인터랙션(SearchInput)과 같은 섹션 안에 나란히 있어야
+  // 하는 레이아웃을 유지하기 위한 슬롯이다.
   heroText: ReactNode;
   // 문제지 전체 목록은 전송량을 줄인 튜플 표현으로 받아(paper-search의 PaperWire),
   // 여기서 한 번만 화면용 모양으로 복원한다.
@@ -397,15 +397,15 @@ export function HomeExamBrowser({
     if (el) el.style.minHeight = "";
   }, [safePage]);
 
-  // 상단 로고(홈 버튼)를 이미 홈에 있는 상태에서 누르면 site-header가 쏘는
-  // 이벤트. 이 컴포넌트의 page는 Next 라우터가 모르는 클라이언트 상태라
-  // "/"로의 Link만으로는 리렌더되지 않으므로 직접 1페이지로 되돌린다.
+  // 메뉴의 "기출문제" 링크를 이미 이 페이지에 있는 상태에서 누르면 site-header /
+  // mobile-nav 가 쏘는 이벤트. 이 컴포넌트의 page는 Next 라우터가 모르는 클라이언트
+  // 상태라 같은 주소로의 Link만으로는 리렌더되지 않으므로 직접 1페이지로 되돌린다.
   useEffect(() => {
-    function handleHomeReset() {
+    function handleBrowserReset() {
       setPage(1);
     }
-    window.addEventListener("gongmoa:home-reset", handleHomeReset);
-    return () => window.removeEventListener("gongmoa:home-reset", handleHomeReset);
+    window.addEventListener("gongmoa:browser-reset", handleBrowserReset);
+    return () => window.removeEventListener("gongmoa:browser-reset", handleBrowserReset);
   }, []);
 
   // 주소창 URL은 공유/새로고침용으로만 갱신한다 — 여기서 서버를 다시 부르지
@@ -419,10 +419,14 @@ export function HomeExamBrowser({
       if (effectiveFavOnly) usp.set("fav", "1");
       if (safePage > 1) usp.set("page", String(safePage));
       const qs = usp.toString();
-      window.history.replaceState(null, "", qs ? `/?${qs}` : "/");
+      // 이 컴포넌트는 기출문제 검색 페이지(/papers)에 산다. 경로를 여기 박아두지
+      // 않고 pathname 을 쓰는 건, 홈(/)에 있던 시절 "/?q=" 로 하드코딩돼 있다가
+      // 이사하면서 주소가 홈으로 되돌아가던 사고를 다시 내지 않으려는 것이다.
+      const base = pathname || "/papers";
+      window.history.replaceState(null, "", qs ? `${base}?${qs}` : base);
     }, URL_SYNC_DEBOUNCE_MS);
     return () => clearTimeout(timeout);
-  }, [query, level, examTypeFilter, effectiveFavOnly, safePage]);
+  }, [pathname, query, level, examTypeFilter, effectiveFavOnly, safePage]);
 
   return (
     <>
@@ -443,8 +447,8 @@ export function HomeExamBrowser({
 
         {/* 통계 타일은 PC(sm 이상)에만 보여준다. 모바일에서는 첫 화면에 카드
             목록이 들어오도록 걷어냈고, "총 자료 수"만 소개 문장에 통합돼 있다
-            (page.tsx의 모바일 전용 소개 문단). PC는 검색창(596px)과 같은 폭으로
-            위 소개 문단 줄 끝과 나란히 보이게 한다. */}
+            (papers/page.tsx의 모바일 전용 소개 문단). PC는 검색창(596px)과 같은
+            폭으로 위 소개 문단 줄 끝과 나란히 보이게 한다. */}
         <div className="mt-4 hidden w-full max-w-[596px] grid-cols-3 gap-3 text-center sm:grid">
           <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-700">
             <FileStack size={20} className="text-blue-500" />

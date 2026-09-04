@@ -15,6 +15,8 @@ import {
   nextDiagnosisDate,
 } from "@/lib/ai-diagnosis";
 import { COACH_MAX_TOTAL } from "@/lib/diagnosis-limits";
+import { DiagnosisProgress } from "@/components/diagnosis-progress";
+import { DiagnosisSampleReport } from "@/components/diagnosis-sample-report";
 
 export const metadata: Metadata = {
   title: "AI 약점 진단",
@@ -58,7 +60,20 @@ export default async function DiagnosisAboutPage() {
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col gap-8 px-4 pb-20 pt-8 sm:pt-12">
       <Hero cta={cta} />
+      {/* 로그인했는데 아직 자격이 안 되는 사람에게는 "얼마나 남았는지"를 바로 보여준다.
+          CTA 의 한 줄 안내(오답 15개 또는 응시 3회)보다 내 숫자가 박힌 바가 더 움직인다.
+          자격이 되면 CTA 가 이미 "진단 받으러 가기"라 바를 겹쳐 두지 않는다. */}
+      {eligibility && !eligibility.eligible && (
+        <DiagnosisProgress
+          attemptCount={eligibility.attemptCount}
+          wrongCount={eligibility.wrongCount}
+          lockedHref="/papers"
+        />
+      )}
       <Steps />
+      {/* 3단계를 읽고 나서 "그래서 결과가 어떻게 생겼는데"에 답하는 자리. 진단은 응시
+          3회 뒤에야 열리므로, 결과물을 미리 보여주지 않으면 세 번 올 이유가 없다. */}
+      <DiagnosisSampleReport />
       <Details />
     </div>
   );
