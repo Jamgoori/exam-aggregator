@@ -180,6 +180,7 @@ export async function buildFixturePdf({
   header = true,
   footer = true,
   gutter = null,
+  strayMarker = false,
 } = {}) {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -223,6 +224,12 @@ export async function buildFixturePdf({
 
   const p2R = columnCursor(p2, font, g.rightTextXByPage[1], L.bodyTopY, g.rightWidth);
   question(p2R, 11);
+  // 인쇄 영역(테두리) **밖**에 떨어져 있는 다음 문항의 번호 조각. 실측(2016 해경
+  // 1차 9급 해상교통관리)에서 이 유령이 진짜 마커와 번호가 겹쳐, 중복 정리가
+  // 유령을 살리고 진짜를 버려 그 문항이 빈 이미지가 됐다.
+  if (strayMarker) {
+    p2.drawText("12.", { x: g.rightTextXByPage[1], y: 10, size: BODY_SIZE, font });
+  }
 
   // 3쪽: 마지막 문항이 **꼬리말 가까이까지** 내려오는 지면. 꼬리말 감지는 "바로 위
   // 본문과 줄간격의 2.1배 넘게 떨어져 있을 것"을 요구하는데, 이런 지면에서는 그

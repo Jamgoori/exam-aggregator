@@ -173,6 +173,46 @@ async function findPageVerticalRules(pageImage, scale) {
   });
 }
 
+// 세로 실선 찾기의 가로 판(같은 조건을 행에 적용). 지면 테두리의 위·아래 가로선을
+// 찾는 데 쓴다 — 표·지문 상자 테두리는 지면 폭의 대부분을 채우지 못해 걸러진다.
+export function findHorizontalRuleYs(greyData, width, height, { maxHeightPx, minCover }) {
+  const need = width * minCover;
+  const rules = [];
+  let y = 0;
+  while (y < height) {
+    let cover = 0;
+    const row = y * width;
+    for (let x = 0; x < width; x++) if (greyData[row + x] < 245) cover++;
+    if (cover < need) {
+      y++;
+      continue;
+    }
+    let end = y;
+    for (;;) {
+      const nextRow = (end + 1) * width;
+      if (end + 1 >= height) break;
+      let c = 0;
+      for (let x = 0; x < width; x++) if (greyData[nextRow + x] < 245) c++;
+      if (c < need) break;
+      end++;
+    }
+    if (end - y + 1 <= maxHeightPx) rules.push({ y0: y, y1: end });
+    y = end + 1;
+  }
+  return rules;
+}
+
+async function findPageHorizontalRules(pageImage, scale) {
+  const { data, info } = await sharp(pageImage)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return findHorizontalRuleYs(data, info.width, info.height, {
+    maxHeightPx: Math.max(1, Math.round(RULE_MAX_WIDTH_PT * scale)),
+    minCover: RULE_MIN_PAGE_COVER,
+  });
+}
+
 // 한 칼럼 본문 텍스트가 실제로 걸쳐 있는 x 범위. 머리글·꼬리말은 뺀다.
 //
 // colKeys 가 배열도 되는 이유: 줄의 col 은 언제나 "지면 절반 기준 좌/우"로 붙는데,
@@ -668,6 +708,31 @@ export function fillMissingNumbersFromRelaxed(pageMarkerDataList, docMarginX, co
   }
 }
 
+// 마커만 있고 **내용이 하나도 없는** 자리를 마커에서 뺀다.
+//
+// 지면 아래쪽 인쇄 영역 밖에 다음 문항의 번호 조각만 남아 있는 PDF 가 있다(실측:
+// 2016 해경 1차 9급 해상교통관리 1쪽 — 지면 테두리 바깥 y=9.9 에 "10." 만 덩그러니
+// 있고 진짜 10번은 2쪽 좌단 맨 위에 있다). 그러면 10번이 두 번 잡혀 중복 정리가
+// **여백 x 가 더 반듯한 쪽(= 유령)** 을 살리고 진짜를 버렸고, 결과물은 빈 이미지가
+// 됐다(사용자 제보: "10번 문제가 아예 없다").
+//
+// 내용 유무는 두 가지로 본다 — 마커 줄에 발문이 같이 있는가, 아니면 같은 칼럼에
+// 아래로 이어지는 줄이 있는가. 둘 다 아니면 그 자리엔 잘라낼 게 없다. 판단
+// 재료가 없으면(줄을 못 찾으면) 남기는 쪽으로만 틀린다.
+const MARKER_ONLY_LINE_RE = /^(?:【\s*문\s*\d{1,3}\s*】|(?:문\s*)?\d{1,3}\.)$/;
+export function dropContentlessMarkers(pageMarkerDataList, columnSplitX) {
+  for (const data of pageMarkerDataList) {
+    const half = columnSplitX ?? data.pageWidthPt / 2;
+    const lines = data.lines ?? [];
+    data.markers = data.markers.filter((m) => {
+      const col = m.x < half ? "L" : "R";
+      const own = lines.find((l) => l.col === col && Math.abs(l.y - m.y) <= 1);
+      if (!own || !MARKER_ONLY_LINE_RE.test((own.text ?? "").trim())) return true;
+      return lines.some((l) => l.col === col && l.y < m.y - 1);
+    });
+  }
+}
+
 export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSplitX) {
   if (docMarginX == null) return;
   const byNumber = new Map();
@@ -1129,6 +1194,29 @@ async function makePageContext(page, markerData, scale, opts) {
     }
   }
 
+  // 지면 테두리의 **아래 가로선**. 되풀이 꼬리말이 없는 조판에서는 칼럼 마지막
+  // 문항이 지면 바닥까지 잘려 이 선이 이미지 아래에 실선으로 남는다(실측: 2016
+  // 해경 1차 9급 해상교통관리 — 5·9·16·20번 아래에 가로 실선. 세로 실선과 달리
+  // 여백 제거를 무력화하지는 않지만 그대로 보인다). 본문 줄보다 **아래에 있는**
+  // 가로선만 보므로 표·지문 상자 테두리는 후보가 되지 않는다.
+  //
+  // "본문보다 아래"는 **한 줄까지는 밑에 있어도 된다**로 잡는다. 인쇄 영역 밖에
+  // 다음 문항의 번호 조각 하나가 떨어져 있는 PDF 가 있어(dropContentlessMarkers
+  // 주석 참고) "모든 줄보다 아래"로 잡으면 테두리를 못 찾는다. 쪽번호 한 줄이
+  // 테두리 밖에 있는 조판도 같이 받아낸다. 두 줄 이상이면 판단을 포기한다.
+  let frameBottomY = null;
+  if (lines.length > 0) {
+    for (const rule of await findPageHorizontalRules(pageImage, scale)) {
+      const topPt = pageHeightPt - rule.y0 / scale;
+      const below = lines.filter((l) => l.y - l.height * 0.3 < topPt).length;
+      if (below > 1) continue;
+      if (frameBottomY === null || topPt > frameBottomY) frameBottomY = topPt;
+    }
+  }
+  // 칼럼을 끝까지 담을 때의 바닥. 테두리가 있으면 그 위에서 끊는다.
+  const bottomFloorPt =
+    frameBottomY === null ? BOTTOM_MARGIN : Math.max(BOTTOM_MARGIN, frameBottomY + RULE_CLEARANCE_PT);
+
   // (top, bottom)은 PDF 좌표(pt, y가 클수록 위)를 받아 이미지 좌표(y가 아래로
   // 갈수록 커짐)로 뒤집어 잘라낸다. 영역이 비면 null.
   async function extractRegion(colDef, topPt, bottomPt) {
@@ -1248,16 +1336,16 @@ async function makePageContext(page, markerData, scale, opts) {
   // 경계에 걸치면 텍스트 조각은 한쪽 칼럼에만 기록되지만 픽셀은 반대쪽 크롭에도
   // 들어온다(실측: 군무원 국어 15·19번).
   function bottomForLastInColumn(colDef, fromY) {
-    if (footerInkTopY === null || footerInkTopY >= fromY) return BOTTOM_MARGIN;
+    if (footerInkTopY === null || footerInkTopY >= fromY) return bottomFloorPt;
     let end = null;
     for (const l of lines) {
       if (l.col !== colDef.key) continue;
       if (l.y >= fromY || l.y <= footerInkTopY) continue;
       if (end === null || l.y < end.y) end = l;
     }
-    if (end === null) return BOTTOM_MARGIN;
+    if (end === null) return bottomFloorPt;
     const endInkBottom = end.y - end.height * 0.3;
-    if (endInkBottom <= footerInkTopY) return BOTTOM_MARGIN;
+    if (endInkBottom <= footerInkTopY) return bottomFloorPt;
     return (endInkBottom + footerInkTopY) / 2;
   }
 
@@ -1287,7 +1375,7 @@ async function makePageContext(page, markerData, scale, opts) {
     headerInkBottomY === null ? null : Math.round((pageHeightPt - headerInkBottomY) * scale);
   // 칼럼을 끝까지 담을 때의 끝 y — 되풀이 꼬리말 위로 올려잡는다.
   const columnBottomPt =
-    footerInkTopY !== null ? footerInkTopY + BOUNDARY_PAD : BOTTOM_MARGIN;
+    footerInkTopY !== null ? footerInkTopY + BOUNDARY_PAD : bottomFloorPt;
 
   return {
     markers, groups, lines, pageWidthPt, pageHeightPt,
@@ -2171,6 +2259,9 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     docMarginX,
     columnSplitX,
   );
+  // 유령 마커(내용 없는 번호 조각)를 중복 정리보다 **먼저** 뺀다 — 나중에 빼면
+  // 중복 정리가 유령을 진짜로 골라버린 뒤라 손쓸 수 없다.
+  dropContentlessMarkers(pageMarkerData.map((d) => d.data), columnSplitX);
   pruneDuplicateMarkers(
     pageMarkerData.map((d) => d.data),
     docMarginX,

@@ -281,6 +281,35 @@ test("칼럼이 지면 폭 절반에 걸치고 칼럼 간격이 좁은 조판", 
   }
 });
 
+test("인쇄 영역 밖에 떨어진 번호 조각이 진짜 문항을 밀어내지 않는다", async () => {
+  // 실측(2016 해경 1차 9급 해상교통관리): 1쪽 테두리 바깥에 "10." 만 있고 진짜
+  // 10번은 2쪽에 있었는데, 중복 정리가 유령 쪽을 살려 10번이 빈 이미지가 됐다.
+  const stray = await extractQuestionsFromPdf(await buildFixturePdf({ strayMarker: true }), {
+    scale: SCALE,
+    expectedCount: FIXTURE_QUESTION_COUNT,
+  });
+  assert.equal(stray.length, FIXTURE_QUESTION_COUNT);
+  for (const c of stray) {
+    const p = await profile(c.image);
+    assert.equal(p.blocks, EXPECTED_BLOCKS.get(c.number), `${c.number}번 줄 수가 다르다`);
+  }
+});
+
+test("꼬리말이 없는 조판에서 지면 테두리 아래선이 이미지에 남지 않는다", async () => {
+  // 꼬리말이 있으면 칼럼 마지막 문항은 꼬리말 위에서 끊기지만, 꼬리말이 없는
+  // 조판은 지면 바닥까지 잘려 테두리 아래 가로선이 그대로 남았다(실측: 2016 해경
+  // 1차 9급 해상교통관리 5·9·16·20번).
+  const noFooter = await extractQuestionsFromPdf(
+    await buildFixturePdf({ frame: true, footer: false }),
+    { scale: SCALE, expectedCount: FIXTURE_QUESTION_COUNT },
+  );
+  assert.equal(noFooter.length, FIXTURE_QUESTION_COUNT);
+  for (const c of noFooter) {
+    const p = await profile(c.image);
+    assert.equal(p.blocks, EXPECTED_BLOCKS.get(c.number), `${c.number}번에 군더더기 줄이 붙었다`);
+  }
+});
+
 test("테두리 없는 조판에서는 내용이 그대로다(대조군)", async () => {
   assert.equal(unframed.length, framed.length);
   const framedProfiles = new Map();
