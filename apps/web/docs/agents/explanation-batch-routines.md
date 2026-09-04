@@ -240,3 +240,31 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
     `npm run audit-explanation-crosstalk -- --json 보고서.json` (읽기 전용, 약 20분) 으로
     `교차 오염` 건수를 본다. 0이 아니면 `--purge` 로 지우고, 위 차단막이 `suspected_crosstalk`
     를 찍고 있는지 루틴 세션 보고에서 함께 확인한다.
+  - **루틴 프롬프트 쪽 수정 완료 (2026-09-04).** v3 루틴 2개
+    (`문항 해설 배치 처리 v3 (병렬)` / `... (역방향·병렬)`)의 프롬프트를 `update_trigger` 로
+    갱신했다(삭제·재생성 아님, 스케줄·이름 그대로). 넣은 것 셋:
+    (1) 서브에이전트가 이미지를 파일로 받을 때 **청크마다 다른 디렉터리**(`mktemp -d` 또는
+    `/tmp/<paper_id>/`)를 쓰고 **파일명에 `question_id` 를 포함**할 것, 문항 번호만으로 된
+    파일명(`16.webp`, `q16.png`) 금지, 가능하면 파일로 받지 말고 청크의 `image_urls` 를 직접
+    볼 것. (2) 청크 내용을 파일로 넘길 때 **세 에이전트가 서로 다른 파일**을 받는지 확인할 것.
+    (3) `save-explanations.mjs` 출력의 `suspected_crosstalk` 가 비어 있지 않으면 세션 종료
+    보고에 그대로 적을 것.
+  - **주의: 루틴이 쓰는 스크립트 원본은 master 가 아니라 루틴 프롬프트에 내장된 코드 블록이다.**
+    위 "원본은 이제 레포 master 커밋" 항목은 v2 시절 이야기이고, v3 프롬프트는 세션마다
+    `next-explanation-chunk.mjs` 와 `save-explanations.mjs` 를 **프롬프트에 박힌 블록으로
+    덮어쓴다**(그 환경은 git 레포가 아니라 fetch 가 안 된다). 그래서 master 에만 머지한 변경은
+    루틴에 반영되지 않는다 — 실제로 저장 단계 차단막을 master 에 넣은 뒤에도 루틴은 차단막
+    없는 구버전을 계속 썼다. 같은 날 두 루틴의 `save-explanations.mjs` 블록을 master 판으로
+    교체해서 해소했다. 스크립트를 고칠 일이 있으면 **master 와 루틴 프롬프트 두 곳을 함께**
+    고칠 것. 참고로 `next-explanation-chunk.mjs` 는 반대로 프롬프트 쪽이 최신이다(2026-08-25
+    RPC 경로가 master 사본에는 없다).
+  - **프롬프트에 코드를 실을 때 NUL 이스케이프(백슬래시 u0000)를 쓰지 말 것.** master 의
+    `save-explanations.mjs` 는 개념 별칭 맵 키를 NUL 구분자로 만드는데, 그 소스를
+    `update_trigger` 로 보내면 전송 계층이 이 이스케이프를 **실제 NUL 바이트로 해석해** 저장한다
+    (2026-09-04 실측 — 저장된 프롬프트를 다시 받아 확인). 그대로 두면 루틴이 Write 하는 소스에
+    raw NUL 이 박힌다. 그래서 루틴에 실린 사본은 예전 프롬프트 사본이 쓰던
+    `subjectScopedKey`(JSON 배열 키)로 되돌려 두었다 — 그 함수 주석이 원래 이 문제를 두고 쓴
+    것이다. 키는 함수 안에서만 쓰는 메모리 상의 값이라 동작은 master 와 같고,
+    `normalizeConceptAlias` 는 글자 단위로 동일하게 유지했다. 루틴 프롬프트를 갱신한 뒤에는
+    저장된 프롬프트를 다시 받아 원본과 diff 하고, 내장 블록을 파일로 떼어 `node --check` 로
+    문법을 확인할 것.
