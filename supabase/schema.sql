@@ -832,7 +832,8 @@ create table if not exists ai_diagnosis_batches (
   user_id uuid not null references auth.users(id) on delete cascade,
   -- Anthropic Message Batch id(msgbatch_...). 한 배치에 여러 사용자가 실린다.
   batch_id text not null,
-  -- 배치 안에서 이 요청을 가리키는 키. 진단 행 id 를 그대로 쓴다.
+  -- 이 진단이 배치 안에서 쓰는 custom_id 의 접두(진단 행 id). 요청은 개념 하나당 하나씩
+  -- 실리고 각 요청의 custom_id 는 `<이 값>_<개념 순번>` 이다(lib/diagnosis-batch-merge.ts).
   custom_id text not null,
   model text not null,
   context jsonb not null,

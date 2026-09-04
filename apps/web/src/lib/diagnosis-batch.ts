@@ -2,8 +2,14 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DIAGNOSIS_CYCLE_DAYS } from "@/lib/ai-diagnosis";
-import { DIAGNOSIS_MODEL, parseCoachingItems } from "@/lib/diagnosis-coach";
+import { DIAGNOSIS_MODEL } from "@/lib/diagnosis-coach";
 import { planCoaching, saveDiagnosisReport } from "@/lib/diagnosis-generate";
+import {
+  batchCustomId,
+  mergeConceptResults,
+  parseBatchCustomId,
+  type ConceptResult,
+} from "@/lib/diagnosis-batch-merge";
 import type { AiDiagnosisReport, DiagnosisConceptSelection } from "@/lib/ai-diagnosis";
 
 // 맞춤 극복법을 Message Batches API 로 만든다.
@@ -13,21 +19,30 @@ import type { AiDiagnosisReport, DiagnosisConceptSelection } from "@/lib/ai-diag
 // 여러 사용자의 요청을 한 번에 밀어 넣을 수 있다. 즉시 생성은 눌린 그 요청 안에서
 // 서버리스 함수가 모델 응답을 기다려야 해서 타임아웃과도 싸워야 했다.
 //
+// 배치 안에서는 **개념 하나가 요청 하나**다(planCoaching 이 그렇게 갈라 준다). 진단 하나를
+// 요청 하나(개념 10개)로 내던 때는 모델이 개념을 앞에서부터 차례로 쓰느라 생성 시간이
+// 개념 수에 정비례했고, 그게 "10분"의 대부분이었다. 배치는 요청들을 동시에 처리하므로
+// 개념별로 갈라 내면 전체가 가장 오래 걸리는 개념 하나 시간으로 줄고, 프롬프트·모델·
+// effort 는 그대로라 극복법의 품질은 같다. 한 진단의 요청들은 같은 배치에 함께 실린다 —
+// 배치는 끝나야 결과를 읽을 수 있으니, 진단 하나의 결과는 여전히 한 번에 온다.
+//
 // 흐름은 두 동작뿐이다:
 //   제출(submitPendingDiagnoses) — report 가 비어 있는 진단 요청을 모아 배치 1건으로 낸다.
-//   수거(collectDiagnosisBatches) — 끝난 배치의 결과를 읽어 report 를 채운다.
+//   수거(collectDiagnosisBatches) — 끝난 배치의 결과를 진단별로 합쳐 report 를 채운다.
 // 둘 다 여러 번 불려도 안전해야 한다(크론·페이지 진입·버튼이 각각 부른다). 진행 중인
 // 배치가 있는 진단은 제출에서 제외되고, 이미 채워진 report 는 수거가 덮어쓰지 않는다.
 //
-// 상태는 ai_diagnosis_batches 에 남는다(스키마: supabase/schema.sql). 제출 시점의 무AI
+// 상태는 ai_diagnosis_batches 에 남는다(스키마: supabase/schema.sql) — 진단 하나에 행
+// 하나이고, 그 진단의 요청들은 custom_id 접두(진단 행 id)로 묶인다. 제출 시점의 무AI
 // 리포트(요약·개념 목록·과목 추세)와 "무엇을 물어봤는지"(대상 개념 목록)를 그 행에
 // 저장해 두는 이유는, 수거가 몇 시간 뒤에 일어나기 때문이다 — 그 사이에 사용자가 문제를
 // 더 풀면 다시 집계한 결과는 프롬프트와 어긋난다. 질문과 답이 같은 데이터를 보게 하려면
 // 질문할 때의 스냅샷을 그대로 들고 있어야 한다.
 
-// 한 번에 배치로 밀어 넣을 진단 요청 수. 사용자당 입력이 10K 토큰 남짓이라 이 값이 곧
-// 배치 1건의 크기다(요청 10만 건·256MB 가 API 상한이므로 한참 아래다). 크론이 매시간
-// 도는 것을 전제로, 한 번에 처리하지 못한 요청은 다음 시간에 이어서 나간다.
+// 한 번에 배치로 밀어 넣을 진단 요청 수. 진단 하나가 개념 수(최대 COACH_MAX_TOTAL)만큼의
+// 요청으로 갈라지므로 배치 1건은 최대 그 곱(250건 남짓)이다 — 요청 10만 건·256MB 가 API
+// 상한이므로 한참 아래다. 크론이 매시간 도는 것을 전제로, 한 번에 처리하지 못한 요청은
+// 다음 시간에 이어서 나간다.
 const SUBMIT_BATCH_SIZE = 25;
 
 // 같은 진단 요청에 대해 배치를 다시 낼 수 있는 횟수. 만들 게 없어 실패하는 요청
@@ -161,9 +176,12 @@ export async function submitPendingDiagnoses(
       continue;
     }
 
-    // custom_id 는 배치 안에서만 유일하면 된다. 진단 행 id 를 그대로 쓰면 결과를
-    // 되돌릴 때 매칭 표가 따로 필요 없다.
-    requests.push({ custom_id: row.id, params: plan.params });
+    // custom_id 는 배치 안에서만 유일하면 된다. 진단 행 id 를 접두로 쓰고 개념 순번을
+    // 붙이면(diagnosis-batch-merge.ts) 결과를 되돌릴 때 매칭 표가 따로 필요 없다 —
+    // 접두로 진단 행을, 순번으로 그 진단의 몇 번째 개념인지를 찾는다.
+    for (const r of plan.requests) {
+      requests.push({ custom_id: batchCustomId(row.id, r.index), params: r.params });
+    }
     items.push({
       diagnosis_id: row.id,
       user_id: row.user_id,
@@ -180,7 +198,7 @@ export async function submitPendingDiagnoses(
     });
   }
 
-  if (requests.length === 0) return { submitted: 0, skipped, error: lastError };
+  if (items.length === 0) return { submitted: 0, skipped, error: lastError };
 
   let batch: Anthropic.Messages.Batches.MessageBatch;
   try {
@@ -208,7 +226,8 @@ export async function submitPendingDiagnoses(
     return { submitted: 0, skipped, batchId: batch.id, error: "진단 요청 기록에 실패했어요." };
   }
 
-  return { submitted: requests.length, skipped, batchId: batch.id, error: lastError };
+  // submitted 는 진단(사용자) 수다. 요청 수(개념 수의 합)가 아니다.
+  return { submitted: items.length, skipped, batchId: batch.id, error: lastError };
 }
 
 export type CollectResult = {
@@ -276,8 +295,12 @@ export async function collectDiagnosisBatches(
       continue;
     }
 
-    const byCustomId = new Map(group.map((g) => [g.custom_id, g]));
-    const seen = new Set<string>();
+    // 결과의 custom_id 는 `<진단 행 id>_<개념 순번>` 이다(구형 배치는 진단 행 id 그대로).
+    // 접두로 진단 행을 찾고, 그 진단의 개념별 결과를 모아 뒀다가 결과 파일을 다 읽은 뒤
+    // 진단 단위로 합쳐 저장한다 — 한 진단의 요청들은 같은 배치에 있으므로 이 한 바퀴에
+    // 전부 들어 있다.
+    const byPrefix = new Map(group.map((g) => [g.custom_id, g]));
+    const gathered = new Map<string, ConceptResult[]>();
     let results;
     try {
       results = await anthropic.messages.batches.results(batchId);
@@ -287,24 +310,37 @@ export async function collectDiagnosisBatches(
     }
 
     for await (const result of results) {
-      const item = byCustomId.get(result.custom_id);
+      const { prefix, index } = parseBatchCustomId(result.custom_id);
+      const item = byPrefix.get(prefix);
       if (!item) continue;
-      seen.add(result.custom_id);
-
+      const list = gathered.get(item.id) ?? [];
+      gathered.set(item.id, list);
       if (result.result.type !== "succeeded") {
-        // errored / canceled / expired. 이유를 남겨 두면 나중에 "왜 안 나왔지"를
-        // 로그를 뒤지지 않고 이 테이블에서 볼 수 있다.
-        await closeItems([item.id], "failed", `배치 결과가 ${result.result.type} 상태예요.`);
+        // errored / canceled / expired. 사유는 합칠 때 개념 이름과 함께 error 에 남는다.
+        list.push({ index, status: result.result.type, text: "" });
+        continue;
+      }
+      list.push({
+        index,
+        status: "succeeded",
+        text: result.result.message.content.map((b) => (b.type === "text" ? b.text : "")).join(""),
+      });
+    }
+
+    for (const item of group) {
+      const conceptResults = gathered.get(item.id);
+      if (!conceptResults) {
+        // 결과 파일에 아예 없던 진단(있어서는 안 되지만, 있으면 영원히 pending 이 된다).
+        await closeItems([item.id], "failed", "배치 결과에 이 요청이 없어요.");
         out.failed++;
         continue;
       }
 
-      const text = result.result.message.content
-        .map((b) => (b.type === "text" ? b.text : ""))
-        .join("");
-      const coaching = parseCoachingItems(text, item.context.targets);
+      const { coaching, failures } = mergeConceptResults(conceptResults, item.context.targets);
       if (coaching.length === 0) {
-        await closeItems([item.id], "failed", "모델이 극복법을 만들지 못했어요.");
+        // 개념이 하나도 안 나왔을 때만 실패다. 이유를 남겨 두면 나중에 "왜 안 나왔지"를
+        // 로그를 뒤지지 않고 이 테이블에서 볼 수 있다.
+        await closeItems([item.id], "failed", failures.join(" / ") || "모델이 극복법을 만들지 못했어요.");
         out.failed++;
         continue;
       }
@@ -316,15 +352,10 @@ export async function collectDiagnosisBatches(
         out.pending++;
         continue;
       }
-      await closeItems([item.id], "ready", null);
+      // 일부 개념이 빠진 채 저장됐으면 그 사실을 ready 행의 error 에 남긴다 — 사용자가
+      // "고른 건 8개인데 6개만 왔다"고 물었을 때 여기서 바로 답이 나온다.
+      await closeItems([item.id], "ready", failures.length > 0 ? failures.join(" / ") : null);
       out.ready++;
-    }
-
-    // 결과 파일에 아예 없던 요청(있어서는 안 되지만, 있으면 영원히 pending 이 된다).
-    const missing = group.filter((g) => !seen.has(g.custom_id)).map((g) => g.id);
-    if (missing.length > 0) {
-      await closeItems(missing, "failed", "배치 결과에 이 요청이 없어요.");
-      out.failed += missing.length;
     }
   }
 
