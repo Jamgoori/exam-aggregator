@@ -263,7 +263,7 @@ export async function fetchQuestionMedia(
 // service role로만 읽는다 — 반드시 "본인 응시 기록이 있는 문제지"로 좁힌 뒤 호출할 것.
 // (오답노트는 이미 응시를 마친 문제지만 다루고, 정답지 PDF도 공개 다운로드라
 // 응시자 본인에게 문항 정답을 보여주는 건 새로운 노출이 아니다.)
-async function fetchCorrectAnswers(
+export async function fetchCorrectAnswers(
   paperIds: string[],
 ): Promise<Map<string, number[]>> {
   const admin = createAdminClient();
@@ -463,7 +463,7 @@ async function fetchQuestionKeys(
 // (/papers/[id]/explanations)은 실패를 빈 결과로 뭉개면 "해설이 없다"고 단언해
 // 버리기 때문이다. 오답노트처럼 해설이 곁다리인 화면은 기본값(false)으로 두어,
 // 해설 조회가 실패해도 본문인 "내가 틀린 문항"은 살려서 보여준다.
-async function fetchExplanations(
+export async function fetchExplanations(
   paperIds: string[],
   wanted?: Map<string, Set<number>>,
   required = false,
@@ -516,7 +516,7 @@ async function fetchExplanations(
 // 하면 개발자도구로 그대로 읽힌다 — 무료 회원에게는 해설 본문이 아예 서버를 떠나지
 // 않아야 한다. 이 조회는 본문(jsonb)을 빼고 question_id만 받으므로
 // fetchExplanations 보다 훨씬 가볍다.
-async function fetchExplainedNumbers(
+export async function fetchExplainedNumbers(
   paperIds: string[],
   wanted?: Map<string, Set<number>>,
 ): Promise<Map<string, Set<number>>> {
@@ -725,7 +725,7 @@ export async function fetchQuestionStatusMap(
 }
 
 // 문항 메모(본인 것만, RLS). `${paperId}#${qnum}` → 메모.
-async function fetchMemos(
+export async function fetchMemos(
   supabase: Supabase,
   userId: string,
   paperIds: string[],
@@ -797,6 +797,99 @@ async function fetchWrongRates(paperIds: string[]): Promise<Map<string, number>>
   return out;
 }
 
+// 이 과목 문제지에 붙은, 한 번이라도 틀린 문항 상태 행(user_question_status)을 문제지
+// 정보와 함께 받는다. 과목 제한은 exam_papers 임베드 FK 로 건다(RLS: 본인 행만).
+type SubjectStatusWrong = {
+  paper: SubjectAttemptPaper;
+  questionNumber: number;
+  wrongCount: number;
+  lastAnsweredAt: string;
+};
+
+async function fetchSubjectStatusWrongs(
+  supabase: Supabase,
+  userId: string,
+  subjectId: string,
+): Promise<SubjectStatusWrong[]> {
+  type Row = {
+    paper_id: string;
+    question_number: number;
+    wrong_count: number | null;
+    last_answered_at: string;
+    exam_papers: SubjectAttemptPaper | null;
+  };
+  const out: SubjectStatusWrong[] = [];
+  let from = 0;
+  while (true) {
+    const { data } = await supabase
+      .from("user_question_status")
+      .select(
+        "paper_id, question_number, wrong_count, last_answered_at, exam_papers!inner(id, title, level, choice_count, subject_id, exam_type_id, year, round, track, created_at)",
+      )
+      .eq("user_id", userId)
+      .gt("wrong_count", 0)
+      .eq("exam_papers.subject_id", subjectId)
+      // range 로 이어받을 때 페이지 경계가 흔들리지 않게 키 순으로 고정한다.
+      .order("paper_id", { ascending: true })
+      .order("question_number", { ascending: true })
+      .range(from, from + BATCH_SIZE - 1);
+    const rows = (data ?? []) as unknown as Row[];
+    for (const r of rows) {
+      if (!r.exam_papers) continue;
+      out.push({
+        paper: r.exam_papers,
+        questionNumber: r.question_number,
+        wrongCount: r.wrong_count ?? 1,
+        lastAnsweredAt: r.last_answered_at,
+      });
+    }
+    if (rows.length < BATCH_SIZE) break;
+    from += BATCH_SIZE;
+  }
+  return out;
+}
+
+// 섞어풀기·복습 세션에서 마지막으로 틀렸을 때 고른 답. review_session_items 는 RLS
+// 정책이 없어 service_role 로 읽고, 세션의 user_id 로 본인 것만 좁힌다.
+async function fetchLastReviewChoices(
+  userId: string,
+  keys: { repId: string; questionNumber: number }[],
+): Promise<Map<string, number | null>> {
+  const out = new Map<string, number | null>();
+  if (keys.length === 0) return out;
+  const admin = createAdminClient();
+  const wanted = new Set(keys.map((k) => `${k.repId}#${k.questionNumber}`));
+  const paperIds = [...new Set(keys.map((k) => k.repId))];
+  type Row = {
+    paper_id: string;
+    question_number: number;
+    selected_choice: number | null;
+    review_sessions: { user_id: string; submitted_at: string | null } | null;
+  };
+  const latest = new Map<string, string>();
+  await inParallel(chunk(paperIds, 100), async (ids) => {
+    const { data } = await admin
+      .from("review_session_items")
+      .select(
+        "paper_id, question_number, selected_choice, review_sessions!inner(user_id, submitted_at)",
+      )
+      .eq("review_sessions.user_id", userId)
+      .eq("is_correct", false)
+      .in("paper_id", ids);
+    for (const r of (data ?? []) as unknown as Row[]) {
+      const key = `${r.paper_id}#${r.question_number}`;
+      if (!wanted.has(key)) continue;
+      const at = r.review_sessions?.submitted_at ?? "";
+      const prev = latest.get(key);
+      if (prev === undefined || at > prev) {
+        latest.set(key, at);
+        out.set(key, r.selected_choice);
+      }
+    }
+  });
+  return out;
+}
+
 // includeExplanations=false 면 해설 본문을 조회하지 않고 "해설이 있는 문항"만 표시해
 // 준다(무료 회원). 오답노트 열람 자체는 무료라 목록·이미지·정답은 그대로 내려가고,
 // 해설만 잠금 자리로 바뀐다 — 무료 해설 한도(FREE_EXPLANATION_DAILY_PAPERS)가 이
@@ -825,15 +918,26 @@ export async function getSubjectWrongNoteQuestions(
   const attempts = ((attemptRows ?? []) as unknown as SubjectAttemptRow[]).filter(
     (a) => a.exam_papers,
   );
-  if (attempts.length === 0) {
+
+  // CBT 응시 없이 채점된 오답 — 기출 섞어풀기(과목 기출 전체에서 뽑아 푼다)와 진단의
+  // "같은개념 기출"이 여기 해당한다. 응시(cbt_attempts)에는 없고 통합 상태
+  // (user_question_status)에만 있어, 응시만 훑으면 그 오답이 이 목록에서 통째로 빠진다.
+  // 문제지의 과목으로 좁혀 이 과목 것만 받는다.
+  const extraStatus = await fetchSubjectStatusWrongs(supabase, userId, subject.id);
+
+  if (attempts.length === 0 && extraStatus.length === 0) {
     return { subject, questions: [], unresolvedCount: 0, resolvedCount: 0 };
   }
 
-  // 응시에 등장한 문제지들(중복 제거) — dedup 대표 계산 입력.
+  // 응시에 등장한 문제지들(중복 제거) — dedup 대표 계산 입력. 상태에만 있는 오답의
+  // 문제지도 함께 넣어야 대표·제목·마크 정규화가 같은 기준으로 돈다.
   const distinctPapers = new Map<string, SubjectAttemptPaper>();
   for (const a of attempts) {
     const p = a.exam_papers!;
     if (!distinctPapers.has(p.id)) distinctPapers.set(p.id, p);
+  }
+  for (const r of extraStatus) {
+    if (!distinctPapers.has(r.paper.id)) distinctPapers.set(r.paper.id, r.paper);
   }
   const paperList = [...distinctPapers.values()];
 
@@ -918,6 +1022,31 @@ export async function getSubjectWrongNoteQuestions(
           lastWrongAt: a.created_at,
         });
       }
+    }
+  }
+
+  // 상태에만 있는 오답을 보탠다. 응시로 이미 잡힌 문항은 응시 쪽 값(그때 고른 답)을
+  // 그대로 두고, 없는 문항만 추가한다. 고른 답은 섞어풀기 세션 기록에서 되짚는다.
+  const extraKeys: { repId: string; questionNumber: number }[] = [];
+  for (const r of extraStatus) {
+    const rep = repId(r.paper.id);
+    const key = `${rep}#${r.questionNumber}`;
+    if (byRepQ.has(key)) continue;
+    byRepQ.set(key, {
+      repId: rep,
+      questionNumber: r.questionNumber,
+      wrongCount: r.wrongCount,
+      selectedChoice: null,
+      lastWrongAt: r.lastAnsweredAt,
+    });
+    extraKeys.push({ repId: rep, questionNumber: r.questionNumber });
+  }
+  if (extraKeys.length > 0) {
+    const chosen = await fetchLastReviewChoices(userId, extraKeys);
+    for (const k of extraKeys) {
+      const agg = byRepQ.get(`${k.repId}#${k.questionNumber}`);
+      const choice = chosen.get(`${k.repId}#${k.questionNumber}`);
+      if (agg && choice !== undefined) agg.selectedChoice = choice;
     }
   }
 

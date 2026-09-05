@@ -695,7 +695,8 @@ drop policy if exists "insert own cbt attempt answers" on cbt_attempt_answers;
 -- 같은 시험지)는 읽는 쪽(dedup-papers 대표)에서 합친다.
 --
 -- wrong_count: 틀린 채로 제출된 횟수(제출 1회당 최대 +1). last_is_correct/
--- last_answered_at: 가장 최근 제출 기준. source: 'cbt' | 'review'(섞어풀기).
+-- last_answered_at: 가장 최근 제출 기준. source: 'cbt' | 'review'(오답 섞어풀기·복습)
+-- | 'mix'(기출 섞어풀기 — 과목 기출 전체에서 뽑아 푼 채점).
 create table if not exists user_question_status (
   user_id uuid not null references auth.users(id) on delete cascade,
   paper_id uuid not null references exam_papers(id) on delete cascade,
@@ -734,8 +735,10 @@ create table if not exists review_sessions (
   user_id uuid not null references auth.users(id) on delete cascade,
   -- null이면 전체 과목 범위. 과목이 지워져도 세션 기록은 남기려 set null.
   subject_id uuid references subjects(id) on delete set null,
-  -- 'subject' | 'all' | 'due'(복습=간격 반복 세션). 'due'는 "이어서 풀기"가 섞어풀기
-  -- 세션을 잘못 집어오지 않게 구분하는 용도다.
+  -- 'subject' | 'all' | 'due'(복습=간격 반복 세션) | 'mix'(기출 섞어풀기). 'due'는
+  -- "이어서 풀기"가 섞어풀기 세션을 잘못 집어오지 않게 구분하는 용도다. 'mix'는 후보가
+  -- 내 오답이 아니라 과목 기출 전체(시행처 무관)인 세션으로, subject_id 가 항상 있고
+  -- 오답노트 과목 페이지에 "9월 5일 섞어풀기" 카드로 남는다(apps/web/src/lib/mix-practice.ts).
   scope text not null default 'subject',
   only_unresolved boolean not null default true,
   total_questions int not null default 0,
@@ -1690,8 +1693,8 @@ create table if not exists srs_reviews (
   question_number int not null,
   reviewed_at timestamptz not null default now(),
   is_correct boolean not null,
-  -- 'cbt'(문제지 응시) | 'review'(섞어풀기·복습 세션). 예정일 밖 채점이 어디서
-  -- 얼마나 들어오는지 보는 축이다.
+  -- 'cbt'(문제지 응시) | 'review'(오답 섞어풀기·복습 세션) | 'mix'(기출 섞어풀기).
+  -- 예정일 밖 채점이 어디서 얼마나 들어오는지 보는 축이다.
   source text not null default 'cbt',
   -- 채점 직전 상태 = 이 복습이 검증한 대상.
   prev_interval_days int not null,

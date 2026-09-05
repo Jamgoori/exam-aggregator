@@ -31,10 +31,13 @@ export default async function ReviewSessionPage({
   if (!view) notFound();
 
   // slug "all" = 전 과목 섞어풀기/복습(특정 과목 페이지가 없음). 돌아가기는 허브로.
+  // 기출 섞어풀기(scope 'mix')는 기록 카드가 붙는 "문제지별" 탭으로 돌아간다.
   const backHref =
     slug === "all"
       ? "/mypage?tab=wrong-notes"
-      : `/mypage/wrong-notes/${slug}?view=questions`;
+      : view.scope === "mix"
+        ? `/mypage/wrong-notes/${slug}`
+        : `/mypage/wrong-notes/${slug}?view=questions`;
 
   // 풀이 화면은 언제나 첫 문항부터 보여준다. 그 이미지는 <head>의 preload로 걸어
   // HTML을 읽는 순간 받기 시작하게 한다(JS 번들을 받아 하이드레이션이 끝날 때까지

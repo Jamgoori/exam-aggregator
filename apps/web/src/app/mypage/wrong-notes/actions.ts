@@ -30,6 +30,11 @@ import {
   type SpreadBacklogResult,
 } from "@/lib/review-preferences";
 import { isPremium } from "@/lib/membership";
+import {
+  createMixSessionForUser,
+  createRetryFromMixSession,
+  type CreateMixSessionResult,
+} from "@/lib/mix-practice";
 import type { SessionSchedule, ReviewPickStrategy } from "@gongmoa/core";
 
 export type CreateReviewResult = { error?: string; sessionId?: string };
@@ -435,6 +440,56 @@ export async function createReviewFromWrong(input: {
   if (owned.length === 0) return { error: "다시 풀 문항이 없어요." };
 
   return createReviewSessionFromItems(supabase, user.id, owned);
+}
+
+// 기출 섞어풀기 시작 — 한 과목의 기출 전체(시행처 무관)에서 limit 개를 뽑아 세션을
+// 만든다. 오답 섞어풀기와 같은 이유로 무료다(정답·해설을 화면에 싣지 않고, 채점 결과는
+// 본인 오답노트로만 간다). 문항 수는 서버가 다시 정리한다(clampMixLimit).
+//
+// 비로그인이면 error 대신 login 플래그를 준다 — 시작 화면은 공개 페이지(과목 목록)에서
+// 바로 열리므로, 호출부가 로그인 페이지로 보내고 돌아온 뒤 이어서 시작하게 한다.
+export type StartMixResult = CreateMixSessionResult & { login?: boolean };
+
+export async function createMixSession(input: {
+  subjectSlug: string;
+  limit?: number;
+  // 급수 필터("9급"·"7급"…, 어느 등급에도 안 묶인 것은 MIX_NO_LEVEL). 비어 있으면 전체.
+  levels?: string[];
+  // 연도 범위. 둘 다 없으면 전체 — 값 정리는 서버(normalizeYearRange)가 한다.
+  yearFrom?: number | null;
+  yearTo?: number | null;
+}): Promise<StartMixResult> {
+  const slug = String(input?.subjectSlug ?? "");
+  if (!slug) return { error: "잘못된 접근입니다." };
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요.", login: true };
+
+  // 클라이언트가 보내는 값이라 문자열만, 길이도 묶는다. 실제 존재 여부는 서버 풀로 거른다.
+  const levels = Array.isArray(input?.levels)
+    ? input.levels.filter((l): l is string => typeof l === "string" && l.length <= 20).slice(0, 10)
+    : [];
+
+  return createMixSessionForUser(supabase, user.id, {
+    subjectSlug: slug,
+    limit: Number(input?.limit),
+    levels,
+    year: { from: input?.yearFrom ?? null, to: input?.yearTo ?? null },
+  });
+}
+
+// 기출 섞어풀기 결과·기록 화면의 "틀린 문항만 다시 풀기". 문항 목록은 서버가 세션에서
+// 직접 읽으므로(소유자 확인 포함) 클라이언트가 (문제지, 문항)을 보내지 않는다.
+export async function createRetryFromMix(input: {
+  sessionId: string;
+}): Promise<CreateReviewResult> {
+  const sessionId = String(input?.sessionId ?? "");
+  if (!sessionId) return { error: "잘못된 접근입니다." };
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  return createRetryFromMixSession(supabase, user.id, sessionId);
 }
 
 export type SubmitReviewResult = { error?: string; view?: ReviewSessionView };
