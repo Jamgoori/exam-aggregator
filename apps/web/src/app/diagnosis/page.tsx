@@ -140,9 +140,8 @@ function Hero({ cta }: { cta: Cta }) {
         <span className="text-violet-600 dark:text-violet-400">틀리는 이유</span>를 봅니다
       </h1>
       <p className="max-w-md break-keep text-sm leading-7 text-zinc-600 dark:text-zinc-400">
-        최근 {DIAGNOSIS_WINDOW_DAYS}일에 틀린 문항을 개념 단위로 다시 세우고, 고른 개념마다
-        내가 고른 오답 하나하나를 짚어 &ldquo;왜 그렇게 골랐는지 · 그래서 뭘 하면 되는지&rdquo;를
-        써 드려요. 따로 입력할 건 없어요.
+        최근 {DIAGNOSIS_WINDOW_DAYS}일에 틀린 문항을 개념 단위로 다시 세우고, 오답마다 왜
+        그렇게 골랐는지와 뭘 하면 되는지를 써 드려요.
       </p>
       <Link
         href={cta.href}

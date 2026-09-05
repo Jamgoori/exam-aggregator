@@ -10,11 +10,11 @@ import {
   Check,
   ChevronRight,
   Flame,
-  Search,
-  Sparkles,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { HomePopupSlider } from "@/components/home-popup-slider";
+import { HomeSearchBox } from "@/components/home-search-box";
+import type { SuggestibleSubject } from "@/lib/subject-suggestions";
 import { getLandingData } from "@/lib/landing-data";
 import { examHref, type ExamCombo } from "@/lib/exam-index";
 import {
@@ -65,7 +65,7 @@ export const metadata: Metadata = {
 };
 
 export default async function Home() {
-  const { combos, totalCount, freeForAll } = await getLandingData();
+  const { combos, subjects, freeForAll } = await getLandingData();
 
   return (
     <div className="flex flex-col">
@@ -78,8 +78,8 @@ export default async function Home() {
       </Suspense>
 
       <TopBanner freeForAll={freeForAll} />
-      <Hero totalCount={totalCount} />
-      <PastQuestions combos={combos} totalCount={totalCount} />
+      <Hero />
+      <PastQuestions combos={combos} subjects={subjects} />
       <Diagnosis />
       <ClosingCta freeForAll={freeForAll} />
     </div>
@@ -107,44 +107,42 @@ async function HomePopup() {
 // 끝난 뒤에는 체험 기간을 말한다 — 날짜·기간은 core 상수에서 온다.
 function TopBanner({ freeForAll }: { freeForAll: boolean }) {
   return (
-    <div className="border-b border-zinc-200 bg-[#e7f2fc]/60 text-center text-xs font-medium text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+    <div className="border-b border-zinc-200 bg-[#e7f2fc]/60 text-center text-[11px] font-medium tracking-[-0.02em] text-zinc-600 sm:text-xs dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
       <Link
         href="/membership"
-        className="mx-auto flex max-w-6xl items-center justify-center gap-2 px-4 py-2 hover:text-zinc-900 dark:hover:text-zinc-200"
+        className="mx-auto flex max-w-6xl items-center justify-center gap-1.5 px-3 py-2 hover:text-zinc-900 sm:gap-2 sm:px-4 dark:hover:text-zinc-200"
       >
-        <span className="size-1.5 rounded-full" style={{ backgroundColor: ACCENT }} />
-        {freeForAll
-          ? `${FREE_UNTIL_LABEL}까지 멤버십 전 기능 무료, 로그인만 하면 돼요`
-          : `가입하면 ${TRIAL_DAYS}일 동안 멤버십 전 기능 무료`}
-        <ChevronRight size={14} aria-hidden />
+        <span
+          className="size-1.5 shrink-0 rounded-full"
+          style={{ backgroundColor: ACCENT }}
+        />
+        {/* 한 줄로 읽히는 안내 — 줄바꿈되면 띠가 두 줄이 되어 히어로를 밀어낸다. */}
+        <span className="min-w-0 truncate whitespace-nowrap">
+          {freeForAll
+            ? `${FREE_UNTIL_LABEL}까지 멤버십 전 기능 무료, 로그인만 하면 돼요`
+            : `가입하면 ${TRIAL_DAYS}일 동안 멤버십 전 기능 무료`}
+        </span>
+        <ChevronRight size={14} className="shrink-0" aria-hidden />
       </Link>
     </div>
   );
 }
 
 // ── 히어로 ───────────────────────────────────────────────────────────────────
-function Hero({ totalCount }: { totalCount: number }) {
+function Hero() {
   return (
     <section className="relative overflow-hidden border-b border-zinc-200 bg-[#e7f2fc]/45 dark:border-zinc-800 dark:bg-zinc-900/60">
-      <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-16 lg:grid-cols-[1.08fr_.92fr] lg:px-6 lg:py-24">
+      <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-8 lg:grid-cols-[1.08fr_.92fr] lg:px-6 lg:py-16">
         {/* lg 미만에서는 카드가 아래로 내려가 한 열이 되므로 글도 가운데로 모은다 —
             왼쪽 정렬 글 + 가운데 카드가 세로로 쌓이면 화면이 한쪽으로 쏠려 보인다. */}
         <div className="relative z-10 flex flex-col items-center text-center lg:items-start lg:text-left">
-          <div
-            className="mb-6 inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1.5 text-xs font-bold dark:bg-zinc-950"
-            style={{ borderColor: `${ACCENT}40`, color: ACCENT }}
-          >
-            <Sparkles size={14} aria-hidden />
-            수험생을 위한 가장 똑똑한 공부법
-          </div>
           <h1 className="max-w-xl text-balance text-4xl font-bold leading-[1.15] tracking-[-0.04em] text-zinc-900 sm:text-5xl lg:text-6xl dark:text-zinc-50">
             합격에 필요한 모든 것,
             <br />
             <span style={{ color: ACCENT }}>공모아</span>에서 시작하세요.
           </h1>
           <p className="mt-6 max-w-lg text-pretty text-base leading-7 text-zinc-600 sm:text-lg dark:text-zinc-400">
-            공무원 기출문제 {totalCount.toLocaleString("ko-KR")}건을 온라인으로 풀고 바로
-            채점하세요.
+            공무원 기출문제를 온라인으로 풀고 바로 채점하세요.
             <br />
             틀린 문제는 오답노트에 자동으로 쌓이고, AI가 왜 틀리는지 개념 단위로 진단해
             드립니다.
@@ -513,7 +511,13 @@ const FEATURED_EXAMS: { slug: string; badge: string; color: string }[] = [
   { slug: "법원직-9급", badge: "9급", color: "#92400e" },
 ];
 
-function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount: number }) {
+function PastQuestions({
+  combos,
+  subjects,
+}: {
+  combos: ExamCombo[];
+  subjects: SuggestibleSubject[];
+}) {
   const bySlug = new Map(combos.map((c) => [c.slug, c]));
   const featured = FEATURED_EXAMS.flatMap((f) => {
     const combo = bySlug.get(f.slug);
@@ -530,8 +534,7 @@ function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount
             원하는 기출문제를 찾아보세요
           </h2>
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-            국가직·지방직·경찰·소방 등 공무원 시험 기출문제 {totalCount.toLocaleString("ko-KR")}건을
-            한 곳에서
+            국가직·지방직·경찰·소방 등 공무원 시험 기출문제를 한 곳에서
           </p>
         </div>
         <Link
@@ -543,28 +546,14 @@ function PastQuestions({ combos, totalCount }: { combos: ExamCombo[]; totalCount
         </Link>
       </div>
 
-      <form
-        action="/papers"
-        method="get"
-        role="search"
-        className="mt-8 flex items-center rounded-xl border border-zinc-200 bg-white p-1.5 shadow-sm dark:border-zinc-700 dark:bg-zinc-950"
-      >
-        <Search size={18} className="ml-2.5 shrink-0 text-zinc-400" aria-hidden />
-        <input
-          type="search"
-          name="q"
-          placeholder="예: 2025 국가직 행정법, 9급 국어"
-          aria-label="기출문제 검색"
-          autoComplete="off"
-          className="min-w-0 flex-1 bg-transparent px-3 py-3 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-100"
-        />
-        <button
-          type="submit"
-          className="rounded-lg bg-[#012854] px-4 py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#0a3a72] dark:bg-[#0a7d5b] dark:hover:bg-[#096b4e]"
-        >
-          검색
-        </button>
-      </form>
+      {/* 검색창은 예전처럼 /papers 로 넘기는 GET 폼이지만, 과목명을 치는 동안에는
+          기출문제 목록의 검색창과 같은 과목 추천이 아래에 뜬다(누르면 그 과목
+          페이지로 곧장 간다). 시행처 이름은 "국가직 행정법"처럼 섞어 친 검색어에서
+          과목명만 떼어내는 데 쓴다. */}
+      <HomeSearchBox
+        subjects={subjects}
+        examTypeNames={[...new Set(combos.map((c) => c.examTypeName))]}
+      />
 
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {featured.map(({ slug, badge, color, combo: c }) => (
@@ -620,7 +609,7 @@ function Diagnosis() {
           <p className="text-sm font-bold" style={{ color: ACCENT }}>
             AI WEAKNESS DIAGNOSIS
           </p>
-          <h2 className="mt-3 max-w-lg text-3xl font-bold leading-tight tracking-tight sm:text-4xl">
+          <h2 className="mt-3 max-w-lg text-[1.625rem] font-bold leading-tight tracking-tight sm:text-4xl">
             열심히만 하지 마세요.
             <br />
             약점을 알면 합격이 빨라집니다.

@@ -26,6 +26,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | 개념 사전 정리 (`keyword_title` 정본화, `concepts`/`concept_aliases`, 약점 진단 축, 재분류 배치 `next-concept-chunk.mjs`/`save-concepts.mjs`) | `docs/agents/concept-dictionary.md` |
 | 해외 IP 차단 (`geo-block.ts`, `proxy.ts`, `GEO_BLOCK*` 환경변수, 크롤러 예외) | `docs/agents/geo-block.md` |
 | 과목명 표기 (시행처마다 다른 과목명, `subject-label.ts`, `SUBJECT_ALIASES`, 새 과목 행 추가) | `docs/agents/subject-names.md` |
+| 자유게시판 본문(HTML)·이미지 업로드·알림 (`rich-text.ts` 새니타이저, `board/actions.ts`, `notifications`, `avatars`/`board-images` 버킷) | `docs/agents/board-rich-text.md` |
 
 # 금지선 (문서 안 읽었어도 이것만은 절대)
 
@@ -85,6 +86,16 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   사전 복제와 `concept_id` 재발급이 따라온다. 표시 이름만
   `packages/core/src/subject-label.ts` 에서 되돌린다. `exam_papers.title` 을 UPDATE
   로 고치지 말 것 (업로드 시점 기록).
+- **자유게시판 본문**: 클라이언트가 보낸 HTML 을 `board_posts.content_html` 에 그대로
+  넣지 말 것 — 반드시 `sanitizeRichText`(packages/core/src/rich-text.ts)를 통과시킨
+  결과만 저장한다(순서도 새니타이즈 → 검증 → 저장). 화면에서
+  `dangerouslySetInnerHTML` 을 쓰는 곳은 `components/rich-text-content.tsx` 하나로
+  유지할 것. 새니타이저의 허용 목록(태그·속성·style 값)을 넓히는 것은 기능 추가가
+  아니라 공격면 확대다 — 테스트를 함께 넣지 않고 넓히지 말 것.
+  `avatars`·`board-images` 버킷에 쓰기 정책을 열지 말 것 (업로드는 서버 액션이
+  리사이즈·형식 변환을 강제하는데, 직접 올릴 수 있으면 그 강제가 사라진다).
+  알림 종류는 `packages/core/src/notifications.ts` 와 DB 의
+  `notifications_type_check` 두 곳에 있다 — 반드시 함께 고칠 것.
 - **정답 등록**: `question_count`와 길이가 다른 정답 배열을 덮어쓰지 말 것.
   공통과목이라고 정답을 다른 직류(track) 문제지에 수동 복사하지 말 것 (법원직
   서기보는 국어·한국사 15문항/영어 20문항 별도 문제지 — 실측 사고 있음).

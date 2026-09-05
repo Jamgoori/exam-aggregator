@@ -3,6 +3,7 @@ import { cacheLife, cacheTag } from "next/cache";
 import { isFreeForAll } from "@gongmoa/core";
 import { getExamIndex } from "@/lib/exam-index";
 import { getHomeStats } from "@/lib/home-stats";
+import { getSubjectIndex } from "@/lib/subject-index";
 
 // 홈(랜딩)이 정적 셸에 그대로 구울 수 있는 값들.
 //
@@ -19,10 +20,8 @@ export async function getLandingData() {
   cacheLife({ revalidate: 3600 });
   cacheTag("home-data");
 
-  const [{ combos, totalCount }, stats] = await Promise.all([
-    getExamIndex(),
-    getHomeStats(),
-  ]);
+  const [{ combos, totalCount }, stats, { entries: subjectEntries }] =
+    await Promise.all([getExamIndex(), getHomeStats(), getSubjectIndex()]);
   // 시험별 최신 연도 중 가장 큰 값 = 사이트에 올라온 가장 최근 시험 연도.
   const latestYear = combos.reduce<number | null>(
     (max, c) => (c.years[0] != null && (max == null || c.years[0] > max) ? c.years[0] : max),
@@ -31,6 +30,9 @@ export async function getLandingData() {
   return {
     combos,
     totalCount,
+    // 홈 검색창의 과목 추천에 쓸 목록. 이름·주소만 있으면 되고, 자료가 없는 과목은
+    // 애초에 인덱스에 없다(빈 과목을 추천하면 헛걸음이 된다).
+    subjects: subjectEntries.map(({ slug, name }) => ({ slug, name })),
     latestYear,
     totalDownloads: stats.totalDownloads ?? 0,
     totalAttempts: stats.totalAttempts ?? 0,

@@ -228,9 +228,13 @@ export function ExamBrowser({
   const [bookmarkedSubjectSet, setBookmarkedSubjectSet] = useState(
     () => new Set(bookmarkedSubjectIds),
   );
-  useEffect(() => {
+  // 서버 목록이 바뀌면 렌더 도중에 맞춘다 — effect 로 미루면 한 프레임 동안 옛
+  // 값이 보이고, 린트(react-hooks/set-state-in-effect)도 이 쪽을 권한다.
+  const [syncedSubjectIds, setSyncedSubjectIds] = useState(bookmarkedSubjectIds);
+  if (syncedSubjectIds !== bookmarkedSubjectIds) {
+    setSyncedSubjectIds(bookmarkedSubjectIds);
     setBookmarkedSubjectSet(new Set(bookmarkedSubjectIds));
-  }, [bookmarkedSubjectIds]);
+  }
   function handleSubjectBookmarkToggled(subjectId: string, bookmarked: boolean) {
     setBookmarkedSubjectSet((prev) => {
       const next = new Set(prev);

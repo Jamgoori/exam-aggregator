@@ -6,7 +6,8 @@ import { usePathname } from "next/navigation";
 import { ChevronDown, ShieldCheck } from "lucide-react";
 import { signOutUser } from "@/app/actions";
 import { SignOutButton } from "@/components/sign-out-button";
-import { ACCOUNT_NAV, avatarInitial } from "@/components/site-nav-items";
+import { ACCOUNT_NAV } from "@/components/site-nav-items";
+import { avatarInitial } from "@gongmoa/core";
 
 // 데스크톱 헤더 오른쪽의 계정 메뉴.
 //
@@ -20,10 +21,12 @@ import { ACCOUNT_NAV, avatarInitial } from "@/components/site-nav-items";
 // 거짓 약속을 하느니 aria-expanded/aria-controls 로 "열고 닫는 패널"이라고만 알린다.
 export function UserMenu({
   nickname,
+  avatarUrl = null,
   isAdmin = false,
   isPremium = false,
 }: {
   nickname: string;
+  avatarUrl?: string | null;
   isAdmin?: boolean;
   isPremium?: boolean;
 }) {
@@ -73,7 +76,7 @@ export function UserMenu({
             : "border-zinc-200 hover:border-blue-300 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:border-blue-800 dark:hover:bg-zinc-800/60"
         }`}
       >
-        <Avatar nickname={nickname} />
+        <Avatar nickname={nickname} avatarUrl={avatarUrl} />
         {/* 태블릿 폭(md)에서는 메뉴 5개까지 한 줄에 들어가느라 남는 폭이 없다.
             닉네임은 lg부터 붙이고, 그 아래에서는 아바타만으로 계정 버튼임을 알린다
             (버튼 자체에 "○○님 계정 메뉴" aria-label이 붙어 있다). */}
@@ -94,7 +97,7 @@ export function UserMenu({
           className="animate-modal-panel-in absolute right-0 top-full z-50 mt-2 w-60 origin-top-right overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xl shadow-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/40"
         >
           <div className="flex items-center gap-2.5 border-b border-zinc-100 bg-gradient-to-b from-blue-50/70 to-transparent px-3.5 py-3 dark:border-zinc-800 dark:from-blue-950/25">
-            <Avatar nickname={nickname} size="lg" />
+            <Avatar nickname={nickname} avatarUrl={avatarUrl} size="lg" />
             <div className="min-w-0">
               <p className="flex items-center gap-1.5 truncate text-sm font-bold">
                 {nickname}님
@@ -173,21 +176,48 @@ export function MembershipBadge() {
   );
 }
 
-// 프로필 사진을 받지 않는 서비스라 닉네임 첫 글자로 대신한다. 회색 원 하나보다
-// 이쪽이 "내 계정"으로 훨씬 빨리 읽힌다.
+// 계정을 나타내는 원형 아바타. 프로필 사진이 있으면 그것을, 없으면 닉네임 첫 글자를
+// 그린다 — 사진을 올린 계정이 소수라 "없을 때"가 예외가 아니라 기본값이다.
+//
+// next/image 대신 <img> 를 쓰는 이유: 이미지는 이미 서버에서 256px 정사각 webp 로
+// 구워 올린 것이라(actions.ts 의 uploadAvatar) 최적화기가 더 해줄 일이 없고,
+// 스토리지 호스트는 환경변수라 remotePatterns 에 못 박아둘 수 없다.
 export function Avatar({
   nickname,
+  avatarUrl = null,
   size = "md",
 }: {
   nickname: string;
-  size?: "md" | "lg";
+  avatarUrl?: string | null;
+  size?: "sm" | "md" | "lg" | "xl";
 }) {
+  const box =
+    size === "xl"
+      ? "h-20 w-20 text-2xl"
+      : size === "lg"
+        ? "h-9 w-9 text-sm"
+        : size === "sm"
+          ? "h-6 w-6 text-[10px]"
+          : "h-7 w-7 text-xs";
+
+  if (avatarUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={avatarUrl}
+        alt=""
+        aria-hidden
+        loading="lazy"
+        decoding="async"
+        className={`shrink-0 rounded-full bg-zinc-100 object-cover ring-1 ring-zinc-900/5 dark:bg-zinc-800 dark:ring-white/10 ${box}`}
+      />
+    );
+  }
+
   return (
     <span
       aria-hidden
-      className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 font-bold text-white ${
-        size === "lg" ? "h-9 w-9 text-sm" : "h-7 w-7 text-xs"
-      }`}
+      className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-blue-600 font-bold text-white ${box}`}
     >
       {avatarInitial(nickname)}
     </span>

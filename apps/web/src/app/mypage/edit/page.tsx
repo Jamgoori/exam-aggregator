@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { NicknameField } from "@/components/nickname-field";
+import { ProfileImageField } from "@/components/profile-image-field";
+import { avatarUrl } from "@/lib/avatars";
 import { CbtViewModeField } from "@/components/cbt-view-mode-field";
 import { DeleteAccountButton } from "@/components/delete-account-button";
 
@@ -34,7 +36,7 @@ export default async function EditAccountPage({
     user.user_metadata?.default_cbt_view_mode === "full" ? "full" : "single";
 
   return (
-    <div className="mx-auto flex w-full max-w-sm flex-col gap-8 px-4 pb-12 pt-6 sm:pt-8">
+    <div className="mx-auto flex w-full max-w-md flex-col gap-8 px-4 pb-12 pt-6 sm:pt-8">
       <div>
         <Link href="/mypage" className="text-sm text-zinc-500 hover:text-blue-600 dark:text-zinc-500 dark:hover:text-blue-400">
           ← 마이페이지
@@ -46,6 +48,14 @@ export default async function EditAccountPage({
       {message && <p className="text-sm text-green-600 dark:text-green-400">{message}</p>}
 
       <section className="flex flex-col gap-4">
+        <h2 className="text-lg font-semibold">프로필 사진</h2>
+        <ProfileImageField
+          nickname={nickname}
+          initialAvatarUrl={avatarUrl(user.user_metadata?.avatar_path as string | undefined)}
+        />
+      </section>
+
+      <section className="flex flex-col gap-4 border-t border-zinc-100 pt-6 dark:border-zinc-700">
         <h2 className="text-lg font-semibold">닉네임</h2>
         <NicknameField defaultValue={nickname} />
       </section>
