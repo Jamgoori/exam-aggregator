@@ -1,5 +1,6 @@
 // 사용법: npm run audit-question-images -- [--sample N] [--paper-ids <파일>] [--concurrency 8]
 //                                          [--out report.json] [--dump-dir <디렉터리>] [--dump 20]
+//         npm run audit-question-images -- --empty-scan [--empty-bytes 2000] [--concurrency 24]
 //
 // **이미 올라간 문항 이미지(= 문제별 풀기 화면에 실제로 보이는 그림)** 를 그대로
 // 내려받아 "순수하게 문제만 있는지"를 잰다. regression-check-crop 과 목적이 다르다:
@@ -53,6 +54,10 @@ const outPath = typeof args.out === "string" ? args.out : "question-image-audit.
 const dumpDir = typeof args["dump-dir"] === "string" ? args["dump-dir"] : null;
 const dumpLimit = args.dump ? Number(args.dump) : 24;
 const seed = args.seed ? Number(args.seed) : 20260904;
+// --empty-scan: 픽셀을 재지 않고 **공개 URL 에 HEAD 만** 날려 크기로 "사실상 빈
+// 이미지"만 찾는다. 전수(10만 장 이상)를 훑을 때 쓰는 값싼 모드다.
+const emptyScan = Boolean(args["empty-scan"]);
+const emptyBytes = args["empty-bytes"] ? Number(args["empty-bytes"]) : 2000;
 
 // 크롭 산출물은 scale 3 이므로 1pt = 3px 이다.
 const PX_PER_PT = 3;
@@ -369,6 +374,56 @@ if (sampleSize && sampleSize < targets.length) {
 console.log(
   `등록된 문항 이미지 ${totalImages}장(세트 공유 제외) 중 ${targets.length}장 검사 (동시성 ${concurrency})\n`,
 );
+
+// ── 값싼 전수 모드: 크기로 "사실상 빈 이미지"만 찾는다 ─────────────────────
+//
+// 가짜 마커가 잡히면 엉뚱한 자리를 잘라 **괘선 한 줄뿐인 이미지**가 나오고, 진짜
+// 문항은 통째로 사라진다(실측: 2020 해경 3차 한국사 14번 — 102바이트). 문항 수는
+// 맞아떨어지므로 회귀 검사도 배치 스크립트도 이걸 못 잡는다. 정상 문항 이미지는
+// 30~200KB 라 크기만으로 충분히 갈린다.
+//
+// **`storage.list()` 를 쓰지 말 것** — 버킷이 public read 라 목록 API 는 에러 없이
+// 빈 배열을 돌려준다. 그걸 믿으면 "빈 이미지 0장"이라는 잘못된 결론이 나온다.
+// 공개 URL 에 HEAD 를 날려 content-length 를 본다(동시성 24로 2,000장에 3분).
+if (emptyScan) {
+  console.log(`빈 이미지 검사: ${targets.length}장 (${emptyBytes}바이트 미만, 동시성 ${concurrency})`);
+  const found = [];
+  let scanCursor = 0;
+  let scanDone = 0;
+  async function scanWorker() {
+    for (;;) {
+      const i = scanCursor++;
+      if (i >= targets.length) return;
+      const t = targets[i];
+      try {
+        const res = await fetch(
+          `${supabaseUrl}/storage/v1/object/public/exam-papers/${t.path}`,
+          { method: "HEAD" },
+        );
+        const size = Number(res.headers.get("content-length") ?? 0);
+        if (res.ok && size < emptyBytes) {
+          const paper = paperById.get(t.paperId) ?? {};
+          found.push({ ...t, size, title: paper.title, year: paper.year });
+        }
+      } catch {
+        // 일시적 네트워크 실패는 무시한다(빈 이미지 판정에 영향이 없다).
+      }
+      scanDone++;
+      if (scanDone % 5000 === 0) console.log(`  ${scanDone}/${targets.length} (빈 이미지 ${found.length})`);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, scanWorker));
+  found.sort((a, b) => (a.year ?? 0) - (b.year ?? 0) || String(a.title).localeCompare(String(b.title)));
+  fs.writeFileSync(outPath, JSON.stringify({ totalImages, emptyBytes, found }, null, 2));
+  console.log(
+    `\n사실상 빈 이미지 ${found.length}장 / 문제지 ${new Set(found.map((f) => f.paperId)).size}장`,
+  );
+  for (const f of found.slice(0, 40)) {
+    console.log(`  ${f.year} ${f.title} ${f.numbers.join("·")}번 — ${f.size}B (${f.path})`);
+  }
+  console.log(`\n리포트: ${outPath}`);
+  process.exit(0);
+}
 
 if (dumpDir) fs.mkdirSync(dumpDir, { recursive: true });
 

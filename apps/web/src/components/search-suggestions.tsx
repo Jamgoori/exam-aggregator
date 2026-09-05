@@ -153,7 +153,10 @@ export function SearchSuggestionList({
             role="option"
             aria-selected={highlighted === i}
             ref={(el) => {
-              itemRefs.current[i] = el;
+              // ref 콜백은 언마운트 때도 불리고, 그때 current 가 null 일 수 있다
+              // (RefObject 타입이 current 를 nullable 로 본다 — 가드가 없으면
+              // `next build` 의 타입 검사가 TS18047 로 막는다).
+              if (itemRefs.current) itemRefs.current[i] = el;
             }}
             href={`/subjects/${s.slug}`}
             onMouseDown={keepFocus}
