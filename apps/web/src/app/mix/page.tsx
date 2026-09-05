@@ -42,12 +42,20 @@ export default async function MixHubPage({
   const { data: claimsData } = await supabase.auth.getClaims();
   const userId = claimsData?.claims.sub ?? null;
 
+  // 최근 기록·즐겨찾기는 곁다리다. 이 둘 때문에 화면 전체가 500 이 되면 안 된다
+  // (2026-09-05 실측: 최근 기록의 과목 임베드 하나가 페이지를 통째로 떨어뜨렸다).
+  // 본문인 과목 목록(getMixHubIndex)이 실패할 때만 에러로 남긴다.
   const [index, favoriteIds, recent] = await Promise.all([
     getMixHubIndex(),
     userId
-      ? getMyBookmarkedSubjectIds(supabase, userId)
+      ? getMyBookmarkedSubjectIds(supabase, userId).catch(() => new Set<string>())
       : Promise.resolve(new Set<string>()),
-    userId ? listRecentMixSessions(userId) : Promise.resolve([]),
+    userId
+      ? listRecentMixSessions(userId).catch((e) => {
+          console.error("섞어풀기 최근 기록 조회 실패", e);
+          return [];
+        })
+      : Promise.resolve([]),
   ]);
 
   // 급수 탭. 9급 → 7급 → … 순이고 "기타"(승진시험처럼 어느 급수에도 안 묶이는 것)는 뒤로.
@@ -62,7 +70,9 @@ export default async function MixHubPage({
     t.key === MIX_NO_LEVEL ? "기타" : t.approx ? `${t.key} 수준` : t.key;
   const selectedTier = tiers.find((t) => t.key === level) ?? null;
 
-  const favoriteSlugs = await resolveFavoriteSlugs(supabase, favoriteIds);
+  const favoriteSlugs = await resolveFavoriteSlugs(supabase, favoriteIds).catch(
+    () => new Set<string>(),
+  );
   // 고른 급수의 문제지가 있는 과목만. 즐겨찾는 과목을 앞으로 — 공시생은 보통 5과목만
   // 도는데 목록에는 수십 과목이 있어, 즐겨찾기가 곧 "내 과목 목록"이다.
   const subjects = index.subjects
@@ -141,7 +151,9 @@ export default async function MixHubPage({
             최근 섞어풀기
           </h2>
           <div className="flex flex-col divide-y divide-zinc-100 overflow-hidden rounded-xl border border-zinc-200 dark:divide-zinc-700/70 dark:border-zinc-700">
-            {recent.map((s) => (
+            {recent
+              .filter((s) => s.subjectSlug && s.subjectName)
+              .map((s) => (
               <Link
                 key={s.id}
                 href={`/mypage/wrong-notes/${s.subjectSlug}/mix/${s.id}`}
@@ -170,7 +182,7 @@ export default async function MixHubPage({
                   className="shrink-0 text-zinc-300 group-hover:text-blue-600 dark:text-zinc-700 dark:group-hover:text-blue-400"
                 />
               </Link>
-            ))}
+              ))}
           </div>
         </section>
       )}

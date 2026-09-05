@@ -53,6 +53,16 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 export const MIX_SCOPE = "mix";
 
+// PostgREST 임베드(`subjects(slug, name)`)는 관계 하나여도 배열로 올 때가 있다. 그대로
+// `row.subjects.slug` 를 읽으면 값이 조용히 undefined 가 되는데, 그 slug 는 화면에서
+// 색 해시(subjectColorIndex — undefined.length)로 들어가 페이지를 통째로 500 으로
+// 떨어뜨린다(2026-09-05 /mix 실측: 최근 기록이 있는 로그인 사용자만 재현). 읽는 자리를
+// 전부 이 함수로 통일한다 — 엣지 함수(review-history)도 같은 이유로 두 모양을 다 받는다.
+export function embedOne<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
@@ -237,7 +247,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     papers.map((p) => {
       const input = {
         level: p.level,
-        examTypeName: p.exam_types?.name ?? null,
+        examTypeName: embedOne(p.exam_types)?.name ?? null,
         track: p.track,
       };
       return [p.id, { tier: examLevelTier(input), approx: isApproxLevelTier(input) }];
@@ -310,7 +320,9 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
   });
 
   const examTypeNames = [
-    ...new Set(papers.map((p) => p.exam_types?.name).filter((n): n is string => !!n)),
+    ...new Set(
+      papers.map((p) => embedOne(p.exam_types)?.name).filter((n): n is string => !!n),
+    ),
   ];
   const years = papers.map((p) => p.year);
 
@@ -721,18 +733,47 @@ export type MixSessionBrief = {
   subjectName: string;
 };
 
+// 세션 행 → 화면용 목록. 임베드 모양(배열/객체) 정규화와 같은 날 순번 붙이기가 여기
+// 다 들어 있어, 조회와 떼어 테스트할 수 있다(mix-practice.test.ts).
+export type MixSessionRow = {
+  id: string;
+  created_at: string;
+  score: number | null;
+  total_questions: number;
+  subjects: { slug: string; name: string } | { slug: string; name: string }[] | null;
+};
+
+export function toMixSessionBriefs(
+  rows: MixSessionRow[],
+  limit: number,
+): MixSessionBrief[] {
+  // 과목이 지워졌거나(세션은 남는다 — subject_id 는 on delete set null) 임베드가 비면
+  // 링크를 만들 수 없으므로 목록에서 뺀다. slug 가 빈 행을 그대로 그리면 화면이 죽는다.
+  const usable = rows.flatMap((row) => {
+    const subject = embedOne(row.subjects);
+    return subject?.slug ? [{ row, subject }] : [];
+  });
+
+  const titles = labelMixSessions(
+    usable.map(({ row }) => ({ id: row.id, createdAt: row.created_at })),
+    kstDayKey,
+  );
+  return usable.slice(0, limit).map(({ row, subject }) => ({
+    id: row.id,
+    title: titles.get(row.id) ?? "섞어풀기",
+    createdAt: row.created_at,
+    score: row.score ?? 0,
+    total: row.total_questions,
+    subjectSlug: subject.slug,
+    subjectName: subject.name,
+  }));
+}
+
 export async function listRecentMixSessions(
   userId: string,
   limit = 5,
 ): Promise<MixSessionBrief[]> {
   const admin = createAdminClient();
-  type Row = {
-    id: string;
-    created_at: string;
-    score: number | null;
-    total_questions: number;
-    subjects: { slug: string; name: string } | null;
-  };
   // 같은 날 순번("(2)")은 그날 만든 세션 전체를 알아야 매길 수 있어, 화면에 보일
   // 개수보다 넉넉히 받아 이름을 붙인 뒤 자른다.
   const { data } = await admin
@@ -743,21 +784,7 @@ export async function listRecentMixSessions(
     .not("submitted_at", "is", null)
     .order("created_at", { ascending: false })
     .limit(100);
-  const rows = ((data ?? []) as unknown as Row[]).filter((r) => r.subjects);
-
-  const titles = labelMixSessions(
-    rows.map((r) => ({ id: r.id, createdAt: r.created_at })),
-    kstDayKey,
-  );
-  return rows.slice(0, limit).map((r) => ({
-    id: r.id,
-    title: titles.get(r.id) ?? "섞어풀기",
-    createdAt: r.created_at,
-    score: r.score ?? 0,
-    total: r.total_questions,
-    subjectSlug: r.subjects!.slug,
-    subjectName: r.subjects!.name,
-  }));
+  return toMixSessionBriefs((data ?? []) as unknown as MixSessionRow[], limit);
 }
 
 export type MixSessionQuestion = {
@@ -902,7 +929,7 @@ export async function getMixSessionWrongNote(
         ? applyExamTypeSubjectName(getPaperDisplayTitle(paper.title, paper.track))
         : "삭제된 문제지",
       paperLevel: paper?.level ?? null,
-      examTypeName: paper?.exam_types?.name ?? null,
+      examTypeName: embedOne(paper?.exam_types)?.name ?? null,
       questionNumber: it.question_number,
       selectedChoice: it.selected_choice,
       correctChoice: answersByPaper.get(it.paper_id)?.[it.question_number - 1] ?? null,
