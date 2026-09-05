@@ -51,7 +51,9 @@ export async function recordQuestionResults(
   userId: string,
   paperId: string,
   results: QuestionResultInput[],
-  source: "cbt" | "review" = "cbt",
+  // 'mix' = 기출 섞어풀기(내 오답이 아니라 과목 기출 전체에서 뽑아 푼 채점). 상태
+  // 갱신 규칙은 review 와 같고, 이력(srs_reviews.source)에서만 구분된다.
+  source: "cbt" | "review" | "mix" = "cbt",
 ): Promise<void> {
   if (results.length === 0) return;
 

@@ -17,6 +17,7 @@ import {
 import {
   submitReviewSession,
   createReviewFromWrong,
+  createRetryFromMix,
   markReviewGuessed,
 } from "@/app/mypage/wrong-notes/actions";
 import { CbtDrawingToolbar, PEN_COLORS } from "@/components/cbt-drawing-toolbar";
@@ -33,6 +34,13 @@ import {
   useSwipeNavigation,
 } from "@/components/question-view-gestures";
 import type { ReviewSessionView } from "@/lib/review-session";
+import { mixSessionTitle } from "@gongmoa/core";
+
+// 기출 섞어풀기(scope 'mix')는 내 오답이 아니라 과목 기출 전체에서 뽑은 새 문제라
+// "극복"이라는 말이 맞지 않는다 — 문구만 정답/오답으로 갈고 흐름은 같다.
+function isMixSession(view: ReviewSessionView): boolean {
+  return view.scope === "mix";
+}
 
 // 섞어풀기 풀이 화면. 문제지 경계 없이 섞인 오답을 순서대로 풀고 채점한다. 풀이
 // 중에는 출처(문제지·번호)와 정답을 숨겨 힌트가 되지 않게 하고, 채점 후에만 공개한다.
@@ -250,7 +258,8 @@ export function ReviewSolver({
           <ChevronLeft size={20} />
         </Link>
         <h1 className="truncate text-sm font-medium text-zinc-700 dark:text-zinc-300">
-          오답 다시 풀기{view.subjectName ? ` · ${view.subjectName}` : ""}
+          {isMixSession(view) ? "기출 섞어풀기" : "오답 다시 풀기"}
+          {view.subjectName ? ` · ${view.subjectName}` : ""}
         </h1>
         <div className="flex shrink-0 items-center gap-2">
           {/* 모바일은 헤더가 좁아 넣지 못하고(그쪽은 두 손가락 핀치로 확대한다),
@@ -526,6 +535,7 @@ function ReviewResult({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  const mix = isMixSession(view);
   const correct = view.score ?? 0;
   const total = view.total;
   const wrong = total - correct;
@@ -544,7 +554,12 @@ function ReviewResult({
     if (pending || wrongItems.length === 0) return;
     setError(null);
     start(async () => {
-      const res = await createReviewFromWrong({ items: wrongItems });
+      // 기출 섞어풀기는 세션 id 만 보낸다 — 서버가 세션에서 틀린 문항을 직접 읽는다.
+      // (createReviewFromWrong 은 "내가 푼 적 있는 문항"으로 거르는데, 중복 시험지의
+      // 형제 문제지에 상태가 기록된 문항은 그 필터에 걸려 빠질 수 있다.)
+      const res = mix
+        ? await createRetryFromMix({ sessionId: view.id })
+        : await createReviewFromWrong({ items: wrongItems });
       if (res.error || !res.sessionId) {
         setError(res.error ?? "다시 풀기를 시작하지 못했어요.");
         return;
@@ -567,20 +582,41 @@ function ReviewResult({
         {correct > 0 ? (
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
-              🎉 {correct}문항 극복
+              🎉 {correct}문항 {mix ? "정답" : "극복"}
             </span>
             {wrong > 0 && (
               <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950/30 dark:text-red-400">
-                {wrong}문항 아직
+                {wrong}문항 {mix ? "오답" : "아직"}
               </span>
             )}
           </div>
         ) : (
           <p className="text-sm font-medium text-zinc-600 dark:text-zinc-400">
-            아직 못 넘겼어요. 해설을 보고 한 번 더 도전해요 💪
+            {mix
+              ? "이번엔 다 틀렸어요. 오답노트에서 해설을 보고 다시 풀어봐요 💪"
+              : "아직 못 넘겼어요. 해설을 보고 한 번 더 도전해요 💪"}
           </p>
         )}
       </div>
+
+      {/* 기출 섞어풀기는 채점과 동시에 오답노트에 날짜 이름으로 남는다. 결과 화면에는
+          해설이 없으므로, 틀린 문제를 해설과 같이 보려면 그 기록으로 가야 한다는 걸
+          여기서 바로 알린다(안 알리면 "틀린 문제가 어디 갔지"가 된다). */}
+      {mix && (
+        <Link
+          href={`/mypage/wrong-notes/${subjectSlug}/mix/${view.id}`}
+          className="group flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm dark:border-emerald-900/50 dark:bg-emerald-950/20"
+        >
+          <span className="min-w-0 flex-1 text-emerald-900 dark:text-emerald-200">
+            오답노트에{" "}
+            <span className="font-semibold">&ldquo;{mixSessionTitle(view.createdAt)}&rdquo;</span>
+            {wrong > 0 ? "로 저장했어요. 틀린 문제를 해설과 함께 볼 수 있어요." : "로 저장했어요."}
+          </span>
+          <span className="shrink-0 font-semibold text-emerald-700 group-hover:underline dark:text-emerald-300">
+            보기 →
+          </span>
+        </Link>
+      )}
 
       {wrongItems.length > 0 && (
         <button
@@ -619,7 +655,7 @@ function ReviewResult({
               </span>
               {it.isCorrect ? (
                 <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
-                  극복
+                  {mix ? "정답" : "극복"}
                 </span>
               ) : (
                 <span className="rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700 dark:bg-red-950/30 dark:text-red-400">

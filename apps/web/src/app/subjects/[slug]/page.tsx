@@ -2,6 +2,7 @@ import { cache } from "react";
 import { cacheLife, cacheTag } from "next/cache";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ChevronRight, Shuffle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createPublicClient } from "@/lib/supabase/public";
 import { getSubjectIndex } from "@/lib/subject-index";
@@ -291,6 +292,36 @@ export default async function SubjectPage({
           </p>
         )}
       </div>
+
+      {/* 기출 섞어풀기 입구. 문제지 한 장씩 고르는 목록 위에 "이 과목 전체에서 아무거나
+          N문항"이라는 다른 진입로를 하나 둔다 — 국가직·지방직·경찰 등 시행처를 가리지
+          않고 섞이는 것이 이 기능의 요점이라, 시행처 탭보다 위에 둔다. 설정(문항 수)은
+          다음 화면에서 고르므로 여기서는 링크 하나면 된다. 검색 색인 대상이 아닌 화면
+          (robots noindex)이라 크롤러가 따라가지 않게 nofollow. */}
+      {dedupedPapers.length > 0 && !level && selectedExamTypeIds.size === 0 && (
+        <Link
+          href={`/subjects/${slug}/mix`}
+          rel="nofollow"
+          className="group flex items-center gap-3 rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-3.5 transition-colors hover:border-blue-300 hover:bg-blue-100/70 dark:border-blue-900/50 dark:bg-blue-950/25 dark:hover:bg-blue-950/40"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+            <Shuffle size={18} />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-bold text-blue-900 dark:text-blue-200">
+              {subject.name} 기출 섞어풀기
+            </span>
+            <span className="text-xs text-blue-800/80 dark:text-blue-300/80">
+              시험 구분 없이 {subject.name} 기출을 무작위로 섞어 원하는 문항 수만큼 풀어요.
+              결과는 오답노트에 날짜별로 남아요.
+            </span>
+          </span>
+          <ChevronRight
+            size={18}
+            className="shrink-0 text-blue-400 transition-transform group-hover:translate-x-0.5"
+          />
+        </Link>
+      )}
 
       {/* 필터 탭은 전부 rel="nofollow" 다 — 누르면 같은 목록을 걸러 보여줄 뿐이라
           정본은 파라미터 없는 주소 하나고, 직렬은 다중 선택이라 크롤러가 따라가면

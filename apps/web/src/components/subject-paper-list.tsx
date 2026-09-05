@@ -25,9 +25,13 @@ export type SubjectPaperItem = {
 export function SubjectPaperList({
   subjectSlug,
   papers,
+  // 같은 탭에 섞어풀기 기록 섹션이 함께 실릴 때만 "시험지별" 소제목을 붙여 두 목록을
+  // 구분한다. 문제지만 있을 때는 예전처럼 제목 없이 카드만.
+  heading,
 }: {
   subjectSlug: string;
   papers: SubjectPaperItem[];
+  heading?: string;
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -65,6 +69,12 @@ export function SubjectPaperList({
 
   return (
     <div className={`flex flex-col gap-3 ${selected.size > 0 ? "pb-24" : ""}`}>
+      {heading && (
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{heading}</h2>
+          <span className="text-xs text-zinc-400 dark:text-zinc-600">{papers.length}장</span>
+        </div>
+      )}
       {error && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-center text-xs text-red-600 dark:bg-red-950/20 dark:text-red-400">
           {error}

@@ -14,7 +14,7 @@ export const unstable_instant = {
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BookOpenCheck, ChevronRight, Star, Trophy } from "lucide-react";
+import { BookOpenCheck, ChevronRight, Shuffle, Star, Trophy } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { ExamCard } from "@/components/exam-card";
 import { FavoriteSubjectsEditor } from "@/components/favorite-subjects-editor";
@@ -724,6 +724,7 @@ function WrongNotesTab({
           오답노트
         </h2>
         <HowItWorksStrip />
+        <MixPracticeEntry subjects={freeSubjects} />
         {freeSubjects.length === 0 ? (
           <div className="flex flex-col items-center gap-4 py-12">
             <p className="text-center text-sm text-zinc-500 dark:text-zinc-500">
@@ -776,7 +777,14 @@ function WrongNotesTab({
         오답노트
       </h2>
       <HowItWorksStrip />
-      {groups.length === 0 ? (
+      <MixPracticeEntry
+        subjects={[...unresolvedBySubject.values()].sort(
+          (a, b) => b.unresolved - a.unresolved || a.name.localeCompare(b.name, "ko"),
+        )}
+      />
+      {/* 응시는 없어도 기출 섞어풀기로 생긴 오답(상태 기준 집계)이 있으면 빈 안내를
+          띄우지 않는다 — 아래 목록이 그 과목을 그린다. */}
+      {groups.length === 0 && unresolvedBySubject.size === 0 ? (
         <div className="flex flex-col items-center gap-4 py-12">
           <p className="text-center text-sm text-zinc-500 dark:text-zinc-500">
             아직 모인 오답이 없어요. CBT로 문제를 풀면 틀린 문제가 과목별로
@@ -791,6 +799,32 @@ function WrongNotesTab({
         </div>
       ) : (
         <div className="flex flex-col gap-3">
+          {/* 응시 없이 채점된 오답(기출 섞어풀기)만 있는 과목은 응시 기준 집계(groups)에
+              없다. 통합 상태 기준 집계에만 있는 과목을 뒤에 붙여 오답노트에서 사라지지
+              않게 한다(무료 회원 카드와 같은 모양). */}
+          {[...unresolvedBySubject.entries()]
+            .filter(([id]) => !groups.some((g) => g.subject.id === id))
+            .sort(([, a], [, b]) => b.unresolved - a.unresolved)
+            .map(([id, s]) => (
+              <Link
+                key={id}
+                href={`/mypage/wrong-notes/${s.slug}`}
+                className="group flex items-center gap-3 rounded-xl border border-zinc-200 p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/40 dark:border-zinc-700 dark:hover:border-blue-800 dark:hover:bg-blue-950/20"
+              >
+                <span
+                  className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${subjectColor(s.slug)}`}
+                >
+                  {s.name}
+                </span>
+                <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                  남은 오답 {s.unresolved}
+                </span>
+                <span className="ml-auto flex shrink-0 items-center gap-1 text-sm font-medium text-blue-600 group-hover:underline dark:text-blue-400">
+                  오답 보기
+                  <ChevronRight size={15} />
+                </span>
+              </Link>
+            ))}
           {groups.map((g) => {
             const stat = unresolvedBySubject.get(g.subject.id);
             const unresolved = stat?.unresolved ?? g.unresolvedCount;
@@ -848,6 +882,45 @@ function WrongNotesTab({
       <ReviewDueCard {...reviewDue} />
       <DiagnosisEntryLink />
     </section>
+  );
+}
+
+// 오답노트 탭 안의 기출 섞어풀기 진입점. 오답을 "다시" 푸는 기능들 사이에서 유일하게
+// "새" 문제를 내는 자리라, 과목 카드 목록과 헷갈리지 않게 한 줄짜리 띠로 둔다.
+// 과목 칩은 오답이 있는 과목(= 지금 공부 중인 과목) 순이고, 그 밖의 과목은 과목
+// 목록으로 보낸다 — 여기서 과목 전체를 늘어놓으면 오답노트가 과목 색인이 된다.
+function MixPracticeEntry({ subjects }: { subjects: { slug: string; name: string }[] }) {
+  const chips = subjects.slice(0, 6);
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-3.5 dark:border-blue-900/50 dark:bg-blue-950/25">
+      <div className="flex items-center gap-2">
+        <Shuffle size={16} className="shrink-0 text-blue-600 dark:text-blue-400" />
+        <span className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+          기출 섞어풀기
+        </span>
+        <span className="hidden text-xs text-blue-800/80 sm:inline dark:text-blue-300/80">
+          시험 구분 없이 과목 기출을 섞어 새 문제를 풀어요. 결과는 여기 날짜별로 남아요.
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {chips.map((s) => (
+          <Link
+            key={s.slug}
+            href={`/subjects/${s.slug}/mix`}
+            className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-zinc-900 dark:text-blue-300 dark:hover:bg-blue-950/60"
+          >
+            {s.name}
+          </Link>
+        ))}
+        <Link
+          href="/subjects"
+          className="flex items-center gap-0.5 rounded-full px-2 py-1 text-xs font-medium text-blue-700 hover:underline dark:text-blue-300"
+        >
+          {chips.length > 0 ? "다른 과목" : "과목 고르기"}
+          <ChevronRight size={13} />
+        </Link>
+      </div>
+    </div>
   );
 }
 

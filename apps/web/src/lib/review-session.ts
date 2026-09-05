@@ -50,6 +50,10 @@ export type ReviewItemView = {
 
 export type ReviewSessionView = {
   id: string;
+  // 'subject' | 'all' | 'due'(복습) | 'mix'(기출 섞어풀기). 풀이·결과 화면이 제목과
+  // 배지 문구("극복" vs "정답")를 이 값으로 가른다.
+  scope: string;
+  createdAt: string;
   subjectSlug: string | null;
   subjectName: string | null;
   total: number;
@@ -415,7 +419,7 @@ export async function createReviewSessionFromItems(
   userId: string,
   items: { paperId: string; questionNumber: number }[],
   limit: number = MAX_LIMIT,
-  opts: { keepOrder?: boolean; scope?: string } = {},
+  opts: { keepOrder?: boolean; scope?: string; subjectId?: string | null; maxLimit?: number } = {},
 ): Promise<{ sessionId?: string; error?: string }> {
   const seen = new Set<string>();
   const clean: { paperId: string; questionNumber: number }[] = [];
@@ -428,14 +432,15 @@ export async function createReviewSessionFromItems(
   }
   if (clean.length === 0) return { error: "다시 풀 문항이 없어요." };
 
-  const cap = Math.min(Math.max(1, limit), MAX_LIMIT);
+  // 기출 섞어풀기는 오답 섞어풀기보다 큰 상한을 쓴다(maxLimit). 기본은 그대로.
+  const cap = Math.min(Math.max(1, limit), opts.maxLimit ?? MAX_LIMIT);
   const picked = (opts.keepOrder ? clean : shuffle(clean)).slice(0, cap);
   const admin = createAdminClient();
   const { data: session, error: sessionError } = await admin
     .from("review_sessions")
     .insert({
       user_id: userId,
-      subject_id: null,
+      subject_id: opts.subjectId ?? null,
       // 'due'는 복습(간격 반복) 세션. 이걸로 "이어서 풀기"가 섞어풀기 세션을
       // 잘못 집어오지 않게 구분한다.
       scope: opts.scope ?? "subject",
@@ -683,7 +688,7 @@ export async function getReviewSessionView(
   const admin = createAdminClient();
   const { data: session } = await admin
     .from("review_sessions")
-    .select("id, user_id, subject_id, total_questions, score, submitted_at")
+    .select("id, user_id, subject_id, scope, total_questions, score, submitted_at, created_at")
     .eq("id", sessionId)
     .maybeSingle();
   if (!session || session.user_id !== userId) return null;
@@ -761,6 +766,8 @@ export async function getReviewSessionView(
 
   return {
     id: session.id as string,
+    scope: (session.scope as string | null) ?? "subject",
+    createdAt: session.created_at as string,
     subjectSlug,
     subjectName,
     total: session.total_questions as number,
@@ -781,11 +788,14 @@ export async function submitReviewSessionForUser(
   const admin = createAdminClient();
   const { data: session } = await admin
     .from("review_sessions")
-    .select("id, user_id, submitted_at, created_at")
+    .select("id, user_id, scope, submitted_at, created_at")
     .eq("id", sessionId)
     .maybeSingle();
   if (!session || session.user_id !== userId) return { error: "세션을 찾을 수 없어요." };
   if (session.submitted_at != null) return { error: "이미 채점된 세션이에요." };
+  // 기출 섞어풀기는 이력에 'mix' 로 남긴다 — "오답을 다시 풀어 맞힌 것"과 "처음 만난
+  // 기출을 맞힌 것"을 같은 source 로 섞으면 유지율 측정(retention-report)이 흐려진다.
+  const source: "review" | "mix" = session.scope === "mix" ? "mix" : "review";
 
   const { data: itemRows } = await admin
     .from("review_session_items")
@@ -872,7 +882,7 @@ export async function submitReviewSessionForUser(
   }
   try {
     for (const [paperId, results] of byPaper) {
-      await recordQuestionResults(userId, paperId, results, "review");
+      await recordQuestionResults(userId, paperId, results, source);
     }
   } catch {
     // 무시: 상태 갱신 실패가 채점을 막지 않는다.

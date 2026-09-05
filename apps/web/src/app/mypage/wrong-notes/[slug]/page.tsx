@@ -1,6 +1,7 @@
 import { cache, Suspense } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { Shuffle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import {
   getSubjectBySlug,
@@ -10,6 +11,8 @@ import {
 import { SubjectWrongNoteQuestions } from "@/components/subject-wrong-note-questions";
 import { SubjectPaperList } from "@/components/subject-paper-list";
 import { WrongNoteViewTabs } from "@/components/wrong-note-view-tabs";
+import { MixSessionList } from "@/components/mix-session-list";
+import { listMixSessions } from "@/lib/mix-practice";
 import { subjectColor } from "@/lib/subject-colors";
 import { isPremium } from "@/lib/membership";
 
@@ -19,6 +22,7 @@ type ViewKey = "papers" | "questions";
 // 낀다) 각자 따로 기다려야 한다. 같은 요청 안에서는 한 번만 조회되도록 감싼다.
 const loadQuestions = cache(getSubjectWrongNoteQuestions);
 const loadOverview = cache(getSubjectWrongNoteOverview);
+const loadMixSessions = cache(listMixSessions);
 
 // 마이페이지 오답노트 탭에서 과목을 골랐을 때 나오는 화면. 기본 "문제지별"은 문제지
 // 요약 카드 목록(누르면 회독별 기록·해설), "문항 모아보기"는 그 과목에서 틀린 문항을
@@ -156,6 +160,9 @@ async function PapersView({ supabase, userId, slug, premium }: ViewProps) {
     (sum, p) => sum + p.unresolvedCount + p.resolvedCount,
     0,
   );
+  // 기출 섞어풀기 기록("9월 5일 섞어풀기")은 문제지 카드와 같은 층위다 — 그날 섞어 푼
+  // 문항 묶음이 문제지 한 장 자리를 차지한다. 최신 기록이 위로 오게 문제지보다 먼저.
+  const mixSessions = await loadMixSessions(supabase, userId, note.subject.id);
 
   return (
     <>
@@ -167,14 +174,30 @@ async function PapersView({ supabase, userId, slug, premium }: ViewProps) {
         </p>
       )}
 
+      {mixSessions.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+              <Shuffle size={14} className="text-blue-600 dark:text-blue-400" />
+              섞어풀기 기록
+            </h2>
+            <span className="text-xs text-zinc-400 dark:text-zinc-600">{mixSessions.length}회</span>
+          </div>
+          <MixSessionList subjectSlug={slug} sessions={mixSessions} />
+        </section>
+      )}
+
       {papers.length === 0 ? (
-        <p className="py-16 text-center text-sm text-zinc-500 dark:text-zinc-500">
-          이 과목에서는 아직 틀린 문제가 없어요. CBT로 문제를 풀면 틀린 문제가
-          자동으로 이곳에 모여요.
-        </p>
+        mixSessions.length === 0 ? (
+          <p className="py-16 text-center text-sm text-zinc-500 dark:text-zinc-500">
+            이 과목에서는 아직 틀린 문제가 없어요. CBT로 문제를 풀거나 위의 기출 섞어풀기를
+            하면 틀린 문제가 자동으로 이곳에 모여요.
+          </p>
+        ) : null
       ) : (
         <SubjectPaperList
           subjectSlug={slug}
+          heading={mixSessions.length > 0 ? "시험지별" : undefined}
           papers={papers.map((p) => ({
             paperId: p.paper.id,
             title: p.paper.title,
@@ -259,7 +282,18 @@ function SubjectWrongNoteShell({
             {subject.name}
           </span>
         </div>
-        <h1 className="text-2xl font-semibold">{subject.name} 오답노트</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold">{subject.name} 오답노트</h1>
+          {/* 기출 섞어풀기 입구. 이 과목의 기출 전체에서 새 문제를 뽑는 기능이라 오답
+              유무와 무관하게 언제나 보인다 — 오답이 0인 과목도 여기서 시작할 수 있다. */}
+          <Link
+            href={`/subjects/${subject.slug}/mix`}
+            className="flex shrink-0 items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"
+          >
+            <Shuffle size={12} />
+            기출 섞어풀기
+          </Link>
+        </div>
       </div>
       {summary}
       <WrongNoteViewTabs view={view} base={base}>
