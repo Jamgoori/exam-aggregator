@@ -39,6 +39,7 @@ export function MixPracticeStarter({
   subjectName,
   questionCount,
   levelGroups,
+  initialLevel,
   cells,
   minYear,
   maxYear,
@@ -51,6 +52,8 @@ export function MixPracticeStarter({
   questionCount: number;
   // 난도 등급별 문항 수(어느 등급에도 안 묶인 것은 MIX_NO_LEVEL). 둘 이상일 때만 칩을 그린다.
   levelGroups: MixLevelGroup[];
+  // 허브에서 고르고 들어온 급수(?level=). 이 과목에 없는 등급이면 무시하고 전체로 둔다.
+  initialLevel?: string | null;
   // (등급, 연도) 교차 문항 수. 두 필터를 함께 걸었을 때 남는 수를 여기서 센다.
   cells: MixCountCell[];
   // 자료가 있는 연도 구간. 없으면 연도 칩을 그리지 않는다.
@@ -65,7 +68,12 @@ export function MixPracticeStarter({
   // 칩에 없는 수를 직접 넣는 입력. 비어 있으면 칩 선택값을 쓴다.
   const [custom, setCustom] = useState("");
   // 고른 급수(다중 선택). 비어 있으면 전체 — 9급+7급처럼 둘을 같이 준비하는 사람도 있다.
-  const [levels, setLevels] = useState<Set<string>>(new Set());
+  // 허브에서 급수를 고르고 왔으면 그걸로 시작한다(이 과목에 없는 등급이면 전체).
+  const [levels, setLevels] = useState<Set<string>>(() =>
+    initialLevel && levelGroups.some((g) => g.key === initialLevel)
+      ? new Set([initialLevel])
+      : new Set(),
+  );
   // 연도 범위. 기본은 전체다 — 기출은 오래된 것도 그대로 출제 자산이라, 처음부터
   // 최근 N년으로 좁혀 두면 사용자가 모르는 채 모수를 잃는다.
   const [year, setYear] = useState<MixYearRange>(MIX_ALL_YEARS);

@@ -8,7 +8,8 @@ import { MixPracticeStarter } from "@/components/mix-practice-starter";
 import { MixSessionList } from "@/components/mix-session-list";
 import { subjectColor } from "@/lib/subject-colors";
 
-// 기출 섞어풀기 시작 화면. 과목 페이지의 "기출 섞어풀기" 버튼과 오답노트에서 들어온다.
+// 기출 섞어풀기 시작 화면. 메뉴 허브(/mix)·과목 페이지의 "기출 섞어풀기" 버튼·오답노트
+// 에서 들어온다.
 // 고를 것은 급수·연도·문항 수뿐이고, 나머지(시행처, 순서, 안 푼 문제 우선, 개념 분산)는
 // 기본값으로 흡수한다 — 공시생이 매일 쓰는 기능일수록 화면에서 결정할 게 적어야 한다.
 //
@@ -32,10 +33,15 @@ export async function generateMetadata({
 
 export default async function MixPracticePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  // 허브(/mix)에서 급수를 고르고 들어오면 그 급수를 미리 켜 둔다 — 과목을 옮길 때마다
+  // 같은 급수를 다시 고르게 하지 않으려는 것.
+  searchParams: Promise<{ level?: string }>;
 }) {
   const { slug } = await params;
+  const { level: levelParam } = await searchParams;
   const overview = await getMixOverview(slug);
   if (!overview) notFound();
   const { subject } = overview;
@@ -92,6 +98,7 @@ export default async function MixPracticePage({
           subjectName={subject.name}
           questionCount={overview.questionCount}
           levelGroups={overview.levelGroups}
+          initialLevel={levelParam ?? null}
           cells={overview.cells}
           minYear={overview.minYear}
           maxYear={overview.maxYear}

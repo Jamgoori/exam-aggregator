@@ -4,6 +4,7 @@ import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createPublicClient } from "@/lib/supabase/public";
 import { fetchAllPages } from "@/lib/fetch-paged";
+import { fetchAllExamPapers } from "@/lib/all-papers";
 import {
   collidingPaperIds,
   fetchPaperIdentitySignals,
@@ -297,6 +298,83 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     minYear: years.length ? Math.min(...years) : null,
     maxYear: years.length ? Math.max(...years) : null,
     repByPaperId: Object.fromEntries(repByPaperId),
+  };
+}
+
+// ── 섞어풀기 허브(/mix)의 급수 탭·과목 목록 ────────────────────────────────
+//
+// 허브에서 급수를 먼저 고르면 과목마다 다시 고를 필요가 없다. 그러려면 "어느 과목에
+// 어느 등급 문제지가 몇 장 있는지"를 과목 수십 개 분량으로 알아야 하는데, 과목별
+// 출제 풀(getMixPool)을 전부 돌리면 문항 단위 조회가 과목 수만큼 붙는다. 허브에는
+// 문제지 단위 수치면 충분하므로 목록 조회 한 번(fetchAllExamPapers — 홈·과목 색인이
+// 쓰는 것과 같은 조회, 중복 시험지도 이미 합쳐져 있다)으로 끝낸다.
+//
+// 그래서 허브의 "기출 N장"은 문제지 수이고, 과목 시작 화면의 칩 숫자는 문항 수다.
+// 단위를 각각 라벨에 적어 둔다.
+
+export type MixHubTier = { key: string; approx: boolean; paperCount: number };
+
+export type MixHubSubject = {
+  slug: string;
+  name: string;
+  paperCount: number;
+  // 등급별 문제지 수(급수 탭으로 걸렀을 때 카드에 보일 수).
+  byTier: Record<string, number>;
+};
+
+export type MixHubIndex = { tiers: MixHubTier[]; subjects: MixHubSubject[] };
+
+export async function getMixHubIndex(): Promise<MixHubIndex> {
+  "use cache";
+  cacheLife({ revalidate: 3600 });
+  cacheTag("home-data");
+
+  const supabase = createPublicClient();
+  const [{ papers, examTypes }, { data: subjectRows }] = await Promise.all([
+    fetchAllExamPapers(supabase),
+    supabase.from("subjects").select("id, slug, name"),
+  ]);
+  const examTypeName = new Map(examTypes.map((t) => [t.id, t.name]));
+  const subjects = new Map(
+    ((subjectRows ?? []) as { id: string; slug: string; name: string }[]).map((r) => [
+      r.id,
+      r,
+    ]),
+  );
+
+  const tierStats = new Map<string, { approx: boolean; paperCount: number }>();
+  const bySubject = new Map<string, MixHubSubject>();
+  for (const p of papers) {
+    const subject = subjects.get(p.subject_id);
+    if (!subject) continue;
+    const input = {
+      level: p.level,
+      examTypeName: examTypeName.get(p.exam_type_id) ?? null,
+      track: p.track,
+    };
+    const key = examLevelTier(input) ?? MIX_NO_LEVEL;
+
+    const t = tierStats.get(key) ?? { approx: false, paperCount: 0 };
+    t.paperCount++;
+    // 환산된 문제지가 하나라도 있으면 그 등급은 "9급 수준"으로 부른다.
+    if (isApproxLevelTier(input)) t.approx = true;
+    tierStats.set(key, t);
+
+    const entry =
+      bySubject.get(subject.id) ??
+      ({ slug: subject.slug, name: subject.name, paperCount: 0, byTier: {} } as MixHubSubject);
+    entry.paperCount++;
+    entry.byTier[key] = (entry.byTier[key] ?? 0) + 1;
+    bySubject.set(subject.id, entry);
+  }
+
+  return {
+    tiers: [...tierStats.entries()].map(([key, t]) => ({
+      key,
+      approx: t.approx,
+      paperCount: t.paperCount,
+    })),
+    subjects: [...bySubject.values()],
   };
 }
 
