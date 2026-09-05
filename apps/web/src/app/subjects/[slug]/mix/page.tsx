@@ -91,7 +91,7 @@ export default async function MixPracticePage({
           subjectSlug={subject.slug}
           subjectName={subject.name}
           questionCount={overview.questionCount}
-          levelCounts={overview.levelCounts}
+          levelGroups={overview.levelGroups}
           loggedIn={!!userId}
         />
       </section>

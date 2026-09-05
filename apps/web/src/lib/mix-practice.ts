@@ -22,7 +22,9 @@ import { createReviewSessionFromItems } from "@/lib/review-session";
 import type { QuestionExplanationContent } from "@/components/explanation-body";
 import {
   clampMixLimit,
+  examLevelTier,
   filterMixCandidatesByLevel,
+  isApproxLevelTier,
   getPaperDisplayTitle,
   applyExamTypeSubjectName,
   kstDayKey,
@@ -66,6 +68,15 @@ type PoolPaper = {
   exam_types: { name: string } | null;
 };
 
+export type MixLevelGroup = {
+  // "9급"·"7급"… 또는 MIX_NO_LEVEL(어느 등급에도 안 묶인 문제지 — 승진시험 등).
+  key: string;
+  count: number;
+  // 급수가 없어 환산된 문제지가 섞인 그룹. 화면이 "9급 수준"으로 이름을 바꿔 단다 —
+  // 순경 준비생에게 "9급"은 자기 시험이 아니라는 신호라 그대로 두면 안 누른다.
+  approx: boolean;
+};
+
 export type MixPool = {
   // 출제 가능한 (대표 문제지, 문항). 이미지가 있고, 정답이 등록돼 있고, voided 가 아닌 것.
   // level·conceptId 는 급수 필터와 개념 분산(pickMixQuestions)의 재료다.
@@ -73,8 +84,8 @@ export type MixPool = {
   // 화면 안내용 통계. paperCount 는 중복 시험지를 합친 뒤의 수(과목 페이지와 같다).
   paperCount: number;
   examTypeNames: string[];
-  // 급수별 출제 가능 문항 수. 급수 없는 문제지는 MIX_NO_LEVEL 키. 시작 화면 급수 칩용.
-  levelCounts: Record<string, number>;
+  // 등급별 출제 가능 문항 수와 라벨 정보. 시작 화면 급수 칩용.
+  levelGroups: MixLevelGroup[];
   minYear: number | null;
   maxYear: number | null;
   // 실제 paper_id → 대표 paper_id. 사용자의 풀이 기록(실제 id 기준)을 후보 키(대표 id)에
@@ -152,7 +163,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     candidates: [],
     paperCount: 0,
     examTypeNames: [],
-    levelCounts: {},
+    levelGroups: [],
     minYear: null,
     maxYear: null,
     repByPaperId: {},
@@ -184,7 +195,17 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
   // 이미지가 잘려 있는 문항만(문제를 보여줄 수 없으면 못 푼다). question_images 를
   // inner 조인해 이미지가 하나라도 있는 문항만 받는다 — 이미지 경로 자체는 세션을
   // 그릴 때 fetchQuestionMedia 가 뽑힌 문항에 대해서만 다시 받는다.
-  const levelByPaper = new Map(papers.map((p) => [p.id, p.level ?? null]));
+  // 문제지별 난도 등급. 급수가 있으면 그대로, 없으면 시행처·직류로 환산한다.
+  const tierByPaper = new Map(
+    papers.map((p) => {
+      const input = {
+        level: p.level,
+        examTypeName: p.exam_types?.name ?? null,
+        track: p.track,
+      };
+      return [p.id, { tier: examLevelTier(input), approx: isApproxLevelTier(input) }];
+    }),
+  );
   type QRow = { id: string; paper_id: string; question_number: number };
   const rowsById = new Map<string, QRow>();
   for (const ids of chunk(answeredRepIds, 25)) {
@@ -215,21 +236,31 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
 
   const candidates: MixCandidate[] = [];
   const seen = new Set<string>();
-  const levelCounts: Record<string, number> = {};
+  const groups = new Map<string, { count: number; approx: boolean }>();
   for (const r of rowsById.values()) {
+    const meta = tierByPaper.get(r.paper_id);
     const c: MixCandidate = {
       paperId: r.paper_id,
       questionNumber: r.question_number,
-      level: levelByPaper.get(r.paper_id) ?? null,
+      level: meta?.tier ?? null,
       conceptId: conceptByQuestionId.get(r.id) ?? null,
     };
     const key = mixCandidateKey(c);
     if (seen.has(key)) continue;
     seen.add(key);
     candidates.push(c);
-    const lk = c.level ?? MIX_NO_LEVEL;
-    levelCounts[lk] = (levelCounts[lk] ?? 0) + 1;
+    const gk = c.level ?? MIX_NO_LEVEL;
+    const g = groups.get(gk) ?? { count: 0, approx: false };
+    g.count++;
+    // 환산된 문제지가 하나라도 섞이면 그룹 전체를 "수준"으로 부른다.
+    if (meta?.approx) g.approx = true;
+    groups.set(gk, g);
   }
+  const levelGroups: MixLevelGroup[] = [...groups.entries()].map(([key, g]) => ({
+    key,
+    count: g.count,
+    approx: g.approx,
+  }));
 
   const examTypeNames = [
     ...new Set(papers.map((p) => p.exam_types?.name).filter((n): n is string => !!n)),
@@ -240,7 +271,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     candidates,
     paperCount: repIds.length,
     examTypeNames,
-    levelCounts,
+    levelGroups,
     minYear: years.length ? Math.min(...years) : null,
     maxYear: years.length ? Math.max(...years) : null,
     repByPaperId: Object.fromEntries(repByPaperId),
@@ -252,8 +283,8 @@ export type MixOverview = {
   questionCount: number;
   paperCount: number;
   examTypeNames: string[];
-  // 급수별 출제 가능 문항 수(급수 없음은 MIX_NO_LEVEL 키).
-  levelCounts: Record<string, number>;
+  // 등급별 출제 가능 문항 수·라벨 정보.
+  levelGroups: MixLevelGroup[];
   minYear: number | null;
   maxYear: number | null;
 };
@@ -273,7 +304,7 @@ export async function getMixOverview(slug: string): Promise<MixOverview | null> 
     questionCount: pool.candidates.length,
     paperCount: pool.paperCount,
     examTypeNames: pool.examTypeNames,
-    levelCounts: pool.levelCounts,
+    levelGroups: pool.levelGroups,
     minYear: pool.minYear,
     maxYear: pool.maxYear,
   };
@@ -335,7 +366,8 @@ export async function createMixSessionForUser(
     };
   }
 
-  const levels = (input.levels ?? []).filter((l) => l in pool.levelCounts);
+  const known = new Set(pool.levelGroups.map((g) => g.key));
+  const levels = (input.levels ?? []).filter((l) => known.has(l));
   const candidates = filterMixCandidatesByLevel(pool.candidates, levels);
   if (candidates.length === 0) {
     return { error: "고른 급수에는 아직 풀 수 있는 문항이 없어요. 급수를 바꿔보세요." };

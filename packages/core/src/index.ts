@@ -31,6 +31,7 @@ export * from "./paper-title";
 export * from "./subject-label";
 export * from "./paper-slug";
 export * from "./levels";
+export * from "./exam-level-tier";
 export * from "./tiers";
 export * from "./subject-color";
 export * from "./dedup-papers";

@@ -13,6 +13,7 @@ import {
   MIX_MIN_LIMIT,
   MIX_NO_LEVEL,
 } from "@gongmoa/core";
+import type { MixLevelGroup } from "@/lib/mix-practice";
 
 // 기출 섞어풀기 시작 패널. 고를 것은 급수와 문항 수뿐이다 — 시행처·연도·순서 같은
 // 설정은 늘어놓지 않는다(오답노트 로드맵 UX 원칙 5: 설정을 노출하지 말고 기본값으로
@@ -20,13 +21,17 @@ import {
 // 섞이면 오답률이 실력과 무관하게 뛴다. "안 풀어 본 문항 먼저"·"같은 개념 안 뭉치게"는
 // 서버가 알아서 하고 여기서는 문구로만 알린다.
 //
+// 급수가 없는 시행처(경찰·소방·해경·계리직)는 서버가 난도 등급으로 환산해 보낸다
+// (exam-level-tier.ts). 그 등급이 섞인 칩은 "9급"이 아니라 "9급 수준"으로 부른다 —
+// 순경 준비생에게 "9급"은 자기 시험이 아니라는 신호로 읽혀 아예 안 누른다.
+//
 // 비로그인 사용자도 이 패널까지는 본다. 누르면 로그인으로 보내고, 돌아오면 같은
 // 화면이라 다시 누르기만 하면 된다.
 export function MixPracticeStarter({
   subjectSlug,
   subjectName,
   questionCount,
-  levelCounts,
+  levelGroups,
   loggedIn,
   compact = false,
 }: {
@@ -34,8 +39,8 @@ export function MixPracticeStarter({
   subjectName: string;
   // 출제 가능한 문항 수. 0이면 시작 버튼 대신 준비 중 안내.
   questionCount: number;
-  // 급수별 출제 가능 문항 수(급수 없음은 MIX_NO_LEVEL 키). 급수가 둘 이상일 때만 칩을 그린다.
-  levelCounts: Record<string, number>;
+  // 난도 등급별 문항 수(어느 등급에도 안 묶인 것은 MIX_NO_LEVEL). 둘 이상일 때만 칩을 그린다.
+  levelGroups: MixLevelGroup[];
   loggedIn: boolean;
   // 과목 오답노트 상단처럼 좁은 자리에 넣을 때: 설명 문구를 줄인다.
   compact?: boolean;
@@ -49,17 +54,19 @@ export function MixPracticeStarter({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  // 급수 칩 순서: 9급 → 7급 → … 급수 없음은 맨 뒤. 문항이 0인 급수는 애초에 키가 없다.
-  const levelKeys = Object.keys(levelCounts).sort((a, b) => {
-    if (a === MIX_NO_LEVEL) return 1;
-    if (b === MIX_NO_LEVEL) return -1;
-    return compareLevels(a, b);
+  // 칩 순서: 9급 → 7급 → … "기타"는 맨 뒤. 문항이 0인 등급은 애초에 오지 않는다.
+  const groups = [...levelGroups].sort((a, b) => {
+    if (a.key === MIX_NO_LEVEL) return 1;
+    if (b.key === MIX_NO_LEVEL) return -1;
+    return compareLevels(a.key, b.key);
   });
-  const showLevels = levelKeys.length > 1;
+  const countByKey = new Map(groups.map((g) => [g.key, g.count]));
+  const levelKeys = groups.map((g) => g.key);
+  const showLevels = groups.length > 1;
   const selectedCount =
     levels.size === 0
       ? questionCount
-      : [...levels].reduce((sum, l) => sum + (levelCounts[l] ?? 0), 0);
+      : [...levels].reduce((sum, l) => sum + (countByKey.get(l) ?? 0), 0);
 
   function toggleLevel(key: string) {
     setLevels((prev) => {
@@ -114,9 +121,15 @@ export function MixPracticeStarter({
     );
   }
 
-  const levelLabel = (key: string) => (key === MIX_NO_LEVEL ? "급수 없음" : key);
+  // 라벨: 환산된 문제지가 섞인 등급은 "9급 수준"(사실이 아닌 걸 사실처럼 부르지 않는다),
+  // 실제 급수만 있는 등급은 그대로 "9급". 어느 등급에도 안 묶인 묶음은 "기타".
+  const labelOf = (g: MixLevelGroup) =>
+    g.key === MIX_NO_LEVEL ? "기타" : g.approx ? `${g.key} 수준` : g.key;
+  const labelByKey = new Map(groups.map((g) => [g.key, labelOf(g)]));
+  const levelLabel = (key: string) => labelByKey.get(key) ?? key;
   const summaryLevels =
     levels.size === 0 ? "" : ` ${levelKeys.filter((k) => levels.has(k)).map(levelLabel).join("·")}`;
+  const hasApprox = groups.some((g) => g.approx);
 
   return (
     <div className="flex flex-col gap-3">
@@ -136,30 +149,32 @@ export function MixPracticeStarter({
             >
               전체 <span className="opacity-70">{questionCount.toLocaleString()}</span>
             </button>
-            {levelKeys.map((key) => {
-              const active = levels.has(key);
+            {groups.map((g) => {
+              const active = levels.has(g.key);
               return (
                 <button
-                  key={key}
+                  key={g.key}
                   type="button"
-                  onClick={() => toggleLevel(key)}
+                  onClick={() => toggleLevel(g.key)}
                   aria-pressed={active}
                   className={`rounded-full px-4 py-2 text-sm font-semibold ${
                     active
-                      ? key === MIX_NO_LEVEL
+                      ? g.key === MIX_NO_LEVEL
                         ? "bg-zinc-500 text-white"
-                        : levelColor(key)
+                        : levelColor(g.key)
                       : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
                   }`}
                 >
-                  {levelLabel(key)}{" "}
-                  <span className="opacity-70">{levelCounts[key].toLocaleString()}</span>
+                  {labelOf(g)} <span className="opacity-70">{g.count.toLocaleString()}</span>
                 </button>
               );
             })}
           </div>
           <p className="text-[11px] text-zinc-400 dark:text-zinc-600">
             여러 급수를 함께 고를 수 있어요. 시험(국가직·지방직 등)은 가리지 않고 섞여요.
+            {hasApprox
+              ? " 경찰·소방·해경·계리직처럼 급수가 없는 시험은 난도가 비슷한 급수에 함께 묶여요(간부후보는 7급 수준, 승진시험은 기타)."
+              : ""}
           </p>
         </div>
       )}

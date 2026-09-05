@@ -29,14 +29,15 @@ export function clampMixLimit(value: unknown): number {
 export type MixCandidate = {
   paperId: string;
   questionNumber: number;
-  // 문제지 급수("9급"·"7급"…, 없으면 null). 시작 화면의 급수 필터가 이 값으로 거른다.
+  // 난도 등급("9급"·"7급"…). 급수가 없는 시행처(경찰·소방·해경·계리직)는 시행처·직류로
+  // 환산한 등급이 들어온다(exam-level-tier.ts). 어느 등급에도 안 묶이면 null.
   level?: string | null;
   // 정본 개념 id(question_explanations.concept_id, 합쳐진 개념은 합쳐진 쪽). 해설이 아직
   // 없는 문항은 null — 개념 분산에서 "어느 개념도 아닌" 문항으로 취급한다.
   conceptId?: string | null;
 };
 
-// 급수 필터. 빈 목록이면 전체. 급수가 없는 문제지(level null)는 "급수 없음" 키로 고른다.
+// 등급 필터. 빈 목록이면 전체. 어느 등급에도 안 묶이는 문제지(승진시험 등)는 이 키로 고른다.
 export const MIX_NO_LEVEL = "__none__";
 
 export function filterMixCandidatesByLevel<T extends MixCandidate>(
