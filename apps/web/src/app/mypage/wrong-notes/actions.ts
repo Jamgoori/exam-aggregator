@@ -453,8 +453,11 @@ export type StartMixResult = CreateMixSessionResult & { login?: boolean };
 export async function createMixSession(input: {
   subjectSlug: string;
   limit?: number;
-  // 급수 필터("9급"·"7급"…, 급수 없음은 MIX_NO_LEVEL). 비어 있으면 전체.
+  // 급수 필터("9급"·"7급"…, 어느 등급에도 안 묶인 것은 MIX_NO_LEVEL). 비어 있으면 전체.
   levels?: string[];
+  // 연도 범위. 둘 다 없으면 전체 — 값 정리는 서버(normalizeYearRange)가 한다.
+  yearFrom?: number | null;
+  yearTo?: number | null;
 }): Promise<StartMixResult> {
   const slug = String(input?.subjectSlug ?? "");
   if (!slug) return { error: "잘못된 접근입니다." };
@@ -471,6 +474,7 @@ export async function createMixSession(input: {
     subjectSlug: slug,
     limit: Number(input?.limit),
     levels,
+    year: { from: input?.yearFrom ?? null, to: input?.yearTo ?? null },
   });
 }
 

@@ -24,7 +24,9 @@ import {
   clampMixLimit,
   examLevelTier,
   filterMixCandidatesByLevel,
+  filterMixCandidatesByYear,
   isApproxLevelTier,
+  normalizeYearRange,
   getPaperDisplayTitle,
   applyExamTypeSubjectName,
   kstDayKey,
@@ -34,6 +36,7 @@ import {
   MIX_MAX_LIMIT,
   MIX_NO_LEVEL,
   type MixCandidate,
+  type MixYearRange,
   type Subject,
 } from "@gongmoa/core";
 
@@ -77,6 +80,11 @@ export type MixLevelGroup = {
   approx: boolean;
 };
 
+// (등급, 연도)별 문항 수. 급수와 연도를 함께 고르면 남는 문항이 몇 개인지 화면이
+// 서버 왕복 없이 세려면 두 축을 교차한 표가 필요하다 — 등급 5종 × 연도 20년이면
+// 100줄 남짓이라 후보 수천 개를 통째로 내려보내는 것보다 훨씬 가볍다.
+export type MixCountCell = { level: string; year: number | null; count: number };
+
 export type MixPool = {
   // 출제 가능한 (대표 문제지, 문항). 이미지가 있고, 정답이 등록돼 있고, voided 가 아닌 것.
   // level·conceptId 는 급수 필터와 개념 분산(pickMixQuestions)의 재료다.
@@ -86,6 +94,8 @@ export type MixPool = {
   examTypeNames: string[];
   // 등급별 출제 가능 문항 수와 라벨 정보. 시작 화면 급수 칩용.
   levelGroups: MixLevelGroup[];
+  // (등급, 연도) 교차 문항 수. 화면이 두 필터를 함께 걸었을 때의 남는 수를 센다.
+  cells: MixCountCell[];
   minYear: number | null;
   maxYear: number | null;
   // 실제 paper_id → 대표 paper_id. 사용자의 풀이 기록(실제 id 기준)을 후보 키(대표 id)에
@@ -164,6 +174,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     paperCount: 0,
     examTypeNames: [],
     levelGroups: [],
+    cells: [],
     minYear: null,
     maxYear: null,
     repByPaperId: {},
@@ -234,15 +245,18 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
   // 해설이 없는 문항은 null 로 남는다(개념 분산에서 상한을 받지 않는다).
   const conceptByQuestionId = await fetchCanonicalConcepts(admin, [...rowsById.keys()]);
 
+  const yearByPaper = new Map(papers.map((p) => [p.id, p.year ?? null]));
   const candidates: MixCandidate[] = [];
   const seen = new Set<string>();
   const groups = new Map<string, { count: number; approx: boolean }>();
+  const cellCounts = new Map<string, number>();
   for (const r of rowsById.values()) {
     const meta = tierByPaper.get(r.paper_id);
     const c: MixCandidate = {
       paperId: r.paper_id,
       questionNumber: r.question_number,
       level: meta?.tier ?? null,
+      year: yearByPaper.get(r.paper_id) ?? null,
       conceptId: conceptByQuestionId.get(r.id) ?? null,
     };
     const key = mixCandidateKey(c);
@@ -255,12 +269,19 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     // 환산된 문제지가 하나라도 섞이면 그룹 전체를 "수준"으로 부른다.
     if (meta?.approx) g.approx = true;
     groups.set(gk, g);
+    const ck = `${gk}|${c.year ?? ""}`;
+    cellCounts.set(ck, (cellCounts.get(ck) ?? 0) + 1);
   }
   const levelGroups: MixLevelGroup[] = [...groups.entries()].map(([key, g]) => ({
     key,
     count: g.count,
     approx: g.approx,
   }));
+  const cells: MixCountCell[] = [...cellCounts.entries()].map(([k, count]) => {
+    const idx = k.lastIndexOf("|");
+    const year = k.slice(idx + 1);
+    return { level: k.slice(0, idx), year: year ? Number(year) : null, count };
+  });
 
   const examTypeNames = [
     ...new Set(papers.map((p) => p.exam_types?.name).filter((n): n is string => !!n)),
@@ -272,6 +293,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     paperCount: repIds.length,
     examTypeNames,
     levelGroups,
+    cells,
     minYear: years.length ? Math.min(...years) : null,
     maxYear: years.length ? Math.max(...years) : null,
     repByPaperId: Object.fromEntries(repByPaperId),
@@ -285,6 +307,8 @@ export type MixOverview = {
   examTypeNames: string[];
   // 등급별 출제 가능 문항 수·라벨 정보.
   levelGroups: MixLevelGroup[];
+  // (등급, 연도) 교차 문항 수 — 화면이 급수·연도를 함께 걸었을 때의 남는 수를 센다.
+  cells: MixCountCell[];
   minYear: number | null;
   maxYear: number | null;
 };
@@ -305,6 +329,7 @@ export async function getMixOverview(slug: string): Promise<MixOverview | null> 
     paperCount: pool.paperCount,
     examTypeNames: pool.examTypeNames,
     levelGroups: pool.levelGroups,
+    cells: pool.cells,
     minYear: pool.minYear,
     maxYear: pool.maxYear,
   };
@@ -353,7 +378,13 @@ export async function createMixSessionForUser(
   supabase: Supabase,
   userId: string,
   // levels: 급수 필터(빈 배열 = 전체). 풀에 실제로 있는 급수 키만 받아들인다.
-  input: { subjectSlug: string; limit?: number; levels?: string[] },
+  // year: 연도 범위(둘 다 null 이면 전체). 자료가 있는 구간 안으로 정리해서 쓴다.
+  input: {
+    subjectSlug: string;
+    limit?: number;
+    levels?: string[];
+    year?: Partial<MixYearRange> | null;
+  },
 ): Promise<CreateMixSessionResult> {
   const subject = await getSubjectBySlug(supabase, input.subjectSlug);
   if (!subject) return { error: "과목을 찾을 수 없어요." };
@@ -368,9 +399,20 @@ export async function createMixSessionForUser(
 
   const known = new Set(pool.levelGroups.map((g) => g.key));
   const levels = (input.levels ?? []).filter((l) => known.has(l));
-  const candidates = filterMixCandidatesByLevel(pool.candidates, levels);
+  const year = normalizeYearRange(input.year, { min: pool.minYear, max: pool.maxYear });
+  const candidates = filterMixCandidatesByYear(
+    filterMixCandidatesByLevel(pool.candidates, levels),
+    year,
+  );
   if (candidates.length === 0) {
-    return { error: "고른 급수에는 아직 풀 수 있는 문항이 없어요. 급수를 바꿔보세요." };
+    const narrowed = [levels.length > 0 ? "급수" : null, year.from != null || year.to != null ? "연도" : null]
+      .filter(Boolean)
+      .join("·");
+    return {
+      error: narrowed
+        ? `고른 ${narrowed} 범위에는 아직 풀 수 있는 문항이 없어요. 범위를 넓혀보세요.`
+        : "출제할 문항이 없어요.",
+    };
   }
 
   const limit = clampMixLimit(input.limit);

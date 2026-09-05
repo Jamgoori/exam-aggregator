@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import {
   clampMixLimit,
   filterMixCandidatesByLevel,
+  filterMixCandidatesByYear,
+  normalizeYearRange,
+  recentYearRange,
+  MIX_ALL_YEARS,
   labelMixSessions,
   MIX_NO_LEVEL,
   mixSessionTitle,
@@ -158,4 +162,59 @@ test("급수 필터: 고른 급수만 남고, 급수 없는 문제지는 전용 
     filterMixCandidatesByLevel(candidates, ["7급", MIX_NO_LEVEL]).map((c) => c.paperId),
     ["b", "c"],
   );
+});
+
+test("연도 범위: 고른 구간만 남고, 연도를 모르는 문항은 범위를 걸면 빠진다", () => {
+  const candidates: MixCandidate[] = [
+    { paperId: "a", questionNumber: 1, year: 2019 },
+    { paperId: "b", questionNumber: 1, year: 2023 },
+    { paperId: "c", questionNumber: 1, year: 2026 },
+    { paperId: "d", questionNumber: 1, year: null },
+  ];
+  assert.equal(filterMixCandidatesByYear(candidates, MIX_ALL_YEARS).length, 4);
+  assert.deepEqual(
+    filterMixCandidatesByYear(candidates, { from: 2023, to: null }).map((c) => c.paperId),
+    ["b", "c"],
+  );
+  assert.deepEqual(
+    filterMixCandidatesByYear(candidates, { from: null, to: 2019 }).map((c) => c.paperId),
+    ["a"],
+  );
+  assert.deepEqual(
+    filterMixCandidatesByYear(candidates, { from: 2020, to: 2025 }).map((c) => c.paperId),
+    ["b"],
+  );
+});
+
+test("연도 범위 정리: 거꾸로 넣으면 바로잡고, 자료 전체를 덮으면 '전체'가 된다", () => {
+  const bounds = { min: 2015, max: 2026 };
+  assert.deepEqual(normalizeYearRange({ from: 2024, to: 2020 }, bounds), {
+    from: 2020,
+    to: 2024,
+  });
+  // 자료 밖으로 나가면 자료 구간 안으로 당긴다.
+  assert.deepEqual(normalizeYearRange({ from: 1999, to: 2020 }, bounds), {
+    from: 2015,
+    to: 2020,
+  });
+  // 전체를 덮는 범위는 필터 없음과 같다.
+  assert.deepEqual(normalizeYearRange({ from: 2015, to: 2026 }, bounds), MIX_ALL_YEARS);
+  assert.deepEqual(normalizeYearRange({ from: null, to: null }, bounds), MIX_ALL_YEARS);
+  // 화면의 셀렉트/입력에서 온 값은 문자열일 수 있다 — 숫자가 아니면 "없음"으로 본다.
+  assert.deepEqual(normalizeYearRange({ from: "abc" as unknown as number, to: 2020 }, bounds), {
+    from: null,
+    to: 2020,
+  });
+  // 자료가 없으면 범위를 만들지 않는다.
+  assert.deepEqual(
+    normalizeYearRange({ from: 2020, to: 2024 }, { min: null, max: null }),
+    MIX_ALL_YEARS,
+  );
+});
+
+test("최근 N년은 오늘이 아니라 자료의 마지막 연도를 기준으로 센다", () => {
+  // 2026년 기출이 아직 없으면 "최근 3년"은 2023~2025 여야 한다.
+  assert.deepEqual(recentYearRange(3, 2025), { from: 2023, to: 2025 });
+  assert.deepEqual(recentYearRange(10, 2026), { from: 2017, to: 2026 });
+  assert.deepEqual(recentYearRange(3, null), MIX_ALL_YEARS);
 });

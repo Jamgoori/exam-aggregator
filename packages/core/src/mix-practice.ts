@@ -32,6 +32,8 @@ export type MixCandidate = {
   // 난도 등급("9급"·"7급"…). 급수가 없는 시행처(경찰·소방·해경·계리직)는 시행처·직류로
   // 환산한 등급이 들어온다(exam-level-tier.ts). 어느 등급에도 안 묶이면 null.
   level?: string | null;
+  // 문제지 시행 연도. 연도 범위 필터가 이 값으로 거른다.
+  year?: number | null;
   // 정본 개념 id(question_explanations.concept_id, 합쳐진 개념은 합쳐진 쪽). 해설이 아직
   // 없는 문항은 null — 개념 분산에서 "어느 개념도 아닌" 문항으로 취급한다.
   conceptId?: string | null;
@@ -47,6 +49,65 @@ export function filterMixCandidatesByLevel<T extends MixCandidate>(
   if (levels.length === 0) return candidates;
   const set = new Set(levels);
   return candidates.filter((c) => set.has(c.level ?? MIX_NO_LEVEL));
+}
+
+// 연도 범위 빠른 선택(최근 N년). 개편 전 문제를 걸러내려는 용도라 "최근"만 있으면
+// 충분하고, 특정 구간(2015~2018)이 필요한 사람은 직접 범위를 쓴다.
+export const MIX_RECENT_YEAR_OPTIONS = [3, 5, 10] as const;
+
+export type MixYearRange = { from: number | null; to: number | null };
+
+export const MIX_ALL_YEARS: MixYearRange = { from: null, to: null };
+
+// 범위를 자료가 있는 구간 안으로 정리한다. 거꾸로 넣었으면(2020~2015) 바로잡고,
+// 자료 전체를 덮으면 "전체"(null)로 돌려 필터가 없는 것과 같게 만든다.
+export function normalizeYearRange(
+  range: Partial<MixYearRange> | null | undefined,
+  bounds: { min: number | null; max: number | null },
+): MixYearRange {
+  const min = bounds.min;
+  const max = bounds.max;
+  if (min == null || max == null) return MIX_ALL_YEARS;
+
+  // null·빈 문자열을 Number() 에 그냥 넘기면 0 이 되어(Number(null) === 0) "전체"가
+  // 자료의 첫 해 한 칸으로 좁혀진다. 값이 없으면 없는 채로 둔다.
+  const toInt = (v: unknown): number | null => {
+    if (v == null || v === "") return null;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? Math.round(n) : null;
+  };
+  let from = toInt(range?.from);
+  let to = toInt(range?.to);
+  if (from != null && to != null && from > to) [from, to] = [to, from];
+
+  from = from == null ? null : Math.min(Math.max(from, min), max);
+  to = to == null ? null : Math.min(Math.max(to, min), max);
+
+  // 구간이 자료 전체와 같으면 필터를 걸지 않은 것과 다르지 않다.
+  if ((from == null || from <= min) && (to == null || to >= max)) return MIX_ALL_YEARS;
+  return { from, to };
+}
+
+// "최근 N년" → 실제 연도 범위. 기준은 자료의 마지막 연도다(올해 기출이 아직 안 올라온
+// 1~3월에 오늘 날짜로 세면 최근 3년이 2년치가 된다).
+export function recentYearRange(years: number, maxYear: number | null): MixYearRange {
+  if (maxYear == null || years <= 0) return MIX_ALL_YEARS;
+  return { from: maxYear - years + 1, to: maxYear };
+}
+
+export function filterMixCandidatesByYear<T extends MixCandidate>(
+  candidates: T[],
+  range: MixYearRange,
+): T[] {
+  if (range.from == null && range.to == null) return candidates;
+  return candidates.filter((c) => {
+    // 연도를 모르는 문항은 범위를 걸면 뺀다 — "2020년 이후"라고 했는데 연도 미상이
+    // 섞이면 고른 범위가 지켜지지 않는다.
+    if (c.year == null) return false;
+    if (range.from != null && c.year < range.from) return false;
+    if (range.to != null && c.year > range.to) return false;
+    return true;
+  });
 }
 
 export function mixCandidateKey(c: MixCandidate): string {

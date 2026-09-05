@@ -9,7 +9,7 @@ import { MixSessionList } from "@/components/mix-session-list";
 import { subjectColor } from "@/lib/subject-colors";
 
 // 기출 섞어풀기 시작 화면. 과목 페이지의 "기출 섞어풀기" 버튼과 오답노트에서 들어온다.
-// 고를 것은 급수와 문항 수뿐이고, 나머지(시행처·연도 범위, 순서, 안 푼 문제 우선, 개념 분산)는
+// 고를 것은 급수·연도·문항 수뿐이고, 나머지(시행처, 순서, 안 푼 문제 우선, 개념 분산)는
 // 기본값으로 흡수한다 — 공시생이 매일 쓰는 기능일수록 화면에서 결정할 게 적어야 한다.
 //
 // 로그인 전에도 화면은 보인다(뭘 하는 기능인지 먼저 닿아야 로그인할 이유가 생긴다).
@@ -92,6 +92,9 @@ export default async function MixPracticePage({
           subjectName={subject.name}
           questionCount={overview.questionCount}
           levelGroups={overview.levelGroups}
+          cells={overview.cells}
+          minYear={overview.minYear}
+          maxYear={overview.maxYear}
           loggedIn={!!userId}
         />
       </section>
