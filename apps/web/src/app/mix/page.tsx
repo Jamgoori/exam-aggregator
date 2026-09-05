@@ -84,9 +84,6 @@ export default async function MixHubPage({
       return fa - fb || a.name.localeCompare(b.name, "ko");
     });
 
-  const mixHref = (slug: string) =>
-    level ? `/subjects/${slug}/mix?level=${encodeURIComponent(level)}` : `/subjects/${slug}/mix`;
-
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pb-12 pt-6 sm:pt-8">
       <div className="flex flex-col gap-2">
@@ -208,7 +205,7 @@ export default async function MixHubPage({
             count: s.count,
             favorite: favoriteSlugs.has(s.slug),
           }))}
-          hrefFor={mixHref}
+          level={level}
           unit={index.unit}
           emptyMessage={
             level

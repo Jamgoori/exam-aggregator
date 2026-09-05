@@ -17,24 +17,33 @@ export type MixPickerSubject = {
 // 섞어풀기 허브의 과목 고르기. 자료가 있는 과목이 수십 개라 목록만 두면 스크롤로
 // 찾아야 해서, 검색창을 함께 둔다.
 //
+// ⚠ 이 컴포넌트에 **함수를 prop 으로 넘기지 말 것.** 클라이언트 컴포넌트의 prop 은
+// 직렬화돼 넘어가므로 함수는 넘길 수 없고, 넘기면 렌더가 통째로 던진다. 그런데 그
+// 에러는 셸이 나간 뒤 스트림 안에서 터져 **HTTP 상태는 200 으로 남는다** — 상태 코드만
+// 보면 멀쩡해 보이고 화면만 죽는다(2026-09-05 /mix 사고: href 를 만드는 함수를 넘겼다가
+// 하루치 배포가 그 상태였다). 그래서 주소 조립에 필요한 값(level)만 문자열로 받는다.
+//
 // 매칭 규칙은 사이트 검색과 같은 함수(@gongmoa/core 의 matchSubjectIds)를 쓴다 —
 // 초성 검색("ㄱㅇ" → 국어)까지 그대로 되고, 홈 검색창과 다른 결과가 나오지 않는다.
 // 필터링은 서버 왕복 없이 이 자리에서 한다(목록이 이미 손에 있다).
 export function MixSubjectPicker({
   subjects,
-  hrefFor,
+  level,
   unit,
   emptyMessage,
 }: {
   subjects: MixPickerSubject[];
-  // 급수 선택을 주소로 이어 붙이는 건 부모(서버 컴포넌트)가 안다.
-  hrefFor: (slug: string) => string;
+  // 허브에서 고른 급수. 과목 시작 화면 주소에 그대로 이어 붙인다(없으면 전체).
+  level: string | null;
   // 카드 숫자의 단위. 집계 함수가 아직 없는 환경에서는 문제지 수로 떨어진다.
   unit: "question" | "paper";
   // 급수 필터 때문에 목록 자체가 빈 경우의 안내(검색 결과가 없는 것과 다른 상황이다).
   emptyMessage: string;
 }) {
   const [query, setQuery] = useState("");
+
+  const hrefFor = (slug: string) =>
+    level ? `/subjects/${slug}/mix?level=${encodeURIComponent(level)}` : `/subjects/${slug}/mix`;
 
   // matchSubjectIds 는 Subject 를 받아 id 를 돌려준다. 여기서는 slug 가 곧 키라
   // id 자리에 slug 를 넣어 그대로 쓴다(같은 규칙을 두 번 적지 않으려는 것).
