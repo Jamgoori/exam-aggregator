@@ -13,6 +13,9 @@ import { KST_TIME_ZONE, MIX_NO_LEVEL } from "@gongmoa/core";
 // 화면은 급수와 과목만 묻는다 — 문항 수·연도는 과목을 고른 다음 화면
 // (/subjects/[slug]/mix)에 있다.
 //
+// 카드 숫자는 시작 화면과 같은 단위(풀 수 있는 문항 수)다 — "20문항 풀기"를 고르는
+// 화면으로 가는 자리라, 여기서 "12장"을 보여주면 단위가 어긋난다.
+//
 // 급수를 여기서 먼저 고르는 이유: 공시생은 자기 급수가 바뀌지 않는다. 과목을 옮길
 // 때마다 9급을 다시 고르게 하면 매번 같은 선택을 반복시키는 셈이라, 여기서 한 번
 // 고르면 과목 시작 화면까지 그대로 이어진다(?level=).
@@ -63,7 +66,7 @@ export default async function MixHubPage({
   // 고른 급수의 문제지가 있는 과목만. 즐겨찾는 과목을 앞으로 — 공시생은 보통 5과목만
   // 도는데 목록에는 수십 과목이 있어, 즐겨찾기가 곧 "내 과목 목록"이다.
   const subjects = index.subjects
-    .map((s) => ({ ...s, count: level ? (s.byTier[level] ?? 0) : s.paperCount }))
+    .map((s) => ({ ...s, count: level ? (s.byTier[level] ?? 0) : s.count }))
     .filter((s) => s.count > 0)
     .sort((a, b) => {
       const fa = favoriteSlugs.has(a.slug) ? 0 : 1;
@@ -194,6 +197,7 @@ export default async function MixHubPage({
             favorite: favoriteSlugs.has(s.slug),
           }))}
           hrefFor={mixHref}
+          unit={index.unit}
           emptyMessage={
             level
               ? "이 급수에는 아직 기출문제가 없어요. 다른 급수를 골라보세요."

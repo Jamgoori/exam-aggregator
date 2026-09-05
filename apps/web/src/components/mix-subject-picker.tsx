@@ -9,7 +9,7 @@ import { subjectColor } from "@/lib/subject-colors";
 export type MixPickerSubject = {
   slug: string;
   name: string;
-  // 고른 급수 기준 문제지 수(급수를 안 골랐으면 과목 전체).
+  // 고른 급수 기준 수(급수를 안 골랐으면 과목 전체). 단위는 unit 이 정한다.
   count: number;
   favorite: boolean;
 };
@@ -23,11 +23,14 @@ export type MixPickerSubject = {
 export function MixSubjectPicker({
   subjects,
   hrefFor,
+  unit,
   emptyMessage,
 }: {
   subjects: MixPickerSubject[];
   // 급수 선택을 주소로 이어 붙이는 건 부모(서버 컴포넌트)가 안다.
   hrefFor: (slug: string) => string;
+  // 카드 숫자의 단위. 집계 함수가 아직 없는 환경에서는 문제지 수로 떨어진다.
+  unit: "question" | "paper";
   // 급수 필터 때문에 목록 자체가 빈 경우의 안내(검색 결과가 없는 것과 다른 상황이다).
   emptyMessage: string;
 }) {
@@ -93,7 +96,8 @@ export function MixSubjectPicker({
               </span>
               <span className="min-w-0 flex-1 text-xs text-zinc-500 dark:text-zinc-500">
                 {s.favorite && <span className="mr-1 text-amber-500">★</span>}
-                기출 {s.count.toLocaleString()}장
+                기출 {s.count.toLocaleString()}
+                {unit === "question" ? "문항" : "장"}
               </span>
               <span className="flex shrink-0 items-center gap-0.5 text-sm font-medium text-blue-600 group-hover:underline dark:text-blue-400">
                 섞어풀기
