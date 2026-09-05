@@ -59,6 +59,31 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+// 조각난 조회를 몇 개씩 동시에 던진다. 출제 풀을 처음 만들 때(캐시가 빈 상태) 국어처럼
+// 문제지가 수백 장인 과목은 조각이 수십 개가 되는데, 한 줄로 세워 기다리면 왕복 지연이
+// 그대로 쌓여 서버리스 함수 제한 시간에 닿는다(2026-09-05 배포 직후 500 관측).
+// 무료 티어 DB라 동시 요청을 무작정 늘리지는 않는다 — wrong-notes.ts 와 같은 값(8).
+const POOL_CONCURRENCY = 8;
+
+async function inParallel<T, R>(
+  items: T[],
+  worker: (item: T) => Promise<R>,
+  concurrency = POOL_CONCURRENCY,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+      while (true) {
+        const i = next++;
+        if (i >= items.length) return;
+        results[i] = await worker(items[i]);
+      }
+    }),
+  );
+  return results;
+}
+
 type PoolPaper = {
   id: string;
   subject_id: string;
@@ -111,7 +136,7 @@ async function fetchCanonicalConcepts(
   questionIds: string[],
 ): Promise<Map<string, string>> {
   const raw = new Map<string, string>();
-  for (const ids of chunk(questionIds, 200)) {
+  await inParallel(chunk(questionIds, 200), async (ids) => {
     const { data } = await admin
       .from("question_explanations")
       .select("question_id, concept_id")
@@ -120,17 +145,17 @@ async function fetchCanonicalConcepts(
     for (const r of (data ?? []) as { question_id: string; concept_id: string | null }[]) {
       if (r.concept_id) raw.set(r.question_id, r.concept_id);
     }
-  }
+  });
   if (raw.size === 0) return raw;
 
   // merged_into 를 끝까지 따라간다(보통 한 단계). 순환은 방어적으로 끊는다.
   const mergedInto = new Map<string, string | null>();
-  for (const ids of chunk([...new Set(raw.values())], 200)) {
+  await inParallel(chunk([...new Set(raw.values())], 200), async (ids) => {
     const { data } = await admin.from("concepts").select("id, merged_into").in("id", ids);
     for (const r of (data ?? []) as { id: string; merged_into: string | null }[]) {
       mergedInto.set(r.id, r.merged_into);
     }
-  }
+  });
   const canonical = (id: string): string => {
     let cur = id;
     for (let i = 0; i < 5; i++) {
@@ -192,7 +217,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
   // 없어 "맞다/틀리다"를 말할 수 없으므로 후보에서 뺀다(schema.sql 의 의도 그대로).
   const admin = createAdminClient();
   const voidedByPaper = new Map<string, Set<number>>();
-  for (const ids of chunk(repIds, 200)) {
+  await inParallel(chunk(repIds, 200), async (ids) => {
     const { data } = await admin
       .from("paper_answers")
       .select("paper_id, voided_questions")
@@ -200,7 +225,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     for (const row of (data ?? []) as { paper_id: string; voided_questions: number[] | null }[]) {
       voidedByPaper.set(row.paper_id, new Set(row.voided_questions ?? []));
     }
-  }
+  });
   const answeredRepIds = repIds.filter((id) => voidedByPaper.has(id));
   if (answeredRepIds.length === 0) return { ...empty, paperCount: repIds.length };
 
@@ -220,7 +245,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
   );
   type QRow = { id: string; paper_id: string; question_number: number };
   const rowsById = new Map<string, QRow>();
-  for (const ids of chunk(answeredRepIds, 25)) {
+  await inParallel(chunk(answeredRepIds, 25), async (ids) => {
     const rows = await fetchAllPages<QRow>(
       (from, to) =>
         supabase
@@ -239,7 +264,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
       if (voidedByPaper.get(r.paper_id)?.has(r.question_number)) continue;
       rowsById.set(r.id, r);
     }
-  }
+  });
 
   // 문항별 정본 개념. 해설 배치가 붙인 concept_id 를 읽고, 합쳐진 개념(merged_into)은
   // 합쳐진 쪽으로 되짚는다 — 같은 개념이 옛 id 와 새 id 로 갈라져 있으면 분산이 안 된다.
@@ -304,25 +329,60 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
 // ── 섞어풀기 허브(/mix)의 급수 탭·과목 목록 ────────────────────────────────
 //
 // 허브에서 급수를 먼저 고르면 과목마다 다시 고를 필요가 없다. 그러려면 "어느 과목에
-// 어느 등급 문제지가 몇 장 있는지"를 과목 수십 개 분량으로 알아야 하는데, 과목별
-// 출제 풀(getMixPool)을 전부 돌리면 문항 단위 조회가 과목 수만큼 붙는다. 허브에는
-// 문제지 단위 수치면 충분하므로 목록 조회 한 번(fetchAllExamPapers — 홈·과목 색인이
-// 쓰는 것과 같은 조회, 중복 시험지도 이미 합쳐져 있다)으로 끝낸다.
+// 어느 등급 문항이 몇 개 있는지"를 과목 수십 개 분량으로 알아야 하는데, 과목별 출제
+// 풀(getMixPool)을 전부 돌리면 문항 단위 조회가 과목 수만큼 붙는다. 그래서 목록 조회
+// 한 번(fetchAllExamPapers — 홈·과목 색인이 쓰는 것과 같은 조회, 중복 시험지도 이미
+// 합쳐져 있다) + 집계 함수 한 번(mix_playable_question_counts)으로 끝낸다.
 //
-// 그래서 허브의 "기출 N장"은 문제지 수이고, 과목 시작 화면의 칩 숫자는 문항 수다.
-// 단위를 각각 라벨에 적어 둔다.
+// 단위는 시작 화면과 같은 **문항 수**다. 집계 함수가 아직 없는 환경에서는 문제지 수로
+// 떨어지고(unit), 화면이 라벨을 "장"으로 바꿔 단다.
 
-export type MixHubTier = { key: string; approx: boolean; paperCount: number };
+export type MixHubTier = { key: string; approx: boolean; count: number };
 
 export type MixHubSubject = {
   slug: string;
   name: string;
-  paperCount: number;
-  // 등급별 문제지 수(급수 탭으로 걸렀을 때 카드에 보일 수).
+  count: number;
+  // 등급별 수(급수 탭으로 걸렀을 때 카드에 보일 수).
   byTier: Record<string, number>;
 };
 
-export type MixHubIndex = { tiers: MixHubTier[]; subjects: MixHubSubject[] };
+// 허브 숫자의 단위. 집계 함수(mix_playable_question_counts)가 있으면 "문항"이고,
+// 아직 없는 환경(마이그레이션 전)에서는 문제지 수로 떨어져 "장"이 된다.
+export type MixHubUnit = "question" | "paper";
+
+export type MixHubIndex = {
+  tiers: MixHubTier[];
+  subjects: MixHubSubject[];
+  unit: MixHubUnit;
+};
+
+// 문제지별 "출제 가능 문항 수". 집계는 DB 함수 한 번으로 받는다 — 과목마다 출제 풀을
+// 돌리면 문항 조회가 과목 수만큼 붙어 허브가 통째로 느려진다. RPC 도 PostgREST 기본
+// 상한(1000행)에 걸리므로 range 로 이어받는다.
+//
+// 함수가 아직 없는 환경(마이그레이션 전)에서는 null 을 돌려주고, 호출부가 문제지 수로
+// 떨어진다 — 전국 오답률 배지(fetchPaperWrongRates)와 같은 처리다.
+async function fetchPlayableQuestionCounts(): Promise<Record<string, number> | null> {
+  const supabase = createPublicClient();
+  const out: Record<string, number> = {};
+  const SIZE = 1000;
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .rpc("mix_playable_question_counts")
+      .range(from, from + SIZE - 1);
+    if (error) {
+      console.error("mix_playable_question_counts 실패", error.message);
+      return null;
+    }
+    const rows = (data ?? []) as { paper_id: string; question_count: number }[];
+    for (const r of rows) out[r.paper_id] = r.question_count;
+    if (rows.length < SIZE) break;
+    from += SIZE;
+  }
+  return out;
+}
 
 export async function getMixHubIndex(): Promise<MixHubIndex> {
   "use cache";
@@ -330,10 +390,14 @@ export async function getMixHubIndex(): Promise<MixHubIndex> {
   cacheTag("home-data");
 
   const supabase = createPublicClient();
-  const [{ papers, examTypes }, { data: subjectRows }] = await Promise.all([
+  const [{ papers, examTypes }, { data: subjectRows }, playable] = await Promise.all([
     fetchAllExamPapers(supabase),
     supabase.from("subjects").select("id, slug, name"),
+    fetchPlayableQuestionCounts(),
   ]);
+  // 문항 수를 못 받았으면(함수 미적용) 문제지 수로 센다 — 화면이 단위를 따라 바꾼다.
+  const unit: MixHubUnit = playable ? "question" : "paper";
+  const countOf = (paperId: string) => (playable ? (playable[paperId] ?? 0) : 1);
   const examTypeName = new Map(examTypes.map((t) => [t.id, t.name]));
   const subjects = new Map(
     ((subjectRows ?? []) as { id: string; slug: string; name: string }[]).map((r) => [
@@ -342,11 +406,15 @@ export async function getMixHubIndex(): Promise<MixHubIndex> {
     ]),
   );
 
-  const tierStats = new Map<string, { approx: boolean; paperCount: number }>();
+  const tierStats = new Map<string, { approx: boolean; count: number }>();
   const bySubject = new Map<string, MixHubSubject>();
   for (const p of papers) {
     const subject = subjects.get(p.subject_id);
     if (!subject) continue;
+    // 풀 수 있는 문항이 하나도 없는 문제지(정답 미등록·크롭 전)는 세지 않는다 —
+    // 세면 "기출 40문항"이라고 해 놓고 시작 화면이 "준비 중"이 된다.
+    const count = countOf(p.id);
+    if (count === 0) continue;
     const input = {
       level: p.level,
       examTypeName: examTypeName.get(p.exam_type_id) ?? null,
@@ -354,17 +422,17 @@ export async function getMixHubIndex(): Promise<MixHubIndex> {
     };
     const key = examLevelTier(input) ?? MIX_NO_LEVEL;
 
-    const t = tierStats.get(key) ?? { approx: false, paperCount: 0 };
-    t.paperCount++;
+    const t = tierStats.get(key) ?? { approx: false, count: 0 };
+    t.count += count;
     // 환산된 문제지가 하나라도 있으면 그 등급은 "9급 수준"으로 부른다.
     if (isApproxLevelTier(input)) t.approx = true;
     tierStats.set(key, t);
 
     const entry =
       bySubject.get(subject.id) ??
-      ({ slug: subject.slug, name: subject.name, paperCount: 0, byTier: {} } as MixHubSubject);
-    entry.paperCount++;
-    entry.byTier[key] = (entry.byTier[key] ?? 0) + 1;
+      ({ slug: subject.slug, name: subject.name, count: 0, byTier: {} } as MixHubSubject);
+    entry.count += count;
+    entry.byTier[key] = (entry.byTier[key] ?? 0) + count;
     bySubject.set(subject.id, entry);
   }
 
@@ -372,9 +440,10 @@ export async function getMixHubIndex(): Promise<MixHubIndex> {
     tiers: [...tierStats.entries()].map(([key, t]) => ({
       key,
       approx: t.approx,
-      paperCount: t.paperCount,
+      count: t.count,
     })),
     subjects: [...bySubject.values()],
+    unit,
   };
 }
 
@@ -558,7 +627,7 @@ async function fetchResolvedKeys(
     if (wantedReps.has(rep)) realIds.add(real);
   }
   const latest = new Map<string, { correct: boolean; at: string }>();
-  for (const ids of chunk([...realIds], 200)) {
+  await inParallel(chunk([...realIds], 200), async (ids) => {
     const { data } = await supabase
       .from("user_question_status")
       .select("paper_id, question_number, last_is_correct, last_answered_at, wrong_count")
@@ -578,7 +647,7 @@ async function fetchResolvedKeys(
         latest.set(key, { correct: r.last_is_correct, at: r.last_answered_at });
       }
     }
-  }
+  });
   for (const [key, v] of latest) if (v.correct) resolved.add(key);
   return { resolved, wrongCount };
 }
@@ -595,7 +664,7 @@ export async function listMixSessions(
   const admin = createAdminClient();
   type ItemRow = { session_id: string; paper_id: string; question_number: number };
   const wrongBySession = new Map<string, ItemRow[]>();
-  for (const ids of chunk(sessions.map((s) => s.id), 50)) {
+  await inParallel(chunk(sessions.map((s) => s.id), 50), async (ids) => {
     const { data } = await admin
       .from("review_session_items")
       .select("session_id, paper_id, question_number")
@@ -606,7 +675,7 @@ export async function listMixSessions(
       list.push(r);
       wrongBySession.set(r.session_id, list);
     }
-  }
+  });
 
   const pool = await getMixPool(subjectId);
   const allWrong = [...wrongBySession.values()].flat();
