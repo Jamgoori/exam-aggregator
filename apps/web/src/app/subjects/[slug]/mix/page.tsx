@@ -9,7 +9,7 @@ import { MixSessionList } from "@/components/mix-session-list";
 import { subjectColor } from "@/lib/subject-colors";
 
 // 기출 섞어풀기 시작 화면. 과목 페이지의 "기출 섞어풀기" 버튼과 오답노트에서 들어온다.
-// 고를 것은 문항 수 하나뿐이고, 나머지(시행처·연도 범위, 순서, 안 푼 문제 우선)는
+// 고를 것은 급수와 문항 수뿐이고, 나머지(시행처·연도 범위, 순서, 안 푼 문제 우선, 개념 분산)는
 // 기본값으로 흡수한다 — 공시생이 매일 쓰는 기능일수록 화면에서 결정할 게 적어야 한다.
 //
 // 로그인 전에도 화면은 보인다(뭘 하는 기능인지 먼저 닿아야 로그인할 이유가 생긴다).
@@ -91,6 +91,7 @@ export default async function MixPracticePage({
           subjectSlug={subject.slug}
           subjectName={subject.name}
           questionCount={overview.questionCount}
+          levelCounts={overview.levelCounts}
           loggedIn={!!userId}
         />
       </section>
@@ -109,6 +110,11 @@ export default async function MixPracticePage({
           <span className="shrink-0 text-blue-600 dark:text-blue-400">3</span>
           다음에 또 시작하면 아직 안 풀어 본 문제부터 나와요. 과목 기출을 한 바퀴 다 돌면
           그때부터 다시 섞여요.
+        </li>
+        <li className="flex gap-2">
+          <span className="shrink-0 text-blue-600 dark:text-blue-400">4</span>
+          같은 개념(예: 행정법의 처분성)이 한 번에 몰리지 않게 골라요. 한 세션에 여러 개념을
+          고르게 만나야 시험처럼 풀 수 있어요.
         </li>
       </ul>
 

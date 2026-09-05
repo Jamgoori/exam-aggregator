@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   clampMixLimit,
+  filterMixCandidatesByLevel,
   labelMixSessions,
+  MIX_NO_LEVEL,
   mixSessionTitle,
   pickMixQuestions,
   MIX_DEFAULT_LIMIT,
@@ -96,4 +98,64 @@ test("같은 날 세션은 만든 순서대로 (2), (3)이 붙는다", () => {
   assert.equal(titles.get("b"), "9월 5일 섞어풀기 (2)");
   assert.equal(titles.get("c"), "9월 5일 섞어풀기 (3)");
   assert.equal(titles.get("d"), "9월 6일 섞어풀기");
+});
+
+test("같은 개념은 한 세션에 하나씩 먼저, 정원이 남을 때만 둘째가 들어온다", () => {
+  // 개념 A 문항 10개, 개념 B·C·D 각 1개, 개념 없음 2개.
+  const candidates: MixCandidate[] = [
+    ...Array.from({ length: 10 }, (_, i) => ({ paperId: `pa${i}`, questionNumber: 1, conceptId: "A" })),
+    { paperId: "pb", questionNumber: 1, conceptId: "B" },
+    { paperId: "pc", questionNumber: 1, conceptId: "C" },
+    { paperId: "pd", questionNumber: 1, conceptId: "D" },
+    { paperId: "pn", questionNumber: 1, conceptId: null },
+    { paperId: "pn", questionNumber: 2, conceptId: null },
+  ];
+  const { picked } = pickMixQuestions(candidates, 6, new Set(), noShuffle);
+  assert.equal(picked.length, 6);
+  const a = picked.filter((p) => p.conceptId === "A").length;
+  // 개념 하나씩(A·B·C·D) + 개념 없음 둘 = 6이 먼저 차므로 A 는 하나뿐이다.
+  assert.equal(a, 1);
+  for (const id of ["B", "C", "D"]) {
+    assert.equal(picked.filter((p) => p.conceptId === id).length, 1, id);
+  }
+});
+
+test("개념 상한은 정원이 남을 때만 올라가고, 후보가 그 개념뿐이어도 정원은 채운다", () => {
+  const candidates: MixCandidate[] = [
+    ...Array.from({ length: 8 }, (_, i) => ({ paperId: `pa${i}`, questionNumber: 1, conceptId: "A" })),
+    { paperId: "pb", questionNumber: 1, conceptId: "B" },
+  ];
+  const { picked } = pickMixQuestions(candidates, 5, new Set(), noShuffle);
+  assert.equal(picked.length, 5);
+  assert.equal(picked.filter((p) => p.conceptId === "B").length, 1);
+  assert.equal(picked.filter((p) => p.conceptId === "A").length, 4);
+});
+
+test("개념 분산은 안 푼 문항 우선보다 뒤다 — 푼 문항으로 개념 겹침을 피하지 않는다", () => {
+  const candidates: MixCandidate[] = [
+    { paperId: "p1", questionNumber: 1, conceptId: "A" },
+    { paperId: "p2", questionNumber: 1, conceptId: "A" },
+    { paperId: "p3", questionNumber: 1, conceptId: "B" }, // 이미 푼 문항
+  ];
+  const { picked, unseenCount } = pickMixQuestions(candidates, 2, new Set(["p3#1"]), noShuffle);
+  assert.equal(picked.length, 2);
+  assert.equal(unseenCount, 2);
+  assert.ok(picked.every((p) => p.conceptId === "A"));
+});
+
+test("급수 필터: 고른 급수만 남고, 급수 없는 문제지는 전용 키로 고른다", () => {
+  const candidates: MixCandidate[] = [
+    { paperId: "a", questionNumber: 1, level: "9급" },
+    { paperId: "b", questionNumber: 1, level: "7급" },
+    { paperId: "c", questionNumber: 1, level: null },
+  ];
+  assert.equal(filterMixCandidatesByLevel(candidates, []).length, 3);
+  assert.deepEqual(
+    filterMixCandidatesByLevel(candidates, ["9급"]).map((c) => c.paperId),
+    ["a"],
+  );
+  assert.deepEqual(
+    filterMixCandidatesByLevel(candidates, ["7급", MIX_NO_LEVEL]).map((c) => c.paperId),
+    ["b", "c"],
+  );
 });

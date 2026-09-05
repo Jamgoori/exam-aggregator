@@ -29,7 +29,24 @@ export function clampMixLimit(value: unknown): number {
 export type MixCandidate = {
   paperId: string;
   questionNumber: number;
+  // 문제지 급수("9급"·"7급"…, 없으면 null). 시작 화면의 급수 필터가 이 값으로 거른다.
+  level?: string | null;
+  // 정본 개념 id(question_explanations.concept_id, 합쳐진 개념은 합쳐진 쪽). 해설이 아직
+  // 없는 문항은 null — 개념 분산에서 "어느 개념도 아닌" 문항으로 취급한다.
+  conceptId?: string | null;
 };
+
+// 급수 필터. 빈 목록이면 전체. 급수가 없는 문제지(level null)는 "급수 없음" 키로 고른다.
+export const MIX_NO_LEVEL = "__none__";
+
+export function filterMixCandidatesByLevel<T extends MixCandidate>(
+  candidates: T[],
+  levels: readonly string[],
+): T[] {
+  if (levels.length === 0) return candidates;
+  const set = new Set(levels);
+  return candidates.filter((c) => set.has(c.level ?? MIX_NO_LEVEL));
+}
 
 export function mixCandidateKey(c: MixCandidate): string {
   return `${c.paperId}#${c.questionNumber}`;
@@ -44,10 +61,10 @@ function shuffleWith<T>(arr: T[], rand: () => number): T[] {
   return a;
 }
 
-// 문제지별로 묶어 라운드로빈으로 뽑는다. 균등 무작위로 뽑으면 문항이 많은 문제지
-// (한 회차 40문항짜리 등)가 세션을 독점해 "섞어풀기"가 아니라 그 문제지 풀기가 된다.
-// 문제지 순서와 문제지 안의 문항 순서를 각각 섞은 뒤 한 장에서 하나씩 돌아가며 집으면,
-// 어느 문제지도 다른 문제지보다 두 문항 이상 앞서지 않는다.
+// 문제지별로 묶어 라운드로빈 순서로 늘어놓는다. 균등 무작위로 뽑으면 문항이 많은
+// 문제지(한 회차 40문항짜리 등)가 세션을 독점해 "섞어풀기"가 아니라 그 문제지 풀기가
+// 된다. 문제지 순서와 문제지 안의 문항 순서를 각각 섞은 뒤 한 장에서 하나씩 돌아가며
+// 집으면, 어느 문제지도 다른 문제지보다 두 문항 이상 앞서지 않는다.
 function roundRobinByPaper<T extends MixCandidate>(
   items: T[],
   limit: number,
@@ -78,6 +95,40 @@ function roundRobinByPaper<T extends MixCandidate>(
   return out;
 }
 
+// 개념이 뭉치지 않게 고른다. 순서대로 훑되 같은 개념은 세션에 하나씩만 먼저 담고,
+// 그래도 정원이 남으면 개념당 2개, 3개… 로 상한을 올려가며 채운다. 개념이 없는 문항
+// (해설 미생성)은 상한을 받지 않는다 — 그 문항을 뒤로 밀면 해설 커버리지가 낮은 과목
+// 에서 정원을 못 채운다.
+//
+// counts 를 밖에서 넘겨 두 번 부를 때(안 푼 문항 → 푼 문항) 개념 수가 이어지게 한다.
+function takeSpreadByConcept<T extends MixCandidate>(
+  ordered: T[],
+  need: number,
+  counts: Map<string, number>,
+): T[] {
+  const out: T[] = [];
+  if (need <= 0 || ordered.length === 0) return out;
+  const taken = new Set<string>();
+  let cap = 1;
+  while (out.length < need && taken.size < ordered.length) {
+    let progressed = false;
+    for (const c of ordered) {
+      if (out.length >= need) break;
+      const key = mixCandidateKey(c);
+      if (taken.has(key)) continue;
+      const concept = c.conceptId ?? null;
+      if (concept && (counts.get(concept) ?? 0) >= cap) continue;
+      taken.add(key);
+      out.push(c);
+      progressed = true;
+      if (concept) counts.set(concept, (counts.get(concept) ?? 0) + 1);
+    }
+    // 한 바퀴에 하나도 못 담았으면 남은 것이 전부 상한에 걸린 것 — 상한을 올린다.
+    if (!progressed) cap++;
+  }
+  return out;
+}
+
 // 후보에서 limit개를 뽑는다.
 //
 // **안 풀어 본 문항을 먼저** 낸다(seenKeys = 이 사용자가 CBT·복습·섞어풀기 어디서든
@@ -85,9 +136,10 @@ function roundRobinByPaper<T extends MixCandidate>(
 // 푼 문항이 섞이면 회독 효과와 헷갈린다. 새 문항이 모자랄 때만 푼 문항으로 채우고,
 // 그때는 결과 화면이 "다 푼 과목"임을 알려준다(coveredAll).
 //
-// 두 그룹 안에서는 각각 문제지 라운드로빈이라 시행처·연도가 자연히 섞인다. 뽑은
-// 목록은 마지막에 한 번 더 섞어, 세션 앞쪽이 전부 새 문항·뒤쪽이 전부 푼 문항으로
-// 갈리지 않게 한다.
+// 두 그룹 안에서는 각각 문제지 라운드로빈 순서로 늘어놓아 시행처·연도가 자연히 섞이고,
+// 그 순서 위에서 **같은 개념이 겹치지 않게**(takeSpreadByConcept) 담는다 — 20문항에
+// "처분성"이 넷 들어오면 그날 공부는 한 개념 복습이 된다. 뽑은 목록은 마지막에 한 번
+// 더 섞어, 세션 앞쪽이 전부 새 문항·뒤쪽이 전부 푼 문항으로 갈리지 않게 한다.
 export function pickMixQuestions<T extends MixCandidate>(
   candidates: T[],
   limit: number,
@@ -101,9 +153,20 @@ export function pickMixQuestions<T extends MixCandidate>(
     (seenKeys.has(mixCandidateKey(c)) ? seen : unseen).push(c);
   }
 
-  const fresh = roundRobinByPaper(unseen, cap, rand);
+  const conceptCounts = new Map<string, number>();
+  const fresh = takeSpreadByConcept(
+    roundRobinByPaper(unseen, unseen.length, rand),
+    cap,
+    conceptCounts,
+  );
   const filler =
-    fresh.length < cap ? roundRobinByPaper(seen, cap - fresh.length, rand) : [];
+    fresh.length < cap
+      ? takeSpreadByConcept(
+          roundRobinByPaper(seen, seen.length, rand),
+          cap - fresh.length,
+          conceptCounts,
+        )
+      : [];
 
   return {
     picked: shuffleWith([...fresh, ...filler], rand),

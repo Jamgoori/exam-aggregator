@@ -453,6 +453,8 @@ export type StartMixResult = CreateMixSessionResult & { login?: boolean };
 export async function createMixSession(input: {
   subjectSlug: string;
   limit?: number;
+  // 급수 필터("9급"·"7급"…, 급수 없음은 MIX_NO_LEVEL). 비어 있으면 전체.
+  levels?: string[];
 }): Promise<StartMixResult> {
   const slug = String(input?.subjectSlug ?? "");
   if (!slug) return { error: "잘못된 접근입니다." };
@@ -460,9 +462,15 @@ export async function createMixSession(input: {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요.", login: true };
 
+  // 클라이언트가 보내는 값이라 문자열만, 길이도 묶는다. 실제 존재 여부는 서버 풀로 거른다.
+  const levels = Array.isArray(input?.levels)
+    ? input.levels.filter((l): l is string => typeof l === "string" && l.length <= 20).slice(0, 10)
+    : [];
+
   return createMixSessionForUser(supabase, user.id, {
     subjectSlug: slug,
     limit: Number(input?.limit),
+    levels,
   });
 }
 

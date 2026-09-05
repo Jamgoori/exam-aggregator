@@ -22,6 +22,7 @@ import { createReviewSessionFromItems } from "@/lib/review-session";
 import type { QuestionExplanationContent } from "@/components/explanation-body";
 import {
   clampMixLimit,
+  filterMixCandidatesByLevel,
   getPaperDisplayTitle,
   applyExamTypeSubjectName,
   kstDayKey,
@@ -29,6 +30,7 @@ import {
   mixCandidateKey,
   pickMixQuestions,
   MIX_MAX_LIMIT,
+  MIX_NO_LEVEL,
   type MixCandidate,
   type Subject,
 } from "@gongmoa/core";
@@ -66,16 +68,60 @@ type PoolPaper = {
 
 export type MixPool = {
   // 출제 가능한 (대표 문제지, 문항). 이미지가 있고, 정답이 등록돼 있고, voided 가 아닌 것.
+  // level·conceptId 는 급수 필터와 개념 분산(pickMixQuestions)의 재료다.
   candidates: MixCandidate[];
   // 화면 안내용 통계. paperCount 는 중복 시험지를 합친 뒤의 수(과목 페이지와 같다).
   paperCount: number;
   examTypeNames: string[];
+  // 급수별 출제 가능 문항 수. 급수 없는 문제지는 MIX_NO_LEVEL 키. 시작 화면 급수 칩용.
+  levelCounts: Record<string, number>;
   minYear: number | null;
   maxYear: number | null;
   // 실제 paper_id → 대표 paper_id. 사용자의 풀이 기록(실제 id 기준)을 후보 키(대표 id)에
   // 맞추는 데 쓴다. 'use cache' 가 결과를 직렬화하므로 Map 대신 객체.
   repByPaperId: Record<string, string>;
 };
+
+// 문항 id → 정본 개념 id. question_explanations 는 service_role 만 읽는다(정답 요약이
+// 실려 있어서). 여기서는 concept_id 만 받고 본문은 건드리지 않는다.
+async function fetchCanonicalConcepts(
+  admin: ReturnType<typeof createAdminClient>,
+  questionIds: string[],
+): Promise<Map<string, string>> {
+  const raw = new Map<string, string>();
+  for (const ids of chunk(questionIds, 200)) {
+    const { data } = await admin
+      .from("question_explanations")
+      .select("question_id, concept_id")
+      .in("question_id", ids)
+      .not("concept_id", "is", null);
+    for (const r of (data ?? []) as { question_id: string; concept_id: string | null }[]) {
+      if (r.concept_id) raw.set(r.question_id, r.concept_id);
+    }
+  }
+  if (raw.size === 0) return raw;
+
+  // merged_into 를 끝까지 따라간다(보통 한 단계). 순환은 방어적으로 끊는다.
+  const mergedInto = new Map<string, string | null>();
+  for (const ids of chunk([...new Set(raw.values())], 200)) {
+    const { data } = await admin.from("concepts").select("id, merged_into").in("id", ids);
+    for (const r of (data ?? []) as { id: string; merged_into: string | null }[]) {
+      mergedInto.set(r.id, r.merged_into);
+    }
+  }
+  const canonical = (id: string): string => {
+    let cur = id;
+    for (let i = 0; i < 5; i++) {
+      const next = mergedInto.get(cur);
+      if (!next || next === cur) break;
+      cur = next;
+    }
+    return cur;
+  };
+  const out = new Map<string, string>();
+  for (const [qid, cid] of raw) out.set(qid, canonical(cid));
+  return out;
+}
 
 // 과목 하나의 출제 풀. 문제지 수백 장 × 문항 수십 개를 훑는 조회라 요청마다 돌리지
 // 않고 캐시한다 — 로그인 여부와 무관한 공개 자료(문항 이미지 존재 여부·정답 등록
@@ -106,6 +152,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     candidates: [],
     paperCount: 0,
     examTypeNames: [],
+    levelCounts: {},
     minYear: null,
     maxYear: null,
     repByPaperId: {},
@@ -137,15 +184,15 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
   // 이미지가 잘려 있는 문항만(문제를 보여줄 수 없으면 못 푼다). question_images 를
   // inner 조인해 이미지가 하나라도 있는 문항만 받는다 — 이미지 경로 자체는 세션을
   // 그릴 때 fetchQuestionMedia 가 뽑힌 문항에 대해서만 다시 받는다.
-  type QRow = { paper_id: string; question_number: number };
-  const candidates: MixCandidate[] = [];
-  const seen = new Set<string>();
+  const levelByPaper = new Map(papers.map((p) => [p.id, p.level ?? null]));
+  type QRow = { id: string; paper_id: string; question_number: number };
+  const rowsById = new Map<string, QRow>();
   for (const ids of chunk(answeredRepIds, 25)) {
     const rows = await fetchAllPages<QRow>(
       (from, to) =>
         supabase
           .from("questions")
-          .select("paper_id, question_number, question_images!inner(order_index)")
+          .select("id, paper_id, question_number, question_images!inner(order_index)")
           .in("paper_id", ids)
           .order("paper_id", { ascending: true })
           .order("question_number", { ascending: true })
@@ -157,12 +204,31 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     );
     for (const r of rows) {
       if (voidedByPaper.get(r.paper_id)?.has(r.question_number)) continue;
-      const c = { paperId: r.paper_id, questionNumber: r.question_number };
-      const key = mixCandidateKey(c);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      candidates.push(c);
+      rowsById.set(r.id, r);
     }
+  }
+
+  // 문항별 정본 개념. 해설 배치가 붙인 concept_id 를 읽고, 합쳐진 개념(merged_into)은
+  // 합쳐진 쪽으로 되짚는다 — 같은 개념이 옛 id 와 새 id 로 갈라져 있으면 분산이 안 된다.
+  // 해설이 없는 문항은 null 로 남는다(개념 분산에서 상한을 받지 않는다).
+  const conceptByQuestionId = await fetchCanonicalConcepts(admin, [...rowsById.keys()]);
+
+  const candidates: MixCandidate[] = [];
+  const seen = new Set<string>();
+  const levelCounts: Record<string, number> = {};
+  for (const r of rowsById.values()) {
+    const c: MixCandidate = {
+      paperId: r.paper_id,
+      questionNumber: r.question_number,
+      level: levelByPaper.get(r.paper_id) ?? null,
+      conceptId: conceptByQuestionId.get(r.id) ?? null,
+    };
+    const key = mixCandidateKey(c);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push(c);
+    const lk = c.level ?? MIX_NO_LEVEL;
+    levelCounts[lk] = (levelCounts[lk] ?? 0) + 1;
   }
 
   const examTypeNames = [
@@ -174,6 +240,7 @@ export async function getMixPool(subjectId: string): Promise<MixPool> {
     candidates,
     paperCount: repIds.length,
     examTypeNames,
+    levelCounts,
     minYear: years.length ? Math.min(...years) : null,
     maxYear: years.length ? Math.max(...years) : null,
     repByPaperId: Object.fromEntries(repByPaperId),
@@ -185,6 +252,8 @@ export type MixOverview = {
   questionCount: number;
   paperCount: number;
   examTypeNames: string[];
+  // 급수별 출제 가능 문항 수(급수 없음은 MIX_NO_LEVEL 키).
+  levelCounts: Record<string, number>;
   minYear: number | null;
   maxYear: number | null;
 };
@@ -204,6 +273,7 @@ export async function getMixOverview(slug: string): Promise<MixOverview | null> 
     questionCount: pool.candidates.length,
     paperCount: pool.paperCount,
     examTypeNames: pool.examTypeNames,
+    levelCounts: pool.levelCounts,
     minYear: pool.minYear,
     maxYear: pool.maxYear,
   };
@@ -251,7 +321,8 @@ export type CreateMixSessionResult = {
 export async function createMixSessionForUser(
   supabase: Supabase,
   userId: string,
-  input: { subjectSlug: string; limit?: number },
+  // levels: 급수 필터(빈 배열 = 전체). 풀에 실제로 있는 급수 키만 받아들인다.
+  input: { subjectSlug: string; limit?: number; levels?: string[] },
 ): Promise<CreateMixSessionResult> {
   const subject = await getSubjectBySlug(supabase, input.subjectSlug);
   if (!subject) return { error: "과목을 찾을 수 없어요." };
@@ -264,9 +335,15 @@ export async function createMixSessionForUser(
     };
   }
 
+  const levels = (input.levels ?? []).filter((l) => l in pool.levelCounts);
+  const candidates = filterMixCandidatesByLevel(pool.candidates, levels);
+  if (candidates.length === 0) {
+    return { error: "고른 급수에는 아직 풀 수 있는 문항이 없어요. 급수를 바꿔보세요." };
+  }
+
   const limit = clampMixLimit(input.limit);
   const seen = await fetchSeenKeys(supabase, userId, pool.repByPaperId);
-  const { picked, unseenCount, coveredAll } = pickMixQuestions(pool.candidates, limit, seen);
+  const { picked, unseenCount, coveredAll } = pickMixQuestions(candidates, limit, seen);
   if (picked.length === 0) return { error: "출제할 문항이 없어요." };
 
   const res = await createReviewSessionFromItems(supabase, userId, picked, picked.length, {
