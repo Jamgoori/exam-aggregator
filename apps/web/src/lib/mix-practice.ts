@@ -561,6 +561,58 @@ export async function listMixSessions(
   });
 }
 
+// 메뉴에서 들어오는 섞어풀기 허브(/mix)의 "최근 기록" 줄. 과목을 가리지 않고 최근
+// 것부터 몇 개만 보여주므로, 과목 페이지 카드(MixSessionSummary)와 달리 극복 진행률은
+// 계산하지 않는다 — 그 계산은 과목별 출제 풀·문항 상태 조회가 붙어 허브에는 무겁다.
+export type MixSessionBrief = {
+  id: string;
+  title: string;
+  createdAt: string;
+  score: number;
+  total: number;
+  subjectSlug: string;
+  subjectName: string;
+};
+
+export async function listRecentMixSessions(
+  userId: string,
+  limit = 5,
+): Promise<MixSessionBrief[]> {
+  const admin = createAdminClient();
+  type Row = {
+    id: string;
+    created_at: string;
+    score: number | null;
+    total_questions: number;
+    subjects: { slug: string; name: string } | null;
+  };
+  // 같은 날 순번("(2)")은 그날 만든 세션 전체를 알아야 매길 수 있어, 화면에 보일
+  // 개수보다 넉넉히 받아 이름을 붙인 뒤 자른다.
+  const { data } = await admin
+    .from("review_sessions")
+    .select("id, created_at, score, total_questions, subjects(slug, name)")
+    .eq("user_id", userId)
+    .eq("scope", MIX_SCOPE)
+    .not("submitted_at", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  const rows = ((data ?? []) as unknown as Row[]).filter((r) => r.subjects);
+
+  const titles = labelMixSessions(
+    rows.map((r) => ({ id: r.id, createdAt: r.created_at })),
+    kstDayKey,
+  );
+  return rows.slice(0, limit).map((r) => ({
+    id: r.id,
+    title: titles.get(r.id) ?? "섞어풀기",
+    createdAt: r.created_at,
+    score: r.score ?? 0,
+    total: r.total_questions,
+    subjectSlug: r.subjects!.slug,
+    subjectName: r.subjects!.name,
+  }));
+}
+
 export type MixSessionQuestion = {
   position: number;
   paperId: string;

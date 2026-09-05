@@ -11,6 +11,7 @@ import {
   MessageSquarePlus,
   Receipt,
   Settings,
+  Shuffle,
   Star,
   Trophy,
   UserRound,
@@ -61,6 +62,15 @@ export const PRIMARY_NAV: NavItem[] = [
     // 게 "국어 기출문제"처럼 과목명으로 찾아오는 절대다수 검색 흐름과 더 맞는다.
     match: (p) => p.startsWith("/subjects"),
     hint: "국어·영어·전공",
+  },
+  {
+    // 과목을 골라 그 과목 기출을 섞어 푸는 자리. 시작 화면(/subjects/*/mix)까지는
+    // 과목 페이지·오답노트를 거쳐야 닿아서, 매일 여는 기능치고 너무 깊었다.
+    href: "/mix",
+    label: "섞어풀기",
+    icon: Shuffle,
+    match: (p) => p === "/mix" || p.endsWith("/mix"),
+    hint: "기출을 시험 구분 없이 랜덤으로",
   },
   {
     href: "/mypage?tab=wrong-notes",
