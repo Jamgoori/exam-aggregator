@@ -90,11 +90,11 @@ async function selectIn(supabase, table, columns, column, values) {
 // 해설이 없는 채로 남아 다음 배치가 다시 집는다(다른 청크 조합에서 다시 만들면 대개
 // 정상으로 나온다).
 //
-// 다만 통합본 분리가 같은 페이지를 두 문제지에 넣은 경우(형법 ↔ 형법총론)는 두 문항이
-// 진짜로 같은 문항이라 해설이 같은 것이 정상이다. 그걸 여기서 막으면 그 문항들은 배치가
-// 돌 때마다 만들고 버리기를 반복한다. 그래서 의심 쌍은 대표 이미지를 실제로 받아
-// 해시를 비교하고, **이미지가 같으면 통과**시킨다(audit-explanation-crosstalk.mjs 와
-// 같은 판정).
+// 다만 같은 문항이 두 문제지에 실린 경우(통합본 분리 중복, 또는 같은 시험이 두 과목명
+// 으로 올라간 쌍둥이 문제지 — 형법 ↔ 형법총론, 회계학 ↔ 회계원리)는 해설이 같은 것이
+// 정상이다. 그걸 여기서 막으면 그 문항들은 배치가 돌 때마다 만들고 버리기를 반복한다.
+// 그래서 의심 쌍은 대표 이미지를 실제로 받아 비교하고, **같은 문항 그림이면 통과**시킨다
+// (audit-explanation-crosstalk.mjs 와 같은 판정 — 바이트 동일 또는 지각 해시 근접).
 function normalizeForCompare(text) {
   return (text ?? "")
     .replace(/[\s　]/g, "")
@@ -124,12 +124,49 @@ function titleSimilarity(a, b) {
 }
 const CROSSTALK_TITLE_THRESHOLD = 0.35;
 
-async function imageHash(supabase, imagePath) {
+// audit-explanation-crosstalk.mjs 와 같은 판정이다 — 한쪽만 고치지 말 것.
+// 문항 이미지가 "같은 문항"인지 판정한다. 바이트가 같으면(sha1) 당연히 같고, 다르더라도
+// **지각 해시(dHash, 16×16 → 256비트)의 해밍 거리가 가까우면 같은 문항**으로 본다.
+// 왜 필요한가(2026-09-05 실측): 같은 시험이 두 과목명으로 따로 올라간 쌍둥이 문제지
+// (2013·2016 국가직 9급 회계학 ↔ 회계원리, 2021·2023 형사소송법 ↔ 형사소송법개론,
+// 2020 형법 ↔ 형법총론)는 같은 문항이 **다른 PDF에서 따로 크롭**돼 바이트는 다르지만
+// 그림은 같다. sha1 만 보면 이걸 교차 오염으로 오판해 — 감사는 멀쩡한 해설을 지우고,
+// 저장 차단막은 배치가 돌 때마다 만들고 버리기를 반복한다.
+//   실측 거리: 쌍둥이 21·27·31·35·43·53·67 / 진짜 오염(다른 문항) 102·110·111·123
+// 그래서 80 을 경계로 둔다. sharp 가 없는 환경이면 sha1 비교로만 떨어진다.
+const IMAGE_DHASH_MAX_DISTANCE = 80;
+
+async function imageSignature(supabase, imagePath) {
   const url = supabase.storage.from("exam-papers").getPublicUrl(imagePath).data.publicUrl;
   const res = await fetch(url);
   if (!res.ok) return null;
   const buf = Buffer.from(await res.arrayBuffer());
-  return createHash("sha1").update(buf).digest("hex");
+  const sha1 = createHash("sha1").update(buf).digest("hex");
+  let dhash = null;
+  try {
+    const sharp = (await import("sharp")).default;
+    const { data } = await sharp(buf)
+      .grayscale()
+      .resize(17, 16, { fit: "fill" })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    dhash = [];
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 16; x++) dhash.push(data[y * 17 + x] < data[y * 17 + x + 1] ? 1 : 0);
+    }
+  } catch {
+    dhash = null;
+  }
+  return { sha1, dhash };
+}
+
+function sameQuestionImage(a, b) {
+  if (!a || !b) return false;
+  if (a.sha1 === b.sha1) return true;
+  if (!a.dhash || !b.dhash) return false;
+  let distance = 0;
+  for (let i = 0; i < a.dhash.length; i++) if (a.dhash[i] !== b.dhash[i]) distance++;
+  return distance <= IMAGE_DHASH_MAX_DISTANCE;
 }
 
 // 저장 직전에 부른다. 돌려주는 값은 { blocked: Set<question_id>, pairs: [...] }.
@@ -197,8 +234,11 @@ async function detectCrosstalk(supabase, items) {
     const pathB = coverImage.get(b.q.id);
     let sameImage = false;
     if (pathA && pathB) {
-      const [ha, hb] = await Promise.all([imageHash(supabase, pathA), imageHash(supabase, pathB)]);
-      sameImage = Boolean(ha && hb && ha === hb);
+      const [sigA, sigB] = await Promise.all([
+        imageSignature(supabase, pathA),
+        imageSignature(supabase, pathB),
+      ]);
+      sameImage = sameQuestionImage(sigA, sigB);
     }
     const record = {
       question_number: a.q.question_number,

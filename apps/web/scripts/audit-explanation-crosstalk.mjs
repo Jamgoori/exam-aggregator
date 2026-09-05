@@ -23,8 +23,10 @@
 // 두 문제지에 넣었거나(크롭 중복), 직류만 다른 같은 문항이 두 문제지에 실제로 실린
 // 경우다. 그래서 기본 동작은 두 문항의 대표 이미지를 실제로 받아 해시를 비교한다:
 //   - 이미지가 다르다  → 진짜 교차 오염(둘 중 하나는 확실히 틀린 해설)
-//   - 이미지가 같다    → 크롭/분리 쪽 문제이지 해설 배치의 잘못이 아니다
-//     (docs/agents/split-combined-pdfs.md 로 갈 일이지 여기서 지울 일이 아니다)
+//   - 이미지가 같다    → 같은 문항이 두 문제지에 실린 것(통합본 분리 중복, 또는 같은
+//     시험이 두 과목명으로 올라간 쌍둥이 문제지). 해설 배치의 잘못이 아니다.
+//     "같다"는 바이트 동일뿐 아니라 지각 해시(dHash)가 가까운 것도 포함한다 — 쌍둥이
+//     문제지는 다른 PDF에서 따로 크롭돼 바이트는 다르다(아래 IMAGE_DHASH_MAX_DISTANCE).
 //
 // --purge 는 **교차 오염으로 분류된 쌍의 양쪽 모두**를 지운다. 어느 쪽이 진짜인지는
 // 이미지를 봐야 알 수 있고 그건 배치가 하는 일이라, 둘 다 지워서 큐로 돌려보내는 편이
@@ -123,12 +125,48 @@ async function fetchAllByKeyset(supabase, table, columns) {
   return rows;
 }
 
-async function imageHash(supabase, imagePath) {
+// 문항 이미지가 "같은 문항"인지 판정한다. 바이트가 같으면(sha1) 당연히 같고, 다르더라도
+// **지각 해시(dHash, 16×16 → 256비트)의 해밍 거리가 가까우면 같은 문항**으로 본다.
+// 왜 필요한가(2026-09-05 실측): 같은 시험이 두 과목명으로 따로 올라간 쌍둥이 문제지
+// (2013·2016 국가직 9급 회계학 ↔ 회계원리, 2021·2023 형사소송법 ↔ 형사소송법개론,
+// 2020 형법 ↔ 형법총론)는 같은 문항이 **다른 PDF에서 따로 크롭**돼 바이트는 다르지만
+// 그림은 같다. sha1 만 보면 이걸 교차 오염으로 오판해 — 감사는 멀쩡한 해설을 지우고,
+// 저장 차단막은 배치가 돌 때마다 만들고 버리기를 반복한다.
+//   실측 거리: 쌍둥이 21·27·31·35·43·53·67 / 진짜 오염(다른 문항) 102·110·111·123
+// 그래서 80 을 경계로 둔다. sharp 가 없는 환경이면 sha1 비교로만 떨어진다.
+const IMAGE_DHASH_MAX_DISTANCE = 80;
+
+async function imageSignature(supabase, imagePath) {
   const url = supabase.storage.from("exam-papers").getPublicUrl(imagePath).data.publicUrl;
   const res = await fetch(url);
   if (!res.ok) return null;
   const buf = Buffer.from(await res.arrayBuffer());
-  return createHash("sha1").update(buf).digest("hex");
+  const sha1 = createHash("sha1").update(buf).digest("hex");
+  let dhash = null;
+  try {
+    const sharp = (await import("sharp")).default;
+    const { data } = await sharp(buf)
+      .grayscale()
+      .resize(17, 16, { fit: "fill" })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    dhash = [];
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 16; x++) dhash.push(data[y * 17 + x] < data[y * 17 + x + 1] ? 1 : 0);
+    }
+  } catch {
+    dhash = null;
+  }
+  return { sha1, dhash };
+}
+
+function sameQuestionImage(a, b) {
+  if (!a || !b) return false;
+  if (a.sha1 === b.sha1) return true;
+  if (!a.dhash || !b.dhash) return false;
+  let distance = 0;
+  for (let i = 0; i < a.dhash.length; i++) if (a.dhash[i] !== b.dhash[i]) distance++;
+  return distance <= IMAGE_DHASH_MAX_DISTANCE;
 }
 
 // --purge 로 지운 행을 백업 JSON 그대로 되돌린다. 이미 해설이 있는 문항(배치가 벌써
@@ -315,15 +353,15 @@ async function main() {
       unknown.push({ a, b, reason: "대표 이미지 없음" });
       continue;
     }
-    const [hashA, hashB] = await Promise.all([
-      imageHash(supabase, pathA),
-      imageHash(supabase, pathB),
+    const [sigA, sigB] = await Promise.all([
+      imageSignature(supabase, pathA),
+      imageSignature(supabase, pathB),
     ]);
-    if (!hashA || !hashB) {
+    if (!sigA || !sigB) {
       unknown.push({ a, b, reason: "이미지 내려받기 실패" });
       continue;
     }
-    if (hashA === hashB) duplicateCrop.push({ a, b });
+    if (sameQuestionImage(sigA, sigB)) duplicateCrop.push({ a, b });
     else crosstalk.push({ a, b });
   }
 
@@ -335,7 +373,7 @@ async function main() {
   console.log(`\n== 교차 오염 (둘 중 하나는 남의 해설): ${crosstalk.length}쌍`);
   for (const pair of crosstalk) console.log(line(pair));
   if (duplicateCrop.length > 0) {
-    console.log(`\n== 이미지가 같은 쌍 (크롭/분리 쪽 문제 — 해설은 건드리지 말 것): ${duplicateCrop.length}쌍`);
+    console.log(`\n== 이미지가 같은 쌍 (같은 문항이 두 문제지에 실림 — 해설은 건드리지 말 것): ${duplicateCrop.length}쌍`);
     for (const pair of duplicateCrop) console.log(line(pair));
   }
   if (unknown.length > 0) {
