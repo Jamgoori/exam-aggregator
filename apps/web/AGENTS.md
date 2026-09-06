@@ -85,6 +85,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   PowerShell 루프). 확인은 미승격 문제지 하나를 크롤러 UA 로 받아
   `x-vercel-cache` 와 `<head>` 길이를 보는 것 — 승격 전 PRERENDER·headLen 1766·
   title/canonical 0개, 승격 후 HIT·headLen 4084·각 1개(2026-09-06 실측).
+  문제지 상세(`app/papers/[id]/page.tsx`) 본문에서 `searchParams` 를 await 하거나
+  쿠키를 읽는 값을 await 하지 말 것 — 그 순간 라우트 전체가 동적이 되어 본문이 통째로
+  PPR postponed 데이터로 밀려나고, 빌드에 미리 만들 수 있는 문제지 수
+  (`PRERENDERED_PAPER_COUNT`)를 올릴 여지가 사라진다. 검색 파라미터는 Promise 그대로
+  Suspense 안의 하위 컴포넌트에 넘겨 거기서 풀고, 개인화 데이터는 `getPaperViewerData` 를 Suspense
+  안에서 부를 것(공개 데이터는 `getPaperPublicData`, `'use cache'`). 그 공개 캐시는
+  댓글·난이도 변경 시 `papers/actions.ts` 의 `revalidatePaperPath` 가
+  `updateTag(paperPublicTag(id))` 로 끊는다 — 태그를 지우면 방금 쓴 댓글이 안 보인다.
 - **다운로드 집계**: `download-counting.ts` 의 봇 목록(`NON_HUMAN_UA`)에 `naver`·`daum`·
   `kakaotalk` 을 넣지 말 것 — 셋 다 크롤러가 아니라 **인앱 브라우저**의 UA 표식이라
   (`NAVER(inapp;...)`, `KAKAOTALK 10.x`, `DaumApps/...`) 넣는 순간 국내 모바일 유입이

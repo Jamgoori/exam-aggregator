@@ -1458,11 +1458,16 @@ export async function getPaperWrongNote(
 // 해설이 준비된 문제지에만 열어준다(아래 count로 판단).
 
 export async function countPaperExplanations(paperId: string): Promise<number> {
-  const admin = createAdminClient();
   // fetchExplanations와 같은 이유로 embedded 필터를 쓰지 않는다 — 이 함수는 문제지
   // 상세페이지가 열릴 때마다 불려서(실측 1.9만 회) 느려지면 "해설 열기" 버튼이
   // 통째로 사라진다. 문항 id를 먼저 받고 그 id로 센다.
+  //
+  // 클라이언트 생성도 try 안에 둔다 — 상세페이지 본문이 빌드 프리렌더에서도 돌게
+  // 되면서 이 함수가 빌드 중에 불린다. service role 키가 없는 환경에서 여기가 밖에서
+  // 던지면 빌드가 통째로 죽는다. 아래 catch 와 같은 판단이다: 실패해도 화면은
+  // "해설 없음"으로 정직하게 그려지고 로그만 남는다.
   try {
+    const admin = createAdminClient();
     const keys = await fetchQuestionKeys(admin, [paperId]);
     const questionIds = [...keys.keys()];
     if (questionIds.length === 0) return 0;

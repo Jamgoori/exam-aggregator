@@ -36,20 +36,36 @@ import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 import {
   getNewestPaperSlugs,
   getPaper,
-  getPaperDetailData,
+  getPaperPublicData,
+  getPaperViewerData,
   getRelatedPapersData,
   getCanonicalPaperHref,
 } from "./paper-detail-data";
-import type { ExamPaper } from "@gongmoa/core";
+import type { RoundAverage } from "@/components/my-cbt-record-modal";
+import type { Comment, ExamPaper } from "@gongmoa/core";
 import type { Metadata } from "next";
 
 // 빌드에서 미리 만들어 둘 문제지 수. 최신 시험부터 이만큼이다(홈 목록 순서).
 //
-// 전부(4,300장) 만들 수는 없다 — 프리렌더 산출물이 장당 305KB(PPR postponed 데이터
-// 194KB)라 통째로 만들면 1.1GB, 힙 8GB 로도 빌드가 OOM 으로 죽는다(3,604장에서
-// SIGABRT, 2026-08-18 실측). 과목 184장은 19MB · 30초로 끝났으니 이 정도면 빌드에
-// 1분 안팎이 더 붙는다.
-const PRERENDERED_PAPER_COUNT = 200;
+// **왜 전부가 아닌가.** 2026-08-18 실측: 프리렌더 산출물이 장당 305KB(그중 PPR
+// postponed 데이터 194KB)라 통째로 만들면 1.1GB 고, 힙 8GB 로도 3,604장에서 SIGABRT
+// 로 죽었다. 여기 실리지 않은 주소는 첫 요청 뒤 승격에 기대는데(위 generateStaticParams
+// 주석), 승격은 배포마다 지워지고 그 사이에 오는 Googlebot 은 <head> 가 빈 셸을
+// 받는다. 그래서 이 숫자를 올릴 수 있으면 올리는 게 맞다.
+//
+// **올리기 전에 재야 하는 것.** 2026-09-06 에 상세페이지 본문을 정적으로 돌렸다
+// (PaperDetailPage 주석: searchParams 를 안 풀고, 쿠키 데이터를 Suspense 뒤로 뺐다).
+// 이러면 postponed 데이터가 줄지만 그만큼 HTML 이 늘어서, **장당 합계가 실제로
+// 줄었는지는 빌드해 봐야 안다.** 재는 법(로컬, .env.local 에 실제 키가 있어야 한다):
+//
+//   PAPER_PRERENDER_COUNT=200 npm run build
+//   du -sh apps/web/.next/server/app/papers   # 장당 크기 = 이 값 / 200
+//
+// 줄었으면 500 → 1200 → 2500 → 전체 순으로 올리며 매번 다시 잰다. 빌드가 OOM 으로
+// 죽으면 직전 값이 상한이다. 프로덕션에서는 Vercel 환경변수 PAPER_PRERENDER_COUNT 로
+// 같은 값을 주면 되고(빌드 전용, NEXT_PUBLIC_ 아님), 빌드가 깨지면 그 변수만 낮춰
+// 재배포하면 원상복구된다 — 그래서 코드 기본값은 안전한 200 그대로 둔다.
+const PRERENDERED_PAPER_COUNT = Number(process.env.PAPER_PRERENDER_COUNT) || 200;
 
 /**
  * 문제지 주소 일부를 빌드에 미리 알려준다. **이 함수가 없으면 Googlebot 이 받는
@@ -117,6 +133,19 @@ export async function generateMetadata({
   };
 }
 
+/**
+ * **이 함수 본문에서 searchParams 를 await 하지 말 것, cookies() 를 부르는 값을
+ * await 하지 말 것.** 둘 중 하나라도 하면 라우트 전체가 동적이 되고, 본문이 통째로
+ * PPR postponed 데이터로 밀려나 빌드가 만들어 두는 정적 셸이 <head> 만 남는다.
+ * (예전에는 맨 위에서 `await searchParams` 와 `await getPaperDetailData(paper)`
+ * 를 했다. 후자가 쿠키 클라이언트였다.)
+ *
+ * 그래서 지금은:
+ * - searchParams 는 await 하지 않고 Promise 그대로 <Suspense> 안의 RelatedPapers 로 넘긴다.
+ * - 모두에게 같은 값은 getPaperPublicData('use cache')로 여기서 바로 읽는다.
+ * - 보는 사람마다 다른 값(즐겨찾기·내 평가·내 응시 기록·관리자 여부)은 아래 Viewer*
+ *   조각들이 <Suspense> 안에서 getPaperViewerData 로 각자 읽는다.
+ */
 export default async function PaperDetailPage({
   params,
   searchParams,
@@ -125,10 +154,6 @@ export default async function PaperDetailPage({
   searchParams: Promise<{ level?: string; examTypes?: string }>;
 }) {
   const { id } = await params;
-  const { level, examTypes: examTypesParam } = await searchParams;
-  const selectedExamTypeIds = new Set(
-    (examTypesParam ?? "").split(",").filter(Boolean),
-  );
 
   const paper = await getPaper(id);
 
@@ -138,20 +163,14 @@ export default async function PaperDetailPage({
   const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
 
   const {
-    userId,
-    loggedIn,
-    isAdmin,
     comments,
     averageScore,
     voteCount,
-    myScore,
-    isBookmarked,
     hasCbtAnswers,
     hasFullExplanations,
     roundAverages,
-    myCbtRecordItems,
     answerKey,
-  } = await getPaperDetailData(paper);
+  } = await getPaperPublicData(paper);
 
   const subject = paper.subjects;
   const examType = paper.exam_types;
@@ -258,11 +277,12 @@ export default async function PaperDetailPage({
               </span>
             )}
           </div>
-          <BookmarkButton
-            paperId={paper.id}
-            initialBookmarked={isBookmarked}
-            loggedIn={loggedIn}
-          />
+          {/* 즐겨찾기 상태는 보는 사람마다 다르다. 자리(44px 원)를 미리 잡아두고
+              Suspense 뒤에서 채워, 정적 셸이 그려진 뒤 버튼이 끼어들어도 레이아웃이
+              밀리지 않게 한다. */}
+          <Suspense fallback={<div className="size-11 shrink-0 rounded-full border border-zinc-200 dark:border-zinc-700" />}>
+            <ViewerBookmarkButton paperId={paper.id} />
+          </Suspense>
         </div>
 
         <div>
@@ -307,7 +327,11 @@ export default async function PaperDetailPage({
                 예고 없이 튕기면 "속았다", 미리 알면 "절차"다. */}
             <p className="-mt-1 text-center text-xs text-zinc-500 dark:text-zinc-500">
               제출 즉시 채점 · 틀린 문제는 오답노트에 자동 저장
-              {!loggedIn && " · 구글·카카오 1초 로그인"}
+              {/* 비로그인에게만 붙는 꼬리말이라 개인화 조각이다. 문장 끝에 이어
+                  붙기만 하므로 fallback 은 비워 둔다(늦게 와도 줄이 안 밀린다). */}
+              <Suspense fallback={null}>
+                <ViewerCbtLoginHint paperId={paper.id} />
+              </Suspense>
             </p>
           </>
         )}
@@ -387,28 +411,28 @@ export default async function PaperDetailPage({
           </div>
         )}
 
-        {myCbtRecordItems.length > 0 && (
-          <div className="mt-1 flex items-center justify-end gap-2 text-xs text-zinc-400 dark:text-zinc-600">
-            <MyCbtRecordModal attempts={myCbtRecordItems} roundAverages={roundAverages} />
-          </div>
-        )}
+        {/* 내 응시 기록이 있는 사람에게만 나오는 줄. 없는 사람에겐 아무것도 안 그리므로
+            fallback 도 비운다 — 자리를 잡아두면 대다수(기록 없음)에게 빈 줄이 남는다. */}
+        <Suspense fallback={null}>
+          <ViewerCbtRecord paperId={paper.id} roundAverages={roundAverages} />
+        </Suspense>
       </div>
 
-      <DifficultyRating
-        paperId={paper.id}
-        averageScore={averageScore}
-        voteCount={voteCount}
-        loggedIn={loggedIn}
-        initialMyScore={myScore}
-      />
+      {/* 평균·참여자 수는 공개 값이지만 "내가 준 점수"는 개인화라, 컴포넌트 통째로
+          Suspense 뒤에 둔다. */}
+      <Suspense fallback={<DifficultyRatingSkeleton />}>
+        <ViewerDifficultyRating
+          paperId={paper.id}
+          averageScore={averageScore}
+          voteCount={voteCount}
+        />
+      </Suspense>
 
-      <CommentsSection
-        paperId={paper.id}
-        comments={comments}
-        currentUserId={userId}
-        loggedIn={loggedIn}
-        isAdmin={isAdmin}
-      />
+      {/* 댓글 목록 자체는 공개 값이지만, 수정·삭제 버튼을 누가 보느냐가 개인화라
+          여기도 Suspense 뒤에서 그린다. */}
+      <Suspense fallback={<CommentsSectionSkeleton />}>
+        <ViewerCommentsSection paperId={paper.id} comments={comments} />
+      </Suspense>
       </div>
 
       {/* 하단 "같은 과목 목록"은 목록 조회 → 중복 통합 신호 → 카드 배지 확인이
@@ -416,11 +440,12 @@ export default async function PaperDetailPage({
           보여주고 이 섹션만 Suspense 뒤에서 스트리밍한다. */}
       {subject ? (
         <Suspense fallback={<RelatedPapersSkeleton />}>
+          {/* searchParams 는 여기서 처음 await 된다 — 페이지 본문에서 풀면 라우트
+              전체가 동적이 되기 때문에 Promise 그대로 넘긴다. */}
           <RelatedPapers
             paper={paper}
             subject={subject}
-            level={level}
-            selectedExamTypeIds={selectedExamTypeIds}
+            searchParams={searchParams}
           />
         </Suspense>
       ) : null}
@@ -428,18 +453,131 @@ export default async function PaperDetailPage({
   );
 }
 
+// ─── 보는 사람마다 다른 조각들 ────────────────────────────────────────────────
+// 전부 getPaperViewerData(쿠키)를 기다린다. 이 함수는 React cache() 로 감싸여 있어
+// 한 요청 안에서 아래 넷이 같은 결과를 나눠 쓴다(왕복은 한 번). 반드시 <Suspense>
+// 안에서만 부를 것 — 페이지 본문에서 부르면 라우트 전체가 동적이 된다.
+
+async function ViewerBookmarkButton({ paperId }: { paperId: string }) {
+  const { isBookmarked, loggedIn } = await getPaperViewerData(paperId);
+  return (
+    <BookmarkButton
+      paperId={paperId}
+      initialBookmarked={isBookmarked}
+      loggedIn={loggedIn}
+    />
+  );
+}
+
+async function ViewerCbtLoginHint({ paperId }: { paperId: string }) {
+  const { loggedIn } = await getPaperViewerData(paperId);
+  return loggedIn ? null : " · 구글·카카오 1초 로그인";
+}
+
+async function ViewerCbtRecord({
+  paperId,
+  roundAverages,
+}: {
+  paperId: string;
+  roundAverages: RoundAverage[];
+}) {
+  const { myCbtRecordItems } = await getPaperViewerData(paperId);
+  if (myCbtRecordItems.length === 0) return null;
+  return (
+    <div className="mt-1 flex items-center justify-end gap-2 text-xs text-zinc-400 dark:text-zinc-600">
+      <MyCbtRecordModal attempts={myCbtRecordItems} roundAverages={roundAverages} />
+    </div>
+  );
+}
+
+async function ViewerDifficultyRating({
+  paperId,
+  averageScore,
+  voteCount,
+}: {
+  paperId: string;
+  averageScore: number | null;
+  voteCount: number;
+}) {
+  const { loggedIn, myScore } = await getPaperViewerData(paperId);
+  return (
+    <DifficultyRating
+      paperId={paperId}
+      averageScore={averageScore}
+      voteCount={voteCount}
+      loggedIn={loggedIn}
+      initialMyScore={myScore}
+    />
+  );
+}
+
+async function ViewerCommentsSection({
+  paperId,
+  comments,
+}: {
+  paperId: string;
+  comments: Comment[];
+}) {
+  const { userId, loggedIn, isAdmin } = await getPaperViewerData(paperId);
+  return (
+    <CommentsSection
+      paperId={paperId}
+      comments={comments}
+      currentUserId={userId}
+      loggedIn={loggedIn}
+      isAdmin={isAdmin}
+    />
+  );
+}
+
+// 난이도 블록이 도착하기 전 자리. 실제 블록(제목 줄 + 막대 그래프 + 안내 문구)과
+// 같은 높이로 잡아 스트리밍이 끝날 때 아래 댓글이 밀려 올라가지 않게 한다.
+function DifficultyRatingSkeleton() {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="skeleton h-5 w-28 rounded-lg" />
+      <div className="flex items-end gap-1">
+        {Array.from({ length: 9 }, (_, i) => (
+          <div key={i} className="skeleton h-16 flex-1 rounded" />
+        ))}
+      </div>
+      <div className="skeleton h-4 w-40 rounded-lg" />
+    </div>
+  );
+}
+
+// 댓글 블록이 도착하기 전 자리(제목 줄 + 입력칸 + 댓글 두 줄).
+function CommentsSectionSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="skeleton h-5 w-24 rounded-lg" />
+      <div className="skeleton h-24 w-full rounded-xl" />
+      {Array.from({ length: 2 }, (_, i) => (
+        <div key={i} className="flex flex-col gap-2">
+          <div className="skeleton h-4 w-32 rounded-lg" />
+          <div className="skeleton h-4 w-full rounded-lg" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Suspense 경계 안에서 자기 데이터를 직접 기다렸다가 그리는 비동기 섹션.
+// searchParams(필터 탭 상태)도 여기서 푼다 — 이 경계 밖에서 풀면 페이지가 동적이 된다.
 async function RelatedPapers({
   paper,
   subject,
-  level,
-  selectedExamTypeIds,
+  searchParams,
 }: {
   paper: ExamPaper;
   subject: NonNullable<ExamPaper["subjects"]>;
-  level?: string;
-  selectedExamTypeIds: Set<string>;
+  searchParams: Promise<{ level?: string; examTypes?: string }>;
 }) {
+  const { level, examTypes: examTypesParam } = await searchParams;
+  const selectedExamTypeIds = new Set(
+    (examTypesParam ?? "").split(",").filter(Boolean),
+  );
+
   const related = await getRelatedPapersData(paper, level, selectedExamTypeIds);
   if (!related || related.subjectPapers.length === 0) return null;
 

@@ -1,12 +1,13 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import bcrypt from "bcryptjs";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { getSessionUser } from "@/lib/supabase/session";
 import { recordQuestionResults } from "@/lib/question-status";
 import { recordAttendance } from "@/lib/attendance";
+import { paperPublicTag } from "@/lib/paper-cache-tags";
 import {
   canReplyTo,
   COMMENT_CONTENT_MAX,
@@ -25,6 +26,15 @@ import { MIN_ATTEMPT_SECONDS, sanitizeSelectedChoice } from "@/lib/cbt-attempt";
 // 아무 페이지도 안 지워진다 — 댓글을 달아도 화면에 안 나타나게 된다. 실제 렌더링
 // 경로를 만들려면 제목·회차가 필요해서 여기서 한 번 조회한다(인덱스 조회 1회).
 async function revalidatePaperPath(paperId: string) {
+  // 상세페이지의 공개 데이터(댓글·난이도 평균)는 'use cache' 로 담겨 있다. 태그를
+  // 끊지 않으면 방금 쓴 댓글이 캐시 수명(5분)만큼 안 보인다
+  // (papers/[id]/paper-detail-data.ts 의 fetchPaperPublicData).
+  //
+  // revalidateTag 가 아니라 updateTag 다 — revalidateTag 는 낡은 값을 계속 내주면서
+  // 뒤에서 갱신하므로, 댓글을 쓴 사람이 router.refresh() 해도 자기 글이 안 보인다.
+  // updateTag 는 서버 액션 안에서만 부를 수 있고 즉시 만료시킨다(read-your-own-writes).
+  updateTag(paperPublicTag(paperId));
+
   const admin = createAdminClient();
   const { data } = await admin
     .from("exam_papers")
