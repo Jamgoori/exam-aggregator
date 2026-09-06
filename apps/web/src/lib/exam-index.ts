@@ -195,13 +195,29 @@ export async function getExamYearPapers(
   slug: string,
   year: number,
 ): Promise<ExamComboPaper[]> {
+  return (await getExamAllPapers(slug)).filter((p) => p.year === year);
+}
+
+/**
+ * 한 시험의 문제지 전체, 연도 내림차순 → 과목명(필수과목 먼저) 순.
+ *
+ * /exams/[exam] 의 "연도별 전체 목록"이 쓴다. searchParams 를 읽지 않는 순수 캐시
+ * 값이라 정적 셸에 그대로 들어간다 — 그래서 시험 허브 18장이 문제지 4천여 장
+ * 전부에 실제 <a> 링크를 흘린다. 사이트맵 말고는 문제지로 가는 발견 경로가 없어
+ * 크롤러가 "발견됨 - 현재 색인되지 않음"에 문제지를 쌓아 두던 것(2026-09 실측
+ * 3,776건)을 여기서 푼다. 연도 필터(getExamYearPapers)도 이 값을 걸러 쓴다 —
+ * 캐시 항목이 시험당 하나로 끝난다.
+ */
+export async function getExamAllPapers(slug: string): Promise<ExamComboPaper[]> {
   "use cache";
   cacheLife({ revalidate: 3600 });
   cacheTag("home-data");
 
-  const papers = (await collectComboPapers(slug)).filter((p) => p.year === year);
-  papers.sort((a, b) =>
-    compareSubjectNames(a.subjectName ?? "", b.subjectName ?? ""),
+  const papers = await collectComboPapers(slug);
+  papers.sort(
+    (a, b) =>
+      b.year - a.year ||
+      compareSubjectNames(a.subjectName ?? "", b.subjectName ?? ""),
   );
   return papers;
 }

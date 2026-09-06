@@ -1,0 +1,110 @@
+# 크롤러가 받는 HTML 의 <head> 에 <title> 과 canonical 이 실제로 있는지 밖에서 찔러 본다.
+#
+# 왜 필요한가: 2026-08 에 Googlebot 만 <head> 가 빈 HTML 을 받아 색인이 ~650 → 83 으로
+# 무너졌는데(apps/web/AGENTS.md 의 SEO 금지선), 브라우저로 보면 멀쩡해서 일주일 뒤
+# 서치콘솔 숫자로야 알았다. 같은 사고를 배포 다음 날 안에 잡으려는 점검이다.
+#
+# 무엇을 보나: 시험별 사이트맵 파일 하나에서 문제지 URL 20개를 무작위로 골라
+# Googlebot·Yeti(네이버)·Bingbot·카카오톡 미리보기 UA 로 받는다. 각 응답의 <head> 안에
+# <title> 과 <link rel="canonical"> 이 있어야 통과. x-vercel-cache 값(HIT/MISS/BYPASS)도
+# 같이 적어 두어 "승격본을 받았는지, 공용 셸을 받았는지"를 나중에 비교할 수 있게 한다.
+#
+# Actions → "크롤러 head 점검" → Run workflow. 배포 다음 날 아침에도 한 번 돈다.
+name: 크롤러 head 점검
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 22 * * *" # 매일 07:00 KST
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 점검
+        env:
+          # 해외 IP 차단(GEO_BLOCK)을 켰을 때 GitHub 러너(미국 IP)를 통과시키는 토큰.
+          # 크롤러 UA 는 원래 예외라 없어도 검색엔진 UA 는 통과하지만, 사이트맵을
+          # 받는 첫 요청은 크롤러 UA 가 아니므로 필요하다(domain-check.yml 과 같은 값).
+          GEO_BYPASS_TOKEN: ${{ secrets.GEO_BYPASS_TOKEN }}
+        run: |
+          set -u
+          APEX=https://gongmoa.kr
+          SAMPLE=20
+          fail=0
+          out=""
+          note() { out="${out}$1"$'\n'; }
+
+          hdr=()
+          if [ -n "${GEO_BYPASS_TOKEN:-}" ]; then
+            hdr=(-H "x-geo-bypass: $GEO_BYPASS_TOKEN")
+          fi
+
+          # 1. 사이트맵 인덱스에서 문제지 파일 하나를 고른다(허브 파일은 제외).
+          index=$(curl -sS "${hdr[@]}" --max-time 60 "$APEX/sitemap.xml" || true)
+          paper_file=$(printf '%s' "$index" | grep -o '<loc>[^<]*sitemaps/papers-[^<]*</loc>' | sed 's/<[^>]*>//g' | shuf -n 1)
+          if [ -z "$paper_file" ]; then
+            echo "## 크롤러 head 점검" >> "$GITHUB_STEP_SUMMARY"
+            echo "- ❌ /sitemap.xml 에서 시험별 문제지 파일을 찾지 못했다." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          note "- 표본 파일: \`$paper_file\`"
+
+          # 2. 그 파일에서 문제지 URL 을 무작위로 뽑는다.
+          urls=$(curl -sS "${hdr[@]}" --max-time 60 "$paper_file" | grep -o '<loc>[^<]*</loc>' | sed 's/<[^>]*>//g' | shuf -n "$SAMPLE")
+          count=$(printf '%s\n' "$urls" | grep -c . || true)
+          if [ "$count" -eq 0 ]; then
+            echo "## 크롤러 head 점검" >> "$GITHUB_STEP_SUMMARY"
+            echo "- ❌ \`$paper_file\` 에 문제지 URL 이 없다." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # 3. 크롤러 UA 4종으로 받아 <head> 를 검사한다.
+          declare -A UA=(
+            [googlebot]="Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+            [yeti]="Mozilla/5.0 (compatible; Yeti/1.1; +https://naver.me/spd)"
+            [bingbot]="Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm) Chrome/116.0.1938.76 Safari/537.36"
+            [kakaotalk]="facebookexternalhit/1.1; kakaotalk-scrap/1.0; +https://devtalk.kakao.com/t/scrap/33984"
+          )
+          for name in googlebot yeti bingbot kakaotalk; do
+            ua="${UA[$name]}"
+            bad=0
+            cache_summary=""
+            while IFS= read -r u; do
+              [ -z "$u" ] && continue
+              tmp=$(mktemp)
+              code=$(curl -sS "${hdr[@]}" -A "$ua" -D "$tmp.h" -o "$tmp" -w '%{http_code}' --max-time 60 "$u" || echo 000)
+              cache=$(grep -i '^x-vercel-cache:' "$tmp.h" | head -1 | awk '{print $2}' | tr -d '\r')
+              cache_summary="${cache_summary}${cache:-none} "
+              # <head> 만 잘라 그 안에 title·canonical 이 있는지 본다. 본문 끝에 hoist 된
+              # 것은 셸(승격 전) 응답이라 여기서는 통과로 치지 않는다.
+              head_part=$(tr -d '\n' < "$tmp" | grep -o '<head>.*</head>' | head -1)
+              has_title=$(printf '%s' "$head_part" | grep -c '<title' || true)
+              has_canon=$(printf '%s' "$head_part" | grep -c 'rel="canonical"' || true)
+              if [ "$code" != "200" ] || [ "$has_title" -eq 0 ] || [ "$has_canon" -eq 0 ]; then
+                bad=$((bad+1))
+                note "  - ❌ [$name] HTTP $code cache=${cache:-none} title=$has_title canonical=$has_canon — $u"
+              fi
+              rm -f "$tmp" "$tmp.h"
+            done <<< "$urls"
+            if [ "$bad" -eq 0 ]; then
+              note "- ✅ $name: $count/$count 통과 (x-vercel-cache: $cache_summary)"
+            else
+              note "- ❌ $name: $bad/$count 실패 (x-vercel-cache: $cache_summary)"
+              fail=1
+            fi
+          done
+
+          {
+            echo "## 크롤러 head 점검 — gongmoa.kr"
+            echo ""
+            echo "$out"
+            echo ""
+            if [ "$fail" = "0" ]; then
+              echo "전부 통과. cache 가 MISS 위주면 워밍(/api/cron/warm-papers)이 아직 안 돈 것이고, HIT 인데 실패가 있으면 CDN 이 셸을 들고 있는 것이다(AGENTS.md SEO 금지선)."
+            else
+              echo "실패한 UA 가 있다. apps/web/AGENTS.md 의 SEO 금지선(htmlLimitedBots·partialPrefetching·generateStaticParams)을 먼저 확인할 것."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$fail"

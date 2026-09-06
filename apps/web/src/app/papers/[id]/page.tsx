@@ -38,6 +38,7 @@ import {
   getPaper,
   getPaperDetailData,
   getRelatedPapersData,
+  getCanonicalPaperHref,
 } from "./paper-detail-data";
 import type { ExamPaper } from "@gongmoa/core";
 import type { Metadata } from "next";
@@ -98,7 +99,10 @@ export async function generateMetadata({
   // 정본은 언제나 제목 기반 주소다. 옛 UUID 주소로 들어와도(프록시 301이 먼저
   // 잡지만) 여기서 새 주소를 가리켜, 두 주소가 각자 색인되는 일이 없게 한다.
   // 하단 목록 탭이 ?level=·?examTypes= 를 붙여 만들어내는 변형 URL들도 같이 접힌다.
-  const canonical = paperHref(paper);
+  // 직류만 다른 중복 시험지의 비대표는 대표 문제지를 정본으로 가리킨다
+  // (paper-detail-data.ts 의 getCanonicalPaperHref) — 같은 내용의 두 주소가 각자
+  // 정본을 주장해 Google 이 임의로 하나를 고르던 것(서치콘솔 "중복" 49건)을 막는다.
+  const canonical = await getCanonicalPaperHref(paper);
 
   return {
     title,
@@ -290,6 +294,9 @@ export default async function PaperDetailPage({
           <>
             <Link
               href={paperCbtHref(paper)}
+              // CBT 는 로그인 게이트 + robots.txt 차단 경로라 크롤러가 따라가 봐야
+              // 빈 껍데기다(exam-card.tsx 의 "바로 풀기"와 같은 이유).
+              rel="nofollow"
               className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-4 text-lg font-medium text-white hover:bg-blue-700"
             >
               <Monitor size={20} />
@@ -637,7 +644,6 @@ function RelatedPapersSection({
             key={p.id}
             paper={p}
             isCurrent={p.id === currentPaperId}
-            linkLevel={level}
             myRoundCount={myRoundCounts.get(p.id)}
             isBookmarked={bookmarkedIds.has(p.id)}
             loggedIn={loggedIn}

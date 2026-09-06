@@ -24,7 +24,6 @@ export type ExamCardPaper = Pick<
 export function ExamCard({
   paper,
   isCurrent = false,
-  linkLevel,
   myRoundCount,
   isBookmarked = false,
   loggedIn = false,
@@ -32,8 +31,6 @@ export function ExamCard({
 }: {
   paper: ExamCardPaper;
   isCurrent?: boolean;
-  // 상세페이지 하단 "같은 과목 목록"의 급수 탭 상태를 이어서 넘겨주기 위한 값
-  linkLevel?: string;
   // 로그인한 사용자가 이 문제지를 CBT로 몇 번 풀었는지 (없으면 배지 자체를 안 보여줌)
   myRoundCount?: number;
   // 로그인한 사용자가 이 문제지를 즐겨찾기했는지
@@ -45,10 +42,12 @@ export function ExamCard({
   const examType = paper.exam_types;
   const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
   const roundTier = myRoundCount ? getRoundTier(myRoundCount) : null;
-  const detailHref = paperHref(paper);
-  const href = linkLevel
-    ? `${detailHref}?level=${encodeURIComponent(linkLevel)}`
-    : detailHref;
+  // 상세페이지 링크는 언제나 파라미터 없는 정본 주소다. 예전에는 급수 탭 상태를
+  // ?level= 로 이어 넘겼는데, 그 변형 주소가 문제지마다 하나씩 생겨 서치콘솔의
+  // "적절한 표준 태그가 포함된 대체 페이지"(788건)를 계속 만들어 냈다. 탭 상태는
+  // 상세페이지 하단 목록이 자기 필터 링크로 다시 고르면 되는 값이라 링크에 실을
+  // 이유가 없다.
+  const href = paperHref(paper);
 
   const className = `relative flex flex-col gap-3 rounded-xl border p-4 transition-colors ${
     isCurrent
@@ -130,6 +129,10 @@ export function ExamCard({
             // 그대로 아래 카드 전체 링크에 맡긴다.
             <Link
               href={paperCbtHref(paper)}
+              // CBT 화면은 로그인 게이트 + robots.txt 차단이라 크롤러에게는 빈
+              // 껍데기다. 카드마다 이 링크가 딸리면 차단 URL 수천 개가 발견 큐에
+              // 섞이므로 따라가지 말라고 표시한다.
+              rel="nofollow"
               className="relative z-10 flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-400 dark:hover:bg-blue-900/40"
             >
               <Monitor size={12} />
