@@ -32,6 +32,11 @@ import { getSitemapData } from "@/lib/sitemap-data";
 // 수백 번의 페이지 렌더를 일으키므로, 무인증 공개면 누구나 밖에서 함수 비용을 태울 수
 // 있다(warm/route.ts 의 "미설정도 허용" 판단과 다른 이유가 이것이다).
 //
+// **크론.** vercel.json 에 offset 을 박은 항목을 계단식으로 넷 둔다(0/1200/2400/3600,
+// 09:30~10:00 KST). 한 항목이 chain 으로 뒤를 물게 하면 그 연쇄가 끊길 때 하루치가
+// 통째로 비므로, 항목마다 자기 구간만 책임지고 chain=0 으로 끈다. 문제지가 4,800장을
+// 넘으면 항목을 하나 더 늘릴 것.
+//
 // 손으로 전부 돌리기(배포 직후, PowerShell):
 //   $s = "<CRON_SECRET>"; $o = 0
 //   do {
@@ -66,8 +71,8 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const offset = Math.max(0, Number(url.searchParams.get("offset")) || 0);
-  // 손으로 돌릴 때는 chain=0 을 붙여 자동 연쇄를 끄고 호출자가 next 로 이어 부른다.
-  // 크론은 파라미터가 없으므로 연쇄가 켜진 채로 돈다.
+  // chain=0 이면 자기 구간만 돌고 끝낸다 — 크론 항목들과 손으로 도는 루프가 이 쪽이다.
+  // 연쇄는 파라미터 없이 부를 때만 켜진다(자기 구간이 어디까지인지 모르는 호출자용).
   const chain = url.searchParams.get("chain") !== "0";
 
   const data = await getSitemapData();

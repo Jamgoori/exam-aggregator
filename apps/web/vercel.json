@@ -12,8 +12,20 @@
       "schedule": "0 * * * *"
     },
     {
-      "path": "/api/cron/warm-papers",
+      "path": "/api/cron/warm-papers?offset=0&chain=0",
       "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/cron/warm-papers?offset=1200&chain=0",
+      "schedule": "40 0 * * *"
+    },
+    {
+      "path": "/api/cron/warm-papers?offset=2400&chain=0",
+      "schedule": "50 0 * * *"
+    },
+    {
+      "path": "/api/cron/warm-papers?offset=3600&chain=0",
+      "schedule": "0 1 * * *"
     }
   ]
 }
