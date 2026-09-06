@@ -79,8 +79,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   로 나뉜다(`lib/sitemap-data.ts`) — 다시 한 파일로 합치지 말 것(서치콘솔에서 시험별
   색인 현황을 보려는 것). 문제지 카드·상세 링크에 `?level=` 같은 파라미터를 다시 붙이지
   말 것(변형 URL 이 문제지마다 생겨 "대체 페이지"만 쌓인다). 배포 뒤에는
-  `/api/cron/warm-papers` 를 한 번 돌릴 것(`CRON_SECRET` 필수, `.env.local.example`) —
-  승격 전 공용 셸을 크롤러가 먼저 받지 않게 하려는 것.
+  `/api/cron/warm-papers` 를 **끝까지** 돌릴 것(`CRON_SECRET` 필수) — 승격 전 공용 셸을
+  크롤러가 먼저 받지 않게 하려는 것. 한 호출이 전부를 돌지 않는다: 응답의 `next` 가
+  null 이 될 때까지 `?offset=<next>&chain=0` 으로 이어 부른다(라우트 머리 주석에
+  PowerShell 루프). 확인은 미승격 문제지 하나를 크롤러 UA 로 받아
+  `x-vercel-cache` 와 `<head>` 길이를 보는 것 — 승격 전 PRERENDER·headLen 1766·
+  title/canonical 0개, 승격 후 HIT·headLen 4084·각 1개(2026-09-06 실측).
 - **다운로드 집계**: `download-counting.ts` 의 봇 목록(`NON_HUMAN_UA`)에 `naver`·`daum`·
   `kakaotalk` 을 넣지 말 것 — 셋 다 크롤러가 아니라 **인앱 브라우저**의 UA 표식이라
   (`NAVER(inapp;...)`, `KAKAOTALK 10.x`, `DaumApps/...`) 넣는 순간 국내 모바일 유입이
