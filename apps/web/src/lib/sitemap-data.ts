@@ -68,8 +68,16 @@ export function slugFromPaperFileName(file: string): string | null {
   return m ? m[1] : null;
 }
 
-function laterOf(a: string | undefined, b: string): string {
+/**
+ * 두 시각 문자열 중 늦은 쪽. **문자열 비교로 하지 말 것** — 여기 들어오는 값은 형식이
+ * 섞여 있다(Postgres 원본 `2026-09-01T15:54:52.075486+00:00` 과 상수
+ * `2026-09-02T00:00:00+09:00`). 사전순으로 비교하면 `+09:00` 로 적힌 쪽이 날짜 문자만으로
+ * 이겨서, 실제로는 더 이른 시각이 "최신"으로 올라간다(실측: 인덱스의 문제지 파일 lastmod 가
+ * 최신 업로드 15:54Z 대신 하한 15:00Z 로 나갔다).
+ */
+export function laterOf(a: string | undefined, b: string | undefined): string | undefined {
   if (!a) return b;
+  if (!b) return a;
   return new Date(a).getTime() > new Date(b).getTime() ? a : b;
 }
 
@@ -174,7 +182,7 @@ export async function getSitemapData(): Promise<SitemapData> {
     const list = bySlug.get(slug) ?? [];
     list.push({
       url: absoluteUrl(paperHref(p)),
-      lastModified: laterOf(uploadedAt.get(p.id), PAPER_LASTMOD_FLOOR),
+      lastModified: laterOf(uploadedAt.get(p.id), PAPER_LASTMOD_FLOOR)!,
       changeFrequency: "monthly",
       priority: 0.7,
     });

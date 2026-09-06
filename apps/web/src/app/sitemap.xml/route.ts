@@ -1,6 +1,7 @@
 import {
   HUBS_FILE,
   getSitemapData,
+  laterOf,
   paperFileName,
   renderSitemapIndex,
   sitemapFileUrl,
@@ -18,9 +19,10 @@ export async function GET() {
     ...data.paperFiles.map((f) => ({
       url: sitemapFileUrl(paperFileName(f.slug)),
       // 파일 안에서 가장 늦은 lastmod. 인덱스만 보고도 어느 시험에 새 문제지가
-      // 올라왔는지 알 수 있게.
+      // 올라왔는지 알 수 있게. 비교는 반드시 laterOf(시각 비교)로 — 문자열 비교를 쓰면
+      // 형식이 섞인 값에서 더 이른 시각이 이긴다(laterOf 주석의 실측 사례).
       lastModified: f.entries.reduce<string | undefined>(
-        (max, e) => (e.lastModified && (!max || e.lastModified > max) ? e.lastModified : max),
+        (max, e) => laterOf(max, e.lastModified),
         undefined,
       ),
     })),
