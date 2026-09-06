@@ -103,6 +103,13 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   리사이즈·형식 변환을 강제하는데, 직접 올릴 수 있으면 그 강제가 사라진다).
   알림 종류는 `packages/core/src/notifications.ts` 와 DB 의
   `notifications_type_check` 두 곳에 있다 — 반드시 함께 고칠 것.
+- **클라이언트 컴포넌트에 함수 prop 금지**: 서버 컴포넌트에서 `"use client"` 컴포넌트로
+  함수를 넘기지 말 것(`hrefFor={...}` 같은 것). prop 은 직렬화돼 넘어가므로 렌더가
+  통째로 던지는데, **그 에러는 셸이 나간 뒤 스트림 안에서 터져 HTTP 상태가 200 으로
+  남는다** — `curl -o /dev/null -w "%{http_code}"` 로는 멀쩡해 보이고 화면만 죽는다
+  (2026-09-05 `/mix` 사고, 하루치 배포가 그 상태였다). 주소·문구 조립은 필요한 값만
+  문자열로 넘기고 컴포넌트 안에서 한다. 배포 확인은 상태 코드가 아니라 **본문에
+  `digest\":` 가 있는지**로 볼 것: `curl -s <url> | grep -o 'digest[^,]*'`.
 - **정답 등록**: `question_count`와 길이가 다른 정답 배열을 덮어쓰지 말 것.
   공통과목이라고 정답을 다른 직류(track) 문제지에 수동 복사하지 말 것 (법원직
   서기보는 국어·한국사 15문항/영어 20문항 별도 문제지 — 실측 사고 있음).

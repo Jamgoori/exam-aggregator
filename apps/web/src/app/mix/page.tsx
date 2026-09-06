@@ -13,6 +13,9 @@ import { KST_TIME_ZONE, MIX_NO_LEVEL } from "@gongmoa/core";
 // 화면은 급수와 과목만 묻는다 — 문항 수·연도는 과목을 고른 다음 화면
 // (/subjects/[slug]/mix)에 있다.
 //
+// 카드 숫자는 시작 화면과 같은 단위(풀 수 있는 문항 수)다 — "20문항 풀기"를 고르는
+// 화면으로 가는 자리라, 여기서 "12장"을 보여주면 단위가 어긋난다.
+//
 // 급수를 여기서 먼저 고르는 이유: 공시생은 자기 급수가 바뀌지 않는다. 과목을 옮길
 // 때마다 9급을 다시 고르게 하면 매번 같은 선택을 반복시키는 셈이라, 여기서 한 번
 // 고르면 과목 시작 화면까지 그대로 이어진다(?level=).
@@ -39,12 +42,20 @@ export default async function MixHubPage({
   const { data: claimsData } = await supabase.auth.getClaims();
   const userId = claimsData?.claims.sub ?? null;
 
+  // 최근 기록·즐겨찾기는 곁다리다. 이 둘 때문에 화면 전체가 500 이 되면 안 된다
+  // (2026-09-05 실측: 최근 기록의 과목 임베드 하나가 페이지를 통째로 떨어뜨렸다).
+  // 본문인 과목 목록(getMixHubIndex)이 실패할 때만 에러로 남긴다.
   const [index, favoriteIds, recent] = await Promise.all([
     getMixHubIndex(),
     userId
-      ? getMyBookmarkedSubjectIds(supabase, userId)
+      ? getMyBookmarkedSubjectIds(supabase, userId).catch(() => new Set<string>())
       : Promise.resolve(new Set<string>()),
-    userId ? listRecentMixSessions(userId) : Promise.resolve([]),
+    userId
+      ? listRecentMixSessions(userId).catch((e) => {
+          console.error("섞어풀기 최근 기록 조회 실패", e);
+          return [];
+        })
+      : Promise.resolve([]),
   ]);
 
   // 급수 탭. 9급 → 7급 → … 순이고 "기타"(승진시험처럼 어느 급수에도 안 묶이는 것)는 뒤로.
@@ -59,20 +70,19 @@ export default async function MixHubPage({
     t.key === MIX_NO_LEVEL ? "기타" : t.approx ? `${t.key} 수준` : t.key;
   const selectedTier = tiers.find((t) => t.key === level) ?? null;
 
-  const favoriteSlugs = await resolveFavoriteSlugs(supabase, favoriteIds);
+  const favoriteSlugs = await resolveFavoriteSlugs(supabase, favoriteIds).catch(
+    () => new Set<string>(),
+  );
   // 고른 급수의 문제지가 있는 과목만. 즐겨찾는 과목을 앞으로 — 공시생은 보통 5과목만
   // 도는데 목록에는 수십 과목이 있어, 즐겨찾기가 곧 "내 과목 목록"이다.
   const subjects = index.subjects
-    .map((s) => ({ ...s, count: level ? (s.byTier[level] ?? 0) : s.paperCount }))
+    .map((s) => ({ ...s, count: level ? (s.byTier[level] ?? 0) : s.count }))
     .filter((s) => s.count > 0)
     .sort((a, b) => {
       const fa = favoriteSlugs.has(a.slug) ? 0 : 1;
       const fb = favoriteSlugs.has(b.slug) ? 0 : 1;
       return fa - fb || a.name.localeCompare(b.name, "ko");
     });
-
-  const mixHref = (slug: string) =>
-    level ? `/subjects/${slug}/mix?level=${encodeURIComponent(level)}` : `/subjects/${slug}/mix`;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pb-12 pt-6 sm:pt-8">
@@ -138,7 +148,9 @@ export default async function MixHubPage({
             최근 섞어풀기
           </h2>
           <div className="flex flex-col divide-y divide-zinc-100 overflow-hidden rounded-xl border border-zinc-200 dark:divide-zinc-700/70 dark:border-zinc-700">
-            {recent.map((s) => (
+            {recent
+              .filter((s) => s.subjectSlug && s.subjectName)
+              .map((s) => (
               <Link
                 key={s.id}
                 href={`/mypage/wrong-notes/${s.subjectSlug}/mix/${s.id}`}
@@ -167,7 +179,7 @@ export default async function MixHubPage({
                   className="shrink-0 text-zinc-300 group-hover:text-blue-600 dark:text-zinc-700 dark:group-hover:text-blue-400"
                 />
               </Link>
-            ))}
+              ))}
           </div>
         </section>
       )}
@@ -193,7 +205,8 @@ export default async function MixHubPage({
             count: s.count,
             favorite: favoriteSlugs.has(s.slug),
           }))}
-          hrefFor={mixHref}
+          level={level}
+          unit={index.unit}
           emptyMessage={
             level
               ? "이 급수에는 아직 기출문제가 없어요. 다른 급수를 골라보세요."

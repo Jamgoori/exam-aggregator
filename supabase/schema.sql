@@ -908,6 +908,34 @@ exception when duplicate_object then null; end $$;
 -- 본인 것만 select 가능한 RLS라, 전체 집계는 security definer로 우회한다. 반환값은 정답이
 -- 아니라 오답 "비율"뿐이라 정답 유출이 아니다(공개 정답지 PDF와 무관). 표본이 적은 문항은
 -- 호출부에서 배지를 숨긴다(작은 표본은 오해를 준다).
+-- 기출 섞어풀기 허브(/mix)가 쓰는 "문제지별 출제 가능 문항 수".
+--
+-- 허브는 과목 수십 개를 한 화면에 늘어놓는데, 과목마다 출제 풀을 돌리면 문항 단위
+-- 조회가 과목 수만큼 붙는다. 그렇다고 문제지 수를 보여주면 "20문항 풀기"를 고르는
+-- 화면에서 단위가 어긋난다. 그래서 개수만 DB 에서 한 번에 집계해 받는다.
+--
+-- "출제 가능"의 뜻은 앱 코드(apps/web/src/lib/mix-practice.ts)와 같다: 정답이 등록된
+-- 문제지의, 크롭 이미지가 있는, voided(전항정답·복수정답)가 아닌 문항. 정답 내용은
+-- 돌려주지 않는다(개수뿐) — paper_answers 가 RLS 로 잠겨 있어 security definer 로 두되
+-- 노출되는 값은 집계 수치다. 중복 시험지 합치기는 대표 선정 규칙이 앱에 있으므로
+-- 호출부가 한다.
+create or replace function mix_playable_question_counts()
+returns table(paper_id uuid, question_count int)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select q.paper_id, count(*)::int as question_count
+  from questions q
+  join paper_answers pa on pa.paper_id = q.paper_id
+  where exists (select 1 from question_images qi where qi.question_id = q.id)
+    and not (q.question_number = any(pa.voided_questions))
+  group by q.paper_id;
+$$;
+
+grant execute on function mix_playable_question_counts() to anon, authenticated;
+
 create or replace function paper_question_wrong_rates(p_paper_ids uuid[])
 returns table(paper_id uuid, question_number int, attempts bigint, wrongs bigint)
 language sql
