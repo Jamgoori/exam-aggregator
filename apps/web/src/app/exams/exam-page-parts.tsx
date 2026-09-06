@@ -4,7 +4,14 @@ import { ExamCard } from "@/components/exam-card";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getCbtAvailability } from "@/lib/cbt-availability";
-import { examYearHref, type ExamCombo, type ExamComboPaper } from "@/lib/exam-index";
+import {
+  examYearHref,
+  getExamAllPapers,
+  type ExamCombo,
+  type ExamComboPaper,
+} from "@/lib/exam-index";
+import { paperHref } from "@/lib/paper-href";
+import { getPaperDisplayTitle } from "@/lib/paper-title";
 import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 
 // /exams/[exam] 이 쓰는 조각들.
@@ -116,6 +123,64 @@ export async function ExamPaperGrid({ papers }: { papers: ExamComboPaper[] }) {
         />
       ))}
     </div>
+  );
+}
+
+/**
+ * 이 시험의 문제지 전체를 연도별로 접어 놓은 링크 목록.
+ *
+ * 위의 카드 그리드는 ?year= 한 해만 보여 주고 다른 연도 링크는 nofollow 라(ExamYearNav),
+ * 크롤러 입장에서 시험 허브는 문제지 4,300장 중 최신 연도 몇십 장에만 닿는 페이지였다.
+ * 그래서 문제지 대부분은 사이트맵에만 매달려 "발견됨 - 현재 색인되지 않음"에 쌓였다
+ * (2026-09 실측 3,776건). 이 목록은 searchParams·cookies 를 읽지 않는 캐시 값만 쓰므로
+ * 정적 셸에 그대로 들어가고, 허브 18장이 문제지 전부에 실제 <a> 를 흘린다.
+ *
+ * 화면에서는 연도마다 접어 둔다(details) — 사람에게는 위 카드가 주 동선이고, 이 목록은
+ * "다른 해 것도 한눈에" 용도다. 접혀 있어도 HTML 에는 전부 실려 크롤러는 그대로 읽는다.
+ */
+export async function ExamAllYearsList({ combo }: { combo: ExamCombo }) {
+  const papers = await getExamAllPapers(combo.slug);
+  if (papers.length === 0) return null;
+
+  const byYear = new Map<number, ExamComboPaper[]>();
+  for (const p of papers) {
+    const list = byYear.get(p.year);
+    if (list) list.push(p);
+    else byYear.set(p.year, [p]);
+  }
+
+  return (
+    <section className="mt-6 flex flex-col gap-3 border-t border-zinc-100 pt-6 dark:border-zinc-800">
+      <h2 className="text-lg font-semibold">연도별 전체 목록</h2>
+      <p className="text-sm text-zinc-500 dark:text-zinc-500">
+        {combo.label} 기출문제 {papers.length.toLocaleString()}건을 연도별로 모았습니다.
+        연도를 누르면 그 해의 과목별 문제지가 펼쳐집니다.
+      </p>
+      <div className="flex flex-col gap-2">
+        {[...byYear.entries()].map(([year, list]) => (
+          <details
+            key={year}
+            className="group rounded-xl border border-zinc-200 dark:border-zinc-700"
+          >
+            <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+              {year}년 {combo.label} 기출문제 {list.length}건
+            </summary>
+            <ul className="grid grid-cols-1 gap-x-4 gap-y-1 border-t border-zinc-100 px-4 py-3 text-sm sm:grid-cols-2 lg:grid-cols-3 dark:border-zinc-800">
+              {list.map((p) => (
+                <li key={p.id}>
+                  <Link
+                    href={paperHref(p)}
+                    className="block truncate py-1 text-zinc-700 hover:text-blue-600 dark:text-zinc-300 dark:hover:text-blue-400"
+                  >
+                    {getPaperDisplayTitle(p.title, p.track)}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -1,5 +1,7 @@
 {
-  "regions": ["icn1"],
+  "regions": [
+    "icn1"
+  ],
   "crons": [
     {
       "path": "/api/cron/warm",
@@ -8,6 +10,10 @@
     {
       "path": "/api/cron/diagnosis",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/warm-papers",
+      "schedule": "30 0 * * *"
     }
   ]
 }

@@ -601,7 +601,6 @@ export function ExamBrowser({
                         <ExamCard
                           key={paper.id}
                           paper={paper as unknown as ExamPaper}
-                          linkLevel={effectiveLevel}
                           myRoundCount={myRoundCounts[paper.id]}
                           isBookmarked={bookmarkedSet.has(paper.id)}
                           loggedIn={loggedIn}
@@ -620,7 +619,6 @@ export function ExamBrowser({
               <ExamCard
                 key={paper.id}
                 paper={paper as unknown as ExamPaper}
-                linkLevel={effectiveLevel}
                 myRoundCount={myRoundCounts[paper.id]}
                 isBookmarked={bookmarkedSet.has(paper.id)}
                 loggedIn={loggedIn}

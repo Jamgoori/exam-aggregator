@@ -409,7 +409,6 @@ export default async function SubjectPage({
           <ExamCard
             key={paper.id}
             paper={paper}
-            linkLevel={level}
             myRoundCount={myRoundCounts.get(paper.id)}
             isBookmarked={bookmarkedIds.has(paper.id)}
             loggedIn={!!userId}

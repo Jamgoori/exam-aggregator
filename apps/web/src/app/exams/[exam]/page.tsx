@@ -11,6 +11,7 @@ import {
 } from "@/lib/exam-index";
 import {
   examBreadcrumbLd,
+  ExamAllYearsList,
   ExamCrumbs,
   ExamPaperGrid,
   ExamPaperGridSkeleton,
@@ -68,6 +69,11 @@ export default async function ExamComboPage({
       <Suspense fallback={<ExamYearSectionSkeleton />}>
         <ExamYearSection combo={combo} searchParams={searchParams} />
       </Suspense>
+
+      {/* 전 연도 링크 목록. searchParams 를 읽지 않으므로 Suspense 밖, 정적 셸 안에
+          들어간다 — 크롤러가 첫 HTML 에서 이 시험의 문제지 전부를 발견하게 하는 것이
+          목적이다(exam-page-parts.tsx 의 ExamAllYearsList 주석). */}
+      <ExamAllYearsList combo={combo} />
 
       <section className="border-t border-zinc-100 pt-6 dark:border-zinc-800">
         <Link

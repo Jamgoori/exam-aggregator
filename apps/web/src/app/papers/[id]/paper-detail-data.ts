@@ -15,7 +15,10 @@ import {
   collidingPaperIds,
   fetchPaperIdentitySignals,
   paperDedupKey,
+  representativePaperIds,
 } from "@/lib/dedup-papers";
+import { fetchAllPages } from "@/lib/fetch-paged";
+import { paperHref } from "@/lib/paper-href";
 import type {
   MyCbtRecordItem,
   RoundAverage,
@@ -92,6 +95,67 @@ export async function getNewestPaperSlugs(limit: number): Promise<string[]> {
   return papers
     .slice(0, limit)
     .map((p) => getPaperSlug(p.title, p.round, p.track));
+}
+
+type RepresentativeSourceRow = {
+  id: string;
+  title: string;
+  level: string | null;
+  track: string | null;
+  year: number;
+  round: number;
+  subject_id: string;
+  exam_type_id: string;
+  created_at: string;
+};
+
+/**
+ * 중복 그룹(직류만 다른 같은 시험지)에서 대표가 아닌 문제지 id → 대표 문제지의 slug.
+ * 대표 자신과 단독 문제지는 표에 없다(대부분이 그렇다 — 표는 작다).
+ *
+ * 목록·사이트맵·RSS 는 대표 한 장만 싣지만 비대표 문제지 주소도 200 으로 열리고
+ * 자기 자신을 canonical 로 선언하고 있었다. 같은 내용의 두 주소가 각자 정본을 주장하니
+ * Google 이 하나를 골랐다(서치콘솔 "중복 페이지, Google 에서 사용자와 다른 표준을
+ * 선택함" 49건). 비대표의 canonical 을 대표로 돌려 그 판단을 우리가 대신 한다.
+ * 대표 선정은 목록 통합과 같은 규칙(representativePaperIds)이라 사이트맵의 주소와
+ * 어긋나지 않는다. exam_papers 행은 건드리지 않는다(docs/agents/dedup-papers.md).
+ */
+async function getRepresentativeSlugById(): Promise<Record<string, string>> {
+  "use cache";
+  cacheLife({ revalidate: 3600 });
+  cacheTag("home-data");
+
+  const supabase = createPublicClient();
+  const rows = await fetchAllPages<RepresentativeSourceRow>(
+    (from, to) =>
+      supabase
+        .from("exam_papers")
+        .select("id, title, level, track, year, round, subject_id, exam_type_id, created_at")
+        .order("id", { ascending: true })
+        .range(from, to) as unknown as Promise<{
+        data: RepresentativeSourceRow[] | null;
+        error: { message: string } | null;
+      }>,
+    "대표 문제지 표",
+  );
+  const signals = await fetchPaperIdentitySignals(supabase, collidingPaperIds(rows));
+  const { repByPaperId } = representativePaperIds(rows, signals);
+
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  // 'use cache' 는 반환값을 직렬화해 보관하므로 Map 대신 평범한 객체로 돌려준다.
+  const out: Record<string, string> = {};
+  for (const [id, repId] of repByPaperId) {
+    if (id === repId) continue;
+    const rep = byId.get(repId);
+    if (rep) out[id] = getPaperSlug(rep.title, rep.round, rep.track);
+  }
+  return out;
+}
+
+/** 이 문제지의 정본 주소. 중복 그룹의 비대표면 대표의 주소, 아니면 자기 주소. */
+export async function getCanonicalPaperHref(paper: ExamPaper): Promise<string> {
+  const repSlug = (await getRepresentativeSlugById())[paper.id];
+  return repSlug ? `/papers/${encodeURIComponent(repSlug)}` : paperHref(paper);
 }
 
 // 상세페이지 상단(제목·버튼·평점·댓글)에 필요한 데이터만 모아서 돌려준다.
