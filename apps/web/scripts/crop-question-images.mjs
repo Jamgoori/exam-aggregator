@@ -142,6 +142,11 @@ const RULE_MIN_BODY_LINES = 3;
 // 있으므로 믿지 않는다.
 const RULE_MAX_TRIM_PT = 80;
 
+// 칼럼 경계에서 이 거리 안에 있는 마커는 "경계 판정이 아슬아슬한 것"으로 본다.
+const MARKER_SPLIT_EPS_PT = 3;
+// 옮긴 마커를 담으려고 크롭을 왼쪽으로 넓힐 때의 여유.
+const MARKER_LEFT_PAD_PT = 2;
+
 // 칼럼 경계에서 이 거리 안에 있는 세로 실선은 "칼럼 구분선"으로 본다.
 const SEPARATOR_NEAR_PT = 20;
 // 구분선을 밀어낼 때 남길 여유. 우측 칼럼 본문이 구분선 바로 옆(실측 1.4pt)에
@@ -188,6 +193,33 @@ export function findVerticalRuleXs(greyData, width, height, { maxWidthPx, minCov
     x = end + 1;
   }
   return rules;
+}
+
+// **자기 칼럼 크롭 범위 밖에 있는 마커를 반대쪽 칼럼으로 옮긴다.**
+//
+// 분류는 "마커 x 가 경계보다 왼쪽인가"로만 하는데, 우측 칼럼이 지면 정확히 절반보다
+// 아주 살짝 왼쪽에서 시작하는 조판이 있다(실측: 2011 법원직 9급 영어 — 지면 폭 595,
+// 절반 297.5 인데 우측 칼럼 마커가 x=297.4). 그러면 그 마커가 좌측으로 분류되고,
+// 좌측 칼럼 크롭 범위(6~293.5)는 그 마커를 **담을 수조차 없어** 엉뚱한 자리를 자른다
+// (실측 24번은 옆 문항 내용이 담기고, 25번은 위아래 경계가 뒤집혀 44바이트짜리 빈
+// 이미지가 됐다). **문항 수는 25/25 로 맞아** 개수 검사도 회귀 검사도 통과한다.
+//
+// 옮기는 조건을 "자기 칼럼 크롭 범위 밖 + 경계에서 MARKER_SPLIT_EPS_PT 이내"로 좁혀,
+// 경계에서 한참 떨어진 마커는 건드리지 않는다. 옮긴 뒤에는 그 마커 번호가 잘리지
+// 않도록 우측 크롭 시작선을 그만큼만 왼쪽으로 넓힌다 — 뒤이어 도는 구분선 처리
+// (clampColumnToSeparator)가 실선 안쪽으로 다시 당기므로 옆 칼럼을 물지 않는다.
+export function reassignBoundaryMarkers(columnDefs, cropX) {
+  if (columnDefs.length !== 2) return columnDefs;
+  const [leftDef, rightDef] = columnDefs;
+  const moved = leftDef.markers.filter(
+    (m) => m.x > leftDef.xRightPt && m.x >= cropX - MARKER_SPLIT_EPS_PT,
+  );
+  if (moved.length === 0) return columnDefs;
+  leftDef.markers = leftDef.markers.filter((m) => !moved.includes(m));
+  rightDef.markers = [...rightDef.markers, ...moved].sort((a, b) => b.y - a.y);
+  const minMovedX = Math.min(...moved.map((m) => m.x));
+  rightDef.xLeftPt = Math.min(rightDef.xLeftPt, minMovedX - MARKER_LEFT_PAD_PT);
+  return columnDefs;
 }
 
 // **칼럼 구분선은 본문 x 범위 조건과 무관하게 언제나 크롭 밖으로 밀어낸다.**
@@ -1196,6 +1228,8 @@ async function makePageContext(page, markerData, scale, opts) {
           { key: "R", markers: right, xLeftPt: cropX + COLUMN_GAP, xRightPt: pageWidthPt - PAGE_MARGIN_X },
         ];
 
+  if (columnMode !== "single") reassignBoundaryMarkers(columnDefs, cropX);
+
   // 지면 테두리·칼럼 구분선을 크롭 영역 밖으로 밀어낸다(위 RULE_* 주석 참고).
   // 지면을 한 번만 훑어 세로 실선 x를 구하고, 칼럼마다 **본문 x 범위 밖**에 있는
   // 실선만 골라 경계를 그 안쪽으로 당긴다. 실선이 없거나 본문 범위를 모르면
@@ -1611,6 +1645,12 @@ async function cropQuestionsFromPage(
       if (strip) {
         raw = await stackVertically([strip, raw]);
         consumedNumbers.add(marker.number);
+      }
+      if (process.env.CROP_DEBUG_BOX) {
+        console.log(
+          `[box] ${marker.number}번 col=${colDef.key} x=${colDef.xLeftPt.toFixed(1)}~${colDef.xRightPt.toFixed(1)} ` +
+            `y=${top.toFixed(1)}~${bottom.toFixed(1)} markerX=${marker.x.toFixed(1)} markerY=${marker.y.toFixed(1)}`,
+        );
       }
       results.push({ number: marker.number, image: await finalizeQuestionImage(raw, scale) });
     }
@@ -2778,7 +2818,9 @@ async function main() {
 // batch-crop-questions.mjs가 extractQuestionsFromPdf만 가져다 쓰려고 import할 때는
 // 이 CLI용 main()이 (process.argv를 오독하며) 같이 실행되면 안 되므로, 직접 실행된
 // 경우에만 돌린다.
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// process.argv[1] 은 `node -e` 로 불러올 때 비어 있다 — 그대로 pathToFileURL 에
+// 넘기면 import 자체가 터진다(감사·디버깅 때 이 모듈만 가져다 쓰는 경우가 있다).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     console.error(err);
     process.exit(1);

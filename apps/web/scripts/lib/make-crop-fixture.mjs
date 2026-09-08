@@ -256,10 +256,19 @@ export const FIXTURE_STRIP_SET = [9, 10];
 //   (3) 꼬리말 y 가 페이지마다 흔들리는 조판. y 버킷(3pt)이 쪼개져 "절반 이상의
 //       페이지"를 못 채우면 꼬리말이 문서 전체에서 하나도 안 잡힌다(실측:
 //       2021 법원직 9급 형법 — y 가 33.6/23.4/33.6).
-const TIGHT_RULE_TEXT_X = 299; // 구분선(297.5) 바로 오른쪽
+// 우측 칼럼이 **지면 정확히 절반(297.5)보다 아주 살짝 왼쪽**에서 시작하는 조판.
+// 실측: 2011 법원직 9급 영어 — 마커 x=297.4. 절반 기준 분류가 이 마커를 좌측으로
+// 보내 좌측 칼럼 크롭이 엉뚱한 자리를 자르고(24번은 옆 문항, 25번은 빈 이미지)
+// 문항 수는 25/25 로 맞아떨어졌다. 구분선은 그보다 왼쪽(295.7 실측)에 있다.
+const TIGHT_RULE_TEXT_X = 297.4;
+const TIGHT_COLUMN_RULE_X = 295.7;
 const BOTTOM_RULE_Y = 40;
 
 export const RULE_FIXTURE_QUESTION_COUNT = 6;
+// 우측 칼럼 문항의 부연 줄 수(좌측은 기본 1줄).
+const TIGHT_RIGHT_BODY_LINES = 3;
+// 그 문항이 만드는 잉크 줄 수(발문 1 + 부연 3 + 선지 4).
+export const TIGHT_RIGHT_LINES = 1 + TIGHT_RIGHT_BODY_LINES + 4;
 
 export async function buildTightRuleFixturePdf({ textFooter = false } = {}) {
   const pdf = await PDFDocument.create();
@@ -270,8 +279,8 @@ export async function buildTightRuleFixturePdf({ textFooter = false } = {}) {
     const page = pdf.addPage([PAGE_W, PAGE_H]);
     // 칼럼 구분선만 긋는다(지면 테두리는 없다).
     page.drawLine({
-      start: { x: L.columnRuleX, y: 26 },
-      end: { x: L.columnRuleX, y: PAGE_H - 26 },
+      start: { x: TIGHT_COLUMN_RULE_X, y: 26 },
+      end: { x: TIGHT_COLUMN_RULE_X, y: PAGE_H - 26 },
       thickness: RULE_W,
       color: rgb(0, 0, 0),
     });
@@ -293,8 +302,13 @@ export async function buildTightRuleFixturePdf({ textFooter = false } = {}) {
     }
     const left = columnCursor(page, font, L.leftTextX, L.bodyTopY);
     question(left, p * 2 + 1);
-    const right = columnCursor(page, font, TIGHT_RULE_TEXT_X, L.bodyTopY);
-    question(right, p * 2 + 2);
+    // 1쪽 우측 마커만 절반(297.5)보다 오른쪽에 둔다 — 그래야 문서가 2단으로
+    // 판정되고, 나머지 쪽의 297.4 마커가 좌측으로 오분류되는 실측 상황이 된다
+    // (전부 297.4 면 "우측 칼럼에 마커가 하나도 없다"며 1단으로 판정해버린다).
+    const right = columnCursor(page, font, p === 0 ? 298.5 : TIGHT_RULE_TEXT_X, L.bodyTopY);
+    // 우측 문항은 **줄 수를 다르게** 만든다. 마커가 반대 칼럼으로 오분류되면
+    // 좌측 문항 자리를 자르게 되는데, 줄 수가 같으면 그 사고가 검사에 안 걸린다.
+    question(right, p * 2 + 2, { bodyLines: TIGHT_RIGHT_BODY_LINES });
   }
   return Buffer.from(await pdf.save());
 }

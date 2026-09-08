@@ -19,6 +19,7 @@ import {
   buildFixturePdf,
   buildTightRuleFixturePdf,
   RULE_FIXTURE_QUESTION_COUNT,
+  TIGHT_RIGHT_LINES,
   LINES_PER_QUESTION,
   FIXTURE_QUESTION_COUNT,
   FIXTURE_MERGED_SETS,
@@ -32,6 +33,7 @@ import {
   computeHeaderInkBottomByPage,
   computeFooterInkTopByPage,
   clampColumnToSeparator,
+  reassignBoundaryMarkers,
   isBlankCrop,
   findBlankCrops,
 } from "./crop-question-images.mjs";
@@ -288,6 +290,35 @@ test("clampColumnToSeparator: 본문 범위와 무관하게 구분선 바깥으�
   assert.equal(far.xLeftPt, 293.4);
 });
 
+test("reassignBoundaryMarkers: 경계 바로 왼쪽의 우측 칼럼 마커를 되돌린다", () => {
+  // 실측값(2011 법원직 9급 영어): 지면 폭 595(절반 297.5), 우측 칼럼 마커 x=297.4,
+  // 좌측 크롭은 293.5 에서 끝난다 — 그 마커를 담을 수 없는데도 좌측으로 분류됐다.
+  const marker = { number: 25, x: 297.4, y: 586.3 };
+  const far = { number: 3, x: 31.1, y: 284.4 };
+  const [left, right] = reassignBoundaryMarkers(
+    [
+      { key: "L", markers: [far, marker], xLeftPt: 6, xRightPt: 293.5 },
+      { key: "R", markers: [], xLeftPt: 301.5, xRightPt: 589 },
+    ],
+    297.5,
+  );
+  assert.deepEqual(left.markers, [far], "경계에서 먼 좌측 마커는 그대로 둔다");
+  assert.deepEqual(right.markers, [marker]);
+  assert.ok(right.xLeftPt < marker.x, "옮긴 마커 번호가 잘리지 않게 크롭을 넓힌다");
+
+  // 자기 칼럼 크롭 안에 들어오는 마커는 건드리지 않는다.
+  const inside = { number: 4, x: 200, y: 500 };
+  const [left2, right2] = reassignBoundaryMarkers(
+    [
+      { key: "L", markers: [inside], xLeftPt: 6, xRightPt: 293.5 },
+      { key: "R", markers: [], xLeftPt: 301.5, xRightPt: 589 },
+    ],
+    297.5,
+  );
+  assert.deepEqual(left2.markers, [inside]);
+  assert.deepEqual(right2.markers, []);
+});
+
 test("구분선이 우측 본문 바로 옆이어도 세로 실선이 남지 않는다", async () => {
   assert.equal(tight.length, RULE_FIXTURE_QUESTION_COUNT);
   for (const c of tight) {
@@ -296,12 +327,17 @@ test("구분선이 우측 본문 바로 옆이어도 세로 실선이 남지 않
   }
 });
 
+// 좌측 문항은 6줄, 우측 문항은 그보다 길다(TIGHT_RIGHT_LINES) — 마커가 반대
+// 칼럼으로 오분류되면 옆 칼럼 자리를 자르게 되므로 줄 수로 바로 드러난다.
+const tightExpectedLines = (number) =>
+  number % 2 === 0 ? TIGHT_RIGHT_LINES : LINES_PER_QUESTION;
+
 test("글자 없는 하단 괘선은 이미지에 딸려 오지 않는다", async () => {
   for (const c of tight) {
     const p = await profile(c.image);
-    // 발문 1 + 부연 1 + 선지 4 = 6줄. 괘선이 남으면 7줄이 되고, 그 위 빈칸까지
-    // 통째로 붙어 이미지가 지면 바닥까지 늘어난다.
-    assert.equal(p.blocks, LINES_PER_QUESTION, `${c.number}번 잉크 덩어리 수`);
+    // 괘선이 남으면 줄이 하나 늘고, 그 위 빈칸까지 통째로 붙어 이미지가 지면
+    // 바닥까지 늘어난다.
+    assert.equal(p.blocks, tightExpectedLines(c.number), `${c.number}번 잉크 덩어리 수`);
     assert.equal(p.firstInk, PAD_PX);
     assert.equal(p.height - 1 - p.lastInk, PAD_PX, `${c.number}번 아래에 빈칸이 남았다`);
   }
@@ -311,7 +347,7 @@ test("꼬리말 y가 페이지마다 흔들려도 꼬리말이 남지 않는다"
   assert.equal(tightWithFooter.length, RULE_FIXTURE_QUESTION_COUNT);
   for (const c of tightWithFooter) {
     const p = await profile(c.image);
-    assert.equal(p.blocks, LINES_PER_QUESTION, `${c.number}번 잉크 덩어리 수`);
+    assert.equal(p.blocks, tightExpectedLines(c.number), `${c.number}번 잉크 덩어리 수`);
     assert.equal(p.height - 1 - p.lastInk, PAD_PX, `${c.number}번 아래에 군더더기가 남았다`);
   }
 });
