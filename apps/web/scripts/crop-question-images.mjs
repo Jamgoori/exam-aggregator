@@ -778,8 +778,29 @@ export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSpli
 // 등장만 진짜로 인정한다. 그 구간에 걸리는 등장이 하나도 없거나 둘 이상이면
 // (모호함) 전부 버려서 개수 불일치 경고로 남긴다 — 틀린 이미지를 올리느니
 // 수동 확인 대상이 되는 편이 낫다.
+// 마커 아래(같은 칼럼)에 본문 줄이 이만큼은 있어야 진짜 문항으로 본다. 발문 한
+// 줄로 끝나는 문항은 없으므로(최소한 선지가 따라온다) 낮게 잡아도 안전하다.
+const MARKER_MIN_LINES_BELOW = 2;
+
+// 그 마커 아래에 실제 본문이 이어지는가. 지면 맨 아래에 홀로 찍힌 조각
+// (다음 쪽 안내용 번호 등)을 가려내는 데 쓴다 — 진짜 문항이라면 자기 발문·선지가
+// 그 아래에 따라온다.
+function hasContentBelow(data, marker, columnMode, columnSplitX) {
+  const half = columnSplitX ?? data.pageWidthPt / 2;
+  const col = columnMode === "single" || marker.x < half ? "L" : "R";
+  let count = 0;
+  for (const l of data.lines ?? []) {
+    const lineCol = columnMode === "single" ? "L" : l.col;
+    if (lineCol !== col) continue;
+    if (l.y < marker.y - 1) count++;
+    if (count >= MARKER_MIN_LINES_BELOW) return true;
+  }
+  return false;
+}
+
 export function dropOutOfSequenceMarkers(pageMarkerDataList, columnMode, columnSplitX) {
   const ordered = [];
+  const dataOf = new Map();
   for (const data of pageMarkerDataList) {
     const { left, right } = splitIntoColumns(
       data.markers,
@@ -787,7 +808,9 @@ export function dropOutOfSequenceMarkers(pageMarkerDataList, columnMode, columnS
       columnMode,
       columnSplitX,
     );
-    ordered.push(...(columnMode === "single" ? left : [...left, ...right]));
+    const inOrder = columnMode === "single" ? left : [...left, ...right];
+    for (const m of inOrder) dataOf.set(m, data);
+    ordered.push(...inOrder);
   }
   const indexed = ordered.map((m, index) => ({ m, index }));
 
@@ -809,9 +832,20 @@ export function dropOutOfSequenceMarkers(pageMarkerDataList, columnMode, columnS
       if (m.number < number && index > before) before = index;
       if (m.number > number && index < after) after = index;
     }
-    const candidates = indexed.filter(
+    let candidates = indexed.filter(
       ({ m, index }) => m.number === number && index > before && index < after,
     );
+    // 순서만으로 못 가르는 중복이 있다. 그럴 때 **아래에 본문이 이어지지 않는
+    // 후보를 뺀다** — 지면 맨 아래에 번호만 홀로 찍힌 조각이 진짜 마커와 같은
+    // 여백 x 에, 같은 순서 구간에 놓이는 조판이 있다(실측: 2015 해경 1차 9급
+    // 선박일반 — 2쪽 좌측 칼럼 맨 아래 "15."(y=48.3)와 우측 칼럼 위 진짜
+    // 15번(y=888.9)이 둘 다 후보로 남았다).
+    if (candidates.length > 1) {
+      const withBody = candidates.filter(({ m }) =>
+        hasContentBelow(dataOf.get(m), m, columnMode, columnSplitX),
+      );
+      if (withBody.length > 0) candidates = withBody;
+    }
     if (candidates.length === 1) keep.add(candidates[0].m);
   }
 
