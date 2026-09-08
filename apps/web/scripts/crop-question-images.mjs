@@ -723,6 +723,9 @@ export function fillMissingNumbersFromRelaxed(pageMarkerDataList, docMarginX, co
   }
 }
 
+// 여백 x 차이가 이 안이면 "같다"고 본다(동점 처리 — 위 주석 참고).
+const MARGIN_TIE_PT = 1;
+
 export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSplitX) {
   if (docMarginX == null) return;
   const byNumber = new Map();
@@ -743,6 +746,14 @@ export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSpli
     const entries = rawEntries.filter((e) => Number.isFinite(e.dev));
     if (entries.length !== rawEntries.length || entries.length < 2) continue;
     const best = entries.reduce((a, b) => (b.dev < a.dev ? b : a));
+    // **여백 x 가 사실상 같으면 손대지 않는다.** reduce 는 동점일 때 앞에 있는
+    // 것을 남기는데, 그 "앞"은 문서 순서라 **뒤 페이지에 있는 진짜 마커가 지워지고
+    // 앞 페이지의 가짜가 살아남는다**(실측: 2020 해경 3차 한국사 — 2쪽 지면 맨
+    // 아래에 "14." 조각이 있고 3쪽에 진짜 14번이 있는데 둘 다 x=17.7 이라 동점.
+    // 진짜가 지워져 14번 이미지가 괘선 한 줄만 남고 내용이 통째로 사라졌다).
+    // 여백으로 못 가르는 중복은 바로 아래 dropOutOfSequenceMarkers 가 열람 순서로
+    // 가른다 — 그쪽이 번호 순서를 보므로 이런 경우에 훨씬 정확하다.
+    if (entries.filter((e) => e.dev - best.dev <= MARGIN_TIE_PT).length > 1) continue;
     for (const e of entries) {
       if (e === best) continue;
       e.data.markers = e.data.markers.filter((m) => m !== e.marker);
@@ -2482,6 +2493,47 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
 // 재시도하고, 그 결과가 더 나으면(에러 없음 + expectedCount와 일치하거나, 최소
 // 예전 방식보다 인식 개수가 많으면) 그걸 쓴다. expectedCount를 안 넘기면(옛
 // 호출자와의 호환) 예전 방식이 에러 없이 끝나는 한 그대로 쓴다.
+// 잘라낸 이미지에 **내용이 사실상 없는지** 본다. 정상 문항 크롭은 최소한 마커
+// 줄(글자높이 12~13pt)이 들어 있으므로, 잉크 높이가 이보다 한참 낮으면 잘못 자른
+// 것이다. 실측으로 이런 이미지가 나오는 경로가 둘이다(둘 다 문항 수는 맞아떨어져
+// 개수 검사·회귀 검사를 그냥 통과한다):
+//   - 지문·지면 조각의 숫자를 마커로 오인해 엉뚱한 자리를 자름(괘선 한 줄만 남는다)
+//   - 텍스트 레이어와 실제 그려지는 내용의 좌표가 어긋난 PDF(통합본을 쪼갠 흔적) —
+//     텍스트에는 문항이 정상 좌표에 있는데 그 자리에 아무것도 안 그려져 있다
+// 배치는 이 판정이 하나라도 걸리면 그 문제지를 업로드하지 않는다(옛 이미지 유지).
+const BLANK_MAX_INK_H_PT = 8;
+
+export async function isBlankCrop(imageBuffer, scale) {
+  const { data, info } = await sharp(imageBuffer)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  let inkTop = -1;
+  let inkBottom = -1;
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x] < 245) {
+        if (inkTop < 0) inkTop = y;
+        inkBottom = y;
+        break;
+      }
+    }
+  }
+  if (inkTop < 0) return true;
+  return inkBottom - inkTop + 1 < BLANK_MAX_INK_H_PT * scale;
+}
+
+// 잘라낸 것들 중 빈 이미지인 문항 번호를 돌려준다(없으면 빈 배열).
+export async function findBlankCrops(cropped, scale) {
+  const blanks = [];
+  for (const c of cropped) {
+    if (await isBlankCrop(c.image, scale)) blanks.push(c.number);
+  }
+  return blanks;
+}
+
 export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage, expectedCount } = {}) {
   const pdf = await getDocument({ data: new Uint8Array(pdfBuffer), wasmUrl: PDF_WASM_URL }).promise;
 

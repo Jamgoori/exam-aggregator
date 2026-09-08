@@ -8,7 +8,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import fs from "node:fs";
-import { extractQuestionsFromPdf } from "./crop-question-images.mjs";
+import { extractQuestionsFromPdf, findBlankCrops } from "./crop-question-images.mjs";
 import { QUESTION_IMAGE_UPLOAD_OPTIONS } from "./lib/question-image-upload.mjs";
 
 function parseArgs(argv) {
@@ -63,10 +63,18 @@ async function cropOnePaper(supabase, paper, { dryRun, scale }) {
   }
 
   const expected = paper.question_count;
-  const warning =
+  let warning =
     expected && cropped.length !== expected
       ? `question_count=${expected}인데 ${cropped.length}개만 인식됨`
       : null;
+
+  // 개수가 맞아도 **내용이 없는 이미지**가 나올 수 있다(isBlankCrop 주석 참고).
+  // 개수 불일치와 같은 취급 — 잘못 잘린 이미지를 올려 덮어쓰느니 옛것을 남긴다.
+  const blanks = await findBlankCrops(cropped, scale);
+  if (blanks.length > 0) {
+    const msg = `내용이 없는 이미지 ${blanks.length}장(${blanks.join(", ")}번) — 마커 오인 또는 텍스트 좌표 어긋남 의심`;
+    warning = warning ? `${warning}; ${msg}` : msg;
+  }
 
   if (dryRun) {
     return { paper, cropped: cropped.length, warning, dryRun: true };

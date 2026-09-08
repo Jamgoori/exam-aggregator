@@ -32,6 +32,8 @@ import {
   computeHeaderInkBottomByPage,
   computeFooterInkTopByPage,
   clampColumnToSeparator,
+  isBlankCrop,
+  findBlankCrops,
 } from "./crop-question-images.mjs";
 
 const SCALE = 3;
@@ -312,4 +314,31 @@ test("꼬리말 y가 페이지마다 흔들려도 꼬리말이 남지 않는다"
     assert.equal(p.blocks, LINES_PER_QUESTION, `${c.number}번 잉크 덩어리 수`);
     assert.equal(p.height - 1 - p.lastInk, PAD_PX, `${c.number}번 아래에 군더더기가 남았다`);
   }
+});
+
+test("isBlankCrop: 내용 없는 크롭(괘선 한 줄·빈 이미지)만 잡는다", async () => {
+  const make = async (draw) => {
+    const width = 300;
+    const height = 120;
+    const buf = Buffer.alloc(width * height, 255);
+    draw(buf, width);
+    return sharp(buf, { raw: { width, height, channels: 1 } }).png().toBuffer();
+  };
+  // 아무것도 없는 이미지
+  assert.equal(await isBlankCrop(await make(() => {}), SCALE), true);
+  // 가로 괘선 한 줄(높이 3px = 1pt)
+  const rule = await make((buf, width) => {
+    for (let y = 60; y < 63; y++) for (let x = 0; x < width; x++) buf[y * width + x] = 0;
+  });
+  assert.equal(await isBlankCrop(rule, SCALE), true);
+  // 글자 한 줄만큼(12pt × scale)의 잉크가 있으면 정상으로 본다
+  const line = await make((buf, width) => {
+    for (let y = 40; y < 40 + 12 * SCALE; y++) for (let x = 10; x < 120; x++) buf[y * width + x] = 0;
+  });
+  assert.equal(await isBlankCrop(line, SCALE), false);
+});
+
+test("실제 크롭 결과에는 빈 이미지가 없다", async () => {
+  assert.deepEqual(await findBlankCrops(framed, SCALE), []);
+  assert.deepEqual(await findBlankCrops(tight, SCALE), []);
 });
