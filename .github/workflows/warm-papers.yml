@@ -126,6 +126,7 @@ jobs:
           sum_processed=0
           sum_ok=0
           sum_fail=0
+          sum_timeout=0
           total="?"
           out=""
           note() { out="${out}$1"$'\n'; }
@@ -154,6 +155,8 @@ jobs:
               if [ "$code" = "401" ] || [ "$code" = "503" ]; then
                 break
               fi
+              # 504 는 Vercel 이 maxDuration(300초)에서 함수를 죽였다는 뜻이다. 한 장이
+              # 오래 걸려 예산을 넘긴 것이므로 route.ts 의 PAGE_TIMEOUT_MS 를 볼 것.
               echo "offset=$offset 실패 (HTTP ${code:-000}, 시도 $attempt/$RETRIES) — 15초 뒤 같은 offset 재시도"
               sleep 15
             done
@@ -174,6 +177,7 @@ jobs:
             processed=$(printf '%s' "$body" | jq -r '.processed')
             okc=$(printf '%s' "$body" | jq -r '.okCount // 0')
             failc=$(printf '%s' "$body" | jq -r '.failCount // 0')
+            timeoutc=$(printf '%s' "$body" | jq -r '.timeoutCount // 0')
             elapsed=$(printf '%s' "$body" | jq -r '.elapsedMs // 0')
             total=$(printf '%s' "$body" | jq -r '.total')
             next=$(printf '%s' "$body" | jq -r '.next')
@@ -182,8 +186,9 @@ jobs:
             sum_processed=$((sum_processed + processed))
             sum_ok=$((sum_ok + okc))
             sum_fail=$((sum_fail + failc))
-            echo "offset=$offset processed=$processed ok=$okc fail=$failc ${elapsed}ms → next=$next / total=$total"
-            note "- offset \`$offset\` → \`$next\` · $processed 장 (ok $okc / fail $failc, $((elapsed / 1000))초)"
+            sum_timeout=$((sum_timeout + timeoutc))
+            echo "offset=$offset processed=$processed ok=$okc fail=$failc timeout=$timeoutc ${elapsed}ms → next=$next / total=$total"
+            note "- offset \`$offset\` → \`$next\` · $processed 장 (ok $okc / fail $failc / 시간초과 $timeoutc, $((elapsed / 1000))초)"
 
             if [ "$isdone" = "true" ] || [ "$next" = "null" ]; then
               break
@@ -217,6 +222,10 @@ jobs:
             if [ "$sum_fail" -gt 0 ]; then
               echo ""
               echo "실패 응답이 섞여 있다. 그 장들은 승격되지 않았을 수 있으니 \"크롤러 head 점검\" 워크플로로 확인할 것."
+            fi
+            if [ "$sum_timeout" -gt 0 ]; then
+              echo ""
+              echo "시간초과 $sum_timeout 장. 어느 주소인지는 Vercel 로그의 \`[warm-papers] 30초 초과\` 줄에 있다 — 그 페이지들이 워밍을 끊던 범인이다."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
