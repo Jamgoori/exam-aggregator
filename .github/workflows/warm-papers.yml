@@ -1,0 +1,223 @@
+# 배포가 끝나면 문제지 워밍(/api/cron/warm-papers)을 끝까지 자동으로 돌린다.
+#
+# **왜 필요한가.** 빌드에서 미리 만드는 문제지는 최신 200장뿐이고(papers/[id]/page.tsx
+# 의 PRERENDERED_PAPER_COUNT), 나머지 4,000여 장은 "첫 요청 뒤 승격"으로 완성본이 된다.
+# 배포가 새로 뜨면 그 승격본이 전부 날아간다 — 다시 데우기 전에 크롤러가 오면 <head>
+# 가 빈 공용 셸을 받는다(apps/web/AGENTS.md 의 SEO 금지선, 색인 ~650 → 83 붕괴의 축).
+# 지금까지는 배포할 때마다 사람이 PowerShell 로 30분씩 손으로 돌렸고, 그러다 회차가
+# 끊기거나 같은 구간을 무한히 다시 부르는 일이 생겼다. 그 일을 여기로 옮긴다.
+#
+# **왜 Vercel 안에서 이어 부르지 않나.** 한 번 해봤고 실패했다. 함수가 after() 로 다음
+# 덩이를 부르는 연쇄는 프로덕션에서 조용히 끊겼고(경찰·소방 문제지가 미승격으로 남음),
+# 그래서 vercel.json 은 연쇄를 포기하고 offset 을 박은 계단식 크론 넷으로 물러섰다.
+# 같은 실행 환경에 자동화를 더 얹으면 같은 방식으로 또 끊긴다. 호출자를 밖(러너)에
+# 두면 300초 제한이 없어 한 런에서 끝까지 가고, 끊긴 지점이 로그에 남고, 실패하면
+# Actions 가 알아서 알린다.
+#
+# **vercel.json 의 계단식 크론은 그대로 둔다.** 저건 배포가 없는 날의 일일 워밍을
+# 맡는다. 이 워크플로는 "배포 직후" 한 번을 맡는다. 역할이 다르다.
+#
+# 필요한 저장소 Secrets:
+#   CRON_SECRET      — Vercel 환경변수와 같은 값. 없으면 워밍 주소가 503 으로 거절한다.
+#   GEO_BYPASS_TOKEN — 해외 IP 차단(GEO_BLOCK)을 켰을 때만. 러너가 미국 IP 라 필요하다
+#                      (domain-check.yml·seo-head-check.yml 과 같은 값).
+#
+# 손으로 돌리기: Actions → "배포 후 문제지 워밍" → Run workflow.
+#   배포를 기다리지 않고 지금 당장 데우려면 "배포 대기"를 false 로, 중간부터 이으려면
+#   "시작 offset" 에 지난 응답의 next 를 넣는다.
+name: 배포 후 문제지 워밍
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      offset:
+        description: "시작 offset (이어 돌릴 때. 보통 0)"
+        required: false
+        default: "0"
+      wait_for_deploy:
+        description: "이 커밋이 프로덕션에 붙을 때까지 기다린다"
+        type: boolean
+        required: false
+        default: false
+
+# 배포가 연달아 나면 앞 워밍은 의미가 없다 — 어차피 승격본이 또 날아갔다.
+# 새 런이 앞 런을 끊고 처음부터 다시 돈다.
+concurrency:
+  group: warm-papers
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    # 4,400장 · 덩이당 최대 5분이면 넉넉잡아 한 시간. 대기까지 포함해 90분에서 끊는다.
+    timeout-minutes: 90
+    steps:
+      - name: 배포 완료 대기
+        if: ${{ github.event_name == 'push' || inputs.wait_for_deploy }}
+        env:
+          GEO_BYPASS_TOKEN: ${{ secrets.GEO_BYPASS_TOKEN }}
+          WANT: ${{ github.sha }}
+        run: |
+          set -u
+          APEX=https://gongmoa.kr
+          # 20초 × 90 = 30분. Vercel 빌드가 이보다 오래 걸리면 워밍은 건너뛰고
+          # 실패로 남긴다 — 조용히 안 데워진 채 끝나는 것보다 낫다.
+          TRIES=90
+          SLEEP=20
+
+          hdr=()
+          if [ -n "${GEO_BYPASS_TOKEN:-}" ]; then
+            hdr=(-H "x-geo-bypass: $GEO_BYPASS_TOKEN")
+          fi
+
+          echo "기다리는 커밋: $WANT"
+          for i in $(seq 1 "$TRIES"); do
+            got=$(curl -sS "${hdr[@]}" --max-time 30 "$APEX/api/version" 2>/dev/null | jq -r '.sha // empty' || true)
+            if [ "$got" = "$WANT" ]; then
+              echo "붙었다 ($((i * SLEEP))초 걸림)."
+              exit 0
+            fi
+            echo "[$i/$TRIES] 아직 ${got:-'(응답 없음)'}"
+            sleep "$SLEEP"
+          done
+
+          {
+            echo "## 배포 후 문제지 워밍"
+            echo ""
+            echo "- ❌ 30분 안에 \`$WANT\` 가 프로덕션에 붙지 않아 워밍을 시작하지 못했다."
+            echo "- Vercel 배포가 실패했거나 아직 빌드 중이다. 배포를 확인한 뒤 이 워크플로를 손으로 다시 돌릴 것(배포 대기 = false)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: 워밍
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          GEO_BYPASS_TOKEN: ${{ secrets.GEO_BYPASS_TOKEN }}
+          START: ${{ inputs.offset || '0' }}
+        run: |
+          set -u
+          APEX=https://gongmoa.kr
+          # 한 덩이는 최대 1,200장 · maxDuration 300초. 응답 직렬화까지 보고 320초.
+          MAX_TIME=320
+          # 덩이당 재시도. 네트워크가 한 번 튀는 것과 진짜 고장을 구분한다.
+          RETRIES=3
+          # 4,400장이면 덩이 넷이면 끝난다. 50이면 어떤 경우에도 남는다 —
+          # 이 숫자에 걸리는 것은 논리가 깨졌다는 뜻이라 실패로 끝낸다.
+          MAX_CHUNKS=50
+
+          if [ -z "${CRON_SECRET:-}" ]; then
+            {
+              echo "## 배포 후 문제지 워밍"
+              echo ""
+              echo "- ❌ 저장소 Secrets 에 \`CRON_SECRET\` 이 없다. Vercel 환경변수와 같은 값을 넣을 것."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          hdr=(-H "authorization: Bearer $CRON_SECRET")
+          if [ -n "${GEO_BYPASS_TOKEN:-}" ]; then
+            hdr+=(-H "x-geo-bypass: $GEO_BYPASS_TOKEN")
+          fi
+
+          offset="$START"
+          chunks=0
+          sum_processed=0
+          sum_ok=0
+          sum_fail=0
+          total="?"
+          out=""
+          note() { out="${out}$1"$'\n'; }
+
+          started=$(date +%s)
+
+          while :; do
+            chunks=$((chunks + 1))
+            if [ "$chunks" -gt "$MAX_CHUNKS" ]; then
+              note "- ❌ 덩이 $MAX_CHUNKS 개를 넘겼다. 끝나지 않는다 — 응답의 next 를 확인할 것."
+              fail=1
+              break
+            fi
+
+            body=""
+            code=""
+            for attempt in $(seq 1 "$RETRIES"); do
+              raw=$(curl -sS "${hdr[@]}" --max-time "$MAX_TIME" -w $'\n%{http_code}' \
+                "$APEX/api/cron/warm-papers?offset=$offset&chain=0" 2>/dev/null || true)
+              code=$(printf '%s' "$raw" | tail -n1)
+              body=$(printf '%s' "$raw" | sed '$d')
+              if [ "$code" = "200" ] && printf '%s' "$body" | jq -e '.ok == true' >/dev/null 2>&1; then
+                break
+              fi
+              # 401·503 은 재시도해도 같다. 설정 문제라 바로 끝낸다.
+              if [ "$code" = "401" ] || [ "$code" = "503" ]; then
+                break
+              fi
+              echo "offset=$offset 실패 (HTTP ${code:-000}, 시도 $attempt/$RETRIES) — 15초 뒤 같은 offset 재시도"
+              sleep 15
+            done
+
+            if [ "$code" = "401" ]; then
+              note "- ❌ 401 — \`CRON_SECRET\` 이 Vercel 환경변수와 다르다."
+              fail=1; break
+            fi
+            if [ "$code" = "503" ]; then
+              note "- ❌ 503 — 프로덕션에 \`CRON_SECRET\` 이 설정돼 있지 않아 워밍이 거절됐다."
+              fail=1; break
+            fi
+            if [ "$code" != "200" ] || ! printf '%s' "$body" | jq -e '.ok == true' >/dev/null 2>&1; then
+              note "- ❌ offset=$offset 에서 $RETRIES 번 모두 실패했다 (마지막 HTTP ${code:-000})."
+              fail=1; break
+            fi
+
+            processed=$(printf '%s' "$body" | jq -r '.processed')
+            okc=$(printf '%s' "$body" | jq -r '.okCount // 0')
+            failc=$(printf '%s' "$body" | jq -r '.failCount // 0')
+            elapsed=$(printf '%s' "$body" | jq -r '.elapsedMs // 0')
+            total=$(printf '%s' "$body" | jq -r '.total')
+            next=$(printf '%s' "$body" | jq -r '.next')
+            isdone=$(printf '%s' "$body" | jq -r '.done')
+
+            sum_processed=$((sum_processed + processed))
+            sum_ok=$((sum_ok + okc))
+            sum_fail=$((sum_fail + failc))
+            echo "offset=$offset processed=$processed ok=$okc fail=$failc ${elapsed}ms → next=$next / total=$total"
+            note "- offset \`$offset\` → \`$next\` · $processed 장 (ok $okc / fail $failc, $((elapsed / 1000))초)"
+
+            if [ "$isdone" = "true" ] || [ "$next" = "null" ]; then
+              break
+            fi
+            # 진행이 없으면 같은 구간을 영원히 다시 부르게 된다. 손으로 돌리던 루프가
+            # 무한루프로 빠졌던 자리가 여기다 — 진행이 멈추면 실패로 끝낸다.
+            if [ "$next" -le "$offset" ]; then
+              note "- ❌ next($next) 가 offset($offset) 보다 나아가지 않았다. 진행이 멈췄다."
+              fail=1; break
+            fi
+            offset="$next"
+          done
+
+          took=$(( $(date +%s) - started ))
+          fail="${fail:-0}"
+
+          {
+            echo "## 배포 후 문제지 워밍 — gongmoa.kr"
+            echo ""
+            if [ "$fail" = "0" ]; then
+              echo "✅ **$sum_processed 장 완료** (전체 $total) · 덩이 $chunks 개 · $((took / 60))분 ${took}초"
+            else
+              echo "❌ **중간에 멈췄다.** 여기까지 $sum_processed 장 (전체 $total)."
+              echo ""
+              echo "이어 돌리려면 Actions → 이 워크플로 → Run workflow → 배포 대기 \`false\`, 시작 offset \`$offset\`."
+            fi
+            echo ""
+            echo "성공 $sum_ok · 실패 $sum_fail"
+            echo ""
+            echo "$out"
+            if [ "$sum_fail" -gt 0 ]; then
+              echo ""
+              echo "실패 응답이 섞여 있다. 그 장들은 승격되지 않았을 수 있으니 \"크롤러 head 점검\" 워크플로로 확인할 것."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$fail"
