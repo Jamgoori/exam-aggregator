@@ -3,7 +3,8 @@ import { checkCronAuth } from "@/lib/cron-auth";
 import { getSitemapData } from "@/lib/sitemap-data";
 
 // 문제지 페이지 워밍. Vercel 크론(vercel.json)이 매일 한 번 부르고, 배포 직후에는
-// 사람이 손으로 부른다.
+// GitHub Actions(.github/workflows/warm-papers.yml)가 master 배포가 프로덕션에 붙는
+// 것을 보고 offset 0 부터 끝까지 이어 부른다.
 //
 // **왜 필요한가.** 문제지 4,400여 장 중 빌드에 미리 만드는 것은 최신 200장뿐이다
 // (papers/[id]/page.tsx 의 PRERENDERED_PAPER_COUNT). 나머지는 next.config 의
