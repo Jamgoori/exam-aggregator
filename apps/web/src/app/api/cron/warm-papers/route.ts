@@ -49,9 +49,19 @@ import { getSitemapData } from "@/lib/sitemap-data";
 export const maxDuration = 300;
 
 const CONCURRENCY = 5;
-// maxDuration(300s) 보다 넉넉히 짧게. 남은 시간에 다음 덩이를 부르는 fetch 와 응답
-// 직렬화가 들어가야 한다.
-const TIME_BUDGET_MS = 240_000;
+// maxDuration(300s) 보다 넉넉히 짧게. 워커는 fetch 를 **시작하기 전에만** 마감을 보므로,
+// 마감 직전에 시작한 요청 한 장이 통째로 예산 밖으로 삐져나온다. 그래서 예산에 더해
+// 그 한 장(PAGE_TIMEOUT_MS)과 응답 직렬화까지 300초 안에 들어와야 한다:
+// 200 + 30 = 230초, 여유 70초.
+//
+// 이 여유가 없어서 실제로 죽었다(2026-09-08, Actions run #1): 240초 예산 + 타임아웃
+// 없는 fetch 조합에서 offset=1245 가 세 번 다 300초에 걸려 504 로 끊겼다. 예산을
+// 넘겨 함수가 죽으면 그 덩이는 통째로 날아간다 — 몇 장을 데웠는지도 알 수 없다.
+const TIME_BUDGET_MS = 200_000;
+// 한 장에 허용하는 시간. 이게 없으면 멎은 페이지 하나가 워커를 영원히 붙잡고,
+// 결국 함수가 maxDuration 에 죽는다. 정상적인 문제지는 1초 안쪽에 온다(실측
+// 240초에 496~749장, 장당 0.32~0.48초) — 30초는 "이 장은 포기한다"는 뜻이다.
+const PAGE_TIMEOUT_MS = 30_000;
 // 한 호출이 처리할 상한. 시간 예산이 먼저 끝나면 그보다 적게 처리하고 next 를 준다.
 const MAX_PER_CALL = 1200;
 const USER_AGENT = "gongmoa-warm/1.0 (+https://gongmoa.kr)";
@@ -96,6 +106,7 @@ export async function GET(request: Request) {
   let cursor = 0;
   let okCount = 0;
   let failCount = 0;
+  let timeoutCount = 0;
 
   async function worker() {
     while (cursor < slice.length && Date.now() < deadline) {
@@ -104,14 +115,23 @@ export async function GET(request: Request) {
         const res = await fetch(target, {
           headers: { "user-agent": USER_AGENT },
           cache: "no-store",
+          // 본문을 다 읽을 때까지가 한 장이다. 이 신호는 arrayBuffer() 로 몸통을
+          // 받는 동안에도 살아 있어서, 헤더만 오고 본문이 멎는 경우까지 끊어 준다.
+          signal: AbortSignal.timeout(PAGE_TIMEOUT_MS),
         });
         // 본문을 끝까지 읽어야 렌더가 완료된다(중간에 끊으면 승격이 일어나지 않을
         // 수 있다). 내용은 쓰지 않는다.
         await res.arrayBuffer();
         if (res.ok) okCount += 1;
         else failCount += 1;
-      } catch {
+      } catch (e) {
         failCount += 1;
+        // 어떤 장이 느린지 알아야 고칠 수 있다. 이 로그가 Vercel 로그에 몰려 나오면
+        // 그 주소들이 워밍을 끊던 범인이다.
+        if (e instanceof Error && e.name === "TimeoutError") {
+          timeoutCount += 1;
+          console.warn(`[warm-papers] ${PAGE_TIMEOUT_MS / 1000}초 초과 — ${target}`);
+        }
       }
     }
   }
@@ -122,7 +142,7 @@ export async function GET(request: Request) {
   const nextOffset = offset + processed;
   const done = nextOffset >= targets.length;
   console.log(
-    `[warm-papers] offset=${offset} processed=${processed} ok=${okCount} fail=${failCount} elapsed=${Date.now() - started}ms total=${targets.length}`,
+    `[warm-papers] offset=${offset} processed=${processed} ok=${okCount} fail=${failCount} timeout=${timeoutCount} elapsed=${Date.now() - started}ms total=${targets.length}`,
   );
 
   // 남은 것이 있으면 다음 덩이를 이어 부른다. 응답을 이미 만들어 두고 after() 로
@@ -151,6 +171,7 @@ export async function GET(request: Request) {
     processed,
     okCount,
     failCount,
+    timeoutCount,
     elapsedMs: Date.now() - started,
     total: targets.length,
     next: done ? null : nextOffset,
