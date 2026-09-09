@@ -284,3 +284,37 @@ Claude Code Remote 스케줄(cron)로 떠서 exam-aggregator 문항에 AI 해설
     `normalizeConceptAlias` 는 글자 단위로 동일하게 유지했다. 루틴 프롬프트를 갱신한 뒤에는
     저장된 프롬프트를 다시 받아 원본과 diff 하고, 내장 블록을 파일로 떼어 `node --check` 로
     문법을 확인할 것.
+- **계정 이관 (2026-09-09): 해설 배치 루틴을 이 계정에서 다시 세웠다.** 기존 순방향·역방향
+  v3 루틴은 다른 계정(별도 환경 `env_011UL7sPM6VGLPJ9nJdKXYut`)에 있었고 그 계정을 더 쓰지
+  않게 되면서 멈췄다 — `question_explanations` 마지막 생성 시각이 **2026-09-07 18:53 UTC**
+  이고 이후 0건이다. **다른 계정의 루틴은 이쪽에서 읽지도 고치지도 못한다**(`list_triggers`
+  는 자기 계정 것만 준다). 그래서 v3 프롬프트에 박혀 있던 스크립트 사본도 회수하지 못했고,
+  아래는 master 사본을 기준으로 새로 만든 것이다.
+  - **새 루틴은 역방향 하나뿐이다** — `문항 해설 배치 처리 v4 (역방향·병렬)`
+    `trig_01H4pCtxvHgajtAsYRaqaHs4`, 크론 `14 */2 * * *`(UTC), 환경 `env_01TbPw8D7vxQrgib2ifuRhp5`
+    (수파), 매 발사마다 새 세션. 순방향을 같이 만들지 않은 이유는 아래 RPC 항목에 있다.
+  - **잔여는 해경(priority 19) 7,690문항 하나뿐이다**(2026-09-09 `explanation-queue-status.mjs`
+    실측, 나머지 19개 그룹은 전부 0). 두 방향으로 좁혀 올 물량이 아니라 역방향 하나로 충분하고,
+    같은 방향 세션이 겹칠 위험도 그만큼 줄어든다.
+  - **`next-explanation-chunk.mjs` 에 RPC 빠른 경로를 넣었다(이 커밋).** DB 에는
+    `next_explanation_pending_papers(p_reverse, p_max_papers)` 가 있는데(2026-08-25 배포,
+    레포 스키마에는 없다) master 사본이 그걸 안 써서, 완료된 그룹 18개를 JS 로 훑느라 청크
+    하나에 **540초 타임아웃**이 났다. 지금은 RPC 를 먼저 부르고 실패하면 기존 순회로 떨어진다.
+    - **RPC 는 8초 statement timeout 에 아슬아슬하다.** 캐시가 식은 첫 호출이 자주 넘어가고
+      곧바로 다시 부르면 4초대다(실측 9회 중 2회 타임아웃, 전부 첫 호출). 그래서 타임아웃일
+      때만 3회까지 재시도한다.
+    - **순방향은 이 RPC 로도 안 된다.** 해설봇 계정으로 `p_reverse:false` 는 매번 타임아웃이고
+      (서비스 롤로는 4.8초에 됐다 — RLS 비용 차이로 보인다), 잔여가 뒤쪽 한 그룹뿐이라
+      순방향은 완료된 18개 그룹을 매번 헛돈다. 순방향 루틴을 다시 만들 일이 있으면 이걸 먼저
+      해결할 것.
+  - **트리거로 만든 루틴은 레포가 안 붙는다**(`config.sources: []` — 생성 응답으로 확인).
+    그래서 v4 프롬프트는 두 경로를 다 담고 있다: 레포가 있으면 레포 스크립트를, 없으면
+    Storage `exam-papers/_batch-scripts/v4/` 의 `next-explanation-chunk.mjs`·`save-explanations.mjs`
+    를 `curl` 로 받고 `npm install --no-save @supabase/supabase-js`(+`sharp`) 한다. 이 환경에는
+    `SUPABASE_SERVICE_ROLE_KEY` 가 있어서 Storage 읽기가 되고(옛 루틴 환경은 안 됐다), npm
+    설치도 된다(2026-09-09 실측). **스크립트를 고치면 master 와 이 v4 Storage 사본을 함께
+    갱신할 것** — v3 시절 "프롬프트에 박힌 블록"이 이 자리를 대신한다.
+  - `_batch-scripts/explanation-prompt.md`(문체·형식 정본)는 그대로 쓴다. 루틴이 매 세션
+    `curl` 로 받아 서브에이전트에게 직접 읽힌다. 배포는 여전히 소유자만 한다.
+  - v3 에서 얻은 교차 오염 대책(청크마다 다른 디렉터리 · 파일명에 `question_id` · 세 에이전트가
+    서로 다른 청크 파일 · `suspected_crosstalk` 보고)은 새 프롬프트에도 그대로 실었다.

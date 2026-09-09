@@ -232,10 +232,106 @@ async function main() {
     return result;
   }
 
+  const bucket = supabase.storage.from("exam-papers");
+  const publicUrls = (paths) => (paths ?? []).map((path) => bucket.getPublicUrl(path).data.publicUrl);
+
+  // 같은 선별을 SQL 한 번으로 하는 RPC(next_explanation_pending_papers, 2026-08-25 DB 배포).
+  // 아래 JS 순회는 완료된 그룹이 앞에 쌓일수록 그룹·문제지마다 조회를 날려 급격히 느려진다
+  // (2026-09-09 실측: 잔여가 우선순위 19 한 그룹만 남은 상태에서 순방향 단일 청크가 540초
+  // 타임아웃, 같은 선별이 RPC로는 5~9초). 실패하면(권한 없음·statement timeout) null을
+  // 돌려주고 기존 순회로 그대로 떨어진다 — 배치를 멈추지 않는다.
+  async function collectViaRpc() {
+    // 이 RPC는 8초 statement timeout 에 아슬아슬하다 — 캐시가 식어 있으면 첫 호출이
+    // 넘어가고 곧바로 다시 부르면 4초대로 떨어진다(2026-09-09 실측: 9회 중 2회 타임아웃,
+    // 전부 첫 호출). 그래서 타임아웃만 짧게 재시도하고, 그래도 안 되면 JS 순회로 간다.
+    let data = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const res = await supabase.rpc("next_explanation_pending_papers", {
+        p_reverse: reverse,
+        p_max_papers: maxChunks,
+      });
+      if (!res.error) {
+        data = res.data;
+        break;
+      }
+      const timedOut = res.error.code === "57014" || /statement timeout/i.test(res.error.message ?? "");
+      if (!timedOut || attempt === 3) {
+        console.error(`pending 문제지 RPC 실패 — JS 순회로 대체: ${res.error.message}`);
+        return null;
+      }
+      console.error(`pending 문제지 RPC 타임아웃 (${attempt}/3) — 재시도`);
+      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+    }
+    const papers = data?.papers;
+    if (!Array.isArray(papers)) {
+      console.error("pending 문제지 RPC 응답 형식이 예상과 다름 — JS 순회로 대체");
+      return null;
+    }
+    if (papers.length === 0) return [];
+
+    // RPC는 subject_id를 싣지 않는다. 제외 과목 필터와 개념 목록에 필요하므로 한 번에 받는다.
+    const paperIds = papers.map((entry) => entry?.paper?.id).filter(Boolean);
+    const { data: subjectRows, error: subjectError } = await supabase
+      .from("exam_papers")
+      .select("id, subject_id")
+      .in("id", paperIds);
+    if (subjectError) {
+      console.error(`문제지 과목 조회 실패 — JS 순회로 대체: ${subjectError.message}`);
+      return null;
+    }
+    const subjectOf = new Map((subjectRows ?? []).map((row) => [row.id, row.subject_id]));
+
+    const out = [];
+    for (const entry of papers) {
+      const paper = entry?.paper;
+      const rows = entry?.questions;
+      if (!paper?.id || !Array.isArray(rows) || rows.length === 0) continue;
+      const subjectId = subjectOf.get(paper.id) ?? null;
+      if (subjectId && excludedSubjectIds.has(subjectId)) continue;
+
+      const pending = rows
+        .map((q) => ({
+          question_id: q.question_id,
+          question_number: q.question_number,
+          image_paths: q.image_paths ?? [],
+          // 대표 이미지가 같으면 같은 세트 — JS 순회 쪽과 같은 규칙이다.
+          set_key: (q.image_paths ?? [])[0] ?? q.question_id,
+        }))
+        .sort((a, b) => a.question_number - b.question_number);
+
+      // 청크 경계는 방향과 무관하게 항상 순방향 기준으로 자른다 (JS 순회와 동일).
+      const paperChunks = cutChunks(pending, targetSize);
+      if (reverse) paperChunks.reverse();
+      const { subject, concepts } = await conceptListFor(subjectId);
+
+      for (const chunk of paperChunks) {
+        out.push({
+          paper: { id: paper.id, title: paper.title, year: paper.year, level: paper.level },
+          subject,
+          concepts,
+          questions: chunk.map((q) => ({
+            question_id: q.question_id,
+            question_number: q.question_number,
+            image_urls: publicUrls(q.image_paths),
+          })),
+        });
+        if (out.length >= maxChunks) return out;
+      }
+    }
+
+    // 돌려받은 문제지가 전부 제외 과목이면 RPC로는 다음 대상을 알 수 없다 —
+    // 여기서 done으로 끝내면 남은 물량을 통째로 건너뛰므로 JS 순회에 넘긴다.
+    if (out.length === 0) return null;
+    return out;
+  }
+
   const collected = []; // { paper, subject, concepts, questions } 단위로 최대 maxChunks개 수집
   let truncatedBy = null; // 수집 도중 조회 오류가 나도 이미 수집한 청크는 살려서 출력
 
-  outer: for (const { exam_type_id, level } of priorities) {
+  const fromRpc = await collectViaRpc();
+  if (fromRpc) collected.push(...fromRpc);
+
+  outer: for (const { exam_type_id, level } of fromRpc ? [] : priorities) {
     // 경찰·계리직처럼 급수(level)가 없는 직렬은 priority 행의 level이 null이다.
     // .eq("level", null)은 에러 없이 0건만 매칭해 그룹이 조용히 건너뛰어지므로
     // (2026-08-09 실측), null은 반드시 .is()로 걸러야 한다.
@@ -315,7 +411,6 @@ async function main() {
       // 청크마다 실어야 한다(같은 과목이면 내용은 같다).
       const { subject, concepts } = await conceptListFor(paper.subject_id);
 
-      const bucket = supabase.storage.from("exam-papers");
       for (const chunk of paperChunks) {
         collected.push({
           paper: { id: paper.id, title: paper.title, year: paper.year, level: paper.level },
@@ -324,7 +419,7 @@ async function main() {
           questions: chunk.map((q) => ({
             question_id: q.question_id,
             question_number: q.question_number,
-            image_urls: q.image_paths.map((p) => bucket.getPublicUrl(p).data.publicUrl),
+            image_urls: publicUrls(q.image_paths),
           })),
         });
         if (collected.length >= maxChunks) break outer;
