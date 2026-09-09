@@ -755,10 +755,30 @@ export function fillMissingNumbersFromRelaxed(pageMarkerDataList, docMarginX, co
   }
 }
 
+// 마커 아래(같은 칼럼)에 본문 줄이 이만큼은 있어야 진짜 문항으로 본다. 발문 한
+// 줄로 끝나는 문항은 없으므로(최소한 선지가 따라온다) 낮게 잡아도 안전하다.
+const MARKER_MIN_LINES_BELOW = 2;
+
+// 그 마커 아래에 실제 본문이 이어지는가. 지면 맨 아래에 홀로 찍힌 조각
+// (다음 쪽 안내용 번호 등)을 가려내는 데 쓴다 — 진짜 문항이라면 자기 발문·선지가
+// 그 아래에 따라온다.
+function hasContentBelow(data, marker, columnMode, columnSplitX) {
+  const half = columnSplitX ?? data.pageWidthPt / 2;
+  const col = columnMode === "single" || marker.x < half ? "L" : "R";
+  let count = 0;
+  for (const l of data.lines ?? []) {
+    const lineCol = columnMode === "single" ? "L" : l.col;
+    if (lineCol !== col) continue;
+    if (l.y < marker.y - 1) count++;
+    if (count >= MARKER_MIN_LINES_BELOW) return true;
+  }
+  return false;
+}
+
 // 여백 x 차이가 이 안이면 "같다"고 본다(동점 처리 — 위 주석 참고).
 const MARGIN_TIE_PT = 1;
 
-export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSplitX) {
+export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSplitX, columnMode) {
   if (docMarginX == null) return;
   const byNumber = new Map();
   for (const data of pageMarkerDataList) {
@@ -772,6 +792,23 @@ export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSpli
   }
   for (const rawEntries of byNumber.values()) {
     if (rawEntries.length < 2) continue;
+    // **아래에 본문이 이어지지 않는 후보를 먼저 뺀다.** 여백 x 만 보면 지면 맨
+    // 아래에 번호만 홀로 찍힌 조각이 "여백에 더 가깝다"는 이유로 진짜 마커를
+    // 밀어낼 수 있다(실측: 2024 해경 1차 9급 물리 — 2쪽 맨 아래 "15."(y=0.4)가
+    // 3쪽의 진짜 15번(y=1101.5)을 이겼다. 진짜 문항이 통째로 사라지고 그 자리에
+    // 빈 이미지가 남았다).
+    const alive = rawEntries.filter((e) =>
+      hasContentBelow(e.data, e.marker, columnMode, columnSplitX),
+    );
+    if (alive.length > 0 && alive.length < rawEntries.length) {
+      for (const e of rawEntries) {
+        if (alive.includes(e)) continue;
+        e.data.markers = e.data.markers.filter((m) => m !== e.marker);
+      }
+      if (alive.length === 1) continue;
+      rawEntries.length = 0;
+      rawEntries.push(...alive);
+    }
     // 여백 x를 확정하지 못한 칼럼(마커 x가 흔들려 최빈값 비율이 낮은 경우)의
     // 마커는 어느 쪽이 진짜인지 판단할 근거가 없으므로 손대지 않는다 — 여기서
     // 무리하게 지우면 진짜 마커가 사라진다(실측: 2026 지방직 9급 국어 2번).
@@ -810,26 +847,6 @@ export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSpli
 // 등장만 진짜로 인정한다. 그 구간에 걸리는 등장이 하나도 없거나 둘 이상이면
 // (모호함) 전부 버려서 개수 불일치 경고로 남긴다 — 틀린 이미지를 올리느니
 // 수동 확인 대상이 되는 편이 낫다.
-// 마커 아래(같은 칼럼)에 본문 줄이 이만큼은 있어야 진짜 문항으로 본다. 발문 한
-// 줄로 끝나는 문항은 없으므로(최소한 선지가 따라온다) 낮게 잡아도 안전하다.
-const MARKER_MIN_LINES_BELOW = 2;
-
-// 그 마커 아래에 실제 본문이 이어지는가. 지면 맨 아래에 홀로 찍힌 조각
-// (다음 쪽 안내용 번호 등)을 가려내는 데 쓴다 — 진짜 문항이라면 자기 발문·선지가
-// 그 아래에 따라온다.
-function hasContentBelow(data, marker, columnMode, columnSplitX) {
-  const half = columnSplitX ?? data.pageWidthPt / 2;
-  const col = columnMode === "single" || marker.x < half ? "L" : "R";
-  let count = 0;
-  for (const l of data.lines ?? []) {
-    const lineCol = columnMode === "single" ? "L" : l.col;
-    if (lineCol !== col) continue;
-    if (l.y < marker.y - 1) count++;
-    if (count >= MARKER_MIN_LINES_BELOW) return true;
-  }
-  return false;
-}
-
 export function dropOutOfSequenceMarkers(pageMarkerDataList, columnMode, columnSplitX) {
   const ordered = [];
   const dataOf = new Map();
@@ -877,6 +894,15 @@ export function dropOutOfSequenceMarkers(pageMarkerDataList, columnMode, columnS
         hasContentBelow(dataOf.get(m), m, columnMode, columnSplitX),
       );
       if (withBody.length > 0) candidates = withBody;
+    }
+    if (process.env.CROP_DEBUG_DUP) {
+      console.log(
+        `[dup] ${number}번 후보 ${candidates.length}개: ` +
+          candidates
+            .map(({ m }) => `x=${m.x.toFixed(1)},y=${m.y.toFixed(1)},아래본문=${hasContentBelow(dataOf.get(m), m, columnMode, columnSplitX)}`)
+            .join(" | ") +
+          ` (before=${before}, after=${after})`,
+      );
     }
     if (candidates.length === 1) keep.add(candidates[0].m);
   }
@@ -2376,11 +2402,26 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     docMarginX,
     columnSplitX,
   );
+  const dumpMarkers = (label) => {
+    if (!process.env.CROP_DEBUG_DUP) return;
+    const want = Number(process.env.CROP_DEBUG_DUP);
+    if (!Number.isFinite(want)) return;
+    const hits = [];
+    pageMarkerData.forEach((d, i) => {
+      for (const m of d.data.markers) {
+        if (m.number === want) hits.push(`p${i}: x=${m.x.toFixed(1)} y=${m.y.toFixed(1)}`);
+      }
+    });
+    console.log(`[dup] ${label}: ${want}번 ${hits.length}개 — ${hits.join(" | ")}`);
+  };
+  dumpMarkers("마커 추출 직후");
   pruneDuplicateMarkers(
     pageMarkerData.map((d) => d.data),
     docMarginX,
     columnSplitX,
+    columnMode,
   );
+  dumpMarkers("pruneDuplicateMarkers 뒤");
   // 여백 x 기준으로 못 가른 중복이 남아 있으면 열람 순서로 마지막 정리를 한다.
   // 여기까지 와서 중복이 남으면 아래 중복 감지가 하드 에러로 문제지를 통째로
   // 버리므로, 그 전에 확실한 것만 살려낸다.
@@ -2389,6 +2430,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     columnMode,
     columnSplitX,
   );
+  dumpMarkers("dropOutOfSequenceMarkers 뒤");
 
   const footerInkTopByPage = computeFooterInkTopByPage(pageMarkerData.map((d) => d.data));
   const footerBaselineByPage = computeFooterBaselineByPage(pageMarkerData.map((d) => d.data));
