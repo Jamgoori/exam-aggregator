@@ -759,9 +759,22 @@ export function fillMissingNumbersFromRelaxed(pageMarkerDataList, docMarginX, co
 // 줄로 끝나는 문항은 없으므로(최소한 선지가 따라온다) 낮게 잡아도 안전하다.
 const MARKER_MIN_LINES_BELOW = 2;
 
-// 그 마커 아래에 실제 본문이 이어지는가. 지면 맨 아래에 홀로 찍힌 조각
-// (다음 쪽 안내용 번호 등)을 가려내는 데 쓴다 — 진짜 문항이라면 자기 발문·선지가
-// 그 아래에 따라온다.
+// 지면 맨 아래 이 비율 안쪽에 있는 마커만 "홀로 찍힌 조각"인지 따진다.
+// 조건을 지면 아래쪽으로 좁히는 이유: 통합본을 쪼갠 흔적 때문에 **다른 과목의
+// 텍스트 레이어가 통째로 남아 있는 문제지**가 있는데(실측: 기상직 계열 — 1번부터
+// 20번까지 전부 두 번씩 잡힌다), 거기서는 지면 한복판의 진짜 마커도 "아래에 본문
+// 없음"으로 걸려 멀쩡한 문항이 사라진다(실측: 2010 기상직 9급 영어 20 → 18).
+// 우리가 잡으려는 가짜는 전부 지면 바닥에 붙어 있었다(y=0.4 / 17.1 / 48.3).
+const STRAY_BOTTOM_BAND_RATIO = 0.08;
+
+// "지면 맨 아래에 번호만 홀로 찍힌 조각"인가 — 다음 쪽 안내용 번호 등.
+// 진짜 문항이라면 자기 발문·선지가 그 아래에 따라온다.
+function isStrayBottomMarker(data, marker, columnMode, columnSplitX) {
+  if (marker.y > data.pageHeightPt * STRAY_BOTTOM_BAND_RATIO) return false;
+  return !hasContentBelow(data, marker, columnMode, columnSplitX);
+}
+
+// 그 마커 아래에 실제 본문이 이어지는가.
 function hasContentBelow(data, marker, columnMode, columnSplitX) {
   const half = columnSplitX ?? data.pageWidthPt / 2;
   const col = columnMode === "single" || marker.x < half ? "L" : "R";
@@ -797,8 +810,8 @@ export function pruneDuplicateMarkers(pageMarkerDataList, docMarginX, columnSpli
     // 밀어낼 수 있다(실측: 2024 해경 1차 9급 물리 — 2쪽 맨 아래 "15."(y=0.4)가
     // 3쪽의 진짜 15번(y=1101.5)을 이겼다. 진짜 문항이 통째로 사라지고 그 자리에
     // 빈 이미지가 남았다).
-    const alive = rawEntries.filter((e) =>
-      hasContentBelow(e.data, e.marker, columnMode, columnSplitX),
+    const alive = rawEntries.filter(
+      (e) => !isStrayBottomMarker(e.data, e.marker, columnMode, columnSplitX),
     );
     if (alive.length > 0 && alive.length < rawEntries.length) {
       for (const e of rawEntries) {
@@ -890,8 +903,8 @@ export function dropOutOfSequenceMarkers(pageMarkerDataList, columnMode, columnS
     // 선박일반 — 2쪽 좌측 칼럼 맨 아래 "15."(y=48.3)와 우측 칼럼 위 진짜
     // 15번(y=888.9)이 둘 다 후보로 남았다).
     if (candidates.length > 1) {
-      const withBody = candidates.filter(({ m }) =>
-        hasContentBelow(dataOf.get(m), m, columnMode, columnSplitX),
+      const withBody = candidates.filter(
+        ({ m }) => !isStrayBottomMarker(dataOf.get(m), m, columnMode, columnSplitX),
       );
       if (withBody.length > 0) candidates = withBody;
     }
@@ -899,7 +912,7 @@ export function dropOutOfSequenceMarkers(pageMarkerDataList, columnMode, columnS
       console.log(
         `[dup] ${number}번 후보 ${candidates.length}개: ` +
           candidates
-            .map(({ m }) => `x=${m.x.toFixed(1)},y=${m.y.toFixed(1)},아래본문=${hasContentBelow(dataOf.get(m), m, columnMode, columnSplitX)}`)
+            .map(({ m }) => `x=${m.x.toFixed(1)},y=${m.y.toFixed(1)},바닥조각=${isStrayBottomMarker(dataOf.get(m), m, columnMode, columnSplitX)}`)
             .join(" | ") +
           ` (before=${before}, after=${after})`,
       );
