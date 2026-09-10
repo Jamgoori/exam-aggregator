@@ -12,6 +12,7 @@ export const unstable_instant = {
   ],
 };
 
+import { Suspense, type ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BookOpenCheck, ChevronRight, Shuffle, Star, Trophy } from "lucide-react";
@@ -248,11 +249,21 @@ export default async function MyPage({
     user.email?.split("@")[0] ??
     "회원";
 
+  // 서로 의존이 없는 조회는 전부 한 번에 보낸다. 예전에는 기본 4개 → 멤버십 →
+  // 진단 → 출석 → 미극복 순으로 대기가 여덟 단계였는데, 이 중 user.id 만 있으면 되는
+  // 것들이 앞 단계 결과를 기다릴 이유가 없었다. 무료 회원에게 돌리지 않는 무거운
+  // 집계(오답 그룹)는 멤버십 결과가 필요하므로 다음 단계에 남긴다.
   const [
     { data: bookmarkRows },
     { data: attemptRows },
     { data: subjectRows },
     { data: subjectBookmarkRows },
+    membership,
+    admin,
+    unresolvedBySubject,
+    diagnosisEligibility,
+    weeklyDiagnosis,
+    attendance,
   ] = await Promise.all([
     supabase
       .from("bookmarks")
@@ -268,6 +279,25 @@ export default async function MyPage({
       .order("created_at", { ascending: false }),
     supabase.from("subjects").select("*").order("name"),
     supabase.from("subject_bookmarks").select("subject_id").eq("user_id", user.id),
+    // 멤버십 판정. 복습·진단이 멤버십 기능이고 오답노트 탭의 과목 카드도 회원 여부에
+    // 따라 다르게 그리므로, 무료 회원에게는 아래의 무거운 집계(문항별 오답 행 + 문항
+    // 상태 맵)를 돌리지 않는다. 관리자는 멤버십과 무관하게 프리미엄으로 본다 —
+    // 검수·문의 대응을 하려면 사용자와 같은 화면을 볼 수 있어야 한다.
+    getMembership(supabase, user.id),
+    isAdminUser(supabase),
+    // 미극복 수는 user_question_status(CBT+섞어풀기 통합) 기준으로 센다 — 섞어풀기로
+    // 극복한 게 헤드라인·과목·오늘 카드에 즉시 반영되고, 섞어풀기 후보 수와 일치한다.
+    // 무료 회원에게도 이 값은 계산한다. 상단 "남은 오답" 요약과, 무료 회원 오답노트
+    // 탭의 과목 카드(이름·slug·남은 오답)가 전부 이 결과로 그려진다.
+    getUnresolvedCountBySubject(supabase, user.id),
+    // 상단 "다음 행동" 카드용. 진단 자격(응시 3회 또는 오답 15개)과 이번 주기 진단
+    // 유무 — 둘 다 count/단건 조회라 가볍다. 무료 회원에게도 보여준다: 잠긴 사실보다
+    // "세 번 풀면 열린다"가 먼저 닿아야 세 번 온다(진단 페이지가 멤버십 안내를 맡는다).
+    getDiagnosisEligibility(supabase, user.id),
+    getWeeklyDiagnosis(supabase, user.id),
+    // 월간 출석 카드. 본인 행만 읽으므로(select-own) 세션 클라이언트로 충분하다.
+    // 기능이 닫혀 있으면 조회조차 하지 않는다 — 그릴 화면이 없다.
+    isAttendanceOpen() ? getAttendanceSummary(supabase, user.id) : Promise.resolve(null),
   ]);
 
   const allSubjects = (subjectRows ?? []) as Subject[];
@@ -281,22 +311,9 @@ export default async function MyPage({
     .map((r) => r.exam_papers)
     .filter((p): p is ExamPaper => p !== null);
 
-  const cbtAvailability = await getCbtAvailability(
-    supabase,
-    bookmarkedPapers.map((p) => p.id),
-  );
-
   const myAttempts = (attemptRows ?? []) as unknown as MyAttempt[];
   const { attemptsByPaper, roundNumberByAttemptId } = computeAttemptRounds(myAttempts);
 
-  // 멤버십 판정을 오답노트 집계보다 먼저 한다. 복습·진단이 멤버십 기능이고 오답노트
-  // 탭의 과목 카드도 회원 여부에 따라 다르게 그리므로, 무료 회원에게는 아래의 무거운
-  // 집계(문항별 오답 행 + 문항 상태 맵)를 돌리지 않는다. 관리자는 멤버십과 무관하게
-  // 프리미엄으로 본다 — 검수·문의 대응을 하려면 사용자와 같은 화면을 볼 수 있어야 한다.
-  const [membership, admin] = await Promise.all([
-    getMembership(supabase, user.id),
-    isAdminUser(supabase),
-  ]);
   const premium = admin || isPremiumMembership(membership);
   // 헤더 배지용 "며칠 남았는지". 체험·결제·출석 보상을 가리지 않는다 — 여기서는
   // 왜 프리미엄인지가 아니라 언제까지인지만 말하면 된다(출처별 문구는 /membership
@@ -308,38 +325,41 @@ export default async function MyPage({
     ? formatExpiry(membership.expiresAt, now)
     : null;
 
-  // 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로 재사용하고, 문항별 오답
-  // 행만 추가로 조회한다. 무료 회원에게는 돌리지 않는다 — 이 집계가 주는 건 과목
-  // 카드의 "극복 진행률"뿐이고, 목록·이동은 아래 unresolvedBySubject 로 충분하다.
-  let wrongNoteGroups: WrongNoteSubjectGroup[] = [];
-  if (premium) {
-    const myAttemptPaperIds = [
-      ...new Set(
-        myAttempts.map((a) => a.exam_papers?.id).filter((id): id is string => !!id),
-      ),
-    ];
-    const [wrongRows, wrongNoteMarks, wrongNoteStatusOverrides] = await Promise.all([
-      fetchWrongAnswerRows(
+  // 두 번째 단계: 즐겨찾기 문제지 id 가 정해져야 하는 CBT 가능 여부와, 멤버십을 알아야
+  // 돌릴지 정하는 오답노트 집계. 오답노트 집계는 위에서 이미 받아온 응시 목록을 그대로
+  // 재사용하고, 문항별 오답 행만 추가로 조회한다. 무료 회원에게는 돌리지 않는다 — 이
+  // 집계가 주는 건 과목 카드의 "극복 진행률"뿐이고, 목록·이동은 unresolvedBySubject 로
+  // 충분하다.
+  const myAttemptPaperIds = [
+    ...new Set(
+      myAttempts.map((a) => a.exam_papers?.id).filter((id): id is string => !!id),
+    ),
+  ];
+  const [cbtAvailability, wrongRows, wrongNoteMarks, wrongNoteStatusOverrides] =
+    await Promise.all([
+      getCbtAvailability(
         supabase,
-        myAttempts.map((a) => a.id),
+        bookmarkedPapers.map((p) => p.id),
       ),
-      fetchWrongNoteMarks(supabase, user.id),
-      fetchQuestionStatusMap(supabase, user.id, myAttemptPaperIds),
+      premium
+        ? fetchWrongAnswerRows(
+            supabase,
+            myAttempts.map((a) => a.id),
+          )
+        : null,
+      premium ? fetchWrongNoteMarks(supabase, user.id) : null,
+      premium ? fetchQuestionStatusMap(supabase, user.id, myAttemptPaperIds) : null,
     ]);
-    wrongNoteGroups = buildWrongNoteGroups(
-      myAttempts as unknown as WrongNoteAttemptRow[],
-      wrongRows,
-      wrongNoteMarks.deleted,
-      wrongNoteStatusOverrides,
-    );
-  }
-  // 미극복 수는 user_question_status(CBT+섞어풀기 통합) 기준으로 센다 — 섞어풀기로
-  // 극복한 게 헤드라인·과목·오늘 카드에 즉시 반영되고, 섞어풀기 후보 수와 일치한다.
+  const wrongNoteGroups: WrongNoteSubjectGroup[] =
+    premium && wrongRows && wrongNoteMarks && wrongNoteStatusOverrides
+      ? buildWrongNoteGroups(
+          myAttempts as unknown as WrongNoteAttemptRow[],
+          wrongRows,
+          wrongNoteMarks.deleted,
+          wrongNoteStatusOverrides,
+        )
+      : [];
   // 표가 비어 있으면(백필 전 등) 응시 기준(buildWrongNoteGroups)으로 폴백.
-  //
-  // 무료 회원에게도 이 값은 계산한다. 상단 "남은 오답" 요약과, 무료 회원 오답노트
-  // 탭의 과목 카드(이름·slug·남은 오답)가 전부 이 결과로 그려진다.
-  const unresolvedBySubject = await getUnresolvedCountBySubject(supabase, user.id);
   const totalUnresolved =
     unresolvedBySubject.size > 0
       ? [...unresolvedBySubject.values()].reduce((s, v) => s + v.unresolved, 0)
@@ -348,48 +368,18 @@ export default async function MyPage({
   const streakDays = computeStreakDays(myAttempts.map((a) => a.created_at));
   const tier = streakTier(streakDays);
 
-  // 상단 "다음 행동" 카드용. 진단 자격(응시 3회 또는 오답 15개)과 이번 주기 진단
-  // 유무 — 둘 다 count/단건 조회라 가볍다. 무료 회원에게도 보여준다: 잠긴 사실보다
-  // "세 번 풀면 열린다"가 먼저 닿아야 세 번 온다(진단 페이지가 멤버십 안내를 맡는다).
-  const [diagnosisEligibility, weeklyDiagnosis] = await Promise.all([
-    getDiagnosisEligibility(supabase, user.id),
-    getWeeklyDiagnosis(supabase, user.id),
-  ]);
-
-  // 월간 출석 카드. 본인 행만 읽으므로(select-own) 세션 클라이언트로 충분하다.
-  // 기능이 닫혀 있으면 조회조차 하지 않는다 — 그릴 화면이 없다.
-  const attendance = isAttendanceOpen()
-    ? await getAttendanceSummary(supabase, user.id)
-    : null;
-
-  // 오늘의 복습(멤버십 전용). 무료 사용자에게는 요약을 조회하지도 않는다 — 못 누르는
-  // 숫자는 압박만 되고, 후보 수집이 이미지 조회까지 도는 무거운 작업이라 값이다.
-  // 체험 남은 일수는 관리자에게 보여주지 않는다 — 관리자는 체험이 끝나도 계속 쓸 수
-  // 있으니 그 문구가 거짓말이 된다.
-  const [dueSummary, subjectChoices, resumable] = premium
-    ? await Promise.all([
-        getDueReviewSummary(supabase, user.id),
-        getReviewSubjectOptions(supabase, user.id),
-        findUnfinishedDueSession(supabase, user.id),
-      ])
-    : [null, [], null];
-  const reviewDue: ReviewDueCardProps = {
-    premium,
-    todayCount: dueSummary?.todayCount ?? 0,
-    deferredCount: dueSummary?.deferredCount ?? 0,
-    newCount: dueSummary?.newCount ?? 0,
-    pendingTotal: dueSummary?.pendingTotal ?? 0,
-    overdueTotal: dueSummary?.overdueTotal ?? 0,
-    relearnCount: dueSummary?.relearnCount ?? 0,
-    suspendedTotal: dueSummary?.suspendedTotal ?? 0,
-    resumeSessionId: resumable?.sessionId ?? null,
-    dailyLimit: dueSummary?.dailyLimit ?? DUE_QUEUE_LIMIT,
-    subjects: dueSummary?.subjects.map((s) => ({ name: s.name, count: s.count })) ?? [],
-    forecast: dueSummary?.forecast ?? [],
-    nextDueOffset: dueSummary?.nextDueOffset ?? null,
-    trialDaysLeft: admin ? null : trialDaysLeft(membership),
-    subjectChoices,
-  };
+  // 오늘의 복습 카드. 후보 수집이 이미지 조회까지 도는 이 페이지에서 가장 느린
+  // 조회라, 위 요약 타일·탭이 먼저 그려지도록 Suspense 뒤에서 따로 스트리밍한다.
+  // 무료 사용자에게는 요약을 조회하지도 않는다(ReviewDueSection 참고).
+  const reviewDue = (
+    <Suspense fallback={<ReviewDueSkeleton />}>
+      <ReviewDueSection
+        supabaseUserId={user.id}
+        premium={premium}
+        trialDaysLeft={admin ? null : trialDaysLeft(membership)}
+      />
+    </Suspense>
+  );
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 pb-12 pt-6 sm:pt-8">
@@ -715,7 +705,7 @@ function WrongNotesTab({
   premium: boolean;
   groups: WrongNoteSubjectGroup[];
   unresolvedBySubject: Map<string, { name: string; slug: string; unresolved: number; due: number }>;
-  reviewDue: ReviewDueCardProps;
+  reviewDue: ReactNode;
 }) {
   // 무료 회원: 오답노트는 열람도 정리도 섞어풀기도 그대로 쓴다. 다만 무거운
   // 집계(buildWrongNoteGroups)는 돌리지 않았으므로 과목 카드를 이미 계산해 둔
@@ -770,7 +760,7 @@ function WrongNotesTab({
             ))}
           </div>
         )}
-        <ReviewDueCard {...reviewDue} />
+        {reviewDue}
         <DiagnosisEntryLink />
       </section>
     );
@@ -887,7 +877,7 @@ function WrongNotesTab({
           })}
         </div>
       )}
-      <ReviewDueCard {...reviewDue} />
+      {reviewDue}
       <DiagnosisEntryLink />
     </section>
   );
@@ -952,5 +942,57 @@ function DiagnosisEntryLink() {
         className="shrink-0 text-violet-400 transition-transform group-hover:translate-x-0.5"
       />
     </Link>
+  );
+}
+
+// 오늘의 복습 카드 데이터. 멤버십 전용이라 무료 사용자에게는 요약을 조회하지도 않는다
+// — 못 누르는 숫자는 압박만 되고, 후보 수집이 이미지 조회까지 도는 무거운 작업이라
+// 값이다. 체험 남은 일수는 관리자에게 보여주지 않는다 — 관리자는 체험이 끝나도 계속
+// 쓸 수 있으니 그 문구가 거짓말이 된다(호출부가 null 로 준다).
+async function ReviewDueSection({
+  supabaseUserId,
+  premium,
+  trialDaysLeft,
+}: {
+  supabaseUserId: string;
+  premium: boolean;
+  trialDaysLeft: number | null;
+}) {
+  const supabase = await createClient();
+  const [dueSummary, subjectChoices, resumable] = premium
+    ? await Promise.all([
+        getDueReviewSummary(supabase, supabaseUserId),
+        getReviewSubjectOptions(supabase, supabaseUserId),
+        findUnfinishedDueSession(supabase, supabaseUserId),
+      ])
+    : [null, [], null];
+  const props: ReviewDueCardProps = {
+    premium,
+    todayCount: dueSummary?.todayCount ?? 0,
+    deferredCount: dueSummary?.deferredCount ?? 0,
+    newCount: dueSummary?.newCount ?? 0,
+    pendingTotal: dueSummary?.pendingTotal ?? 0,
+    overdueTotal: dueSummary?.overdueTotal ?? 0,
+    relearnCount: dueSummary?.relearnCount ?? 0,
+    suspendedTotal: dueSummary?.suspendedTotal ?? 0,
+    resumeSessionId: resumable?.sessionId ?? null,
+    dailyLimit: dueSummary?.dailyLimit ?? DUE_QUEUE_LIMIT,
+    subjects: dueSummary?.subjects.map((s) => ({ name: s.name, count: s.count })) ?? [],
+    forecast: dueSummary?.forecast ?? [],
+    nextDueOffset: dueSummary?.nextDueOffset ?? null,
+    trialDaysLeft,
+    subjectChoices,
+  };
+  return <ReviewDueCard {...props} />;
+}
+
+function ReviewDueSkeleton() {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+      <div className="skeleton h-5 w-28 rounded-lg" />
+      <div className="skeleton h-8 w-40 rounded-lg" />
+      <div className="skeleton h-4 w-full rounded-lg" />
+      <div className="skeleton h-10 w-full rounded-lg" />
+    </div>
   );
 }

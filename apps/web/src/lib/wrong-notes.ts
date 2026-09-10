@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cacheLife } from "next/cache";
 import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -72,6 +73,21 @@ async function inParallel<T, R>(
 }
 
 export async function fetchWrongNoteMarks(
+  supabase: Supabase,
+  userId: string,
+  paperIds?: string[],
+): Promise<WrongNoteMarks> {
+  // 전체 스캔(paperIds 없음)은 마이페이지 한 번 열 때 오답 집계·미극복 수·복습 요약이
+  // 각자 부른다 — 같은 요청 안에서는 한 번만 돌게 React cache 로 묶는다.
+  if (!paperIds) return fetchAllWrongNoteMarksCached(supabase, userId);
+  return fetchWrongNoteMarksUncached(supabase, userId, paperIds);
+}
+
+const fetchAllWrongNoteMarksCached = cache((supabase: Supabase, userId: string) =>
+  fetchWrongNoteMarksUncached(supabase, userId),
+);
+
+async function fetchWrongNoteMarksUncached(
   supabase: Supabase,
   userId: string,
   paperIds?: string[],

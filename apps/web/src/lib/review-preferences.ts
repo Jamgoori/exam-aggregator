@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import type { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -32,7 +33,9 @@ export type ReviewPrefs = {
 // 전체를 거절하는데, 이 함수는 error를 삼키고 기본값을 돌려주므로 마이그레이션
 // 적용 전에는 기존 사용자의 과목 보류와 하루 상한이 조용히 초기화된 것처럼
 // 보이게 된다. 국면은 없어도 되는 파생값이라 따로 읽는다(getStoredStudyPhase).
-export async function getReviewPrefs(
+// 한 요청 안에서 복습 요약·과목 선택지·오늘 한도가 각자 부르므로 React cache 로 묶어
+// 조회는 한 번만 나가게 한다(createClient 가 요청당 같은 인스턴스를 돌려준다).
+export const getReviewPrefs = cache(async function getReviewPrefs(
   supabase: Supabase,
   userId: string,
 ): Promise<ReviewPrefs> {
@@ -47,7 +50,7 @@ export async function getReviewPrefs(
     ),
     dailyLimit: normalizeDailyLimit(data?.daily_limit as number | null | undefined),
   };
-}
+});
 
 // AI 약점 진단에서 뺄 과목. 복습 보류와 목적이 달라 컬럼이 따로다(schema.sql 참고).
 // 맞춤 극복법은 개념 하나당 실API 생성이 붙어 요금이 개념 수에 비례하므로 과목당 7개·
