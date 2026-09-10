@@ -22,7 +22,7 @@ import { paperHref } from "@/lib/paper-href";
 import type {
   MyCbtRecordItem,
   RoundAverage,
-} from "@/components/my-cbt-record-modal";
+} from "@/components/my-paper-history";
 import { getPaperSlug } from "@gongmoa/core";
 import type { AnswerKey, Comment, ExamPaper } from "@gongmoa/core";
 
@@ -232,7 +232,7 @@ export async function getPaperDetailData(paper: ExamPaper) {
     userId
       ? supabase
           .from("cbt_attempts")
-          .select("id, score, total_questions, created_at")
+          .select("id, score, total_questions, duration_seconds, created_at")
           .eq("paper_id", paper.id)
           .eq("user_id", userId)
           .order("created_at", { ascending: true })
@@ -264,6 +264,7 @@ export async function getPaperDetailData(paper: ExamPaper) {
     id: string;
     score: number;
     total_questions: number;
+    duration_seconds: number | null;
     created_at: string;
   }[];
   // 이 페이지는 문제지 하나만 다루므로, 오래된 순으로 이미 받아온 목록에 순서대로
@@ -273,6 +274,7 @@ export async function getPaperDetailData(paper: ExamPaper) {
     round: i + 1,
     score: a.score,
     totalQuestions: a.total_questions,
+    durationSeconds: a.duration_seconds,
     createdAt: a.created_at,
   }));
 

@@ -20,7 +20,7 @@ import { DifficultyRating } from "@/components/difficulty-rating";
 import { CommentsSection } from "@/components/comments-section";
 import { ExamCard } from "@/components/exam-card";
 import { BookmarkButton } from "@/components/bookmark-button";
-import { MyCbtRecordModal } from "@/components/my-cbt-record-modal";
+import { MyPaperHistory } from "@/components/my-paper-history";
 import {
   getPaperDisplayTitle,
   getPaperDocumentTitle,
@@ -387,11 +387,11 @@ export default async function PaperDetailPage({
           </div>
         )}
 
-        {myCbtRecordItems.length > 0 && (
-          <div className="mt-1 flex items-center justify-end gap-2 text-xs text-zinc-400 dark:text-zinc-600">
-            <MyCbtRecordModal attempts={myCbtRecordItems} roundAverages={roundAverages} />
-          </div>
-        )}
+        {/* 이 시험지를 언제 몇 점에 풀었는지 — 기록을 만들어낸 "온라인에서 풀기"
+            바로 아래에 펼쳐둔다. 다시 풀지 말지를 정하는 데 가장 필요한 값이라
+            모달(누르면 나오는 자리)에 두지 않는다. 기록이 없는 사람(비회원 포함)
+            에게는 아무것도 그리지 않아 버튼 줄이 예전과 똑같이 보인다. */}
+        <MyPaperHistory attempts={myCbtRecordItems} roundAverages={roundAverages} />
       </div>
 
       <DifficultyRating

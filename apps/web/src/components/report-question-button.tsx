@@ -18,7 +18,7 @@ const REASONS: { value: QuestionReportReason; label: string }[] = [
 // 해설/CBT 화면 어디서나 붙일 수 있는 작은 신고 버튼. 트리거 옆에 붙는 팝오버로
 // 만들었더니, CBT 문제별 풀기(모바일)에서는 트리거가 화면 가운데 근처에 있어
 // 고정폭 팝오버가 화면 왼쪽 밖으로 잘려 나가는 문제가 있었다 — 트리거 위치와
-// 무관하게 항상 화면 안에 들어오도록 가운데 정렬 모달로 바꿨다(my-cbt-record-modal
+// 무관하게 항상 화면 안에 들어오도록 가운데 정렬 모달로 바꿨다(cbt-result-modal
 // 과 같은 패턴).
 export function ReportQuestionButton({
   paperId,
