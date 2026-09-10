@@ -1,0 +1,7 @@
+# === 모노레포 루트 .gitattributes ===
+
+# 생성물이라 사람이 줄 단위로 읽을 일이 없다. diff 를 끄면 `git diff` 가
+# "Binary files differ" 한 줄로 끝나 15,519 줄(420KB) 이 통째로 쏟아지는 걸 막는다.
+# 의존성 변경을 실제로 훑어야 할 때는 `git diff --text package-lock.json`.
+# linguist-generated 는 GitHub PR 화면에서 기본 접힘 처리까지 해 준다.
+package-lock.json -diff linguist-generated=true

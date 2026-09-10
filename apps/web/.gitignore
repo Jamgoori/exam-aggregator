@@ -56,3 +56,15 @@ db-backup-*.json
 
 # Claude Code 머신 로컬 설정 (배치 루틴 환경이 세션마다 생성 — 커밋 금지)
 .claude/settings.local.json
+
+# pdfjs 워커 (postinstall 이 pdfjs-dist 에서 복사해 넣는 vendored 산출물 — 커밋 금지)
+# 1.3MB 짜리 한 줄(991,543자) 미니파이 파일이라 커밋해 두면 저장소 전체 검색이
+# 통째로 이걸 뱉는다. 실측: `rg -n "canvas"` 출력이 1,321,377 바이트인데 그중
+# 99.2% 가 이 파일 한 줄이었다(빼면 9,874 바이트). 에이전트 세션의 컨텍스트가
+# 검색 한 번에 날아가던 자리다.
+#
+# 지워도 안전하다: package.json 의 postinstall 이 매번 다시 만든다. 의존성 변화가
+# 없는 no-op `npm install`("up to date") 에서도, `npm ci` 에서도 workspace 의
+# postinstall 은 실행된다 — 둘 다 확인했다. Vercel 은 vercel.json 에 buildCommand 가
+# 없어 기본 경로(install → build)를 타므로 node_modules 캐시가 살아 있어도 복구된다.
+/public/pdf.worker.min.mjs
