@@ -87,6 +87,15 @@ export default async function PaperExplanationsPage({
   // view/download로 들어오므로, 같은 사람이라도 시간당 한도는 독립적으로 소진된다.
   // 무료 회원의 하루 몫은 반대로 둘을 합쳐 문제지 단위로 센다 — "이 문제지 해설을
   // 오늘 봤는가"가 기준이라, 같은 문제지를 열람했다가 내려받는 건 한 개다.
+  //
+  // 해설 본문(getPaperExplanations)은 사용자와 무관한 값이라 열람권 판정을 기다리지
+  // 않고 먼저 띄워 둔다 — 판정이 끝날 때쯤 같이 도착한다(사용자별로 갈리는 건 몇 장을
+  // 내줄지뿐이다). 예전에는 인증 → 멤버십 → 한도 판정 → 해설 조회가 아홉 왕복 가까이
+  // 차례로 이어졌다.
+  const questionsPromise = getPaperExplanations(supabase, paper);
+  // 아래 판정을 기다리는 동안 먼저 실패하면 "처리되지 않은 거절"로 잡히지 않게 한다 —
+  // 실제 에러는 아래 await 에서 그대로 던져진다(error.tsx 가 받는다).
+  questionsPromise.catch(() => {});
   const access = loggedIn
     ? await resolveExplanationAccess({
         userId: user!.id,
@@ -97,7 +106,7 @@ export default async function PaperExplanationsPage({
     : null;
   const hasFullAccess = loggedIn && access!.full;
 
-  const questions = await getPaperExplanations(supabase, paper);
+  const questions = await questionsPromise;
 
   if (questions.length === 0) {
     return (

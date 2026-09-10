@@ -60,8 +60,14 @@ export async function isAdminUser(supabase: Supabase): Promise<boolean> {
 }
 
 export async function isPremium(supabase: Supabase, userId: string): Promise<boolean> {
-  if (await isAdminUser(supabase)) return true;
-  return isPremiumMembership(await getMembership(supabase, userId));
+  // 관리자 여부와 멤버십은 서로 독립이라 같이 보낸다 — 순서대로 기다리면 부르는
+  // 곳마다(해설·복습·진단 …) DB 왕복이 하나씩 더 붙는다. 멤버십 조회는 인덱스 단건이라
+  // 관리자에게 한 번 더 도는 비용이 왕복 하나를 줄이는 이득보다 작다.
+  const [admin, membership] = await Promise.all([
+    isAdminUser(supabase),
+    getMembership(supabase, userId),
+  ]);
+  return admin || isPremiumMembership(membership);
 }
 
 export type MembershipRow = {
