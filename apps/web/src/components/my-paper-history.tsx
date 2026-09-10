@@ -29,7 +29,7 @@ const INLINE_LIMIT = 4;
  *
  * 예전에는 같은 데이터를 버튼 줄 끝의 "내 기록보기" 모달에 숨겨뒀는데, 다시 풀지
  * 말지를 정하는 데 가장 필요한 정보가 한 번 더 눌러야 나오는 자리에 있었다.
- * 그래서 "온라인에서 풀기" 바로 아래 — 기록을 만들어낸 버튼 바로 밑 — 에 펼쳐둔다.
+ * 그래서 열기 버튼들(문제·정답·해설)과 체감 난이도 사이에 제 구역으로 펼쳐둔다.
  *
  * 서버 컴포넌트다. 값이 이미 페이지 데이터(getPaperDetailData)에 실려 오므로
  * 상태가 필요 없고, 접기도 <details> 로 끝난다.
@@ -67,7 +67,7 @@ export function MyPaperHistory({
   const older = rows.slice(INLINE_LIMIT);
 
   return (
-    <div className="mt-1 flex flex-col gap-1 rounded-xl border border-zinc-200 px-3.5 py-3 dark:border-zinc-700">
+    <div className="flex flex-col gap-1 rounded-xl border border-zinc-200 px-3.5 py-3 dark:border-zinc-700">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <p className="flex items-center gap-1.5 text-sm font-bold text-zinc-700 dark:text-zinc-300">
           <Trophy size={14} className="shrink-0 text-amber-500" />내 시험 기록
