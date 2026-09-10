@@ -251,11 +251,13 @@ export default async function PaperExplanationsPage({
           읽는 순서는 왼쪽 단을 끝까지 내려간 뒤 오른쪽 단으로 넘어가는 신문식이
           된다(격자였을 때의 좌→우 가로 우선에서 바뀐 부분). */}
       <div className="flex flex-col gap-4 print:block print:columns-2 print:gap-x-6">
-        {visibleGroups.map((group) => (
+        {visibleGroups.map((group, index) => (
           <WrongNoteQuestionCard
             key={group.rows[0].questionNumber}
             rows={group.rows}
             images={group.images}
+            // 첫 카드의 이미지가 이 페이지의 LCP 라 lazy 를 풀고 우선 받게 한다.
+            eagerImages={index === 0}
             explanationsOpen
             showSelection={false}
             hideImagesInPrint

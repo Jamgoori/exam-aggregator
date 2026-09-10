@@ -137,8 +137,9 @@ export function WrongNoteQuestionCard({
   // "내가 고른 답"/"풀지 않음" 표시는 숨긴다.
   explanationsOpen = false,
   showSelection = true,
-  // 화면 밖 문항 이미지까지 미리 받아야 하는 화면에서 쓴다. (해설 페이지는 인쇄에서
-  // 이미지를 빼면서 더는 쓰지 않는다 — hideImagesInPrint 참고.)
+  // 이미지를 lazy 가 아니라 바로 받게 한다. 해설 페이지가 첫 카드에만 준다 — 첫
+  // 문항 이미지가 그 페이지의 LCP 인데 lazy 면 브라우저가 레이아웃 뒤에야 받기 시작해
+  // 그만큼 늦게 뜬다. 나머지 카드는 lazy 로 두어 인쇄·스크롤 전 대역폭을 아낀다.
   eagerImages = false,
   // 인쇄(PDF 저장)에서 문제 이미지를 빼고 해설만 남긴다. 전체 해설 페이지 전용 —
   // 문제지 이미지는 원본 PDF로 따로 받을 수 있어 인쇄물에서는 자리만 잡아먹고,
@@ -229,6 +230,7 @@ export function WrongNoteQuestionCard({
               src={src}
               alt={`${numberLabel} 문제 이미지 ${i + 1}`}
               loading={eagerImages ? "eager" : "lazy"}
+              fetchPriority={eagerImages && i === 0 ? "high" : undefined}
               className="w-full break-inside-avoid print:w-auto print:max-w-full print:self-center print:[zoom:0.5]"
             />
           ))}

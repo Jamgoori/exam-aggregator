@@ -2,6 +2,9 @@ import { connection } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { createPublicClient } from "@/lib/supabase/public";
 import { getCachedHomeData } from "@/lib/home-data";
+import { getLandingData } from "@/lib/landing-data";
+import { getExamIndex } from "@/lib/exam-index";
+import { getSubjectIndex } from "@/lib/subject-index";
 
 // 워밍업 엔드포인트. Vercel 크론(vercel.json)이 주기적으로 호출한다.
 // 목적: (1) 무료 티어 Supabase가 오래 쉬면 자동 일시정지(1주) → 첫 방문자가 몇 초
@@ -41,7 +44,14 @@ export async function GET(request: Request) {
   await supabase.from("subjects").select("id").limit(1);
 
   // 홈 전역 데이터 캐시를 데운다(비어있으면 채우고, stale이면 백그라운드 갱신 트리거).
-  const data = await getCachedHomeData();
+  // 랜딩(홈)·시험 인덱스·과목 인덱스도 같이 데운다 — 셋 다 문제지 전체 스캔 위에서
+  // 파생되는 캐시라, 여기서 안 데우면 배포 뒤 첫 방문자가 그 스캔(1.5~3초)을 기다린다.
+  const [data] = await Promise.all([
+    getCachedHomeData(),
+    getLandingData(),
+    getExamIndex(),
+    getSubjectIndex(),
+  ]);
 
   return Response.json({
     ok: true,

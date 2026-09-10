@@ -7,7 +7,11 @@ import { GraduationCap } from "lucide-react";
 // public/pdf.worker.min.mjs로 복사해서 같은 출처(same-origin) 정적 파일로 서빙한다.
 // 번들러(터보팩/웹팩) 자산 처리 방식 차이나 CDN 의존성 없이 항상 설치된 pdfjs-dist
 // 버전과 정확히 맞물리게 하기 위함.
-const WORKER_SRC = "/pdf.worker.min.mjs";
+import pdfjsPackage from "pdfjs-dist/package.json";
+
+// public/ 의 워커 사본(postinstall 이 복사)에 pdfjs 버전을 쿼리로 붙인다 — next.config 가
+// 이 경로에 영구 캐시(immutable) 헤더를 주므로, 버전이 바뀌면 주소도 바뀌어야 한다.
+const WORKER_SRC = `/pdf.worker.min.mjs?v=${pdfjsPackage.version}`;
 
 export type DrawTool = "move" | "pen" | "eraser";
 
@@ -402,6 +406,7 @@ export function PdfCanvasViewer({
 
     let cancelled = false;
     const renderTasks: { cancel: () => void }[] = [];
+    let observer: IntersectionObserver | null = null;
     annotationCanvasesRef.current = [];
     container.innerHTML = "";
     setLoading(true);
@@ -427,6 +432,11 @@ export function PdfCanvasViewer({
 
         const containerWidth = renderWidth;
         const dpr = window.devicePixelRatio || 1;
+        // 본문 캔버스의 배율 상한. 3배 화면(대부분의 최신 폰)에서 700px 폭 20쪽이면
+        // 캔버스 백킹 스토어만 수백 MB 가 되어 모바일 사파리가 캔버스를 비워 버리거나
+        // 탭이 죽는다. 2배면 스캔본 글자도 충분히 선명하고 메모리는 절반 이하다.
+        // 필기 캔버스는 attachDrawing 이 화면 배율을 그대로 쓰므로 여기 상한과 무관하다.
+        const renderDpr = Math.min(dpr, 2);
 
         // 먼저 페이지 객체를 전부 병렬로 가져와서(가벼운 메타데이터 조회) 스크롤
         // 레이아웃(빈 캔버스)을 한 번에 순서대로 만들어두고, 실제 렌더링(무거운 작업,
@@ -442,14 +452,15 @@ export function PdfCanvasViewer({
           contentCanvas: HTMLCanvasElement;
           viewport: import("pdfjs-dist/legacy/build/pdf.mjs").PageViewport;
           page: Awaited<ReturnType<typeof doc.getPage>>;
+          wrapper: HTMLDivElement;
         }[] = [];
 
         for (const page of pages) {
           const unscaledViewport = page.getViewport({ scale: 1 });
           const cssScale = containerWidth / unscaledViewport.width;
-          const viewport = page.getViewport({ scale: cssScale * dpr });
-          const cssWidth = viewport.width / dpr;
-          const cssHeight = viewport.height / dpr;
+          const viewport = page.getViewport({ scale: cssScale * renderDpr });
+          const cssWidth = viewport.width / renderDpr;
+          const cssHeight = viewport.height / renderDpr;
 
           const pageWrapper = document.createElement("div");
           pageWrapper.style.position = "relative";
@@ -491,26 +502,68 @@ export function PdfCanvasViewer({
           });
 
           container!.appendChild(pageWrapper);
-          pendingRenders.push({ contentCanvas, viewport, page });
+          pendingRenders.push({ contentCanvas, viewport, page, wrapper: pageWrapper });
         }
 
         setLoading(false);
 
+        // 실제 렌더링은 뷰포트 근처(위아래 두 화면)에 들어온 쪽부터, 동시에 세 장까지.
+        // 예전에는 첫 장부터 끝까지 전부 렌더링했다 — 위 레이아웃(빈 캔버스)은 그대로
+        // 전부 만들어 스크롤 높이와 필기 캔버스는 처음부터 있고, 무거운 그리기만 보이는
+        // 곳 우선으로 미룬다. 스크롤을 내리면 먼저 그려 둔 장이 없어도 두 화면 앞서
+        // 시작하므로 빈 장을 마주치는 일은 드물다.
         const RENDER_CONCURRENCY = 3;
-        let nextIndex = 0;
-        async function renderNext(): Promise<void> {
-          while (nextIndex < pendingRenders.length) {
-            if (cancelled) return;
-            const { contentCanvas, viewport, page } =
-              pendingRenders[nextIndex++];
+        const queue: number[] = [];
+        const queued = new Set<number>();
+        let active = 0;
+        function pump() {
+          while (!cancelled && active < RENDER_CONCURRENCY && queue.length > 0) {
+            const index = queue.shift()!;
+            const { contentCanvas, viewport, page } = pendingRenders[index];
             const task = page.render({ canvas: contentCanvas, viewport });
             renderTasks.push(task);
-            await task.promise;
+            active += 1;
+            task.promise
+              .catch((err: unknown) => {
+                // 이펙트 정리(cancel)로 끊긴 렌더링은 에러가 아니다.
+                if (cancelled) return;
+                console.error("PDF 페이지 렌더링 실패:", err);
+                const detail =
+                  err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+                setError(`PDF를 불러오지 못했어요.\n${detail}`);
+              })
+              .finally(() => {
+                active -= 1;
+                pump();
+              });
           }
         }
-        await Promise.all(
-          Array.from({ length: RENDER_CONCURRENCY }, () => renderNext()),
-        );
+        function enqueue(index: number) {
+          if (queued.has(index)) return;
+          queued.add(index);
+          queue.push(index);
+          pump();
+        }
+
+        if (typeof IntersectionObserver === "function") {
+          observer = new IntersectionObserver(
+            (entries) => {
+              for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                const index = Number((entry.target as HTMLElement).dataset.pageIndex);
+                enqueue(index);
+                observer?.unobserve(entry.target);
+              }
+            },
+            { root: scrollWrapperRef.current, rootMargin: "200% 0px" },
+          );
+          pendingRenders.forEach((r, i) => {
+            r.wrapper.dataset.pageIndex = String(i);
+            observer!.observe(r.wrapper);
+          });
+        } else {
+          pendingRenders.forEach((_, i) => enqueue(i));
+        }
       } catch (err) {
         if (!cancelled) {
           console.error("PDF 렌더링 실패:", err);
@@ -529,6 +582,7 @@ export function PdfCanvasViewer({
 
     return () => {
       cancelled = true;
+      observer?.disconnect();
       renderTasks.forEach((t) => t.cancel());
     };
   }, [fileUrl, renderWidth]);

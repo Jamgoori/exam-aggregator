@@ -89,6 +89,16 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // pdf.js 워커(1.3MB). public/ 의 기본 헤더는 max-age=0 이라 CBT 전체보기를 열
+        // 때마다 재검증 왕복이 붙었다. 주소에 pdfjs 버전을 쿼리로 달아 쓰므로
+        // (components/pdf-canvas-viewer.tsx 의 WORKER_SRC) 업그레이드하면 주소가 바뀌고,
+        // 같은 주소는 영구 캐시해도 안전하다.
+        source: "/pdf.worker.min.mjs",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
+      {
         source: "/(.*)",
         headers: [
           // 브라우저가 응답을 선언된 Content-Type 외의 것으로 추측(스니핑)해 실행하지 못하게 한다.

@@ -36,7 +36,9 @@ export async function toggleSubjectBookmark(
       .eq("id", existing.id);
     if (error) return { error: "즐겨찾기 해제에 실패했어요." };
 
-    revalidatePath("/");
+    // 홈("/")은 갱신하지 않는다 — 홈은 즐겨찾기를 읽지 않는데, 홈 경로를 revalidate 하면
+    // 홈이 쓰는 'use cache' 엔트리(문제지 전체 스캔 파생값)까지 만료시켜 다음 방문자가
+    // 그 스캔을 기다리게 했다. 목록(/papers)은 요청마다 즐겨찾기를 새로 읽는다.
     revalidatePath("/mypage");
     return { success: true, bookmarked: false };
   }
@@ -46,7 +48,6 @@ export async function toggleSubjectBookmark(
     .insert({ user_id: user.id, subject_id: subjectId });
   if (error) return { error: "즐겨찾기에 실패했어요." };
 
-  revalidatePath("/");
   revalidatePath("/mypage");
   return { success: true, bookmarked: true };
 }

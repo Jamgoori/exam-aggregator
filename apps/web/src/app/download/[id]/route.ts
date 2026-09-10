@@ -1,6 +1,24 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
+import { cacheLife, cacheTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { createPublicClient } from "@/lib/supabase/public";
 import { decideDownloadCount, readDownloadHeaders } from "@/lib/download-counting";
+
+// 파일 경로·이름은 공개 자료이고 업로드 뒤 거의 안 바뀐다. 사람들이 가장 많이 누르는
+// "문제 열기"가 이 라우트를 지나므로, 조회를 캐시해 302 까지의 왕복을 줄인다(관리자가
+// 고치면 home-data 태그로 함께 갱신된다).
+async function getPaperFile(id: string) {
+  "use cache";
+  cacheLife({ revalidate: 3600 });
+  cacheTag("home-data");
+
+  const { data } = await createPublicClient()
+    .from("exam_papers")
+    .select("file_path, file_name")
+    .eq("id", id)
+    .maybeSingle();
+  return (data as { file_path: string; file_name: string } | null) ?? null;
+}
 
 // 원본 PDF로 나가는 유일한 통로. "문제 열기"(?view=1)와 다운로드 아이콘이 모두 여기를
 // 지난다 — 예전에는 "문제 열기"가 Storage 공개 URL로 바로 나가서, 사람들이 실제로 가장
@@ -42,18 +60,18 @@ export async function GET(
     }
   }
 
-  const { data: paper } = await supabase
-    .from("exam_papers")
-    .select("file_path, file_name")
-    .eq("id", id)
-    .single();
+  const paper = await getPaperFile(id);
 
   if (!paper) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
+  // 카운트는 응답을 보낸 뒤에 올린다(after) — 사용자는 PDF 가 열리기까지 이 RPC 를
+  // 기다릴 이유가 없다. 실패해도 파일은 이미 내준 뒤라 집계만 하나 빠질 뿐이다.
   if (decideDownloadCount(readDownloadHeaders(request.headers)).count) {
-    await supabase.rpc("increment_download_count", { paper_id: id });
+    after(async () => {
+      await supabase.rpc("increment_download_count", { paper_id: id });
+    });
   }
 
   // download 옵션을 주면 Storage가 Content-Disposition: attachment로 응답해서
