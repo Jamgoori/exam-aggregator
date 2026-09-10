@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { ChevronRight, MapPin, Monitor } from "lucide-react";
 import { levelColor } from "@/lib/level-colors";
 import { examTypeFilledColor } from "@/lib/exam-type-colors";
+import { examTypeIcon } from "@/lib/exam-type-icons";
 import { getRoundTier } from "@/lib/round-tier";
 import { BookmarkButton } from "@/components/bookmark-button";
 import { getPaperDisplayTitle } from "@/lib/paper-title";
@@ -40,6 +41,7 @@ export function ExamCard({
   hasCbtAnswers?: boolean;
 }) {
   const examType = paper.exam_types;
+  const examTypeIconSrc = examType ? examTypeIcon(examType.name) : null;
   const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
   const roundTier = myRoundCount ? getRoundTier(myRoundCount) : null;
   // 상세페이지 링크는 언제나 파라미터 없는 정본 주소다. 예전에는 급수 탭 상태를
@@ -70,6 +72,25 @@ export function ExamCard({
 
       <div className="flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
+          {examTypeIconSrc && (
+            // 시행처 마크. 옆의 직렬 배지가 같은 정보를 글자로 이미 말하고 있어
+            // 스크린리더에는 숨긴다(장식용).
+            //
+            // next/image 대신 <img> 를 쓰는 이유: 이미 24px 표시용으로 구워둔
+            // 96px webp 라 최적화기가 더 해줄 게 없는데, 카드마다 붙는 이미지라
+            // /_next/image 요청만 목록 한 장에 수십 건씩 늘어난다.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={examTypeIconSrc}
+              alt=""
+              aria-hidden
+              width={24}
+              height={24}
+              loading="lazy"
+              decoding="async"
+              className="h-6 w-6 shrink-0 object-contain"
+            />
+          )}
           {paper.level && (
             <span
               className={`rounded px-2 py-0.5 text-xs font-bold ${levelColor(paper.level)}`}
