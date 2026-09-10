@@ -1,13 +1,17 @@
 import { useRouter } from "expo-router";
+import { Image } from "expo-image";
 import { Pressable, Text, View } from "react-native";
 import { getPaperDisplayTitle, type ExamPaper } from "@gongmoa/core";
 import { roundBadge } from "../lib/round-tier";
 import { examTypeBadge, levelBadge } from "../theme/badges";
+import { examTypeIcon } from "../theme/exam-type-icons";
 import { useColors } from "../theme/colors";
 
 // 문제지 카드. 웹 components/exam-card.tsx 와 같은 구성으로 맞춘다 —
-// 위: 급수·직렬·회독 배지 + 즐겨찾기 별 / 가운데: 제목 / 아래: 구분선 + 바로 풀기·자세히 보기.
-// 배지 색도 웹과 같은 값(theme/badges)이라 같은 문제지가 양쪽에서 같은 색으로 보인다.
+// 위: 시행처 마크 + 급수·직렬·회독 배지 + 즐겨찾기 별 / 가운데: 제목 /
+// 아래: 구분선 + 바로 풀기·자세히 보기.
+// 배지 색도 마크도 웹과 같은 값(theme/badges, theme/exam-type-icons)이라 같은
+// 문제지가 양쪽에서 같게 보인다.
 export function ExamCard({
   paper,
   myRoundCount,
@@ -30,6 +34,7 @@ export function ExamCard({
   const examType = paper.exam_types;
   const round = myRoundCount ?? 0;
   const tier = round > 0 ? roundBadge(round) : null;
+  const icon = examType?.name ? examTypeIcon(examType.name) : undefined;
 
   return (
     <Pressable
@@ -44,7 +49,27 @@ export function ExamCard({
       }}
     >
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-        <View style={{ flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        <View
+          style={{
+            flex: 1,
+            flexDirection: "row",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          {icon && (
+            // 옆의 직렬 배지가 같은 정보를 글자로 말하고 있어 장식으로 둔다.
+            // 다른 화면과 같이 expo-image 를 쓴다 — react-native 의 Image 는
+            // iOS 에서 webp 디코딩이 OS 버전에 딸려 있다.
+            <Image
+              source={icon}
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+              contentFit="contain"
+              style={{ width: 24, height: 24 }}
+            />
+          )}
           {level && <Chip text={level} {...levelBadge(level)} />}
           {examType?.name && <Chip text={examType.name} {...examTypeBadge(examType.name)} />}
           {tier && <Chip text={`${round}회독`} bg={tier.bg} fg={tier.fg} rounded />}

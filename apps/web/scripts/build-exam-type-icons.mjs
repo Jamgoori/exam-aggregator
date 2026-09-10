@@ -1,4 +1,4 @@
-// 시행처 마크 원본(각 기관 상징) -> public/exam-types 의 24px 표시용 webp.
+// 시행처 마크 원본(각 기관 상징) -> 웹·앱이 함께 쓰는 24px 표시용 webp.
 //
 //   node scripts/build-exam-type-icons.mjs [원본디렉터리]
 //
@@ -10,15 +10,22 @@
 //   1) 투명 여백을 잘라내고(원본 해상도에서)
 //   2) 긴 변 96px(24px 표시의 4배) 로 한 번만 축소하고
 //   3) webp 로 굽는다.
-// 짝이 되는 이름표는 src/lib/exam-type-icons.ts 의 표에 있다.
+//
+// 결과는 웹(public/exam-types)과 앱(apps/mobile/assets/exam-types) 두 곳에 같이
+// 굽는다 — 배지 색(theme/badges.ts)과 마찬가지로 같은 문제지가 양쪽에서 같은
+// 마크로 보여야 하고, 앱은 번들에 넣어야 해서 URL 로 공유할 수 없다.
+// 짝이 되는 이름표는 web src/lib/exam-type-icons.ts, 앱 src/theme/exam-type-icons.ts.
 import sharp from "sharp";
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = process.argv[2] ?? path.join(HERE, "data", "exam-type-icons");
-const OUT = path.join(HERE, "..", "public", "exam-types");
+const OUTS = [
+  path.join(HERE, "..", "public", "exam-types"),
+  path.join(HERE, "..", "..", "mobile", "assets", "exam-types"),
+];
 
 const MAP = [
   ["경찰.svg", "police.webp"],
@@ -38,25 +45,26 @@ const MAP = [
 
 const BOX = 96;
 
-mkdirSync(OUT, { recursive: true });
+for (const dir of OUTS) mkdirSync(dir, { recursive: true });
 
 for (const [src, out, opts] of MAP) {
   let input = path.join(SRC, src);
   if (opts?.cutWhiteBackground) input = await cutWhiteBackground(input);
   if (opts?.darkenGrays) input = await darkenGrays(input, opts.darkenGrays);
 
-  const dest = path.join(OUT, out);
-  await sharp(input, { density: 600 })
+  const baked = await sharp(input, { density: 600 })
     .trim({ threshold: 0 })
     .resize(BOX, BOX, {
       fit: "inside",
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     })
     .webp({ quality: 90, effort: 6 })
-    .toFile(dest);
+    .toBuffer();
 
-  const meta = await sharp(dest).metadata();
-  console.log(`${out}  ${meta.width}x${meta.height}  ${statSync(dest).size}B`);
+  for (const dir of OUTS) writeFileSync(path.join(dir, out), baked);
+
+  const meta = await sharp(baked).metadata();
+  console.log(`${out}  ${meta.width}x${meta.height}  ${baked.length}B`);
 }
 
 async function cutWhiteBackground(file) {
