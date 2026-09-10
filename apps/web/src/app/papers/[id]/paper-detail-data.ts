@@ -19,6 +19,7 @@ import {
 } from "@/lib/dedup-papers";
 import { fetchAllPages } from "@/lib/fetch-paged";
 import { paperHref } from "@/lib/paper-href";
+import { paperDetailTag } from "@/lib/cache-tags";
 import type {
   MyCbtRecordItem,
   RoundAverage,
@@ -158,22 +159,31 @@ export async function getCanonicalPaperHref(paper: ExamPaper): Promise<string> {
   return repSlug ? `/papers/${encodeURIComponent(repSlug)}` : paperHref(paper);
 }
 
-// 상세페이지 상단(제목·버튼·평점·댓글)에 필요한 데이터만 모아서 돌려준다.
-// 하단 "같은 과목 목록"은 getRelatedPapersData로 분리해 Suspense로 스트리밍한다 —
-// 그 섹션은 목록 조회 뒤에 dedup 신호·북마크 확인이 직렬로 이어져 왕복이 많아,
-// 페이지 전체 첫 표시를 그만큼 잡아먹고 있었다. 어떤 쿼리를 어떻게 묶어서
-// 날리는지(왕복 횟수)는 전부 이 파일에서 결정하고, 페이지 컴포넌트는 받은 값을
-// 그리기만 한다.
-export async function getPaperDetailData(paper: ExamPaper) {
-  const supabase = await createClient();
+// 상세페이지 상단(제목·버튼·평점·댓글)에 필요한 데이터는 두 갈래로 나뉜다.
+//
+// - getPaperPublicData: 로그인 여부와 무관하게 모두에게 같은 값(정답표·CBT 가능
+//   여부·해설 준비 여부·회차 평균·난이도 평균). 'use cache' + 공개 클라이언트라 정적
+//   셸에 그대로 구워진다 — 제목·버튼·JSON-LD 가 CDN 캐시된 HTML 로 나가고, 크롤러도
+//   첫 응답에서 본문을 본다.
+// - getPaperUserData: 사용자별 값(즐겨찾기·내 평점·내 응시 기록·관리자 여부)과
+//   댓글. cookies() 를 읽으므로 페이지에서는 작은 Suspense 섬 안에서만 기다린다.
+//
+// 예전에는 둘을 한 함수에서 열 개 쿼리로 같이 받아 페이지 최상단에서 기다렸다.
+// 그러면 cookies() 때문에 본문 전체가 동적이 되어 정적 셸에는 loading.tsx 뼈대만
+// 남고, 모든 방문자(크롤러 포함)가 그 왕복이 끝나야 제목을 봤다.
+// 어떤 쿼리를 어떻게 묶어서 날리는지(왕복 횟수)는 전부 이 파일에서 결정하고,
+// 페이지 컴포넌트는 받은 값을 그리기만 한다.
 
-  // 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — 아래의 개인화 쿼리
-  // (북마크/내 평가/내 응시 기록)는 전부 RLS가 본인 것만 돌려주므로 인증 서버
-  // 왕복(getUser) 없이 곧바로 나머지 조회 전체를 한 번에 병렬로 날릴 수 있다
-  // (예전에는 getUser 결과를 기다리는 단계들이 줄줄이 이어져 왕복이 5~6번이었다).
-  const { data: claimsData } = await supabase.auth.getClaims();
-  const userId = claimsData?.claims.sub ?? null;
-  const loggedIn = !!userId;
+export async function getPaperPublicData(paper: ExamPaper) {
+  "use cache";
+  // 정답표·CBT 가능 여부는 관리자 작업으로만 바뀌고(home-data 태그로 즉시 갱신),
+  // 해설 준비 여부는 배치가 Next 밖에서 upsert 하므로 태그 갱신이 없다 — 그래서
+  // 수명을 짧게 잡아 "해설 열기" 버튼이 늦어도 10분 안에 나타나게 한다. 난이도
+  // 평균은 평점 액션이 paperDetailTag 로 바로 갱신한다.
+  cacheLife({ revalidate: 600 });
+  cacheTag("home-data", paperDetailTag(paper.id));
+
+  const supabase = createPublicClient();
 
   // 정답표는 (시험종류+연도+급수+회차)당 1장이 원칙이고 track은 대개 null이다 —
   // 법원직처럼 정답표 한 장에 전 직류가 실려 있기 때문. track 붙은 문제지(서기보 등)
@@ -192,51 +202,16 @@ export async function getPaperDetailData(paper: ExamPaper) {
     : answerKeyQuery.is("level", null);
 
   const [
-    { data: comments },
     { data: ratings },
     { data: answerKeyRows },
     { data: hasCbtAnswers },
     { data: roundAverageRows },
-    { data: isAdminData },
-    { data: bookmarkData },
-    { data: myRatingData },
-    { data: myCbtAttemptRows },
     explanationCount,
   ] = await Promise.all([
-    supabase
-      .from("comments")
-      .select("id, paper_id, user_id, nickname, content, created_at, updated_at, parent_id")
-      .eq("paper_id", paper.id)
-      .order("created_at", { ascending: true }),
     supabase.from("difficulty_ratings").select("score").eq("paper_id", paper.id),
     answerKeyQuery,
     supabase.rpc("has_cbt_answers", { target_paper_id: paper.id }),
     supabase.rpc("avg_score_by_round", { target_paper_id: paper.id }),
-    loggedIn ? supabase.rpc("is_admin") : Promise.resolve({ data: false }),
-    userId
-      ? supabase
-          .from("bookmarks")
-          .select("id")
-          .eq("user_id", userId)
-          .eq("paper_id", paper.id)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
-    userId
-      ? supabase
-          .from("difficulty_ratings")
-          .select("score")
-          .eq("paper_id", paper.id)
-          .eq("user_id", userId)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
-    userId
-      ? supabase
-          .from("cbt_attempts")
-          .select("id, score, total_questions, created_at")
-          .eq("paper_id", paper.id)
-          .eq("user_id", userId)
-          .order("created_at", { ascending: true })
-      : Promise.resolve({ data: null }),
     // "해설 열기" 버튼 노출 판단용. question_explanations는 관리자 전용 RLS라
     // service role로 개수만 센다 (해설 내용은 /papers/[id]/explanations에서 렌더링).
     countPaperExplanations(paper.id),
@@ -260,6 +235,80 @@ export async function getPaperDetailData(paper: ExamPaper) {
   const averageScore =
     scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
 
+  // 정답표 원본 URL도 여기서 만들지 않는다. "열기"·"다운로드" 둘 다 /download/answer
+  // 라우트를 거쳐야 로그인 검사·카운트가 붙는다(app/download/answer/[id]/route.ts) —
+  // 화면에 Storage 공개 URL을 그대로 내려주면 비로그인도 그 주소로 바로 받아갈 수 있다.
+  //
+  // exact track 정답표 우선, 없으면 공용(track null) 정답표.
+  const answerKeys = (answerKeyRows ?? []) as AnswerKey[];
+  const typedAnswerKey =
+    answerKeys.find((k) => k.track != null && k.track === paper.track) ??
+    answerKeys.find((k) => k.track == null) ??
+    null;
+
+  return {
+    averageScore,
+    voteCount: scores.length,
+    hasCbtAnswers: hasCbtAnswers === true,
+    hasFullExplanations,
+    roundAverages,
+    // 캐시 값은 직렬화돼 보관되므로 화면이 쓰는 필드만 남긴다.
+    answerKey: typedAnswerKey ? { id: typedAnswerKey.id } : null,
+  };
+}
+
+// 사용자별 값 + 댓글. 한 요청 안에서 여러 Suspense 섬이 같은 값을 기다리므로
+// React cache() 로 묶어 조회는 한 번만 나가게 한다.
+export const getPaperUserData = cache(async (paperId: string) => {
+  const supabase = await createClient();
+
+  // 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — 아래의 개인화 쿼리
+  // (북마크/내 평가/내 응시 기록)는 전부 RLS가 본인 것만 돌려주므로 인증 서버
+  // 왕복(getUser) 없이 곧바로 나머지 조회 전체를 한 번에 병렬로 날릴 수 있다
+  // (예전에는 getUser 결과를 기다리는 단계들이 줄줄이 이어져 왕복이 5~6번이었다).
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims.sub ?? null;
+  const loggedIn = !!userId;
+
+  const [
+    { data: comments },
+    { data: isAdminData },
+    { data: bookmarkData },
+    { data: myRatingData },
+    { data: myCbtAttemptRows },
+  ] = await Promise.all([
+    supabase
+      .from("comments")
+      .select("id, paper_id, user_id, nickname, content, created_at, updated_at, parent_id")
+      .eq("paper_id", paperId)
+      .order("created_at", { ascending: true }),
+    loggedIn ? supabase.rpc("is_admin") : Promise.resolve({ data: false }),
+    userId
+      ? supabase
+          .from("bookmarks")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("paper_id", paperId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    userId
+      ? supabase
+          .from("difficulty_ratings")
+          .select("score")
+          .eq("paper_id", paperId)
+          .eq("user_id", userId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    userId
+      ? supabase
+          .from("cbt_attempts")
+          .select("id, score, total_questions, created_at")
+          .eq("paper_id", paperId)
+          .eq("user_id", userId)
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: null }),
+  ]);
+
   const myCbtAttempts = (myCbtAttemptRows ?? []) as {
     id: string;
     score: number;
@@ -276,33 +325,16 @@ export async function getPaperDetailData(paper: ExamPaper) {
     createdAt: a.created_at,
   }));
 
-  // 정답표 원본 URL도 여기서 만들지 않는다. "열기"·"다운로드" 둘 다 /download/answer
-  // 라우트를 거쳐야 로그인 검사·카운트가 붙는다(app/download/answer/[id]/route.ts) —
-  // 화면에 Storage 공개 URL을 그대로 내려주면 비로그인도 그 주소로 바로 받아갈 수 있다.
-  //
-  // exact track 정답표 우선, 없으면 공용(track null) 정답표.
-  const answerKeys = (answerKeyRows ?? []) as AnswerKey[];
-  const typedAnswerKey =
-    answerKeys.find((k) => k.track != null && k.track === paper.track) ??
-    answerKeys.find((k) => k.track == null) ??
-    null;
-
   return {
     userId,
     loggedIn,
     isAdmin: isAdminData === true,
     comments: (comments ?? []) as Comment[],
-    averageScore,
-    voteCount: scores.length,
     myScore: myRatingData ? (myRatingData.score as number) : null,
     isBookmarked: !!bookmarkData,
-    hasCbtAnswers,
-    hasFullExplanations,
-    roundAverages,
     myCbtRecordItems,
-    answerKey: typedAnswerKey,
   };
-}
+});
 
 // 하단 "같은 과목 기출문제 목록" 섹션 전용 데이터. 목록 조회 → dedup 신호 조회 →
 // 카드용 북마크/바로풀기 확인이 데이터 의존 때문에 직렬로 이어질 수밖에 없어,

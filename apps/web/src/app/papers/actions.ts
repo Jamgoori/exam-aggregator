@@ -1,10 +1,11 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import bcrypt from "bcryptjs";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { getSessionUser } from "@/lib/supabase/session";
+import { paperDetailTag } from "@/lib/cache-tags";
 import { recordQuestionResults } from "@/lib/question-status";
 import { recordAttendance } from "@/lib/attendance";
 import {
@@ -262,6 +263,9 @@ export async function postRating(
     scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
 
   await revalidatePaperPath(paperId);
+  // 난이도 평균은 상세페이지의 캐시된 공개 데이터(getPaperPublicData)에 들어 있다 —
+  // 다음 방문자가 새 평균을 보도록 그 엔트리를 갱신한다(화면은 위 반환값으로 즉시).
+  revalidateTag(paperDetailTag(paperId), "max");
   return { success: true, averageScore, voteCount: scores.length };
 }
 

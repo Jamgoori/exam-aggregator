@@ -36,10 +36,12 @@ import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 import {
   getNewestPaperSlugs,
   getPaper,
-  getPaperDetailData,
+  getPaperPublicData,
+  getPaperUserData,
   getRelatedPapersData,
   getCanonicalPaperHref,
 } from "./paper-detail-data";
+import type { RoundAverage } from "@/components/my-cbt-record-modal";
 import type { ExamPaper } from "@gongmoa/core";
 import type { Metadata } from "next";
 
@@ -117,6 +119,10 @@ export async function generateMetadata({
   };
 }
 
+// 본문은 정적 셸에 들어간다 — searchParams 와 cookies() 를 이 함수에서 읽지 않는다.
+// searchParams(하단 목록 필터)는 RelatedPapers 가, 사용자별 값은 아래 *Island 들이 각자
+// Suspense 안에서 기다린다. 그래서 제목·버튼·JSON-LD 는 'use cache' 값만으로 그려져
+// CDN 캐시된 HTML 로 나가고, 로그인한 사람의 즐겨찾기·내 기록·댓글만 뒤따라 채워진다.
 export default async function PaperDetailPage({
   params,
   searchParams,
@@ -125,11 +131,6 @@ export default async function PaperDetailPage({
   searchParams: Promise<{ level?: string; examTypes?: string }>;
 }) {
   const { id } = await params;
-  const { level, examTypes: examTypesParam } = await searchParams;
-  const selectedExamTypeIds = new Set(
-    (examTypesParam ?? "").split(",").filter(Boolean),
-  );
-
   const paper = await getPaper(id);
 
   if (!paper) {
@@ -138,20 +139,13 @@ export default async function PaperDetailPage({
   const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
 
   const {
-    userId,
-    loggedIn,
-    isAdmin,
-    comments,
     averageScore,
     voteCount,
-    myScore,
-    isBookmarked,
     hasCbtAnswers,
     hasFullExplanations,
     roundAverages,
-    myCbtRecordItems,
     answerKey,
-  } = await getPaperDetailData(paper);
+  } = await getPaperPublicData(paper);
 
   const subject = paper.subjects;
   const examType = paper.exam_types;
@@ -258,11 +252,9 @@ export default async function PaperDetailPage({
               </span>
             )}
           </div>
-          <BookmarkButton
-            paperId={paper.id}
-            initialBookmarked={isBookmarked}
-            loggedIn={loggedIn}
-          />
+          <Suspense fallback={<div className="skeleton h-9 w-9 shrink-0 rounded-full" />}>
+            <BookmarkIsland paperId={paper.id} />
+          </Suspense>
         </div>
 
         <div>
@@ -307,7 +299,9 @@ export default async function PaperDetailPage({
                 예고 없이 튕기면 "속았다", 미리 알면 "절차"다. */}
             <p className="-mt-1 text-center text-xs text-zinc-500 dark:text-zinc-500">
               제출 즉시 채점 · 틀린 문제는 오답노트에 자동 저장
-              {!loggedIn && " · 구글·카카오 1초 로그인"}
+              <Suspense fallback={null}>
+                <CbtLoginHint paperId={paper.id} />
+              </Suspense>
             </p>
           </>
         )}
@@ -387,28 +381,22 @@ export default async function PaperDetailPage({
           </div>
         )}
 
-        {myCbtRecordItems.length > 0 && (
-          <div className="mt-1 flex items-center justify-end gap-2 text-xs text-zinc-400 dark:text-zinc-600">
-            <MyCbtRecordModal attempts={myCbtRecordItems} roundAverages={roundAverages} />
-          </div>
-        )}
+        <Suspense fallback={null}>
+          <MyCbtRecordIsland paperId={paper.id} roundAverages={roundAverages} />
+        </Suspense>
       </div>
 
-      <DifficultyRating
-        paperId={paper.id}
-        averageScore={averageScore}
-        voteCount={voteCount}
-        loggedIn={loggedIn}
-        initialMyScore={myScore}
-      />
+      <Suspense fallback={<DifficultyGaugeSkeleton />}>
+        <DifficultyRatingIsland
+          paperId={paper.id}
+          averageScore={averageScore}
+          voteCount={voteCount}
+        />
+      </Suspense>
 
-      <CommentsSection
-        paperId={paper.id}
-        comments={comments}
-        currentUserId={userId}
-        loggedIn={loggedIn}
-        isAdmin={isAdmin}
-      />
+      <Suspense fallback={<CommentsSkeleton />}>
+        <CommentsIsland paperId={paper.id} />
+      </Suspense>
       </div>
 
       {/* 하단 "같은 과목 목록"은 목록 조회 → 중복 통합 신호 → 카드 배지 확인이
@@ -416,30 +404,136 @@ export default async function PaperDetailPage({
           보여주고 이 섹션만 Suspense 뒤에서 스트리밍한다. */}
       {subject ? (
         <Suspense fallback={<RelatedPapersSkeleton />}>
-          <RelatedPapers
-            paper={paper}
-            subject={subject}
-            level={level}
-            selectedExamTypeIds={selectedExamTypeIds}
-          />
+          <RelatedPapers paper={paper} subject={subject} searchParams={searchParams} />
         </Suspense>
       ) : null}
     </div>
   );
 }
 
+// ── 사용자별 섬 ──────────────────────────────────────────────────────────────
+// 각각 Suspense 안에서 getPaperUserData(React cache 로 요청당 한 번만 조회)를
+// 기다렸다가 자기 자리만 채운다. 비로그인이면 조회가 가벼워 곧바로 채워진다.
+
+async function BookmarkIsland({ paperId }: { paperId: string }) {
+  const { isBookmarked, loggedIn } = await getPaperUserData(paperId);
+  return (
+    <BookmarkButton paperId={paperId} initialBookmarked={isBookmarked} loggedIn={loggedIn} />
+  );
+}
+
+// 버튼을 누르기 전에 "누르면 무슨 일이 생기는지"를 한 줄로. 비로그인은 누르는 순간
+// 로그인 화면을 만나므로 그 사실을 여기서 미리 말한다 — 예고 없이 튕기면 "속았다",
+// 미리 알면 "절차"다.
+async function CbtLoginHint({ paperId }: { paperId: string }) {
+  const { loggedIn } = await getPaperUserData(paperId);
+  return loggedIn ? null : " · 구글·카카오 1초 로그인";
+}
+
+async function MyCbtRecordIsland({
+  paperId,
+  roundAverages,
+}: {
+  paperId: string;
+  roundAverages: RoundAverage[];
+}) {
+  const { myCbtRecordItems } = await getPaperUserData(paperId);
+  if (myCbtRecordItems.length === 0) return null;
+  return (
+    <div className="mt-1 flex items-center justify-end gap-2 text-xs text-zinc-400 dark:text-zinc-600">
+      <MyCbtRecordModal attempts={myCbtRecordItems} roundAverages={roundAverages} />
+    </div>
+  );
+}
+
+async function DifficultyRatingIsland({
+  paperId,
+  averageScore,
+  voteCount,
+}: {
+  paperId: string;
+  averageScore: number | null;
+  voteCount: number;
+}) {
+  const { loggedIn, myScore } = await getPaperUserData(paperId);
+  return (
+    <DifficultyRating
+      paperId={paperId}
+      averageScore={averageScore}
+      voteCount={voteCount}
+      loggedIn={loggedIn}
+      initialMyScore={myScore}
+    />
+  );
+}
+
+async function CommentsIsland({ paperId }: { paperId: string }) {
+  const { comments, userId, loggedIn, isAdmin } = await getPaperUserData(paperId);
+  return (
+    <CommentsSection
+      paperId={paperId}
+      comments={comments}
+      currentUserId={userId}
+      loggedIn={loggedIn}
+      isAdmin={isAdmin}
+    />
+  );
+}
+
+// loading.tsx 의 같은 블록과 같은 모양 — 셸에서 실제 화면으로 바뀔 때 자리가 그대로
+// 이어지게 한다.
+function DifficultyGaugeSkeleton() {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700">
+      <div className="skeleton h-4 w-16 rounded-lg" />
+      <div className="skeleton h-4 w-32 rounded-lg" />
+      <div className="flex flex-col gap-1 pt-8">
+        <div className="flex items-end gap-1">
+          {Array.from({ length: 9 }, (_, i) => (
+            <div
+              key={i}
+              className="skeleton w-full flex-1 rounded-sm"
+              style={{ height: `${14 + i * 3}px` }}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CommentsSkeleton() {
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="skeleton h-5 w-28 rounded-lg" />
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="skeleton h-9 w-full rounded-lg sm:w-40" />
+          <div className="skeleton h-9 w-full rounded-lg sm:w-52" />
+        </div>
+        <div className="skeleton h-16 w-full rounded-lg" />
+        <div className="skeleton h-9 w-24 self-end rounded-lg" />
+      </div>
+    </div>
+  );
+}
+
 // Suspense 경계 안에서 자기 데이터를 직접 기다렸다가 그리는 비동기 섹션.
+// searchParams(필터 탭)는 여기서만 읽는다 — 페이지 최상단에서 읽으면 본문 전체가
+// 동적이 되어 정적 셸에 제목조차 못 싣는다.
 async function RelatedPapers({
   paper,
   subject,
-  level,
-  selectedExamTypeIds,
+  searchParams,
 }: {
   paper: ExamPaper;
   subject: NonNullable<ExamPaper["subjects"]>;
-  level?: string;
-  selectedExamTypeIds: Set<string>;
+  searchParams: Promise<{ level?: string; examTypes?: string }>;
 }) {
+  const { level, examTypes: examTypesParam } = await searchParams;
+  const selectedExamTypeIds = new Set(
+    (examTypesParam ?? "").split(",").filter(Boolean),
+  );
   const related = await getRelatedPapersData(paper, level, selectedExamTypeIds);
   if (!related || related.subjectPapers.length === 0) return null;
 
