@@ -1,4 +1,4 @@
-import { cache } from "react";
+import { cache, Suspense } from "react";
 import { cacheLife, cacheTag } from "next/cache";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -8,7 +8,7 @@ import { createPublicClient } from "@/lib/supabase/public";
 import { getSubjectIndex } from "@/lib/subject-index";
 import { ExamCard } from "@/components/exam-card";
 import { Pagination } from "@/components/pagination";
-import { levelColor, compareLevels } from "@/lib/level-colors";
+import { levelColor } from "@/lib/level-colors";
 import { examTypeTabColor } from "@/lib/exam-type-colors";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getMyBookmarkedPaperIds } from "@/lib/bookmarks";
@@ -17,12 +17,7 @@ import { getCbtAvailability } from "@/lib/cbt-availability";
 import { SubjectBookmarkButton } from "@/components/subject-bookmark-button";
 import { JsonLd } from "@/components/json-ld";
 import { SITE_URL, absoluteUrl } from "@/lib/site-url";
-import {
-  collapseDuplicatePapers,
-  collidingPaperIds,
-  fetchPaperIdentitySignals,
-} from "@/lib/dedup-papers";
-import type { ExamPaper } from "@gongmoa/core";
+import { getSubjectPapers } from "@/lib/exam-index";
 import { getSubjectBySlug } from "@gongmoa/core";
 import type { Metadata } from "next";
 
@@ -111,6 +106,15 @@ export async function generateMetadata({
   };
 }
 
+// 본문 머리(빵부스러기·h1·자료 수)는 정적 셸에 들어간다 — searchParams 와 cookies() 를
+// 이 함수에서 읽지 않는다. 필터 탭·카드 그리드는 searchParams 에 달려 있으므로
+// SubjectPaperGrid 가 Suspense 안에서 읽고, 즐겨찾기 별은 SubjectBookmarkIsland 가
+// 따로 채운다. 목록 자체는 'use cache' 값(getSubjectPapers)이라 요청 시점 DB 조회는
+// 로그인 사용자의 개인화 값(회독·즐겨찾기)과 CBT 가능 여부 한 번뿐이다.
+//
+// 예전에는 페이지 최상단에서 둘 다 읽어 본문 전체가 동적이었고(정적 셸은 loading.tsx
+// 뼈대뿐), 과목 행 전체 select → 중복 판별 → 즐겨찾기/CBT 확인이 직렬 세 단계로
+// 이어져 크롤러까지 그 왕복을 다 기다렸다.
 export default async function SubjectPage({
   params,
   searchParams,
@@ -119,132 +123,13 @@ export default async function SubjectPage({
   searchParams: Promise<{ level?: string; examTypes?: string; page?: string }>;
 }) {
   const { slug } = await params;
-  const { level, examTypes: examTypesParam, page } = await searchParams;
-  const selectedExamTypeIds = new Set(
-    (examTypesParam ?? "").split(",").filter(Boolean),
-  );
-  const currentPage = Math.max(1, Number(page) || 1);
-  const supabase = await createClient();
-
   const subject = await getSubject(slug);
 
   if (!subject) {
     notFound();
   }
 
-  // 회독 배지용 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — cbt_attempts
-  // 조회 자체가 RLS로 본인 것만 반환되므로 인증 서버 왕복(getUser)이 필요 없다.
-  const { data: claimsData } = await supabase.auth.getClaims();
-  const userId = claimsData?.claims.sub ?? null;
-
-  // 이 과목(+필터)의 문제지를 전부 받아 중복(직류만 다른 같은 시험지)을 합친 뒤에
-  // 페이지를 자른다. SQL LIMIT/OFFSET으로 먼저 자르면 대표가 잘려나간 페이지에 걸려
-  // 페이지 경계·총 개수가 흔들리므로, 합친 다음 메모리에서 페이지네이션한다.
-  // PostgREST 기본 max_rows(1000)에 걸려 조용히 잘리지 않도록 1000건씩 이어받는다.
-  async function fetchAllSubjectPapers(): Promise<ExamPaper[]> {
-    const BATCH_SIZE = 1000;
-    const rows: ExamPaper[] = [];
-    let start = 0;
-    while (true) {
-      let q = supabase
-        .from("exam_papers")
-        .select("*, subjects(*), exam_types(*)")
-        .eq("subject_id", subject!.id);
-      if (level) q = q.eq("level", level);
-      if (selectedExamTypeIds.size > 0)
-        q = q.in("exam_type_id", [...selectedExamTypeIds]);
-      const { data, error } = await q
-        .order("year", { ascending: false })
-        .order("round", { ascending: false })
-        .order("id", { ascending: true })
-        .range(start, start + BATCH_SIZE - 1);
-      if (error || !data || data.length === 0) break;
-      rows.push(...(data as unknown as ExamPaper[]));
-      if (data.length < BATCH_SIZE) break;
-      start += BATCH_SIZE;
-    }
-    return rows;
-  }
-
-  // 급수 탭은 이 과목에 존재하는 급수 종류만 필요하므로, 목록 전체를 받아오는 대신
-  // level 컬럼만 가볍게 조회해서 만든다.
-  const [
-    { data: levelRows },
-    { data: examTypeRows },
-    allSubjectPapers,
-    myRoundCounts,
-    bookmarkedSubjectIds,
-  ] = await Promise.all([
-    supabase.from("exam_papers").select("level").eq("subject_id", subject.id),
-    // 직렬 탭도 급수 탭과 같은 이유로, 이 과목에 실제 존재하는 직렬만 가볍게 조회한다.
-    supabase
-      .from("exam_papers")
-      .select("exam_type_id, exam_types(id, name, display_order)")
-      .eq("subject_id", subject.id),
-    fetchAllSubjectPapers(),
-    userId
-      ? getMyRoundCounts(supabase, userId)
-      : Promise.resolve(new Map<string, number>()),
-    userId
-      ? getMyBookmarkedSubjectIds(supabase, userId)
-      : Promise.resolve(new Set<string>()),
-  ]);
-
-  // 메타데이터가 같아도 정답 배열까지 일치할 때만 합친 뒤, 이 페이지에 보일 만큼만
-  // 자른다. 확인용 조회는 정말 겹칠 수 있는 문제지에 대해서만 한다.
-  const signals = await fetchPaperIdentitySignals(
-    supabase,
-    collidingPaperIds(allSubjectPapers),
-  );
-  const dedupedPapers = collapseDuplicatePapers(allSubjectPapers, signals);
-  const totalPages = Math.max(1, Math.ceil(dedupedPapers.length / PAGE_SIZE));
-  const pageStart = (currentPage - 1) * PAGE_SIZE;
-
-  const availableLevels = [
-    ...new Set(
-      (levelRows ?? []).map((r) => r.level).filter((l): l is string => !!l),
-    ),
-  ].sort(compareLevels);
-
-  const examTypeById = new Map<
-    string,
-    { id: string; name: string; display_order: number }
-  >();
-  for (const row of examTypeRows ?? []) {
-    const et = row.exam_types as unknown as
-      | { id: string; name: string; display_order: number }
-      | null;
-    if (et) examTypeById.set(et.id, et);
-  }
-  const availableExamTypes = [...examTypeById.values()].sort(
-    (a, b) => a.display_order - b.display_order,
-  );
-
-  const filteredPapers = dedupedPapers.slice(pageStart, pageStart + PAGE_SIZE);
-
-  // 급수 탭·직렬 탭이 서로의 선택 상태를 지우지 않도록, 두 탭 모두 이 헬퍼로
-  // href를 만든다 — 인자로 넘긴 값만 바꾸고 나머지는 현재 선택을 그대로 유지한다.
-  function buildFilterHref(
-    nextLevel: string | undefined,
-    nextExamTypeIds: Set<string>,
-  ) {
-    const usp = new URLSearchParams();
-    if (nextLevel) usp.set("level", nextLevel);
-    if (nextExamTypeIds.size > 0)
-      usp.set("examTypes", [...nextExamTypeIds].join(","));
-    const qs = usp.toString();
-    return qs ? `/subjects/${slug}?${qs}` : `/subjects/${slug}`;
-  }
-
-  // 카드 목록이 정해진 뒤에야 그 문제지들의 id를 알 수 있어서, 메인 조회와
-  // 병렬로 묶지 않고 그 다음 단계에서 한 번 더 병렬 조회한다.
-  const filteredPaperIds = filteredPapers.map((p) => p.id);
-  const [bookmarkedIds, cbtAvailability] = await Promise.all([
-    userId
-      ? getMyBookmarkedPaperIds(supabase, userId, filteredPaperIds)
-      : Promise.resolve(new Set<string>()),
-    getCbtAvailability(supabase, filteredPaperIds),
-  ]);
+  const { papers: allPapers } = await getSubjectPapers(subject.id);
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
@@ -280,19 +165,113 @@ export default async function SubjectPage({
           {/* 제목에 "기출문제"까지 넣어 <title>과 h1이 같은 말을 하게 한다 —
               과목명 한 단어짜리 제목은 이 페이지가 무엇의 목록인지 알려주지 못한다. */}
           <h1 className="text-3xl font-semibold">{subject.name} 기출문제</h1>
-          <SubjectBookmarkButton
-            subjectId={subject.id}
-            initialBookmarked={bookmarkedSubjectIds.has(subject.id)}
-            loggedIn={!!userId}
-          />
+          <Suspense fallback={<div className="skeleton h-8 w-8 rounded-full" />}>
+            <SubjectBookmarkIsland subjectId={subject.id} />
+          </Suspense>
         </div>
-        {dedupedPapers.length > 0 && (
+        {allPapers.length > 0 && (
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-500">
-            {dedupedPapers.length.toLocaleString()}건
+            {allPapers.length.toLocaleString()}건
           </p>
         )}
       </div>
 
+      <Suspense fallback={<SubjectPaperGridSkeleton />}>
+        <SubjectPaperGrid
+          slug={slug}
+          subjectName={subject.name}
+          subjectId={subject.id}
+          searchParams={searchParams}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+// 과목 즐겨찾기 별. 사용자별 값이라 h1 옆 이 자리만 따로 채운다.
+async function SubjectBookmarkIsland({ subjectId }: { subjectId: string }) {
+  const supabase = await createClient();
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims.sub ?? null;
+  const bookmarkedSubjectIds = userId
+    ? await getMyBookmarkedSubjectIds(supabase, userId)
+    : new Set<string>();
+  return (
+    <SubjectBookmarkButton
+      subjectId={subjectId}
+      initialBookmarked={bookmarkedSubjectIds.has(subjectId)}
+      loggedIn={!!userId}
+    />
+  );
+}
+
+// 섞어풀기 입구 + 급수·직렬 탭 + 카드 그리드 + 페이지네이션. searchParams 를 읽는
+// 유일한 자리다.
+async function SubjectPaperGrid({
+  slug,
+  subjectName,
+  subjectId,
+  searchParams,
+}: {
+  slug: string;
+  subjectName: string;
+  subjectId: string;
+  searchParams: Promise<{ level?: string; examTypes?: string; page?: string }>;
+}) {
+  const { level, examTypes: examTypesParam, page } = await searchParams;
+  const selectedExamTypeIds = new Set(
+    (examTypesParam ?? "").split(",").filter(Boolean),
+  );
+  const currentPage = Math.max(1, Number(page) || 1);
+
+  const [{ papers: allPapers, availableLevels, availableExamTypes }, supabase] =
+    await Promise.all([getSubjectPapers(subjectId), createClient()]);
+
+  // 이 과목의 문제지 전체(중복은 이미 합쳐진 상태)에서 필터를 적용한 뒤 페이지를
+  // 자른다. SQL LIMIT/OFFSET으로 먼저 자르면 대표가 잘려나간 페이지에 걸려
+  // 페이지 경계·총 개수가 흔들리므로, 합친 다음 메모리에서 페이지네이션한다.
+  const dedupedPapers = allPapers.filter(
+    (p) =>
+      (!level || p.level === level) &&
+      (selectedExamTypeIds.size === 0 ||
+        (p.exam_types != null && selectedExamTypeIds.has(p.exam_types.id))),
+  );
+  const totalPages = Math.max(1, Math.ceil(dedupedPapers.length / PAGE_SIZE));
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const filteredPapers = dedupedPapers.slice(pageStart, pageStart + PAGE_SIZE);
+
+  // 회독 배지용 사용자 식별은 JWT 로컬 검증(getClaims)으로 충분하다 — cbt_attempts
+  // 조회 자체가 RLS로 본인 것만 반환되므로 인증 서버 왕복(getUser)이 필요 없다.
+  // 카드 목록이 정해진 뒤라 그 문제지들의 id 로만 좁혀 한 번에 병렬 조회한다.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const userId = claimsData?.claims.sub ?? null;
+  const filteredPaperIds = filteredPapers.map((p) => p.id);
+  const [myRoundCounts, bookmarkedIds, cbtAvailability] = await Promise.all([
+    userId
+      ? getMyRoundCounts(supabase, userId)
+      : Promise.resolve(new Map<string, number>()),
+    userId
+      ? getMyBookmarkedPaperIds(supabase, userId, filteredPaperIds)
+      : Promise.resolve(new Set<string>()),
+    getCbtAvailability(supabase, filteredPaperIds),
+  ]);
+
+  // 급수 탭·직렬 탭이 서로의 선택 상태를 지우지 않도록, 두 탭 모두 이 헬퍼로
+  // href를 만든다 — 인자로 넘긴 값만 바꾸고 나머지는 현재 선택을 그대로 유지한다.
+  function buildFilterHref(
+    nextLevel: string | undefined,
+    nextExamTypeIds: Set<string>,
+  ) {
+    const usp = new URLSearchParams();
+    if (nextLevel) usp.set("level", nextLevel);
+    if (nextExamTypeIds.size > 0)
+      usp.set("examTypes", [...nextExamTypeIds].join(","));
+    const qs = usp.toString();
+    return qs ? `/subjects/${slug}?${qs}` : `/subjects/${slug}`;
+  }
+
+  return (
+    <>
       {/* 기출 섞어풀기 입구. 문제지 한 장씩 고르는 목록 위에 "이 과목 전체에서 아무거나
           N문항"이라는 다른 진입로를 하나 둔다 — 국가직·지방직·경찰 등 시행처를 가리지
           않고 섞이는 것이 이 기능의 요점이라, 시행처 탭보다 위에 둔다. 설정(문항 수)은
@@ -309,10 +288,10 @@ export default async function SubjectPage({
           </span>
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="text-sm font-bold text-blue-900 dark:text-blue-200">
-              {subject.name} 기출 섞어풀기
+              {subjectName} 기출 섞어풀기
             </span>
             <span className="text-xs text-blue-800/80 dark:text-blue-300/80">
-              시험 구분 없이 {subject.name} 기출을 무작위로 섞어 원하는 문항 수만큼 풀어요.
+              시험 구분 없이 {subjectName} 기출을 무작위로 섞어 원하는 문항 수만큼 풀어요.
               결과는 오답노트에 날짜별로 남아요.
             </span>
           </span>
@@ -322,7 +301,6 @@ export default async function SubjectPage({
           />
         </Link>
       )}
-
       {/* 필터 탭은 전부 rel="nofollow" 다 — 누르면 같은 목록을 걸러 보여줄 뿐이라
           정본은 파라미터 없는 주소 하나고, 직렬은 다중 선택이라 크롤러가 따라가면
           조합이 폭발한다. robots.txt 가 크롤 자체를 막지만, 여기서 nofollow 로
@@ -400,7 +378,7 @@ export default async function SubjectPage({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filteredPapers.length === 0 && (
           <p className="col-span-full py-12 text-center text-zinc-500 dark:text-zinc-500">
-            {(levelRows ?? []).length === 0
+            {allPapers.length === 0
               ? "아직 업로드된 기출문제가 없습니다."
               : "조건에 맞는 기출문제가 없습니다."}
           </p>
@@ -426,6 +404,41 @@ export default async function SubjectPage({
         }}
         basePath={`/subjects/${slug}`}
       />
-    </div>
+    </>
+  );
+}
+
+// loading.tsx 의 탭·그리드 블록과 같은 모양 — 셸에서 실제 화면으로 바뀔 때 자리가
+// 그대로 이어지게 한다.
+function SubjectPaperGridSkeleton() {
+  return (
+    <>
+      <div className="flex flex-wrap gap-2">
+        {Array.from({ length: 5 }, (_, i) => (
+          <div key={i} className="skeleton h-8 w-14 rounded-full" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {Array.from({ length: 8 }, (_, i) => (
+          <div
+            key={i}
+            className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="skeleton h-5 w-10 rounded" />
+                <div className="skeleton h-5 w-14 rounded" />
+              </div>
+              <div className="skeleton h-7 w-7 shrink-0 rounded-full" />
+            </div>
+            <div className="skeleton h-4 w-full rounded-lg" />
+            <div className="mt-auto flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-700">
+              <div className="skeleton h-5 w-16 rounded-full" />
+              <div className="skeleton h-4 w-16 rounded-lg" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }

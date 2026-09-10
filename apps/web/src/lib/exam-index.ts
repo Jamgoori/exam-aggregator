@@ -2,6 +2,7 @@ import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import { createPublicClient } from "@/lib/supabase/public";
 import { fetchAllExamPapers } from "@/lib/all-papers";
+import { compareLevels } from "@/lib/level-colors";
 import type { ExamType, Subject } from "@gongmoa/core";
 
 // 시행처(국가직·지방직 …) × 급수(9급·7급 …) 한 칸을 가리키는 "시험" 단위.
@@ -42,7 +43,17 @@ export function examYearHref(slug: string, year: number): string {
   return `${examHref(slug)}?year=${year}`;
 }
 
-async function loadPapers() {
+// 문제지 전체 스캔(4,300행 + 중복 판별 조회) 한 벌. 시험 인덱스·시험별 목록(18개)·
+// 과목별 목록·getNewestPaperSlugs 가 전부 이 위에서 파생되는데, 각자 캐시 엔트리마다
+// fetchAllExamPapers 를 따로 돌리면 배포 직후나 revalidateTag("home-data") 뒤에 같은
+// 스캔이 20번 넘게 DB 를 때린다(빌드의 generateStaticParams 도 마찬가지). 여기서 한 번
+// 캐시해 파생 엔트리들이 같은 값을 나눠 쓰게 한다. Map 은 캐시에 그대로 못 담으므로
+// 배열로 두고 loadPapers 가 매번 Map 을 만든다(수천 건이라 순식간이다).
+async function loadPaperTables() {
+  "use cache";
+  cacheLife({ revalidate: 3600 });
+  cacheTag("home-data");
+
   const supabase = createPublicClient();
   const [{ data: subjectRows }, { papers, examTypes }, { data: examTypeRows }] =
     await Promise.all([
@@ -50,12 +61,18 @@ async function loadPapers() {
       fetchAllExamPapers(supabase),
       supabase.from("exam_types").select("*"),
     ]);
-  const subjectById = new Map(
-    ((subjectRows ?? []) as Subject[]).map((s) => [s.id, s]),
-  );
-  const examTypeById = new Map(
-    ((examTypeRows ?? []) as ExamType[]).map((t) => [t.id, t]),
-  );
+  return {
+    papers,
+    examTypes,
+    subjects: (subjectRows ?? []) as Subject[],
+    examTypeRows: (examTypeRows ?? []) as ExamType[],
+  };
+}
+
+async function loadPapers() {
+  const { papers, examTypes, subjects, examTypeRows } = await loadPaperTables();
+  const subjectById = new Map(subjects.map((s) => [s.id, s]));
+  const examTypeById = new Map(examTypeRows.map((t) => [t.id, t]));
   return { papers, examTypes, subjectById, examTypeById };
 }
 
@@ -220,4 +237,58 @@ export async function getExamAllPapers(slug: string): Promise<ExamComboPaper[]> 
       compareSubjectNames(a.subjectName ?? "", b.subjectName ?? ""),
   );
   return papers;
+}
+
+/** 과목 페이지가 쓰는, 한 과목의 문제지 전체 + 탭에 쓸 급수·직렬 목록. */
+export type SubjectPapersData = {
+  papers: ExamComboPaper[];
+  availableLevels: string[];
+  availableExamTypes: { id: string; name: string; display_order: number }[];
+};
+
+/**
+ * 한 과목의 문제지 전체(중복 시험지를 대표 한 장으로 합친 뒤), 최신 시험부터.
+ *
+ * /subjects/[slug] 가 쓴다. 예전에는 페이지가 요청마다 이 과목의 행을 `select *` 조인으로
+ * 전부 받고(국어·영어·한국사는 수백 행) 중복 판별 조회를 이어 돌린 뒤 급수·직렬 탭용
+ * 스캔 두 번을 더 했다 — 크롤러를 포함한 모든 방문자가 DB 왕복 세 단계를 기다렸다.
+ * 여기서는 홈·시험 페이지와 같은 전체 스캔 캐시(loadPaperTables)를 과목으로 거르기만
+ * 하므로 요청 시점에는 조회가 없다. 합치는 기준은 홈 목록과 같다(과목까지 키에 들어
+ * 있어 전역으로 합쳐도 과목 안에서 합친 것과 결과가 같다).
+ *
+ * 정렬은 fetchAllExamPapers 가 정한 순서(연도 → 관례 시행월 → 회차)라 홈 목록과 같다.
+ */
+export async function getSubjectPapers(subjectId: string): Promise<SubjectPapersData> {
+  "use cache";
+  cacheLife({ revalidate: 3600 });
+  cacheTag("home-data");
+
+  const { papers, subjectById, examTypeById } = await loadPapers();
+  const subjectName = subjectById.get(subjectId)?.name ?? null;
+  const levels = new Set<string>();
+  const examTypes = new Map<string, { id: string; name: string; display_order: number }>();
+  const out: ExamComboPaper[] = [];
+  for (const p of papers) {
+    if (p.subject_id !== subjectId) continue;
+    const examType = examTypeById.get(p.exam_type_id);
+    if (p.level) levels.add(p.level);
+    if (examType) examTypes.set(examType.id, examType);
+    out.push({
+      id: p.id,
+      title: p.title,
+      track: p.track,
+      level: p.level,
+      year: p.year,
+      round: p.round,
+      subjectName,
+      exam_types: examType,
+    });
+  }
+  return {
+    papers: out,
+    availableLevels: [...levels].sort(compareLevels),
+    availableExamTypes: [...examTypes.values()].sort(
+      (a, b) => a.display_order - b.display_order,
+    ),
+  };
 }
