@@ -219,9 +219,17 @@ export default async function MyPage({
   const { tab } = await searchParams;
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // 닉네임·아바타·id 는 전부 JWT 안에 있고 아래 조회는 RLS 가 본인 것만 돌려주므로
+  // 인증 서버 왕복(getUser) 없이 로컬 검증(getClaims)으로 식별한다 — 이 페이지의 첫
+  // 직렬 단계라 왕복 하나가 그대로 TTFB 였다.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const user = claimsData?.claims
+    ? {
+        id: claimsData.claims.sub,
+        email: claimsData.claims.email as string | undefined,
+        user_metadata: claimsData.claims.user_metadata,
+      }
+    : null;
 
   if (!user) {
     const next = tab ? `/mypage?tab=${encodeURIComponent(tab)}` : "/mypage";

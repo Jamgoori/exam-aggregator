@@ -66,9 +66,10 @@ export default async function PaperExplanationsPage({
   const displayTitle = getPaperDisplayTitle(paper.title, paper.track);
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // 누구인지만 있으면 된다(열람권 판정은 userId 기준, 데이터 접근은 RLS). 인증 서버
+  // 왕복(getUser) 대신 JWT 로컬 검증으로 바꿔 이 페이지의 직렬 대기 하나를 뺀다.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const user = claimsData?.claims ? { id: claimsData.claims.sub } : null;
   const loggedIn = !!user;
 
   // 다운로드(?download=1)는 저장까지 이어지는 행위라 문제 PDF 다운로드

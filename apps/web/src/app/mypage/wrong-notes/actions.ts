@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getSessionUser } from "@/lib/supabase/session";
+import { getSessionClaims, getSessionUser } from "@/lib/supabase/session";
 import {
   createReviewSessionForUser,
   createReviewSessionFromItems,
@@ -395,11 +395,13 @@ export type ReviewNudge = {
 export async function getReviewNudge(): Promise<ReviewNudge> {
   const empty: ReviewNudge = { todayCount: 0, subjects: [] };
 
-  const { supabase, user } = await getSessionUser();
-  if (!user) return empty;
-  if (!(await isPremium(supabase, user.id))) return empty;
+  // 읽기만 하는 조회라 JWT 로컬 검증으로 충분하다 — 이 액션은 홈과 모든 페이지의
+  // "복습 N" 버튼이 부르므로 인증 서버 왕복 하나가 그대로 체감 지연이었다.
+  const { supabase, claims } = await getSessionClaims();
+  if (!claims) return empty;
+  if (!(await isPremium(supabase, claims.sub))) return empty;
 
-  const summary = await getDueReviewSummary(supabase, user.id);
+  const summary = await getDueReviewSummary(supabase, claims.sub);
   return {
     todayCount: summary.todayCount,
     subjects: summary.subjects.map((s) => ({ name: s.name, count: s.count })),

@@ -35,6 +35,17 @@ export function clearReviewFabCache(): void {
   }
 }
 
+// 홈의 복습 유도 슬라이드(review-nudge-slide.tsx)와 같은 캐시를 쓴다. 둘 다 같은
+// 서버 액션(getReviewNudge)을 부르는데, 캐시를 따로 두면 홈에 들어올 때마다 같은
+// 무거운 조회가 두 번 돈다.
+export function readReviewFabCache(): number | null {
+  return readCache();
+}
+
+export function writeReviewFabCache(count: number): void {
+  writeCache(count);
+}
+
 function readCache(): number | null {
   if (typeof window === "undefined") return null;
   try {

@@ -1,9 +1,27 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { MessageCircle } from "lucide-react";
-import { ChatPanel } from "@/components/chat-panel";
+
+// 패널은 버튼을 누른 사람에게만 필요한데, 정적으로 import 하면 그 안의 Supabase
+// 브라우저 SDK(실측 ~225KB, 홈 라우트 JS 의 60% 이상)가 모든 페이지의 번들에 실려
+// 채팅을 열지 않는 방문자까지 내려받는다. 처음 열 때 그 청크를 가져온다 — 실시간
+// 채널은 어차피 패널이 열린 뒤에야 붙으므로 동작은 같다.
+const ChatPanel = dynamic(
+  () =>
+    import("@/components/chat-panel").then((m) => {
+      // ChatPanel 은 createPortal 을 그대로 돌려줘 반환형이 ReactPortal 인데, 이
+      // 모노레포에는 @types/react 가 두 벌(18·19) 있어 next/dynamic 의 제약과 타입만
+      // 어긋난다. JSX 로 한 겹 감싸면 반환형이 Element 가 되어 문제가 없다.
+      function ChatPanelLazy(props: { onClose: () => void }) {
+        return <m.ChatPanel {...props} />;
+      }
+      return ChatPanelLazy;
+    }),
+  { ssr: false },
+);
 
 // 사이트 전체에서 쓰는 채팅방 입구(카카오톡 오픈채팅 대체).
 //

@@ -98,12 +98,18 @@ async function StreamedSiteHeader() {
   // 아예 부르지 않는다 — 로그인 사용자에 한해서만, 그것도 admins 테이블 이메일
   // 인덱스 조회 한 번이라 비용이 작다. 위 getClaims()는 로컬 JWT 검증이라 이
   // 조회와 무관하게 계속 DB를 안 탄다.
-  const isAdmin = claims ? (await supabase.rpc("is_admin")).data === true : false;
+  //
+  // 관리자 여부와 멤버십은 서로 독립이라 같이 보낸다 — 순서대로 기다리면 로그인
+  // 사용자의 모든 페이지에 DB 왕복이 하나씩 더 붙는다(mypage 와 같은 방식).
+  const [isAdmin, membership] = claims
+    ? await Promise.all([
+        supabase.rpc("is_admin").then((r) => r.data === true),
+        getMembership(supabase, claims.sub),
+      ])
+    : [false, null];
   // 관리자는 멤버십 레코드와 무관하게 유료 기능을 다 쓰므로, 배지도 멤버십 페이지의
   // "관리자 계정" 취급과 맞춰 멤버십으로 본다.
-  const isPremium = claims
-    ? isAdmin || isPremiumMembership(await getMembership(supabase, claims.sub))
-    : false;
+  const isPremium = claims ? isAdmin || isPremiumMembership(membership) : false;
 
   const headerUser = claims
     ? {

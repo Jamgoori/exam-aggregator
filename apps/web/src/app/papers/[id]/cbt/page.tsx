@@ -25,9 +25,14 @@ export default async function CbtPage({
 
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // 로그인 여부와 기본 보기 방식(user_metadata)만 필요하므로 인증 서버 왕복(getUser)
+  // 대신 JWT 를 로컬에서 검증한다 — 아래 문제지·문항 조회가 이 뒤에 이어지므로 CBT
+  // 진입마다 왕복 하나가 그대로 지연이었다. 응시 기록 저장은 RLS 가 본인 여부를 다시
+  // 검증한다.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const user = claimsData?.claims
+    ? { id: claimsData.claims.sub, user_metadata: claimsData.claims.user_metadata }
+    : null;
 
   // 로컬 개발에서 크롭 이미지·레이아웃을 확인하려면 매번 로그인해야 해서 번거롭다.
   // .env.local에 DEV_SKIP_CBT_AUTH=1을 두면 로그인 없이 열 수 있다.

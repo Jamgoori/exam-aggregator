@@ -6,6 +6,7 @@ import { CalendarCheck } from "lucide-react";
 import { createDueReviewSession, getReviewNudge } from "@/app/mypage/wrong-notes/actions";
 import { srsDayIndex } from "@gongmoa/core";
 import type { HomePopupControls, HomePopupSource } from "@/lib/home-popup";
+import { readReviewFabCache, writeReviewFabCache } from "@/components/review-fab";
 
 // 로그인하고 홈에 들어왔을 때 "복습부터" 하도록 유도하는 장.
 //
@@ -50,9 +51,17 @@ type Nudge = { todayCount: number; subjects: { name: string; count: number }[] }
 
 export const reviewNudgeSource: HomePopupSource = {
   id: "review-nudge",
-  resolve: async () => {
-    if (seenToday()) return null;
+  resolve: async ({ signedIn }) => {
+    // 비로그인은 서버가 0을 돌려주고, 0이면 onShown(markSeen)이 돌지 않아 "오늘
+    // 봤다"가 영영 기록되지 않는다 — 그래서 예전엔 비로그인 홈 방문마다 서버 액션이
+    // 한 번씩 헛돌았다. 로그인했을 때만 묻는다.
+    if (!signedIn || seenToday()) return null;
+    // 같은 탭에서 "복습 N" 버튼(ReviewFab)이 이미 셌으면 그 값을 쓴다. 0이면 서버를
+    // 안 부르고, 양수면 과목 내역만 한 번 더 받는다.
+    const cached = readReviewFabCache();
+    if (cached != null && cached <= 0) return null;
     const res = await getReviewNudge();
+    writeReviewFabCache(res.todayCount);
     if (res.todayCount <= 0) return null;
     return {
       id: "review-nudge",

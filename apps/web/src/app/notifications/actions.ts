@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getSessionUser } from "@/lib/supabase/session";
+import { getSessionClaims, getSessionUser } from "@/lib/supabase/session";
 import {
   fetchNotifications,
   NOTIFICATION_DROPDOWN_SIZE,
@@ -39,8 +39,10 @@ export async function loadNotificationFeed(): Promise<NotificationFeed> {
 // 배지 숫자만 갱신하는 가벼운 조회(주기 폴링용). 목록을 같이 실어 보내면
 // 1분마다 알림 8건이 왕복한다.
 export async function loadUnreadCount(): Promise<number> {
-  const { user } = await getSessionUser();
-  if (!user) return 0;
+  // 1분마다 도는 폴링이라 인증 서버 왕복(getUser) 대신 JWT 로컬 검증으로 식별한다.
+  const { claims } = await getSessionClaims();
+  if (!claims) return 0;
+  const user = { id: claims.sub };
 
   const admin = createAdminClient();
   const { count } = await admin
