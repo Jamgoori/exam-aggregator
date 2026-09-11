@@ -478,7 +478,7 @@ export function ExamBrowser({
           <div className="flex min-w-0 flex-col items-center gap-1 rounded-2xl border-2 border-zinc-200 px-4 py-3 dark:border-zinc-700">
             <Users size={20} className="text-blue-500" />
             <span className="whitespace-nowrap text-sm font-medium text-zinc-600 dark:text-zinc-400">
-              실시간 총 응시 수
+              누적 응시 수
             </span>
             <strong className="text-lg tabular-nums">
               {(totalAttempts ?? 0).toLocaleString("ko-KR")}건
