@@ -179,8 +179,10 @@ export default function PrivacyPage() {
               </tr>
               <tr className="border-b border-zinc-100 dark:border-zinc-800">
                 <td className="py-2 pr-4">Google LLC (미국)</td>
-                <td className="py-2 pr-4">구글 로그인, 방문 통계(Google Analytics)</td>
-                <td className="py-2">통계 도구는 설정된 경우에만 동작</td>
+                <td className="py-2 pr-4">
+                  구글 로그인, 방문 통계(Google Analytics), 광고 게재(Google AdSense)
+                </td>
+                <td className="py-2">통계·광고 도구는 설정된 경우에만 동작</td>
               </tr>
               <tr className="border-b border-zinc-100 dark:border-zinc-800">
                 <td className="py-2 pr-4">Microsoft Corporation (미국)</td>
@@ -245,6 +247,20 @@ export default function PrivacyPage() {
             <strong>분석 도구</strong>: Vercel Analytics, Google Analytics, Microsoft Clarity가
             쿠키 또는 유사 기술로 방문·이용 통계를 수집할 수 있습니다. 브라우저 설정에서
             쿠키 저장을 거부할 수 있으며, 이 경우에도 서비스 이용에는 지장이 없습니다.
+          </li>
+          <li>
+            <strong>광고</strong>: 로그인하지 않았거나 멤버십 기간이 없는 이용자에게는 Google
+            AdSense 광고가 표시되며, 구글과 그 파트너가 쿠키 또는 유사 기술로 광고 게재·측정에
+            필요한 정보를 수집할 수 있습니다. 맞춤 광고는{" "}
+            <a
+              href="https://myadcenter.google.com/"
+              target="_blank"
+              rel="noreferrer"
+              className="text-blue-600 hover:underline dark:text-blue-400"
+            >
+              구글 광고 설정
+            </a>
+            에서 끌 수 있고, 멤버십 기간이 있는 동안에는 광고가 표시되지 않습니다.
           </li>
         </ul>
       </Section>

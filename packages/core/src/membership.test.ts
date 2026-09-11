@@ -7,6 +7,7 @@ import {
   trialExpiresAt,
   TRIAL_DAYS,
   FREE_MEMBERSHIP,
+  isAdFreeMembership,
   isPremiumMembership,
   isTrialUnstarted,
   membershipDaysLeft,
@@ -156,5 +157,46 @@ test("trialExpiresAt: 기간 중에는 이벤트 종료일, 끝난 뒤에는 60�
   assert.equal(
     trialExpiresAt(after).getTime(),
     after.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000,
+  );
+});
+
+// ── 광고 제외 자격(isAdFreeMembership) ──────────────────────────────────────
+// 여기서만 기준 시각을 전면 무료 기간 **안**으로 잡는다. 이 판정이 지켜야 하는 것이
+// "이벤트 기간에도 무료 회원에게는 광고가 뜬다"이기 때문이다.
+const DURING_FREE = new Date("2027-01-01T00:00:00Z");
+
+test("전면 무료 기간이어도 체험 회원에게는 광고를 뺀 자격이 없다", () => {
+  // 이벤트 기간이라 프리미엄 판정은 true 지만, 광고는 그것과 따로 논다.
+  assert.equal(isPremiumMembership(trial(), DURING_FREE), true);
+  assert.equal(isAdFreeMembership(trial(), DURING_FREE), false);
+});
+
+test("결제·출석 보상 기간에는 광고를 뺀다", () => {
+  const paid = trial({ source: "paid", expiresAt: "2027-03-01T00:00:00Z" });
+  const attendance = trial({
+    source: "attendance",
+    expiresAt: "2027-03-01T00:00:00Z",
+  });
+  assert.equal(isAdFreeMembership(paid, DURING_FREE), true);
+  assert.equal(isAdFreeMembership(attendance, DURING_FREE), true);
+});
+
+test("만료된 결제 기간은 광고를 빼주지 않는다", () => {
+  const expired = trial({ source: "paid", expiresAt: "2026-12-31T23:59:00Z" });
+  assert.equal(isAdFreeMembership(expired, DURING_FREE), false);
+});
+
+test("만료 없는 정기결제는 광고를 뺀다", () => {
+  const subscribed = trial({ source: "paid", expiresAt: null });
+  assert.equal(isAdFreeMembership(subscribed, DURING_FREE), true);
+});
+
+test("무료 등급과 행 없음은 광고 대상이다", () => {
+  assert.equal(isAdFreeMembership(FREE_MEMBERSHIP, DURING_FREE), false);
+  assert.equal(isAdFreeMembership(null, DURING_FREE), false);
+  // tier 가 free 면 source 가 paid 로 남아 있어도(환불·만료 처리 흔적) 광고 대상이다.
+  assert.equal(
+    isAdFreeMembership(trial({ tier: "free", source: "paid" }), DURING_FREE),
+    false,
   );
 });

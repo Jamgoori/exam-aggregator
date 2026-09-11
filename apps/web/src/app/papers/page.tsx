@@ -11,6 +11,7 @@ export const unstable_instant = {
 
 import { createClient } from "@/lib/supabase/server";
 import { ExamBrowser } from "@/components/exam-browser";
+import { AdBanner } from "@/components/ad-banner";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
@@ -137,6 +138,8 @@ export default async function PapersPage({
         totalDownloads={totalDownloads}
         totalAttempts={totalAttempts}
       />
+      {/* 카드 목록을 다 훑고 난 자리. 목록 중간에 끼우면 찾던 문제지를 가린다. */}
+      <AdBanner placement="papersList" />
     </div>
   );
 }
