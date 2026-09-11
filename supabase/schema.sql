@@ -611,7 +611,7 @@ create policy "select own cbt attempts" on cbt_attempts
 -- 평균·전국 오답률·총 응시 수)를 오염시킬 수 있어 제거했다 (2026-07-16 보안 점검).
 drop policy if exists "insert own cbt attempts" on cbt_attempts;
 
--- 홈 화면 "실시간 총 응시 수" 집계용: cbt_attempts는 본인 것만 select 가능한 RLS라
+-- 홈 화면 "누적 응시 수" 집계용: cbt_attempts는 본인 것만 select 가능한 RLS라
 -- 전체 응시 건수를 세려면 security definer로 우회해야 한다.
 create or replace function total_cbt_attempt_count()
 returns bigint
