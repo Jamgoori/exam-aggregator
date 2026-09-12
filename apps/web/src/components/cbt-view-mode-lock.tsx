@@ -9,20 +9,26 @@ import { setDefaultCbtViewMode } from "@/app/actions";
 // 아니라 UI를 처음 보는 사람에게만 필요한 안내라서 서버 왕복까지 갈 필요가 없어서다.
 const LOCK_HINT_STORAGE_KEY = "cbt-lock-hint-dismissed";
 
+// 안내 말풍선을 이번 방문에서 이미 띄웠는지. 전체화면을 켜고 끄면 이 버튼이 탭 줄과
+// 헤더 줄 사이를 오가며 다시 마운트되는데, 그때마다 안내가 다시 튀어나오면 성가시다.
+// 새로고침하면 다시 0부터라, "다시 보지 않기"(localStorage)를 대신하는 건 아니다.
+let lockHintShownThisVisit = false;
+
 // 자물쇠 아이콘: 지금 보고 있는 모드(전체보기/문제별 풀기)를 계정의 기본 시작
-// 모드로 저장하는 토글이다. 저장된 기본값·저장 중 상태·첫 방문 안내 말풍선까지
-// 자물쇠에 관련된 상태는 전부 이 컴포넌트가 스스로 관리한다.
+// 모드로 저장하는 토글이다. 저장 중 상태와 첫 방문 안내 말풍선은 이 컴포넌트가
+// 스스로 관리하고, 저장된 기본값만은 부모가 들고 있다 — 전체화면을 켜고 끄면 이
+// 버튼이 다른 줄로 옮겨가며 다시 마운트돼서, 여기서 들고 있으면 방금 누른 잠금이
+// 서버에 저장된 예전 값으로 되돌아가 보인다.
 export function CbtViewModeLock({
   viewMode,
-  initialDefaultViewMode,
+  savedDefaultViewMode,
+  onSavedDefaultViewModeChange,
 }: {
   viewMode: "full" | "single";
   // 계정에 명시적으로 저장된 시작 모드. 자물쇠를 한 번도 안 눌러본 계정은 null.
-  initialDefaultViewMode: "full" | "single" | null;
+  savedDefaultViewMode: "full" | "single" | null;
+  onSavedDefaultViewModeChange: (next: "full" | "single" | null) => void;
 }) {
-  const [savedDefaultViewMode, setSavedDefaultViewMode] = useState(
-    initialDefaultViewMode,
-  );
   const [isSavingDefault, startSavingDefault] = useTransition();
   const [lockHintVisible, setLockHintVisible] = useState(false);
   const [dontShowLockHint, setDontShowLockHint] = useState(false);
@@ -30,8 +36,12 @@ export function CbtViewModeLock({
   // 자물쇠 버튼은 아이콘만 봐서는 기능을 짐작하기 어려워서, 처음 들어왔을 때 한 번
   // 말풍선으로 짚어준다. 로딩 직후 다른 UI와 뒤섞여 나타나지 않게 살짝 지연을 둔다.
   useEffect(() => {
+    if (lockHintShownThisVisit) return;
     if (localStorage.getItem(LOCK_HINT_STORAGE_KEY)) return;
-    const timeout = setTimeout(() => setLockHintVisible(true), 600);
+    const timeout = setTimeout(() => {
+      lockHintShownThisVisit = true;
+      setLockHintVisible(true);
+    }, 600);
     return () => clearTimeout(timeout);
   }, []);
 
@@ -56,10 +66,10 @@ export function CbtViewModeLock({
     const nextDefault = isDefaultViewModeLocked ? null : viewMode;
     // 서버 응답을 기다리지 않고 즉시 아이콘부터 바꾼다(낙관적 업데이트). 실패하면
     // 원래 상태로 되돌린다.
-    setSavedDefaultViewMode(nextDefault);
+    onSavedDefaultViewModeChange(nextDefault);
     startSavingDefault(async () => {
       const res = await setDefaultCbtViewMode(nextDefault);
-      if (res.error) setSavedDefaultViewMode(previousDefault);
+      if (res.error) onSavedDefaultViewModeChange(previousDefault);
     });
   }
 
