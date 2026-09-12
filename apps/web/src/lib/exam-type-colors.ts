@@ -13,6 +13,7 @@ const EXAM_TYPE_COLORS: Record<string, string> = {
   기상직: "border border-teal-300 text-teal-700",
   간호직: "border border-fuchsia-300 text-fuchsia-700",
   국회직: "border border-violet-300 text-violet-700",
+  한능검: "border border-rose-300 text-rose-700",
 };
 
 export function examTypeColor(name: string) {
@@ -33,6 +34,7 @@ const EXAM_TYPE_TAB_COLORS: Record<string, string> = {
   기상직: "border border-teal-300 bg-teal-50 text-teal-700",
   간호직: "border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700",
   국회직: "border border-violet-300 bg-violet-50 text-violet-700",
+  한능검: "border border-rose-300 bg-rose-50 text-rose-700",
 };
 
 export function examTypeTabColor(name: string) {
@@ -55,6 +57,7 @@ const EXAM_TYPE_FILLED_COLORS: Record<string, string> = {
   기상직: "bg-teal-700 text-white", // 5.47:1
   간호직: "bg-fuchsia-600 text-white", // 4.71:1
   국회직: "bg-violet-600 text-white", // 5.70:1
+  한능검: "bg-rose-600 text-white", // 4.84:1
 };
 
 export function examTypeFilledColor(name: string) {

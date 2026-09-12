@@ -27,6 +27,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | 해외 IP 차단 (`geo-block.ts`, `proxy.ts`, `GEO_BLOCK*` 환경변수, 크롤러 예외) | `docs/agents/geo-block.md` |
 | 과목명 표기 (시행처마다 다른 과목명, `subject-label.ts`, `SUBJECT_ALIASES`, 새 과목 행 추가) | `docs/agents/subject-names.md` |
 | 자유게시판 본문(HTML)·이미지 업로드·알림 (`rich-text.ts` 새니타이저, `board/actions.ts`, `notifications`, `avatars`/`board-images` 버킷) | `docs/agents/board-rich-text.md` |
+| 한국사능력검정시험(한능검) 회차 추가·전용 과목/탭 (`upload-korean-history-exam.mjs`, `lib/korean-history-exam.ts`) | `docs/agents/korean-history-exam.md` |
 
 # 금지선 (문서 안 읽었어도 이것만은 절대)
 
@@ -114,6 +115,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   (2026-09-05 `/mix` 사고, 하루치 배포가 그 상태였다). 주소·문구 조립은 필요한 값만
   문자열로 넘기고 컴포넌트 안에서 한다. 배포 확인은 상태 코드가 아니라 **본문에
   `digest\":` 가 있는지**로 볼 것: `curl -s <url> | grep -o 'digest[^,]*'`.
+- **한능검**: 한국사능력검정시험 문제지를 공무원 "한국사"(`korean-history`) 과목 행에
+  붙이지 말 것 — 전용 과목 행(`korean-history-exam`)에만 붙인다. 50문항 5지선다라
+  20~25문항짜리 공무원 한국사 목록에 섞이면 그 과목이 통째로 못 쓰게 된다.
 - **정답 등록**: `question_count`와 길이가 다른 정답 배열을 덮어쓰지 말 것.
   공통과목이라고 정답을 다른 직류(track) 문제지에 수동 복사하지 말 것 (법원직
   서기보는 국어·한국사 15문항/영어 20문항 별도 문제지 — 실측 사고 있음).
