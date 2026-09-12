@@ -3,14 +3,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { JsonLd } from "@/components/json-ld";
 import {
+  getExamAllPapers,
   getExamCombo,
   getExamIndex,
   getExamYearPapers,
   examHref,
   type ExamCombo,
 } from "@/lib/exam-index";
+import { KHE_EXAM_TYPE_NAME } from "@/lib/korean-history-exam";
 import {
   examBreadcrumbLd,
+  ExamAllPapersList,
   ExamAllYearsList,
   ExamCrumbs,
   ExamPaperGrid,
@@ -33,7 +36,11 @@ export async function generateMetadata({
   if (!combo) return {};
 
   const title = `${combo.label} 기출문제`;
-  const description = `${combo.label} 공무원 시험 기출문제 ${combo.count}건을 ${combo.years[combo.years.length - 1]}년부터 ${combo.years[0]}년까지 연도별로 모았습니다. 정답과 함께 무료로 열람·다운로드하세요.`;
+  // 한능검은 공무원 시험이 아니고 회차로 도는 시험이라 문구를 따로 쓴다.
+  const description =
+    combo.examTypeName === KHE_EXAM_TYPE_NAME
+      ? `한국사능력검정시험 ${combo.level} 기출문제 ${combo.count}건을 ${combo.years[combo.years.length - 1]}년부터 ${combo.years[0]}년까지 회차별로 모았습니다. 정답과 함께 무료로 열람·다운로드하세요.`
+      : `${combo.label} 공무원 시험 기출문제 ${combo.count}건을 ${combo.years[combo.years.length - 1]}년부터 ${combo.years[0]}년까지 연도별로 모았습니다. 정답과 함께 무료로 열람·다운로드하세요.`;
 
   return {
     title,
@@ -56,6 +63,11 @@ export default async function ExamComboPage({
   const combo = await getExamCombo(decodeURIComponent(exam));
   if (!combo) notFound();
 
+  // 한능검은 연도가 목록을 가르는 축이 아니다 — 회차(제50~79회)가 곧 시험 한 장이고
+  // 한 해에 4~6회가 들어 있어, 연도로 자르면 "2026년 4건"처럼 토막만 보인다. 30장
+  // 전부를 한 번에 펼쳐 놓는다(공무원 기출은 시험 하나가 수백 장이라 그대로 둔다).
+  const singleList = combo.examTypeName === KHE_EXAM_TYPE_NAME;
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 pt-6 pb-12 sm:pt-8">
       <JsonLd data={examBreadcrumbLd(combo)} />
@@ -63,17 +75,23 @@ export default async function ExamComboPage({
       {/* 제목이 이미 "국가직 9급 기출문제"라 급수 배지를 따로 달지 않는다. */}
       <h1 className="text-3xl font-bold">{combo.label} 기출문제</h1>
 
-      {/* 여기부터는 ?year= 에 딸린 내용이다. Cache Components 아래서 searchParams는
-          정적 셸에서 읽을 수 없으므로(빌드가 잡아준다) 경계 뒤로 미룬다 — 셸의
-          제목·빵부스러기가 먼저 뜨고 목록이 이어서 스트리밍된다. */}
-      <Suspense fallback={<ExamYearSectionSkeleton />}>
-        <ExamYearSection combo={combo} searchParams={searchParams} />
-      </Suspense>
+      {singleList ? (
+        <ExamAllPapersSection combo={combo} />
+      ) : (
+        <>
+          {/* 여기부터는 ?year= 에 딸린 내용이다. Cache Components 아래서 searchParams는
+              정적 셸에서 읽을 수 없으므로(빌드가 잡아준다) 경계 뒤로 미룬다 — 셸의
+              제목·빵부스러기가 먼저 뜨고 목록이 이어서 스트리밍된다. */}
+          <Suspense fallback={<ExamYearSectionSkeleton />}>
+            <ExamYearSection combo={combo} searchParams={searchParams} />
+          </Suspense>
 
-      {/* 전 연도 링크 목록. searchParams 를 읽지 않으므로 Suspense 밖, 정적 셸 안에
-          들어간다 — 크롤러가 첫 HTML 에서 이 시험의 문제지 전부를 발견하게 하는 것이
-          목적이다(exam-page-parts.tsx 의 ExamAllYearsList 주석). */}
-      <ExamAllYearsList combo={combo} />
+          {/* 전 연도 링크 목록. searchParams 를 읽지 않으므로 Suspense 밖, 정적 셸 안에
+              들어간다 — 크롤러가 첫 HTML 에서 이 시험의 문제지 전부를 발견하게 하는 것이
+              목적이다(exam-page-parts.tsx 의 ExamAllYearsList 주석). */}
+          <ExamAllYearsList combo={combo} />
+        </>
+      )}
 
       <section className="border-t border-zinc-100 pt-6 dark:border-zinc-800">
         <Link
@@ -84,6 +102,32 @@ export default async function ExamComboPage({
         </Link>
       </section>
     </div>
+  );
+}
+
+/**
+ * 연도로 나누지 않고 문제지를 한 번에 다 펼치는 목록 (한능검).
+ *
+ * searchParams 를 읽지 않아 목록 자체는 정적 셸에 들어가고, 사용자마다 다른
+ * 회독·즐겨찾기 배지가 붙는 카드 그리드만 경계 뒤로 스트리밍된다. 크롤러가 첫
+ * HTML 에서 문제지 전부를 발견하도록 하는 몫은 아래 ExamAllPapersList 가 맡는다.
+ */
+async function ExamAllPapersSection({ combo }: { combo: ExamCombo }) {
+  const papers = await getExamAllPapers(combo.slug);
+
+  return (
+    <>
+      <section className="flex flex-col gap-4">
+        <h2 className="text-lg font-semibold">
+          {combo.label} 기출문제 {papers.length.toLocaleString()}건
+        </h2>
+        <Suspense fallback={<ExamPaperGridSkeleton count={papers.length || 8} />}>
+          <ExamPaperGrid papers={papers} />
+        </Suspense>
+      </section>
+
+      <ExamAllPapersList combo={combo} />
+    </>
   );
 }
 
