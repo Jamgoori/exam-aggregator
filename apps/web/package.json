@@ -30,11 +30,12 @@
     "split-by-subject-header": "node scripts/split-by-subject-header.mjs",
     "split-by-toc": "node scripts/split-by-toc.mjs",
     "split-fire": "node scripts/split-fire-paper.mjs",
-    "test": "TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --test src/lib/*.test.ts"
+    "test": "TSX_TSCONFIG_PATH=tsconfig.test.json node --import tsx --test src/lib/*.test.ts",
+    "crop-scanned-questions": "node --env-file=.env.local scripts/crop-scanned-questions.mjs"
   },
   "dependencies": {
-    "@gongmoa/core": "*",
     "@anthropic-ai/sdk": "^0.110.0",
+    "@gongmoa/core": "*",
     "@napi-rs/canvas": "^1.0.2",
     "@next/third-parties": "^16.2.10",
     "@supabase/ssr": "^0.12.0",
@@ -59,7 +60,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
     "tailwindcss": "^4",
-    "typescript": "^5.9.3",
-    "tsx": "^4.20.0"
+    "tesseract.js": "^7.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
   }
 }

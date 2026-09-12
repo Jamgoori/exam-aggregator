@@ -18,6 +18,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { QUESTION_IMAGE_UPLOAD_OPTIONS } from "./lib/question-image-upload.mjs";
+import { withTextLayer } from "./lib/ocr-text-layer.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -2307,8 +2308,15 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
 // 재시도하고, 그 결과가 더 나으면(에러 없음 + expectedCount와 일치하거나, 최소
 // 예전 방식보다 인식 개수가 많으면) 그걸 쓴다. expectedCount를 안 넘기면(옛
 // 호출자와의 호환) 예전 방식이 에러 없이 끝나는 한 그대로 쓴다.
-export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage, expectedCount } = {}) {
-  const pdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
+export async function extractQuestionsFromPdf(
+  pdfBuffer,
+  { scale = 3, onPage, expectedCount, textLayer } = {},
+) {
+  const realPdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
+  // textLayer: 스캔본(텍스트 레이어 0자)을 위해 호출자가 OCR 로 만들어 넘긴 가짜
+  // 텍스트 조각들(scripts/lib/ocr-text-layer.mjs). 렌더·크롭은 언제나 원본 PDF 로
+  // 하고 **글자 좌표만** 이쪽에서 읽는다. 안 넘기면 예전과 완전히 같은 경로다.
+  const pdf = textLayer ? withTextLayer(realPdf, textLayer) : realPdf;
 
   let legacyResult;
   let legacyError;

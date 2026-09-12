@@ -68,3 +68,7 @@ db-backup-*.json
 # postinstall 은 실행된다 — 둘 다 확인했다. Vercel 은 vercel.json 에 buildCommand 가
 # 없어 기본 경로(install → build)를 타므로 node_modules 캐시가 살아 있어도 복구된다.
 /public/pdf.worker.min.mjs
+
+# OCR 언어 데이터 캐시 (tesseract.js 가 내려받아 두는 파일)
+.ocr-cache/
+.tmp/
