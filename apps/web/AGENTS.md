@@ -16,7 +16,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 | 작업 | 먼저 읽을 문서 |
 |---|---|
-| 문항 이미지 크롭 (`crop-question-images.mjs`/`batch-crop-questions.mjs`, 새 시험유형 등록 포함) | `docs/agents/crop-question-images.md` |
+| 문항 이미지 크롭 (`crop-question-images.mjs`/`batch-crop-questions.mjs`, 새 시험유형 등록 포함; **텍스트 레이어 없는 스캔본**은 `crop-scanned-questions.mjs` — 같은 문서 맨 위 "스캔본 크롭 절차" 절) | `docs/agents/crop-question-images.md` |
 | 해설 배치 루틴·해설 스크립트·해설 관련 RLS/스키마 (`next-explanation-chunk.mjs`, `save-explanations.mjs`, 루틴 프롬프트/훅) | `docs/agents/explanation-batch-routines.md` |
 | 법령 문항 해설 (생성·재생성·삭제·판별) | `docs/agents/law-explanations.md` |
 | 중복 시험지 표시 통합 (`dedup-papers.ts`, 목록에 같은 시험지가 여러 장 보이는 문제) | `docs/agents/dedup-papers.md` |
@@ -34,6 +34,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - **크롭**: 배치 스크립트를 한 번 돌리고 성공/실패 개수만 보고 끝내지 말 것.
   "개수 일치 = 성공"으로 판단 금지 (반쪽 크롭이 개수만 맞은 실측 사례 있음).
   크롭 로직 수정 시 이미 완료한 다른 시험유형/급수 전체 재검증 필수.
+  **스캔본(OCR 경로)은 더하다**: 개수·번호 대조 게이트가 50/50 이어도 발문 유실·세트
+  자료 누락·머리글 끼임은 못 잡는다(실측 4종) — `dump-scanned-crops.mjs` 병합본을
+  회차마다 끝까지 눈으로 본 뒤에만 올릴 것. 되풀이 꼬리말 판정을 스캔본에서 다시 켜지
+  말 것(⑤가 잘린다).
 - **해설 배치**: 레포의 `scripts/` 해설 스크립트 사본을 Supabase Storage에 업로드
   금지 (배포는 소유자 전용 절차). `question_explanations_question_uidx` unique
   인덱스 삭제 금지 (upsert 전제조건). `question_explanations` RLS/`admins` 변경 시
