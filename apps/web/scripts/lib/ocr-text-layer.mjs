@@ -232,14 +232,30 @@ async function sweepMarkerColumns(pngBuffer, items, sweepWorker, ranges, ocrScal
       return x >= lo - 4 && x <= lo + STRIP_WIDTH_PT;
     });
 
-    // 이 띠 안에 "[" 로 시작하는 조각이 서 있는 줄들(세트 안내문). 아래에서 그 줄은 건너뛴다.
+    // 이 띠 안에 세트 안내문("[29~30] …")이 서 있는 줄들. 아래에서 그 줄은 건너뛴다.
+    //
+    // 판정은 **"[N" 조각과 그 오른쪽 이웃 조각들을 이어 붙였을 때 "[N~M]" 이 되는가**로
+    // 한다. 두 번 틀리고 정한 기준이다(실측 60회 11번 "11. (가)~(다)를 일어난 순서대로"):
+    //   - "[" 로 시작하기만 하면 → 마커가 "[11" 처럼 읽힌 줄까지 안내문으로 몰림.
+    //   - 같은 줄 어딘가에 물결표만 있으면 → 발문 속 "(가)~(다)" 의 물결표에 걸림.
+    // 어느 쪽이든 그 자리를 채워 주던 띠 훑기가 막혀 11번이 통째로 사라졌다. 진짜
+    // 안내문은 "[29" 바로 뒤에 "~30]" 이 붙는다.
+    const GUIDE_RE = /^\[\s*\d{1,3}\s*[~∼～]\s*\d{1,3}\s*\]/;
     const guideLineYs = items
-      .filter(
-        (it) =>
-          /^\[/.test(it.str) &&
-          it.transform[4] >= lo - 4 &&
-          it.transform[4] <= lo + STRIP_WIDTH_PT,
-      )
+      .filter((it) => {
+        if (!/^\[\s*\d{1,3}/.test(it.str)) return false;
+        if (it.transform[4] < lo - 4 || it.transform[4] > lo + STRIP_WIDTH_PT) return false;
+        const rightward = items
+          .filter(
+            (o) =>
+              o !== it &&
+              Math.abs(o.transform[5] - it.transform[5]) <= 5 &&
+              o.transform[4] > it.transform[4],
+          )
+          .sort((a, b) => a.transform[4] - b.transform[4])
+          .slice(0, 3);
+        return GUIDE_RE.test([it, ...rightward].map((o) => o.str).join(""));
+      })
       .map((it) => it.transform[5]);
 
     for (const w of found) {
@@ -428,9 +444,10 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
   //   - 글자 크기가 후보의 60% 미만이거나 160% 초과인 조각. 스캔 잡음("^." h=1.9,
   //     "미조" h=4.8)이 이웃으로 잡혀 61회 9번("가"→재판독 9) 을 막았다. 선지 원문자는
   //     마커의 80% 남짓이라 그대로 걸린다.
-  // 5%: 칼럼 맨 위 마커가 y≈976/1050(=93%) 라 7% 로 잡으면 경계에 걸린다. 머리글
-  // 조각은 y≈1010 이상(96%+)이라 5% 로도 충분히 갈린다.
-  const HEADER_BAND = 0.05;
+  // 7.5%: 이 판형은 지면 높이 ≈1074pt, 칼럼 맨 위 마커 y≈977(91%), 머리글 조각
+  // y≈1010~1021(94~95%). 5% 로 잡았더니 1019 의 머리글 "력" 이 띠 밖으로 새어 이웃으로
+  // 세졌고(실측 60회 11번), 10% 면 마커 자리(977)까지 삼킨다. 그 사이 값.
+  const HEADER_BAND = 0.075;
   const inBand = (y, pageHeightPt) =>
     Boolean(pageHeightPt) && (y > pageHeightPt * (1 - HEADER_BAND) || y < pageHeightPt * HEADER_BAND);
   const inChoiceCluster = (items, it, col, pageHeightPt) => {
@@ -440,8 +457,15 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
       if (columnOf(other.transform[4]) !== col) continue;
       if (Math.abs(other.transform[5] - it.transform[5]) > CHOICE_CLUSTER_PT) continue;
       if (inBand(other.transform[5], pageHeightPt)) continue;
+      // 위 한계 1.4: 칼럼 구분선 조각 "|"(h≈15.8, 마커의 1.5배)이 이웃으로 세지던 것
+      // (실측 60회 11번). 선지 원문자는 마커의 0.8배 남짓이라 그대로 걸린다.
       const ratio = other.height / Math.max(it.height, 0.1);
-      if (ratio < 0.6 || ratio > 1.6) continue;
+      if (ratio < 0.6 || ratio > 1.4) continue;
+      // 글자·숫자·원문자 흔적이 하나도 없는 조각(":" "|" "ㅣ" "]" 같은 것)은 이웃이
+      // 아니다 — 칼럼 사이 세로 구분선이 마커 열 안(x≈367~376)에 걸쳐 지면 전체에
+      // 그런 부스러기를 흘리고, 그것 둘만으로 진짜 마커가 선지 묶음으로 몰렸다(실측
+      // 60회 11번: ":" ":" "|"). 선지 ①~⑤는 "©" "@" "(3)" "0)" 처럼 반드시 흔적이 남는다.
+      if (!/[0-9A-Za-z가-힣①-⑳©®@()]/.test(other.str)) continue;
       neighbors++;
     }
     return neighbors >= 2;
