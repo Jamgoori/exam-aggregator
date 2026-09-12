@@ -232,6 +232,16 @@ async function sweepMarkerColumns(pngBuffer, items, sweepWorker, ranges, ocrScal
       return x >= lo - 4 && x <= lo + STRIP_WIDTH_PT;
     });
 
+    // 이 띠 안에 "[" 로 시작하는 조각이 서 있는 줄들(세트 안내문). 아래에서 그 줄은 건너뛴다.
+    const guideLineYs = items
+      .filter(
+        (it) =>
+          /^\[/.test(it.str) &&
+          it.transform[4] >= lo - 4 &&
+          it.transform[4] <= lo + STRIP_WIDTH_PT,
+      )
+      .map((it) => it.transform[5]);
+
     for (const w of found) {
       const x = (left + w.bbox.x0) / ocrScale;
       // 전면 OCR 조각과 같은 규약으로 맞춘다(디센더 몫만큼 내린 baseline).
@@ -239,12 +249,19 @@ async function sweepMarkerColumns(pngBuffer, items, sweepWorker, ranges, ocrScal
       const descender = Math.min(DESCENDER_PT, heightPt * 0.4);
       const yHere = (meta.height - w.bbox.y1) / ocrScale + descender;
       if (existing.some((it) => Math.abs(it.transform[5] - yHere) <= 5)) continue;
+      // 세트 안내문("[29~30] 다음 자료를 …")이 서는 줄은 건너뛴다. 띠 안에서는 "[29" 의
+      // 숫자만 보여 29. 로 읽히는데, 마커로 넣으면 진짜 29번과 겹치고(실측 61회 "29번이
+      // 두 번") 안내문 줄에 "29" 가 하나 더 끼어 크롭 쪽 안내문 정규식까지 깨진다.
+      if (guideLineYs.some((y) => Math.abs(y - yHere) <= 5)) continue;
       items.push({
         str: `${Number(w.text.replace(/\D/g, ""))}.`,
         transform: [1, 0, 0, 1, x, yHere],
         width: (w.bbox.x1 - w.bbox.x0) / ocrScale,
         height: heightPt - descender,
         confidence: w.confidence,
+        // 띠 훑기가 만든 조각. 전면 OCR 이 같은 자리를 이미 글자로 갖고 있으므로,
+        // 마커에서 내려갈 때는 마침표만 떼지 않고 조각째 지운다(demoteOutOfOrderMarkers).
+        fromSweep: true,
       });
     }
   }
@@ -296,10 +313,18 @@ function demoteOutOfOrderMarkers(pagesItems, ranges) {
   }
   const keep = new Set();
   for (let i = tailIndex[tailIndex.length - 1]; i !== -1; i = prev[i]) keep.add(i);
+  dbg(
+    `LIS 전 순서: ${slots
+      .map((s, i) => `${keep.has(i) ? "" : "✗"}${s.number}@p${s.pageIndex + 1}c${s.key[1]}y${(-s.key[2]).toFixed(0)}${s.it.fromSweep ? "s" : ""}`)
+      .join(" ")}`,
+  );
 
   let demoted = 0;
   slots.forEach((slot, i) => {
     if (keep.has(i)) return;
+    // 띠 훑기 조각(fromSweep)도 지우지 않고 마침표만 뗀다. 지워 봤더니(실측 60회) 내려간
+    // 띠 조각이 곧 되살리기의 유일한 후보였던 자리("11")가 비어 버렸다. 세트 안내문
+    // 줄에 띠 조각이 끼는 문제는 sweepMarkerColumns 가 그 줄을 건너뛰는 것으로 막는다.
     slot.it.str = slot.it.str.slice(0, -1);
     delete slot.it.alt;
     demoted++;
@@ -347,8 +372,11 @@ const RESCUE_MAX_MISSING = 8;
 const RESCUABLE_RE = /^(\d{1,3})[^\w\s]{0,2}$/;
 const CHOICE_CLUSTER_PT = 45;
 const RESCUE_COLUMN_SLACK_PT = 8;
+// OCR_RESCUE_DEBUG=1 이면 되살리기 판단을 stderr 에 찍는다(왜 안 살아나는지 볼 때).
+const RESCUE_DEBUG = Boolean(process.env.OCR_RESCUE_DEBUG);
+const dbg = (...a) => RESCUE_DEBUG && console.error("[rescue]", ...a);
 
-function markerSlotsInReadingOrder(pagesItems, ranges, slackPt = 0) {
+function markerSlotsInReadingOrder(pagesItems, ranges, slackPt = RESCUE_COLUMN_SLACK_PT) {
   const ordered = [...ranges].sort((a, b) => a[0] - b[0]);
   const columnOf = (x) => {
     const i = ordered.findIndex(([lo, hi]) => x >= lo - slackPt && x <= hi + slackPt);
@@ -361,6 +389,7 @@ function markerSlotsInReadingOrder(pagesItems, ranges, slackPt = 0) {
       const col = columnOf(it.transform[4]);
       slots.push({
         it,
+        pageIndex,
         number: Number(MARKERISH_RE.exec(it.str)[1]),
         key: readingKey(pageIndex, col, it.transform[5]),
       });
@@ -387,30 +416,61 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
 
   const missing = [];
   for (let n = 1; n <= expectedMarkerCount; n++) if (!markerAt.has(n)) missing.push(n);
+  dbg(`빠진 번호 [${missing.join(",")}] 마커 ${markerAt.size} 열 ${ranges.map(([lo,hi])=>`${lo.toFixed(0)}~${hi.toFixed(0)}`).join(" ")}`);
   if (missing.length === 0 || missing.length > RESCUE_MAX_MISSING) return 0;
 
-  // 같은 열에서 45pt 안에 다른 조각이 둘 이상 붙어 있으면 선지 묶음이다.
-  const inChoiceCluster = (items, it, col) => {
+  // 같은 열에서 45pt 안에 **비슷한 크기의** 조각이 둘 이상 붙어 있으면 선지 묶음이다.
+  //
+  // 두 가지는 이웃으로 세지 않는다(실측으로 진짜 마커를 죽이던 것들):
+  //   - 머리글·꼬리말 띠(지면 위아래 7%)의 조각. 칼럼 맨 위 마커(y≈976)는 바로 위
+  //     머리글 "력"·"|"(y≈1010~1020)와 45pt 안에 있어, 68회 "12"·60회 "11"·61회
+  //     "465"(재판독 45) 가 전부 선지 묶음으로 몰렸다.
+  //   - 글자 크기가 후보의 60% 미만이거나 160% 초과인 조각. 스캔 잡음("^." h=1.9,
+  //     "미조" h=4.8)이 이웃으로 잡혀 61회 9번("가"→재판독 9) 을 막았다. 선지 원문자는
+  //     마커의 80% 남짓이라 그대로 걸린다.
+  // 5%: 칼럼 맨 위 마커가 y≈976/1050(=93%) 라 7% 로 잡으면 경계에 걸린다. 머리글
+  // 조각은 y≈1010 이상(96%+)이라 5% 로도 충분히 갈린다.
+  const HEADER_BAND = 0.05;
+  const inBand = (y, pageHeightPt) =>
+    Boolean(pageHeightPt) && (y > pageHeightPt * (1 - HEADER_BAND) || y < pageHeightPt * HEADER_BAND);
+  const inChoiceCluster = (items, it, col, pageHeightPt) => {
     let neighbors = 0;
     for (const other of items) {
       if (other === it) continue;
       if (columnOf(other.transform[4]) !== col) continue;
-      if (Math.abs(other.transform[5] - it.transform[5]) <= CHOICE_CLUSTER_PT) neighbors++;
+      if (Math.abs(other.transform[5] - it.transform[5]) > CHOICE_CLUSTER_PT) continue;
+      if (inBand(other.transform[5], pageHeightPt)) continue;
+      const ratio = other.height / Math.max(it.height, 0.1);
+      if (ratio < 0.6 || ratio > 1.6) continue;
+      neighbors++;
     }
     return neighbors >= 2;
   };
   const markerSized = (it) =>
     medianHeight > 0 && Math.abs(it.height - medianHeight) <= medianHeight * 0.5;
 
+  // 앞뒤 경계는 **가장 가까운 있는 번호**로 잡는다. n-1 이 함께 빠져 있으면 n-2, n-3…
+  // 으로 물러선다. 이게 없으면 12·13 이 같이 빠진 68회에서 12번의 뒤 경계가 없어져
+  // 12쪽 머리글의 "12" 까지 후보로 들어왔다(후보 둘 → 손대지 않음 → 그대로 실패).
+  const nearestBelow = (n) => {
+    for (let k = n - 1; k >= 1; k--) if (markerAt.has(k)) return markerAt.get(k);
+    return null;
+  };
+  const nearestAbove = (n) => {
+    for (let k = n + 1; k <= expectedMarkerCount; k++) if (markerAt.has(k)) return markerAt.get(k);
+    return null;
+  };
+
   let rescued = 0;
   for (const n of missing) {
-    const before = markerAt.get(n - 1) ?? null;
-    const after = markerAt.get(n + 1) ?? null;
+    const before = nearestBelow(n);
+    const after = nearestAbove(n);
     if (!before && !after) continue;
+    dbg(`${n}번: 앞 ${before ? JSON.stringify(before) : "없음"} 뒤 ${after ? JSON.stringify(after) : "없음"}`);
 
     const candidates = [];
     for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-      const { items, png } = pages[pageIndex];
+      const { items, png, heightPt } = pages[pageIndex];
       for (const it of items) {
         // 진짜 마커(범위 안 번호)는 후보가 아니다. 범위 밖 번호("465.")는 (c) 로 본다.
         if (isMarkerish(it) && Number(MARKERISH_RE.exec(it.str)[1]) <= expectedMarkerCount) continue;
@@ -419,22 +479,38 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
         const key = readingKey(pageIndex, col, it.transform[5]);
         if (before && compareKeys(key, before) <= 0) continue;
         if (after && compareKeys(key, after) >= 0) continue;
-        if (inChoiceCluster(items, it, col)) continue;
+        // 머리글·꼬리말 띠의 조각은 마커일 수 없다(쪽 번호 "12" 가 12번 후보로 들어오던 것).
+        if (inBand(it.transform[5], heightPt)) {
+          dbg(`  후보 탈락(머리글/꼬리말 띠) p${pageIndex + 1} y=${it.transform[5].toFixed(0)} "${it.str}"`);
+          continue;
+        }
+        if (inChoiceCluster(items, it, col, heightPt)) {
+          dbg(`  후보 탈락(선지 묶음) p${pageIndex + 1} y=${it.transform[5].toFixed(0)} "${it.str}"`);
+          continue;
+        }
 
         const m = RESCUABLE_RE.exec(it.str);
-        if (m && Number(m[1]) !== n) continue; // 숫자로 읽혔는데 다른 번호면 그 자리가 아니다
-        if (m && (it.confidence ?? 100) >= MARKER_MIN_CONFIDENCE) {
+        if (m && Number(m[1]) === n && (it.confidence ?? 100) >= MARKER_MIN_CONFIDENCE) {
           candidates.push({ it, key, how: "text" });
           continue;
         }
+        // 숫자로 읽혔는데 번호가 다르거나 신뢰도가 낮으면 버리지 않고 재판독으로 넘긴다 —
+        // 61회 45번은 "465"(마침표까지 잃은 뒤) 로 읽혔고 재판독은 "45" 를 냈다.
         // (b)(c) 재판독 경로 — 글자 크기가 마커와 비슷한 조각만, 숫자 전용으로 다시 읽는다.
-        if (!digitWorker || !png || !markerSized(it)) continue;
+        if (!digitWorker || !png || !markerSized(it)) {
+          if (m) dbg(`  후보 탈락(크기 h=${it.height.toFixed(1)}/${medianHeight.toFixed(1)}) p${pageIndex + 1} y=${it.transform[5].toFixed(0)} "${it.str}"`);
+          continue;
+        }
         if (/^\(/.test(it.str)) continue; // 선지 "(3)" 모양은 애초에 안 본다
         const read = await readSpotAsDigits(png, it, digitWorker, ocrScale);
-        if (read !== String(n)) continue;
+        if (read !== String(n)) {
+          if (m || read) dbg(`  후보 탈락(재판독 "${read}") p${pageIndex + 1} y=${it.transform[5].toFixed(0)} "${it.str}"`);
+          continue;
+        }
         candidates.push({ it, key, how: "reread" });
       }
     }
+    dbg(`  후보 ${candidates.length}개: ${candidates.map((c) => `${c.how} "${c.it.str}" ${JSON.stringify(c.key)}`).join(" | ")}`);
     if (candidates.length !== 1) continue;
     candidates[0].it.str = `${n}.`;
     candidates[0].it.confidence = Math.max(candidates[0].it.confidence ?? 0, MARKER_MIN_CONFIDENCE);
@@ -456,6 +532,7 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
 function resolveDuplicateMarkers(pagesItems, ranges, expectedMarkerCount) {
   if (ranges.length === 0 || expectedMarkerCount == null) return 0;
   const { slots } = markerSlotsInReadingOrder(pagesItems, ranges);
+  dbg(`마커 순서: ${slots.map((s) => `${s.number}@p${s.key[0] + 1}c${s.key[1]}y${(-s.key[2]).toFixed(0)}`).join(" ")}`);
   const present = new Set(slots.map((s) => s.number));
   let fixed = 0;
   for (let i = 1; i < slots.length; i++) {
@@ -497,8 +574,13 @@ function chooseMarkerNumbers(pagesItems, ranges, expectedMarkerCount) {
   // **열 순서는 x 로 정한다.** markerColumnRanges 는 촘촘한 순서(= 마커가 많은 열
   // 순서)로 돌려주므로 배열 순서를 그대로 읽기 순서로 쓰면 좌우가 뒤집힐 수 있다.
   const ordered = [...ranges].sort((a, b) => a[0] - b[0]);
+  // 열 판정에 되살리기와 같은 여유를 준다 — 되살아난 마커는 열 폭 밖 8pt 까지 있을 수
+  // 있어서(68회 12·13번 x≈389.4, 열 373~389), 여유 없이 보면 "열 밖" 으로 밀려 자리가
+  // 흐트러진다.
   const columnOf = (x) => {
-    const i = ordered.findIndex(([lo, hi]) => x >= lo && x <= hi);
+    const i = ordered.findIndex(
+      ([lo, hi]) => x >= lo - RESCUE_COLUMN_SLACK_PT && x <= hi + RESCUE_COLUMN_SLACK_PT,
+    );
     return i === -1 ? ordered.length : i;
   };
   const slots = [];
@@ -576,10 +658,32 @@ export async function buildOcrTextLayer(
     for (const block of data.blocks ?? []) {
       for (const paragraph of block.paragraphs ?? []) {
         for (const line of paragraph.lines ?? []) {
+          // **한 줄의 낱말은 baseline 을 하나로 맞춘다.** pdfjs 는 한 run 에 baseline 이
+          // 하나인데, OCR 상자 아랫변은 낱말마다 몇 pt 씩 흔들린다(실측 61회 7쪽 세트
+          // 안내문 "[29~30] 다음 자료를 …": "[29"·"~30]" 은 976, "다음" 977, "료" 973).
+          // 크롭 쪽은 y 를 정수로 반올림해 줄을 묶으므로 이 한 줄이 세 줄로 갈라지고,
+          // 안내문을 한 줄에서 직접 맞춘 뒤 **이웃 줄 다시 엮기가 같은 안내문을 한 번
+          // 더 등록**해 세트가 두 번 만들어졌다("29번이 두 번 잘렸습니다").
+          //
+          // 줄 안 낱말 아랫변의 중앙값을 그 줄의 아랫변으로 쓰되, 4pt 넘게 벗어난 낱말
+          // (머리글의 큰 글자 등)은 제 값을 지킨다 — 최댓값으로 맞추면 그런 낱말 하나가
+          // 줄 전체를 끌어내려 띠 훑기의 같은 자리 판정(5pt)까지 어긋난다. 아랫변만
+          // 옮기고 윗변은 그대로 두므로 "잉크 윗선"(y + height)은 낱말마다 변하지 않는다.
+          const bottoms = (line.words ?? [])
+            .filter((w) => (w.text ?? "").trim())
+            .map((w) => w.bbox.y1)
+            .sort((a, b) => a - b);
+          const lineBottom = bottoms.length ? bottoms[Math.floor(bottoms.length / 2)] : null;
+          const SNAP_PX = 4 * OCR_SCALE;
+
           for (const word of line.words ?? []) {
             const text = (word.text ?? "").trim();
             if (!text) continue;
-            const { x0, y0, x1, y1 } = word.bbox;
+            const { x0, y0, x1 } = word.bbox;
+            const y1 =
+              lineBottom !== null && Math.abs(word.bbox.y1 - lineBottom) <= SNAP_PX
+                ? lineBottom
+                : word.bbox.y1;
             // pdfjs 조각과 같은 규약: transform[4]=x, transform[5]=baseline y,
             // 좌표계 원점은 지면 왼쪽 아래. OCR 은 왼쪽 위 기준 상자를 주므로 아래
             // 변(y1)에서 디센더 몫만큼 글리프 안쪽으로 올려 baseline 으로 삼는다(위 DESCENDER_PT).
@@ -604,7 +708,8 @@ export async function buildOcrTextLayer(
       }
     }
     if (digitWorker) await refineMarkers(png, items, digitWorker, OCR_SCALE);
-    pages.push({ items, png });
+    // heightPt: 되살리기가 머리글·꼬리말 띠를 가려내는 데 쓴다(rescueMissingMarkers).
+    pages.push({ items, png, heightPt: viewport.height / OCR_SCALE });
     onPage?.(p, items.length);
   }
   const itemsByPage = pages.map((pg) => pg.items);
