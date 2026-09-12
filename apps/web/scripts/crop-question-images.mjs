@@ -1872,6 +1872,7 @@ function planCrossPageSets(pageDataList, columnMode) {
         numbers: members.map((m) => m.marker.number),
         annotation: { pageIdx: p, col: g.col, y: g.y, height: g.height },
         slots: slots.slice(startSlot, endSlot + 1),
+        members,
         lastMember: members[wanted - 1],
       });
     }
@@ -2253,9 +2254,33 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, f
       // 첫 조각은 안내문에서 시작한다 — 그래도 안내문 바로 위에 붙은 머리글·괘선이
       // 딸려 올 수 있으므로 안내문 baseline 기준으로 걷어낸다. 이어지는 조각은
       // 칼럼 맨 위부터라 되풀이 머리글 제거를 그대로 쓴다.
+      // 되풀이 머리글을 좌표로 못 잡은 문서(headerBandPx null — 스캔본은 머리글이
+      // 그림이고 OCR 도 쪽마다 다르게 읽어 되풀이 판정이 안 된다)에서는 이어지는 조각
+      // 위에 머리글 띠가 통째로 남았다(실측 57회 [35~36]: 왼쪽 35번 아래에 9쪽 머리글
+      // "…력검정시험 (심화) 9" 가 끼고 36번이 왔다). 그 조각에서 가장 먼저 오는 멤버의
+      // 마커 baseline 위 잉크를 걷어낸다 — 단문항 크롭이 마커에서 시작하는 것과 같다.
+      // 단, 그 마커 위에 본문 줄이 있으면(지문이 앞 쪽에서 이어져 칼럼 맨 위에서
+      // 계속되는 세트) 걷어내면 지문이 날아가므로 손대지 않는다 — 맨 위 7.5% 띠(머리글
+      // 자리)의 줄만 무시한다.
+      const slotFirstMember = plan.members?.find(
+        (m) => m.pageIdx === slot.pageIdx && m.col === slot.col,
+      );
+      const nothingAboveFirstMember =
+        slotFirstMember &&
+        !ctx.lines.some(
+          (l) =>
+            l.col === slot.col &&
+            l.y > slotFirstMember.marker.y + 2 &&
+            l.y < ctx.pageHeightPt * (1 - 0.075),
+        );
       const deheaded = isFirst
         ? await ctx.dropTopJunk(raw, top, plan.annotation.y)
-        : await dropRunningHeader(raw, ctx.headerBandPx, scale);
+        : ctx.headerBandPx === null && nothingAboveFirstMember
+          ? await dropInkAboveBaseline(
+              raw,
+              Math.round((ctx.pageHeightPt - slotFirstMember.marker.y) * scale),
+            )
+          : await dropRunningHeader(raw, ctx.headerBandPx, scale);
       if (!deheaded) continue;
       const trimmed = await trimVerticalWhitespace(deheaded);
       if (trimmed) pieces.push(trimmed);

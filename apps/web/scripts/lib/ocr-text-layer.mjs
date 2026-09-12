@@ -592,7 +592,7 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
 
         const m = RESCUABLE_RE.exec(it.str);
         if (m && Number(m[1]) === n && (it.confidence ?? 100) >= MARKER_MIN_CONFIDENCE) {
-          candidates.push({ it, key, how: "text" });
+          candidates.push({ it, key, how: "text", tier: 0 });
           continue;
         }
         // 숫자로 읽혔는데 번호가 다르거나 신뢰도가 낮으면 버리지 않고 재판독으로 넘긴다 —
@@ -608,10 +608,23 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
           if (m || read) dbg(`  후보 탈락(재판독 "${read}") p${pageIndex + 1} y=${it.transform[5].toFixed(0)} "${it.str}"`);
           continue;
         }
-        candidates.push({ it, key, how: "reread" });
+        // 같은 번호를 이미 숫자로 읽었던 조각(신뢰도만 낮았던 것) > 숫자가 섞인 조각 > 글자
+        // 조각. 후보가 둘 이상일 때 이 등급으로 가른다 — 59회 50번은 진짜 "50"(신뢰도 낮음)과
+        // 한글 "류"(숫자 전용 재판독이 "50" 으로 읽음)가 나란히 후보에 올라 손대지 못했다.
+        const tier = m && Number(m[1]) === n ? 1 : /\d/.test(it.str) ? 2 : 3;
+        candidates.push({ it, key, how: "reread", tier });
       }
     }
-    dbg(`  후보 ${candidates.length}개: ${candidates.map((c) => `${c.how} "${c.it.str}" ${JSON.stringify(c.key)}`).join(" | ")}`);
+    dbg(`  후보 ${candidates.length}개: ${candidates.map((c) => `${c.how}${c.tier} "${c.it.str}" ${JSON.stringify(c.key)}`).join(" | ")}`);
+    if (candidates.length > 1) {
+      const best = Math.min(...candidates.map((c) => c.tier));
+      const top = candidates.filter((c) => c.tier === best);
+      if (top.length === 1) {
+        dbg(`  등급 ${best} 후보 하나만 남김: "${top[0].it.str}"`);
+        candidates.length = 0;
+        candidates.push(top[0]);
+      }
+    }
     if (candidates.length === 0 && digitWorker && n > 5) {
       // (d) 조각이 아예 없는 자리 — 두 OCR 패스가 그 낱말을 하나도 내놓지 않은 경우
       // (실측 65회 7번, 64회 20번: 지면에는 또렷한데 조각 0개). 앞뒤 번호 사이의 마커
@@ -633,6 +646,39 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
     rescued++;
   }
   return rescued;
+}
+
+// 세트 안내문 "[35 ~ 36]" 을 OCR 이 "[35" "36]" 두 낱말로 내놓고 물결표를 잃는 조판이 있다
+// (실측 57회 9쪽 — 물결표 양옆 공백이 넓어 tesseract 가 아예 안 읽음). 공유 크롭 코드의
+// ANNOTATION_RANGE_RE 는 물결표(또는 "문")가 있어야 걸리므로, 35번이 공통 자료 없이 선지만
+// 남은 채 **개수는 맞게** 올라갔다. 같은 줄(3pt 이내)에서 "[N" 뒤 60pt 안에 "M]"(N<M) 이 오면
+// 한 낱말 "[N~M]" 로 합친다. 텍스트 레이어가 있는 문제지는 이 경로를 안 탄다.
+const GUIDE_OPEN_RE = /^\[\s*(\d{1,3})\s*[~∼～]?$/;
+const GUIDE_CLOSE_RE = /^[~∼～]?\s*(\d{1,3})\s*\]$/;
+const GUIDE_TILDE_RE = /^[~∼～]$/;
+function joinSplitSetGuides(items) {
+  for (const open of items) {
+    const om = GUIDE_OPEN_RE.exec(open.str);
+    if (!om) continue;
+    const ox = open.transform[4];
+    const oy = open.transform[5];
+    const same = items
+      .filter((it) => it !== open && Math.abs(it.transform[5] - oy) <= 3 && it.transform[4] > ox && it.transform[4] - ox <= 60)
+      .sort((p, q) => p.transform[4] - q.transform[4]);
+    const close = same.find((it) => GUIDE_CLOSE_RE.test(it.str));
+    if (!close) continue;
+    const n = Number(om[1]);
+    const m = Number(GUIDE_CLOSE_RE.exec(close.str)[1]);
+    if (!(n < m && m - n <= 10)) continue;
+    const between = same.filter((it) => it.transform[4] < close.transform[4] && !GUIDE_TILDE_RE.test(it.str));
+    if (between.length > 0) continue;
+    open.str = `[${n}~${m}]`;
+    open.width = close.transform[4] + close.width - ox;
+    close.str = "";
+    dbg(`세트 안내문 합침: "[${n}~${m}]" y=${oy.toFixed(0)}`);
+  }
+  // 합쳐진 뒤쪽 조각은 빈 낱말로 남기지 않고 지운다.
+  for (let i = items.length - 1; i >= 0; i--) if (items[i].str === "") items.splice(i, 1);
 }
 
 /**
@@ -981,6 +1027,7 @@ export async function buildOcrTextLayer(
       }
     }
     if (digitWorker) await refineMarkers(png, items, digitWorker, OCR_SCALE);
+    joinSplitSetGuides(items);
     // heightPt: 되살리기가 머리글·꼬리말 띠를 가려내는 데 쓴다(rescueMissingMarkers).
     pages.push({ items, png, heightPt: viewport.height / OCR_SCALE });
     onPage?.(p, items.length);
@@ -1009,8 +1056,67 @@ export async function buildOcrTextLayer(
   const deduped = resolveDuplicateMarkers(itemsByPage, ranges, expectedMarkerCount);
   if (rescued || deduped || demoted) onRescue?.(rescued, deduped, demoted);
   chooseMarkerNumbers(itemsByPage, ranges, expectedMarkerCount);
+  normalizeTallMarkers(itemsByPage, expectedMarkerCount);
   // 렌더 결과는 여기서 버린다 — 호출자에게는 글자 조각만 넘긴다.
   return pages.map(({ items }) => ({ items }));
+}
+
+// 상자가 마커보다 훨씬 큰(1.4배 초과) 마커는 y·높이를 제 발문 줄에 맞춘다.
+//
+// tesseract 가 마커 글리프를 옆 글자와 한 상자로 묶으면(실측 67회 19번 "19." h=13.0,
+// 61회 9번 되살린 "가" h=13.8 — 마커 중앙값 7.5) 상자 아랫변이 줄보다 처져 baseline 이
+// 발문 줄 아래 4~6pt 에 놓인다. 그러면 공유 크롭 코드가 (1) 발문 낱말들을 "마커 윗줄"로
+// 보고 그 baseline 까지로 위 경계를 눌러 발문 윗동강을 자르고, (2) 큰 높이로 잡은
+// baseline px 아래를 dropTopJunk 가 부스러기로 걷어내 발문 한 줄이 통째로 사라진다.
+// 두 회차 모두 개수는 50/50 이라 눈으로 보기 전엔 몰랐다.
+//
+// 같은 쪽·마커 오른쪽 250pt 안·세로 10pt 안에서 보통 키(중앙값의 0.5~1.6배)인 낱말들을
+// y(±2pt)로 묶어 가장 낱말이 많은 줄(2개 이상)을 발문 줄로 보고, 마커 y 를 그 줄의 중앙값
+// y 로, 높이를 마커 중앙값으로 바꾼다. 보통 키의 마커는 손대지 않는다.
+function normalizeTallMarkers(pagesItems, expectedMarkerCount) {
+  const markers = [];
+  for (const items of pagesItems)
+    for (const it of items)
+      if (isMarkerish(it) && Number(MARKERISH_RE.exec(it.str)[1]) <= expectedMarkerCount) markers.push(it);
+  const heights = markers.map((m) => m.height).sort((p, q) => p - q);
+  const median = heights[Math.floor(heights.length / 2)] ?? 0;
+  if (median <= 0) return;
+  for (const items of pagesItems) {
+    for (const m of items) {
+      if (!markers.includes(m) || m.height <= median * 1.4) continue;
+      const mx = m.transform[4];
+      const my = m.transform[5];
+      const near = items.filter(
+        (it) =>
+          it !== m &&
+          !isMarkerish(it) &&
+          it.transform[4] > mx &&
+          it.transform[4] - mx <= 250 &&
+          Math.abs(it.transform[5] - my) <= 10 &&
+          it.height >= median * 0.5 &&
+          it.height <= median * 1.6,
+      );
+      const groups = [];
+      for (const it of near) {
+        const y = it.transform[5];
+        const g = groups.find((grp) => Math.abs(grp.y - y) <= 2);
+        if (g) g.ys.push(y);
+        else groups.push({ y, ys: [y] });
+      }
+      groups.sort((p, q) => q.ys.length - p.ys.length);
+      const best = groups[0];
+      const oldH = m.height;
+      m.height = median;
+      if (best && best.ys.length >= 2) {
+        const ys = [...best.ys].sort((p, q) => p - q);
+        const lineY = ys[Math.floor(ys.length / 2)];
+        dbg(`마커 ${m.str} 상자 큼(h=${oldH.toFixed(1)}→${median.toFixed(1)}): y ${my.toFixed(1)}→${lineY.toFixed(1)} (줄 낱말 ${ys.length}개)`);
+        m.transform[5] = lineY;
+      } else {
+        dbg(`마커 ${m.str} 상자 큼(h=${oldH.toFixed(1)}→${median.toFixed(1)}): 발문 줄 못 찾아 y 그대로`);
+      }
+    }
+  }
 }
 
 /**
