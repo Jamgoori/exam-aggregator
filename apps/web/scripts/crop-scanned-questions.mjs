@@ -196,6 +196,9 @@ async function cropOnePaper(supabase, paper, { dryRun, scale, worker, digitWorke
       // 스캔본은 되풀이 꼬리말을 찾지 않는다 — OCR 좌표로는 마지막 선지 줄과 못 가려서
       // 선지가 잘렸다(실측 69회 2번, 57회 11번). 쪽번호 조각이 남는 쪽을 택한다.
       footerDetection: false,
+      // 쪽마다 지면이 좌우로 흔들리므로 칼럼 크롭 x 를 쪽별로 잡는다(61회: 우측 마커 x
+      // 369·380·389 — 문서 하나의 경계로는 "[1점]" 꼬리가 잘리거나 딸려 들어온다).
+      perPageColumnCrop: true,
     });
   } catch (err) {
     return { paper, error: `크롭 실패: ${err.message}` };

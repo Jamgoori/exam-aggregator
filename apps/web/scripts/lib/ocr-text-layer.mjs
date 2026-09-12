@@ -541,8 +541,14 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
     }
     return neighbors >= 2;
   };
-  const markerSized = (it) =>
-    medianHeight > 0 && Math.abs(it.height - medianHeight) <= medianHeight * 0.5;
+  // 0.4~2.0배: ±50% 로 두었더니 낱말 상자가 마커 글리프까지 삼켜 키가 큰 조각(61회 9번 "가"
+  // — 상자 높이 17.8pt, 마커 중앙값 7.5pt)이 말없이 탈락했다. 부스러기·머리글은 3pt 바닥과
+  // 띠 제외가 이미 거르므로 여기는 넓게 둔다. 재판독이 번호와 정확히 같아야 하는 건 그대로.
+  const markerSized = (it) => {
+    if (medianHeight <= 0) return false;
+    const ratio = it.height / medianHeight;
+    return ratio >= 0.4 && ratio <= 2.0;
+  };
 
   // 앞뒤 경계는 **가장 가까운 있는 번호**로 잡는다. n-1 이 함께 빠져 있으면 n-2, n-3…
   // 으로 물러선다. 이게 없으면 12·13 이 같이 빠진 68회에서 12번의 뒤 경계가 없어져
@@ -667,7 +673,6 @@ async function rereadGapForNumber(pages, ranges, before, after, n, digitWorker, 
     const { png, items, heightPt } = pages[seg.page];
     if (!png || !heightPt || seg.yTop - seg.yBottom < 8) continue;
     const [lo, hi] = ordered[seg.col];
-    const bandWidthPt = hi - lo + BAND_LEFT_PT + BAND_RIGHT_PT;
     dbg(`  띠 탐색 p${seg.page + 1} 열${seg.col}(${lo.toFixed(0)}~${hi.toFixed(0)}) y ${seg.yTop.toFixed(0)}→${seg.yBottom.toFixed(0)}`);
     const { data: px, info } = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true });
     const left = Math.max(0, Math.round((lo - BAND_LEFT_PT) * ocrScale));
@@ -705,12 +710,32 @@ async function rereadGapForNumber(pages, ranges, before, after, n, digitWorker, 
         dbg(`  띠 덩어리(크기 제외) p${seg.page + 1} y=${((info.height - (end + 1)) / ocrScale).toFixed(0)} h=${hPt.toFixed(1)}`);
         continue;
       }
+      // **덩어리의 왼쪽 끝이 마커 열 안에 있어야 한다.** 띠를 열 오른쪽 12pt 까지 넓히자
+      // (64회 "20." 이 열 오른쪽 끝에 섰다) 선지 원문자(열보다 18pt 오른쪽)가 띠에 걸려
+      // 덩어리로 잡히고, 숫자 전용 판독이 ①·④·⑤ 를 "7" 로 읽어 진짜 7 이 유일하지 않게
+      // 됐다(실측 65회 7번). 마커는 열 왼쪽에 서고 원문자는 열 밖에서 시작한다.
+      let leftmost = Infinity;
+      for (let yy = start; yy <= end; yy++) {
+        const row = yy * info.width;
+        for (let x = left; x <= right; x++)
+          if (!skipCol[x - left] && px[row + x] < 160) {
+            if (x < leftmost) leftmost = x;
+            break;
+          }
+      }
+      // hi+1: 원문자는 열 오른쪽 끝 바로 밖(실측 65회 x=60, hi=58)에 서서 +2 로는 못 갈랐다.
+      if (leftmost / ocrScale > hi + 1) {
+        dbg(`  띠 덩어리(열 밖 시작 x=${(leftmost / ocrScale).toFixed(0)}) p${seg.page + 1} y=${((info.height - (end + 1)) / ocrScale).toFixed(0)} h=${hPt.toFixed(1)}`);
+        continue;
+      }
       // 이 덩어리만 넉넉히 잘라 숫자 전용(한 낱말)으로 읽는다 — readSpotAsDigits 와 같은 규약.
       // readSpotAsDigits 는 baseline·height 에 DESCENDER_PT 가 반영된 조각을 기대한다.
+      // 자를 폭은 **덩어리 왼쪽 끝에서 16pt** — 띠 전체를 넘기면 발문 첫 글자까지 들어와
+      // "7." 이 "73" 으로 읽혔다(실측 65회). 세 자리 번호+마침표가 14pt 남짓이다.
       const item = {
         str: "",
-        transform: [1, 0, 0, 1, (lo - BAND_LEFT_PT), (info.height - (end + 1)) / ocrScale + DESCENDER_PT],
-        width: bandWidthPt + 6,
+        transform: [1, 0, 0, 1, leftmost / ocrScale - 1, (info.height - (end + 1)) / ocrScale + DESCENDER_PT],
+        width: 16,
         height: hPt - DESCENDER_PT,
       };
       const read = await readSpotAsDigits(png, item, digitWorker, ocrScale);
@@ -721,8 +746,8 @@ async function rereadGapForNumber(pages, ranges, before, after, n, digitWorker, 
         items,
         item: {
           str: `${n}.`,
-          transform: [1, 0, 0, 1, lo, (info.height - (end + 1)) / ocrScale + DESCENDER_PT],
-          width: bandWidthPt,
+          transform: [1, 0, 0, 1, leftmost / ocrScale, (info.height - (end + 1)) / ocrScale + DESCENDER_PT],
+          width: 16,
           height: hPt - DESCENDER_PT,
           confidence: MARKER_MIN_CONFIDENCE,
           fromSweep: true,

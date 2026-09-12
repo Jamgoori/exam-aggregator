@@ -626,6 +626,42 @@ export function computeColumnCropX(pageMarkerDataList) {
   return right.min - COLUMN_CROP_BACKOFF_PT;
 }
 
+// computeColumnCropX 의 **페이지별** 판. 스캔본은 쪽마다 지면이 좌우로 몇 pt 씩 흔들려
+// (실측 61회: 우측 칼럼 마커 x 가 369·380·389) 문서 하나의 경계로는 안 된다 — 오른쪽으로
+// 밀린 쪽에서는 왼쪽 칼럼의 "[1점]" 꼬리가 잘리고 오른쪽 칼럼 크롭에 그 꼬리가 딸려
+// 들어온다. 문서 전체 클러스터로 우측 칼럼이 어디인지만 정하고, 잘라낼 x 는 **그 쪽에
+// 실제로 선 우측 마커의 최소 x** 에서 물러선다. 우측 마커가 둘 미만인 쪽은 null(문서값).
+// 텍스트 레이어 문제지는 쪽이 정렬돼 있어 문서값과 같지만, 호출자가 켤 때만 쓴다.
+export function computeColumnCropXByPage(pageMarkerDataList) {
+  const xs = pageMarkerDataList.flatMap((d) => d.markers.map((m) => m.x)).sort((a, b) => a - b);
+  if (xs.length < 4) return pageMarkerDataList.map(() => null);
+  const clusters = [];
+  let current = [xs[0]];
+  for (let i = 1; i < xs.length; i++) {
+    if (xs[i] - current[current.length - 1] <= COLUMN_CLUSTER_TOLERANCE_PT) current.push(xs[i]);
+    else {
+      clusters.push(current);
+      current = [xs[i]];
+    }
+  }
+  clusters.push(current);
+  if (clusters.length < 2) return pageMarkerDataList.map(() => null);
+  const summarized = clusters
+    .map((c) => ({ count: c.length, x: c.reduce((a, b) => a + b, 0) / c.length }))
+    .sort((a, b) => b.count - a.count);
+  const first = summarized[0];
+  const second = summarized.find((c) => Math.abs(c.x - first.x) >= COLUMN_SPLIT_MIN_GAP_PT);
+  if (!second) return pageMarkerDataList.map(() => null);
+  const rightCenter = Math.max(first.x, second.x);
+  return pageMarkerDataList.map((d) => {
+    const onPage = d.markers
+      .map((m) => m.x)
+      .filter((x) => Math.abs(x - rightCenter) <= COLUMN_CLUSTER_TOLERANCE_PT);
+    if (onPage.length < 2) return null;
+    return Math.min(...onPage) - COLUMN_CROP_BACKOFF_PT;
+  });
+}
+
 // 문서 전체 마커에서 칼럼별 최빈 x를 구한다. "문" 신호가 하나라도 있으면
 // 기존의 신뢰 마커 기반 필터가 더 정확하므로 계산하지 않는다(null 반환).
 export function computeDocMarginX(pageMarkerDataList, columnSplitX) {
@@ -2091,7 +2127,7 @@ async function normalizeWidths(cropped) {
   }
 }
 
-async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, footerDetection = true) {
+async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, footerDetection = true, perPageColumnCrop = false) {
   // 1차 패스: 렌더링 없이 텍스트만 뽑아 페이지 폭 절반 기준으로 findQuestionMarkers를
   // 한 번 돌려본다.
   const roughMarkerData = [];
@@ -2125,6 +2161,11 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, f
   const columnCropX = useColumnSplitOverride
     ? computeColumnCropX(pageMarkerData.map((d) => d.data))
     : null;
+  // perPageColumnCrop(스캔본 전용): 쪽마다 흔들리는 지면에 맞춰 크롭 x 를 쪽별로 잡는다.
+  // 값이 없는 쪽(우측 마커 둘 미만)은 위 문서값(없으면 지면 절반)으로 떨어진다.
+  const columnCropXByPage = perPageColumnCrop
+    ? computeColumnCropXByPage(pageMarkerData.map((d) => d.data))
+    : pageMarkerData.map(() => null);
   const columnMode =
     columnSplitX != null || pageMarkerData.some((d) => d.data.markers.some((m) => m.x >= d.data.pageWidthPt / 2))
       ? "double"
@@ -2181,7 +2222,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, f
           columnMode,
           columnSplitX,
           footerInkTopY: footerInkTopByPage[pageIdx],
-          columnCropX,
+          columnCropX: columnCropXByPage[pageIdx] ?? columnCropX,
           headerInkBottomY: headerInkBottomByPage[pageIdx],
           footerBaselineY: footerBaselineByPage[pageIdx],
         }),
@@ -2294,7 +2335,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, f
       columnMode,
       columnSplitX,
       footerInkTopByPage[p - 1],
-      columnCropX,
+      columnCropXByPage[p - 1] ?? columnCropX,
       headerInkBottomByPage[p - 1],
       handledNumbers,
       footerBaselineByPage[p - 1],
@@ -2339,7 +2380,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, f
 // 호출자와의 호환) 예전 방식이 에러 없이 끝나는 한 그대로 쓴다.
 export async function extractQuestionsFromPdf(
   pdfBuffer,
-  { scale = 3, onPage, expectedCount, textLayer, footerDetection = true } = {},
+  { scale = 3, onPage, expectedCount, textLayer, footerDetection = true, perPageColumnCrop = false } = {},
 ) {
   const realPdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
   // textLayer: 스캔본(텍스트 레이어 0자)을 위해 호출자가 OCR 로 만들어 넘긴 가짜
@@ -2350,7 +2391,7 @@ export async function extractQuestionsFromPdf(
   let legacyResult;
   let legacyError;
   try {
-    legacyResult = await extractWithStrategy(pdf, scale, onPage, false, footerDetection);
+    legacyResult = await extractWithStrategy(pdf, scale, onPage, false, footerDetection, perPageColumnCrop);
   } catch (err) {
     legacyError = err;
   }
@@ -2378,7 +2419,7 @@ export async function extractQuestionsFromPdf(
   let overrideResult;
   let overrideError;
   try {
-    overrideResult = await extractWithStrategy(pdf, scale, onPage, true, footerDetection);
+    overrideResult = await extractWithStrategy(pdf, scale, onPage, true, footerDetection, perPageColumnCrop);
   } catch (err) {
     overrideError = err;
   }
