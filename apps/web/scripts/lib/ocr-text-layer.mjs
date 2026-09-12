@@ -75,6 +75,33 @@ function isMarkerish(item) {
 }
 
 /**
+ * 조각 하나가 서 있는 자리를 크게 잘라 **숫자만** 읽는다. refineMarkers(마커 재확인)와
+ * rescueMissingMarkers(빠진 마커 재판독)가 같은 자르기를 쓴다 — 두 곳이 다르게 자르면
+ * 한쪽에서만 옆 글자가 딸려 들어와 결과가 어긋난다.
+ * @returns 읽힌 숫자 문자열(숫자 아닌 글자는 뺀 것). 못 읽으면 "".
+ */
+async function readSpotAsDigits(pngBuffer, item, digitWorker, ocrScale) {
+  const x = item.transform[4] * ocrScale;
+  const yBottom = item.transform[5] * ocrScale;
+  const h = item.height * ocrScale;
+  const w = item.width * ocrScale;
+  const pad = Math.round(h * 0.35);
+  const meta = await sharp(pngBuffer).metadata();
+  const left = Math.max(0, Math.round(x - pad));
+  const top = Math.max(0, Math.round(meta.height - yBottom - h - pad));
+  const width = Math.min(meta.width - left, Math.round(w + pad * 2));
+  const height = Math.min(meta.height - top, Math.round(h + pad * 2));
+  if (width <= 0 || height <= 0) return "";
+  const crop = await sharp(pngBuffer)
+    .extract({ left, top, width, height })
+    .resize({ width: width * 3 })
+    .png()
+    .toBuffer();
+  const { data } = await digitWorker.recognize(crop);
+  return (data.text ?? "").replace(/[^\d]/g, "");
+}
+
+/**
  * 마커 후보를 숫자 전용으로 다시 읽는다.
  *
  * 본문 OCR(kor+eng)은 굵은 문항 번호에서 실측으로 틀린다 — 50회 4쪽의 "15." 를
@@ -85,26 +112,8 @@ function isMarkerish(item) {
 async function refineMarkers(pngBuffer, items, digitWorker, ocrScale) {
   const candidates = items.filter(isMarkerish);
   if (candidates.length === 0) return;
-  const image = sharp(pngBuffer);
   for (const item of candidates) {
-    const x = item.transform[4] * ocrScale;
-    const yBottom = item.transform[5] * ocrScale;
-    const h = item.height * ocrScale;
-    const w = item.width * ocrScale;
-    const pad = Math.round(h * 0.35);
-    const meta = await image.metadata();
-    const left = Math.max(0, Math.round(x - pad));
-    const top = Math.max(0, Math.round(meta.height - yBottom - h - pad));
-    const width = Math.min(meta.width - left, Math.round(w + pad * 2));
-    const height = Math.min(meta.height - top, Math.round(h + pad * 2));
-    if (width <= 0 || height <= 0) continue;
-    const crop = await sharp(pngBuffer)
-      .extract({ left, top, width, height })
-      .resize({ width: width * 3 })
-      .png()
-      .toBuffer();
-    const { data } = await digitWorker.recognize(crop);
-    const read = (data.text ?? "").replace(/[^\d]/g, "");
+    const read = await readSpotAsDigits(pngBuffer, item, digitWorker, ocrScale);
     const original = MARKERISH_RE.exec(item.str)[1];
     // **자릿수가 같을 때만 후보로 인정한다.** 잘라낸 자리에 옆 글자가 조금이라도
     // 걸리면 숫자 전용 워커는 그것까지 숫자로 읽는다(실측 50회: "25." 자리가
@@ -252,53 +261,146 @@ function compareKeys(a, b) {
 }
 
 /**
- * 마커 열 안에서 **번호는 읽혔는데 마침표가 어긋나 버려진 마커**를 되살린다.
+ * 읽기 순서에서 **번호가 거꾸로 가는 마커**를 마커 자리에서 내린다.
  *
- * 실측(2026-09-12, 한능검 스캔본): 못 찾은 마커 대부분은 "아예 안 읽힌 것"이 아니라
- * 끝문자가 어긋나 마커 모양(`N.`)에 안 맞은 것이었다 — 79회 6번은 `"6"`(마침표가
- * 통째로 안 읽힘, 신뢰도 90), 78회 7번은 `"7),"`(마침표가 괄호+쉼표로, 신뢰도 47).
- * 지면에서는 둘 다 굵고 선명하다. `normalizeMarkerish` 는 끝문자 **한 개**짜리만
- * 되돌리므로 이 둘은 그대로 탈락했다.
+ * 문항 번호는 읽기 순서(페이지 → 왼쪽 칼럼 → 오른쪽 칼럼, 칼럼 안에서는 위 → 아래)로
+ * 반드시 1씩 늘어난다. 이 성질을 깨는 마커는 거의 전부 가짜다 — 실측 68회: 12쪽
+ * 머리글의 "12" 가 마커 열 x 에 걸쳐 `"12."` 로 읽혀 12번 자리를 차지했다. 진짜 12번은
+ * "빠진 번호"로 잡히지도 않았고(자리가 차 있으니), 13번은 앞뒤 번호가 뒤집혀 있어
+ * 찾을 구간 자체가 없었다. 61회의 "29번이 두 번" 도 같은 부류다.
  *
- * **끝문자 규칙을 전역으로 풀면 안 된다** — 마커 열에는 선지 원문자(①~⑤)가 `"(3)"`,
- * `"0)"` 처럼 읽힌 잡음이 함께 서 있어서, 숫자만 보고 주우면 가짜 마커가 섞인다
- * (그 사고의 결과가 "번호가 통째로 밀린 이미지"다 — 위 chooseMarkerNumbers 주석).
- * 그래서 네 조건을 **모두** 만족할 때만 되살린다:
- *
- *   1. 마커 열 안에 있을 것.
- *   2. 숫자로 **시작**할 것 (`"(3)"` 같은 선지 잡음은 여는 괄호에서 걸러진다).
- *      뒤에 붙은 기호는 두 글자까지 봐준다.
- *   3. 그 번호가 **빠진 번호와 정확히 같을** 것, 그리고 앞뒤 번호 사이의 읽기 순서
- *      자리에 있을 것. 후보가 둘 이상이면 손대지 않는다.
- *   4. 신뢰도가 마커 문턱 이상일 것 (다른 마커와 같은 기준).
- *
- * 빠진 번호가 많은 회차(= 인식이 통째로 나쁜 회차)에는 아예 손대지 않는다. 그런
- * 문제지에서 몇 개를 주워 개수만 맞추면 오히려 게이트를 통과해 버린다.
+ * 최장 증가 부분열(LIS)에 들지 못하는 마커를 내린다 — 가장 긴 사슬을 남기는 것이라
+ * 진짜 마커 49개 사이에 낀 가짜 하나는 사슬에 못 든다. 내릴 때는 마침표만 떼서
+ * (dropMarkersOutsideColumns 와 같은 방식) 조각의 위치 정보는 남긴다. 내려간 번호는
+ * 이어지는 rescueMissingMarkers 가 "빠진 번호"로 다시 찾는다.
  */
-const RESCUE_MAX_MISSING = 5;
-const RESCUABLE_RE = /^(\d{1,3})[^\w\s]{0,2}$/;
+function demoteOutOfOrderMarkers(pagesItems, ranges) {
+  if (ranges.length === 0) return 0;
+  const { slots } = markerSlotsInReadingOrder(pagesItems, ranges);
+  if (slots.length < 2) return 0;
 
-function rescueMissingMarkers(pagesItems, ranges, expectedMarkerCount) {
-  if (ranges.length === 0 || expectedMarkerCount == null) return 0;
+  // 엄격 증가 LIS — O(n log n), 되짚기용 prev 배열.
+  const tailIndex = []; // tailIndex[k] = 길이 k+1 인 사슬의 마지막 slot 인덱스(끝 번호 최소)
+  const prev = new Array(slots.length).fill(-1);
+  for (let i = 0; i < slots.length; i++) {
+    const n = slots[i].number;
+    let lo = 0;
+    let hi = tailIndex.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (slots[tailIndex[mid]].number < n) lo = mid + 1;
+      else hi = mid;
+    }
+    prev[i] = lo > 0 ? tailIndex[lo - 1] : -1;
+    tailIndex[lo] = i;
+  }
+  const keep = new Set();
+  for (let i = tailIndex[tailIndex.length - 1]; i !== -1; i = prev[i]) keep.add(i);
+
+  let demoted = 0;
+  slots.forEach((slot, i) => {
+    if (keep.has(i)) return;
+    slot.it.str = slot.it.str.slice(0, -1);
+    delete slot.it.alt;
+    demoted++;
+  });
+  return demoted;
+}
+
+/**
+ * 마커 열 안에서 **버려지거나 잘못 읽힌 마커**를 되살린다.
+ *
+ * 실측(2026-09-12, 한능검 스캔본): 못 찾은 마커는 "아예 안 읽힌 것"이 아니었다.
+ * 지면에서는 굵고 선명한데 OCR 결과가 마커 모양(`N.`)에 안 맞았을 뿐이다. 세 부류다:
+ *
+ *   (a) 번호는 읽혔는데 끝문자가 어긋남 — 79회 6번 `"6"`(마침표 미인식, 신뢰도 90),
+ *       78회 7번 `"7),"`, 61회 `"13"`·`"14"`, 60·55회 `"11"`. `normalizeMarkerish` 는
+ *       끝문자 한 개짜리만 되돌린다.
+ *   (b) 숫자가 글자로 읽힘 — 79회 8번 `"Or"`. 텍스트로는 못 살린다. 그 자리를 잘라
+ *       **숫자 전용으로 다시 읽으면** "8" 이 나온다(refineMarkers 와 같은 자르기).
+ *       (a) 인데 신뢰도가 문턱 아래인 것(59회 50번 `"50"` 신뢰도 26)도 이 길로 보낸다 —
+ *       재판독이 같은 번호를 내면 그것으로 확인된 것이다.
+ *   (c) 있을 수 없는 번호로 읽힌 마커 — 61회 `"465."`(문항 수 50 인데). 재판독하면
+ *       `"45."` 로, 빠진 번호와 정확히 맞는다.
+ *
+ * **규칙을 전역으로 풀면 안 된다** — 마커 열에는 선지 원문자(①~⑤)가 `"(3)"`, `"©"`
+ * 처럼 읽힌 잡음이 함께 서 있어서, 숫자만 보고 주우면 가짜 마커가 섞인다(그 사고의
+ * 결과가 "번호가 통째로 밀린 이미지"다 — 위 chooseMarkerNumbers 주석). 그래서 아래
+ * 조건을 **모두** 만족하는 후보가 **정확히 하나**일 때만 되살린다:
+ *
+ *   1. 마커 열 안(열 폭에 8pt 여유 — 스캔본은 쪽마다 좌우로 몇 pt 씩 흔들려서, 61회는
+ *      같은 칼럼의 마커 x 가 369·380·389 로 갈렸다)에 있고, 앞뒤 번호 사이의 읽기 순서
+ *      자리에 있을 것.
+ *   2. 읽힌 값이 **빠진 번호와 정확히 같을** 것 — (a)는 텍스트가 숫자로 시작해야
+ *      하고(`"(3)"` 은 여는 괄호에서 걸러진다) 뒤 기호는 두 글자까지, (b)(c)는 재판독
+ *      결과가 그 번호일 것.
+ *   3. 선지 무리가 아닐 것 — 같은 열 45pt 안에 다른 조각이 둘 이상 있으면 선지
+ *      묶음(①~⑤ 가 20pt 남짓 간격으로 선다)이라 보고 버린다. 마커는 발문 줄 하나뿐이라
+ *      그렇게 촘촘히 서지 않는다. 재판독 경로에는 마커와 비슷한 글자 크기도 요구한다.
+ *
+ * 빠진 번호가 많은 회차(= 인식이 통째로 나쁜 회차)에는 손대지 않는다. 그런 문제지에서
+ * 몇 개를 주워 개수만 맞추면 오히려 게이트를 통과해 버린다. 재판독 경로가 생기면서
+ * 상한을 5→8로 올렸다 — 하나하나 글리프를 다시 읽어 확인하므로 추측이 아니다.
+ * 업로드 전 두 게이트(개수 일치·찍힌 번호 대조)는 그대로다.
+ */
+const RESCUE_MAX_MISSING = 8;
+const RESCUABLE_RE = /^(\d{1,3})[^\w\s]{0,2}$/;
+const CHOICE_CLUSTER_PT = 45;
+const RESCUE_COLUMN_SLACK_PT = 8;
+
+function markerSlotsInReadingOrder(pagesItems, ranges, slackPt = 0) {
   const ordered = [...ranges].sort((a, b) => a[0] - b[0]);
   const columnOf = (x) => {
-    const i = ordered.findIndex(([lo, hi]) => x >= lo && x <= hi);
+    const i = ordered.findIndex(([lo, hi]) => x >= lo - slackPt && x <= hi + slackPt);
     return i === -1 ? -1 : i;
   };
-
-  const markerAt = new Map();
+  const slots = [];
   pagesItems.forEach((items, pageIndex) => {
     for (const it of items) {
       if (!isMarkerish(it)) continue;
-      const n = Number(MARKERISH_RE.exec(it.str)[1]);
-      if (markerAt.has(n)) continue;
-      markerAt.set(n, readingKey(pageIndex, columnOf(it.transform[4]), it.transform[5]));
+      const col = columnOf(it.transform[4]);
+      slots.push({
+        it,
+        number: Number(MARKERISH_RE.exec(it.str)[1]),
+        key: readingKey(pageIndex, col, it.transform[5]),
+      });
     }
   });
+  slots.sort((a, b) => compareKeys(a.key, b.key));
+  return { slots, columnOf };
+}
+
+async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWorker, ocrScale) {
+  if (ranges.length === 0 || expectedMarkerCount == null) return 0;
+  const pagesItems = pages.map((pg) => pg.items);
+  const { slots, columnOf } = markerSlotsInReadingOrder(pagesItems, ranges, RESCUE_COLUMN_SLACK_PT);
+
+  const markerAt = new Map();
+  const heights = [];
+  for (const s of slots) {
+    if (s.number > expectedMarkerCount) continue; // (c) 있을 수 없는 번호는 자리로 안 친다
+    if (!markerAt.has(s.number)) markerAt.set(s.number, s.key);
+    heights.push(s.it.height);
+  }
+  heights.sort((a, b) => a - b);
+  const medianHeight = heights[Math.floor(heights.length / 2)] ?? 0;
 
   const missing = [];
   for (let n = 1; n <= expectedMarkerCount; n++) if (!markerAt.has(n)) missing.push(n);
   if (missing.length === 0 || missing.length > RESCUE_MAX_MISSING) return 0;
+
+  // 같은 열에서 45pt 안에 다른 조각이 둘 이상 붙어 있으면 선지 묶음이다.
+  const inChoiceCluster = (items, it, col) => {
+    let neighbors = 0;
+    for (const other of items) {
+      if (other === it) continue;
+      if (columnOf(other.transform[4]) !== col) continue;
+      if (Math.abs(other.transform[5] - it.transform[5]) <= CHOICE_CLUSTER_PT) neighbors++;
+    }
+    return neighbors >= 2;
+  };
+  const markerSized = (it) =>
+    medianHeight > 0 && Math.abs(it.height - medianHeight) <= medianHeight * 0.5;
 
   let rescued = 0;
   for (const n of missing) {
@@ -307,26 +409,78 @@ function rescueMissingMarkers(pagesItems, ranges, expectedMarkerCount) {
     if (!before && !after) continue;
 
     const candidates = [];
-    pagesItems.forEach((items, pageIndex) => {
+    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+      const { items, png } = pages[pageIndex];
       for (const it of items) {
-        if (isMarkerish(it)) continue;
-        const m = RESCUABLE_RE.exec(it.str);
-        if (!m || Number(m[1]) !== n) continue;
-        if ((it.confidence ?? 100) < MARKER_MIN_CONFIDENCE) continue;
+        // 진짜 마커(범위 안 번호)는 후보가 아니다. 범위 밖 번호("465.")는 (c) 로 본다.
+        if (isMarkerish(it) && Number(MARKERISH_RE.exec(it.str)[1]) <= expectedMarkerCount) continue;
         const col = columnOf(it.transform[4]);
         if (col === -1) continue;
         const key = readingKey(pageIndex, col, it.transform[5]);
         if (before && compareKeys(key, before) <= 0) continue;
         if (after && compareKeys(key, after) >= 0) continue;
-        candidates.push({ it, key });
+        if (inChoiceCluster(items, it, col)) continue;
+
+        const m = RESCUABLE_RE.exec(it.str);
+        if (m && Number(m[1]) !== n) continue; // 숫자로 읽혔는데 다른 번호면 그 자리가 아니다
+        if (m && (it.confidence ?? 100) >= MARKER_MIN_CONFIDENCE) {
+          candidates.push({ it, key, how: "text" });
+          continue;
+        }
+        // (b)(c) 재판독 경로 — 글자 크기가 마커와 비슷한 조각만, 숫자 전용으로 다시 읽는다.
+        if (!digitWorker || !png || !markerSized(it)) continue;
+        if (/^\(/.test(it.str)) continue; // 선지 "(3)" 모양은 애초에 안 본다
+        const read = await readSpotAsDigits(png, it, digitWorker, ocrScale);
+        if (read !== String(n)) continue;
+        candidates.push({ it, key, how: "reread" });
       }
-    });
+    }
     if (candidates.length !== 1) continue;
     candidates[0].it.str = `${n}.`;
+    candidates[0].it.confidence = Math.max(candidates[0].it.confidence ?? 0, MARKER_MIN_CONFIDENCE);
     markerAt.set(n, candidates[0].key);
     rescued++;
   }
   return rescued;
+}
+
+/**
+ * 같은 번호가 두 번 읽힌 자리를 읽기 순서로 바로잡는다.
+ *
+ * demoteOutOfOrderMarkers 가 먼저 돌아 대부분의 중복은 이미 한쪽이 내려가 있다. 여기
+ * 남는 것은 "두 마커가 순서상 둘 다 말이 되는" 경우뿐이다(28, 29, 29, 30 에서 어느
+ * 29 도 사슬을 안 깨는 일은 없으니 실제로는 드물다). 재판독(refineMarkers)이 후보(alt)를
+ * 달아 두었으면 그것을 먼저 쓰고, 없으면 **앞뒤 번호가 정확히 가리키는 빠진 번호**일
+ * 때만 바꾼다. 그 밖의 경우는 손대지 않는다(개수 게이트가 막는다).
+ */
+function resolveDuplicateMarkers(pagesItems, ranges, expectedMarkerCount) {
+  if (ranges.length === 0 || expectedMarkerCount == null) return 0;
+  const { slots } = markerSlotsInReadingOrder(pagesItems, ranges);
+  const present = new Set(slots.map((s) => s.number));
+  let fixed = 0;
+  for (let i = 1; i < slots.length; i++) {
+    const a = slots[i - 1];
+    const b = slots[i];
+    if (a.number !== b.number) continue;
+    const altB = b.it.alt ? Number(MARKERISH_RE.exec(b.it.alt)[1]) : null;
+    const altA = a.it.alt ? Number(MARKERISH_RE.exec(a.it.alt)[1]) : null;
+    const next = slots[i + 1]?.number ?? expectedMarkerCount + 1;
+    const prev = slots[i - 2]?.number ?? 0;
+    const wantB = a.number + 1;
+    const wantA = b.number - 1;
+    if (!present.has(wantB) && wantB < next && (altB === wantB || altB === null)) {
+      b.it.str = `${wantB}.`;
+      b.number = wantB;
+      present.add(wantB);
+      fixed++;
+    } else if (!present.has(wantA) && wantA > prev && (altA === wantA || altA === null)) {
+      a.it.str = `${wantA}.`;
+      a.number = wantA;
+      present.add(wantA);
+      fixed++;
+    }
+  }
+  return fixed;
 }
 
 /**
@@ -395,8 +549,8 @@ function chooseMarkerNumbers(pagesItems, ranges, expectedMarkerCount) {
  * @param pdf pdfjs 문서 (getPage/numPages)
  * @param worker tesseract.js 워커 (호출자가 만들고 끝나면 terminate 한다 — 워커
  *   기동에 언어 데이터 로딩이 붙어 문제지마다 새로 만들면 그만큼 느려진다)
- * @param onRescue 끝문자가 어긋나 버려졌던 마커를 되살린 개수(rescueMissingMarkers).
- *   되살린 게 없으면 부르지 않는다.
+ * @param onRescue (되살린 마커 수, 중복 바로잡은 수, 순서 어긋나 내린 수). 모두 0 이면
+ *   부르지 않는다. (rescueMissingMarkers / resolveDuplicateMarkers / demoteOutOfOrderMarkers)
  * @returns Array<{ items: Array<{ str, transform, width, height }> }>
  */
 export async function buildOcrTextLayer(
@@ -468,8 +622,14 @@ export async function buildOcrTextLayer(
   dropMarkersOutsideColumns(itemsByPage, ranges);
   // 끝문자가 어긋나 버려진 마커를 좁은 조건으로만 되살린다(위 주석). 되살린 뒤에
   // 번호를 고르므로, 되살아난 자리도 읽기 순서 검사를 그대로 받는다.
-  const rescued = rescueMissingMarkers(itemsByPage, ranges, expectedMarkerCount);
-  if (rescued) onRescue?.(rescued);
+  // 읽기 순서를 거스르는 가짜 마커(머리글의 쪽 번호 등)를 먼저 내려야, 그 번호가 "빠진
+  // 번호"로 잡혀 진짜 자리를 찾는다(demoteOutOfOrderMarkers 주석의 68회).
+  const demoted = demoteOutOfOrderMarkers(itemsByPage, ranges);
+  const rescued = await rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWorker, OCR_SCALE);
+  // 같은 번호가 두 번 읽힌 자리는 되살리기 뒤에 본다 — 되살아난 마커가 앞뒤 번호를
+  // 채워 줘야 "정확히 가리키는 빠진 번호"를 판정할 수 있다.
+  const deduped = resolveDuplicateMarkers(itemsByPage, ranges, expectedMarkerCount);
+  if (rescued || deduped || demoted) onRescue?.(rescued, deduped, demoted);
   chooseMarkerNumbers(itemsByPage, ranges, expectedMarkerCount);
   // 렌더 결과는 여기서 버린다 — 호출자에게는 글자 조각만 넘긴다.
   return pages.map(({ items }) => ({ items }));

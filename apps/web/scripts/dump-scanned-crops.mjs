@@ -71,12 +71,16 @@ await digitWorker.setParameters({
 });
 
 let rescued = 0;
+let deduped = 0;
+let demoted = 0;
 const textLayer = await buildOcrTextLayer(pdf, worker, {
   digitWorker,
   sweepWorker,
   expectedMarkerCount: paper.question_count ?? undefined,
-  onRescue: (n) => {
+  onRescue: (n, d, x) => {
     rescued = n;
+    deduped = d ?? 0;
+    demoted = x ?? 0;
   },
 });
 await worker.terminate();
@@ -88,7 +92,9 @@ const cropped = await extractQuestionsFromPdf(pdfBuffer, {
   expectedCount: paper.question_count,
   textLayer,
 });
-console.log(`${paper.title}: ${cropped.length}/${paper.question_count}개 (되살린 마커 ${rescued}개)`);
+console.log(
+  `${paper.title}: ${cropped.length}/${paper.question_count}개 (되살린 마커 ${rescued}개, 중복 바로잡음 ${deduped}개, 순서 어긋나 내림 ${demoted}개)`,
+);
 
 for (const c of cropped) {
   const name = `${String(c.number).padStart(2, "0")}${c.groupNumbers ? `-세트(${c.groupNumbers.join(",")})` : ""}.png`;
