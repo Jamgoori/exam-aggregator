@@ -184,6 +184,40 @@ export async function ExamAllYearsList({ combo }: { combo: ExamCombo }) {
   );
 }
 
+/**
+ * 연도로 나누지 않은 전체 링크 목록 (한능검처럼 연도가 축이 아닌 시험용).
+ *
+ * 위 ExamAllYearsList 와 목적이 같다 — 정적 셸에 문제지로 가는 실제 `<a>` 를 남기는
+ * 것. 카드 그리드는 cookies 를 읽어 스트리밍되므로 크롤러가 받는 첫 HTML 에는 없다.
+ * 화면에서는 접어 두어(details) 같은 목록이 두 번 늘어서 보이지 않게 한다.
+ */
+export async function ExamAllPapersList({ combo }: { combo: ExamCombo }) {
+  const papers = await getExamAllPapers(combo.slug);
+  if (papers.length === 0) return null;
+
+  return (
+    <section className="mt-6 flex flex-col gap-3 border-t border-zinc-100 pt-6 dark:border-zinc-800">
+      <details className="group rounded-xl border border-zinc-200 dark:border-zinc-700">
+        <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+          {combo.label} 기출문제 전체 목록 {papers.length.toLocaleString()}건
+        </summary>
+        <ul className="grid grid-cols-1 gap-x-4 gap-y-1 border-t border-zinc-100 px-4 py-3 text-sm sm:grid-cols-2 lg:grid-cols-3 dark:border-zinc-800">
+          {papers.map((p) => (
+            <li key={p.id}>
+              <Link
+                href={paperHref(p)}
+                className="block truncate py-1 text-zinc-700 hover:text-blue-600 dark:text-zinc-300 dark:hover:text-blue-400"
+              >
+                {getPaperDisplayTitle(p.title, p.track)}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </section>
+  );
+}
+
 export function ExamPaperGridSkeleton({ count = 8 }: { count?: number }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
