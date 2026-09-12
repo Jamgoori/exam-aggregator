@@ -25,6 +25,29 @@ import sharp from "sharp";
 // 통째로 못 올리므로 시간보다 인식률이 먼저다.
 const OCR_SCALE = 4;
 
+// **OCR 상자의 아랫변은 baseline 이 아니다.** pdfjs 의 y 는 진짜 baseline 이라 g·쉼표
+// 같은 디센더가 그 아래로 내려가는데, OCR 이 주는 상자의 아랫변은 그 줄 잉크의 맨
+// 아래다. 그대로 baseline 이라고 넘기면 "본문 첫 줄이 속한 잉크 덩어리는 baseline
+// 아래까지 이어진다"는 크롭 쪽 전제(crop-question-images.mjs 의 dropInkAboveBaseline)가
+// 깨진다 — 그 줄이 baseline 위에서 끝나 버리므로 **머리글 잡음으로 몰려 통째로
+// 지워진다**. 실측 78회: 50문항 중 36개가 발문 줄을 잃고 지문 상자부터 시작했다
+// (개수 게이트는 통과하고 번호 대조 게이트에서 14/50 으로 걸렸다).
+//
+// 그래서 상자 아랫변에서 이만큼을 **글리프 안쪽으로 올려** baseline 으로 삼는다(진짜
+// baseline 이 디센더 위에 있는 것과 같은 자리). 그러면 그 줄의 잉크가 baseline 아래로
+// 내려가므로 위 전제가 성립한다. 같은 양을 height 에서 빼 두므로 "잉크 윗선"
+// (y + height)은 변하지 않는다 — 크롭 경계 계산은 그대로 두고 baseline 의 의미만
+// pdfjs 와 맞추는 것이다.
+//
+// **부호를 거꾸로 하면 더 나빠진다**(실측): baseline 을 아래로 내리면 덩어리가 그보다
+// 더 아래까지 이어져야 살아남으므로, 멀쩡하던 줄까지 지워진다(78회 9번이 그렇게 죽었다).
+//
+// **비율(글자 높이의 %)로 옮기면 안 된다**(실측): 같은 줄이라도 글자 크기가 다르면
+// 이동량이 달라져 크롭 쪽의 줄 묶기가 흐트러지고, 그러면 문항 아래 경계가 한 줄
+// 위로 올라가 **마지막 선지가 통째로 잘린다**(78회 25번 ⑤가 그렇게 사라졌다).
+// 고정값이라야 상대 기하가 그대로 보존된다. 글자가 이보다 작으면 높이의 40% 로 줄인다.
+const DESCENDER_PT = 1.5;
+
 // 문항 마커 끝의 마침표가 쉼표로 읽히는 일이 잦다(실측 50회: "9," "11," "49,"
 // — 굵은 번호 뒤 마침표가 베이스라인 아래로 번진다). 마커 정규식은 "N." 만
 // 인정하므로 이 한 글자 때문에 문항이 통째로 사라진다. 숫자 1~3자리 + 종결
@@ -202,18 +225,108 @@ async function sweepMarkerColumns(pngBuffer, items, sweepWorker, ranges, ocrScal
 
     for (const w of found) {
       const x = (left + w.bbox.x0) / ocrScale;
-      const yHere = (meta.height - w.bbox.y1) / ocrScale;
+      // 전면 OCR 조각과 같은 규약으로 맞춘다(디센더 몫만큼 내린 baseline).
+      const heightPt = (w.bbox.y1 - w.bbox.y0) / ocrScale;
+      const descender = Math.min(DESCENDER_PT, heightPt * 0.4);
+      const yHere = (meta.height - w.bbox.y1) / ocrScale + descender;
       if (existing.some((it) => Math.abs(it.transform[5] - yHere) <= 5)) continue;
-      const yBottom = (meta.height - w.bbox.y1) / ocrScale;
       items.push({
         str: `${Number(w.text.replace(/\D/g, ""))}.`,
-        transform: [1, 0, 0, 1, x, yBottom],
+        transform: [1, 0, 0, 1, x, yHere],
         width: (w.bbox.x1 - w.bbox.x0) / ocrScale,
-        height: (w.bbox.y1 - w.bbox.y0) / ocrScale,
+        height: heightPt - descender,
         confidence: w.confidence,
       });
     }
   }
+}
+
+/** 읽기 순서(페이지 → 왼쪽 칼럼 → 오른쪽 칼럼, 칼럼 안에서는 위 → 아래) 비교용 키. */
+function readingKey(page, columnIndex, y) {
+  return [page, columnIndex, -y];
+}
+
+function compareKeys(a, b) {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+
+/**
+ * 마커 열 안에서 **번호는 읽혔는데 마침표가 어긋나 버려진 마커**를 되살린다.
+ *
+ * 실측(2026-09-12, 한능검 스캔본): 못 찾은 마커 대부분은 "아예 안 읽힌 것"이 아니라
+ * 끝문자가 어긋나 마커 모양(`N.`)에 안 맞은 것이었다 — 79회 6번은 `"6"`(마침표가
+ * 통째로 안 읽힘, 신뢰도 90), 78회 7번은 `"7),"`(마침표가 괄호+쉼표로, 신뢰도 47).
+ * 지면에서는 둘 다 굵고 선명하다. `normalizeMarkerish` 는 끝문자 **한 개**짜리만
+ * 되돌리므로 이 둘은 그대로 탈락했다.
+ *
+ * **끝문자 규칙을 전역으로 풀면 안 된다** — 마커 열에는 선지 원문자(①~⑤)가 `"(3)"`,
+ * `"0)"` 처럼 읽힌 잡음이 함께 서 있어서, 숫자만 보고 주우면 가짜 마커가 섞인다
+ * (그 사고의 결과가 "번호가 통째로 밀린 이미지"다 — 위 chooseMarkerNumbers 주석).
+ * 그래서 네 조건을 **모두** 만족할 때만 되살린다:
+ *
+ *   1. 마커 열 안에 있을 것.
+ *   2. 숫자로 **시작**할 것 (`"(3)"` 같은 선지 잡음은 여는 괄호에서 걸러진다).
+ *      뒤에 붙은 기호는 두 글자까지 봐준다.
+ *   3. 그 번호가 **빠진 번호와 정확히 같을** 것, 그리고 앞뒤 번호 사이의 읽기 순서
+ *      자리에 있을 것. 후보가 둘 이상이면 손대지 않는다.
+ *   4. 신뢰도가 마커 문턱 이상일 것 (다른 마커와 같은 기준).
+ *
+ * 빠진 번호가 많은 회차(= 인식이 통째로 나쁜 회차)에는 아예 손대지 않는다. 그런
+ * 문제지에서 몇 개를 주워 개수만 맞추면 오히려 게이트를 통과해 버린다.
+ */
+const RESCUE_MAX_MISSING = 5;
+const RESCUABLE_RE = /^(\d{1,3})[^\w\s]{0,2}$/;
+
+function rescueMissingMarkers(pagesItems, ranges, expectedMarkerCount) {
+  if (ranges.length === 0 || expectedMarkerCount == null) return 0;
+  const ordered = [...ranges].sort((a, b) => a[0] - b[0]);
+  const columnOf = (x) => {
+    const i = ordered.findIndex(([lo, hi]) => x >= lo && x <= hi);
+    return i === -1 ? -1 : i;
+  };
+
+  const markerAt = new Map();
+  pagesItems.forEach((items, pageIndex) => {
+    for (const it of items) {
+      if (!isMarkerish(it)) continue;
+      const n = Number(MARKERISH_RE.exec(it.str)[1]);
+      if (markerAt.has(n)) continue;
+      markerAt.set(n, readingKey(pageIndex, columnOf(it.transform[4]), it.transform[5]));
+    }
+  });
+
+  const missing = [];
+  for (let n = 1; n <= expectedMarkerCount; n++) if (!markerAt.has(n)) missing.push(n);
+  if (missing.length === 0 || missing.length > RESCUE_MAX_MISSING) return 0;
+
+  let rescued = 0;
+  for (const n of missing) {
+    const before = markerAt.get(n - 1) ?? null;
+    const after = markerAt.get(n + 1) ?? null;
+    if (!before && !after) continue;
+
+    const candidates = [];
+    pagesItems.forEach((items, pageIndex) => {
+      for (const it of items) {
+        if (isMarkerish(it)) continue;
+        const m = RESCUABLE_RE.exec(it.str);
+        if (!m || Number(m[1]) !== n) continue;
+        if ((it.confidence ?? 100) < MARKER_MIN_CONFIDENCE) continue;
+        const col = columnOf(it.transform[4]);
+        if (col === -1) continue;
+        const key = readingKey(pageIndex, col, it.transform[5]);
+        if (before && compareKeys(key, before) <= 0) continue;
+        if (after && compareKeys(key, after) >= 0) continue;
+        candidates.push({ it, key });
+      }
+    });
+    if (candidates.length !== 1) continue;
+    candidates[0].it.str = `${n}.`;
+    markerAt.set(n, candidates[0].key);
+    rescued++;
+  }
+  return rescued;
 }
 
 /**
@@ -282,9 +395,15 @@ function chooseMarkerNumbers(pagesItems, ranges, expectedMarkerCount) {
  * @param pdf pdfjs 문서 (getPage/numPages)
  * @param worker tesseract.js 워커 (호출자가 만들고 끝나면 terminate 한다 — 워커
  *   기동에 언어 데이터 로딩이 붙어 문제지마다 새로 만들면 그만큼 느려진다)
+ * @param onRescue 끝문자가 어긋나 버려졌던 마커를 되살린 개수(rescueMissingMarkers).
+ *   되살린 게 없으면 부르지 않는다.
  * @returns Array<{ items: Array<{ str, transform, width, height }> }>
  */
-export async function buildOcrTextLayer(pdf, worker, { onPage, digitWorker, sweepWorker, expectedMarkerCount } = {}) {
+export async function buildOcrTextLayer(
+  pdf,
+  worker,
+  { onPage, onRescue, digitWorker, sweepWorker, expectedMarkerCount } = {},
+) {
   const pages = [];
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
@@ -307,16 +426,24 @@ export async function buildOcrTextLayer(pdf, worker, { onPage, digitWorker, swee
             const text = (word.text ?? "").trim();
             if (!text) continue;
             const { x0, y0, x1, y1 } = word.bbox;
+            // pdfjs 조각과 같은 규약: transform[4]=x, transform[5]=baseline y,
+            // 좌표계 원점은 지면 왼쪽 아래. OCR 은 왼쪽 위 기준 상자를 주므로 아래
+            // 변(y1)에서 디센더 몫만큼 글리프 안쪽으로 올려 baseline 으로 삼는다(위 DESCENDER_PT).
+            const heightPt = (y1 - y0) / OCR_SCALE;
+            const descender = Math.min(DESCENDER_PT, heightPt * 0.4);
             items.push({
               str: normalizeMarkerish(text),
-              // pdfjs 조각과 같은 규약: transform[4]=x, transform[5]=baseline y,
-              // 좌표계 원점은 지면 왼쪽 아래. OCR 은 왼쪽 위 기준 상자를 주므로
-              // 아래 변(y1)을 baseline 으로 본다(디센더만큼의 오차는 이 로직이
-              // 쓰는 허용오차 안이다).
-              transform: [1, 0, 0, 1, x0 / OCR_SCALE, (viewport.height - y1) / OCR_SCALE],
+              transform: [
+                1,
+                0,
+                0,
+                1,
+                x0 / OCR_SCALE,
+                (viewport.height - y1) / OCR_SCALE + descender,
+              ],
               width: (x1 - x0) / OCR_SCALE,
               confidence: word.confidence ?? 0,
-              height: (y1 - y0) / OCR_SCALE,
+              height: heightPt - descender,
             });
           }
         }
@@ -339,6 +466,10 @@ export async function buildOcrTextLayer(pdf, worker, { onPage, digitWorker, swee
 
   const ranges = markerColumnRanges(itemsByPage);
   dropMarkersOutsideColumns(itemsByPage, ranges);
+  // 끝문자가 어긋나 버려진 마커를 좁은 조건으로만 되살린다(위 주석). 되살린 뒤에
+  // 번호를 고르므로, 되살아난 자리도 읽기 순서 검사를 그대로 받는다.
+  const rescued = rescueMissingMarkers(itemsByPage, ranges, expectedMarkerCount);
+  if (rescued) onRescue?.(rescued);
   chooseMarkerNumbers(itemsByPage, ranges, expectedMarkerCount);
   // 렌더 결과는 여기서 버린다 — 호출자에게는 글자 조각만 넘긴다.
   return pages.map(({ items }) => ({ items }));
