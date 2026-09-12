@@ -1116,6 +1116,21 @@ async function makePageContext(page, markerData, scale, opts) {
     const baselinePx = Math.round((regionTopPt - anchorY) * scale);
     if (baselinePx <= 0) return raw;
     const cleaned = await dropInkAboveBaseline(raw, baselinePx, Math.round(TOP_JUNK_MAX_PT * scale));
+    if (process.env.CROP_DEBUG && cleaned) {
+      const before = (await sharp(raw).metadata()).height;
+      const after = (await sharp(cleaned).metadata()).height;
+      if (after !== before) {
+        console.error(
+          `[crop]   dropTopJunk: regionTop=${regionTopPt.toFixed(1)} anchorY=${anchorY.toFixed(1)} baselinePx=${baselinePx} → ${before}px → ${after}px (${before - after}px 걷어냄)`,
+        );
+        // CROP_DEBUG 가 디렉터리면 걷어내기 전 원본을 남긴다(anchorY 로 파일명).
+        if (process.env.CROP_DEBUG.length > 1) {
+          const { writeFileSync, existsSync } = await import("node:fs");
+          if (existsSync(process.env.CROP_DEBUG))
+            writeFileSync(`${process.env.CROP_DEBUG}/raw-y${anchorY.toFixed(0)}.png`, raw);
+        }
+      }
+    }
     return cleaned ?? raw;
   }
 
@@ -1438,6 +1453,11 @@ async function cropQuestionsFromPage(
       const override = topOverrideByNumber.get(marker.number);
       const top = override ?? topBoundaryFor(colDef.key, marker);
       const bottom = findBottomBoundary(colDef, marker.y);
+      // CROP_DEBUG=1: 문항마다 고른 경계를 stderr 에 찍는다(왜 이렇게 잘렸는지 볼 때).
+      if (process.env.CROP_DEBUG)
+        console.error(
+          `[crop] ${marker.number}번 col=${colDef.key} marker y=${marker.y.toFixed(1)} h=${(marker.height ?? 0).toFixed(1)} top=${top.toFixed(1)}${override ? "(override)" : ""} bottom=${bottom.toFixed(1)}`,
+        );
 
       // topOverride 가 걸린 문항(안내문 바로 아래 첫 문제)은 크롭이 **안내문 바로
       // 밑에서** 시작한다 — 마커 위쪽도 이 문항의 내용이므로 위쪽 잉크를 걷어내면

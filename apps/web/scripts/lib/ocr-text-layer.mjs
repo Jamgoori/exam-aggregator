@@ -46,7 +46,12 @@ const OCR_SCALE = 4;
 // 이동량이 달라져 크롭 쪽의 줄 묶기가 흐트러지고, 그러면 문항 아래 경계가 한 줄
 // 위로 올라가 **마지막 선지가 통째로 잘린다**(78회 25번 ⑤가 그렇게 사라졌다).
 // 고정값이라야 상대 기하가 그대로 보존된다. 글자가 이보다 작으면 높이의 40% 로 줄인다.
-const DESCENDER_PT = 1.5;
+//
+// **4pt 다.** 1.5pt 로 두었더니 잉크 아랫변 실측이 1~2pt 만 어긋나도(실측 59회 25번:
+// 실측 440.8, 실제 443.0) baseline 이 잉크 밖으로 나가 발문 줄이 통째로 걷혔다.
+// 4pt 면 10~14pt 글자의 몸통 안(x-height 구간)이라 그 정도 오차는 삼킨다. 줄 단위로
+// 같은 값을 쓰므로 상대 기하는 그대로고, 잉크 윗선(y + height)도 변하지 않는다.
+const DESCENDER_PT = 4;
 
 // 문항 마커 끝의 마침표가 쉼표로 읽히는 일이 잦다(실측 50회: "9," "11," "49,"
 // — 굵은 번호 뒤 마침표가 베이스라인 아래로 번진다). 마커 정규식은 "N." 만
@@ -82,8 +87,12 @@ function isMarkerish(item) {
  */
 async function readSpotAsDigits(pngBuffer, item, digitWorker, ocrScale) {
   const x = item.transform[4] * ocrScale;
-  const yBottom = item.transform[5] * ocrScale;
-  const h = item.height * ocrScale;
+  // 조각의 baseline 은 상자 아랫변에서 DESCENDER_PT 만큼 글리프 안쪽으로 올려 둔 값이고
+  // height 는 그만큼 줄어 있다(buildOcrTextLayer). 자를 상자는 그 이전의 상자여야 한다 —
+  // 올린 값 그대로 자르면 숫자 아랫동강이 잘려 재판독이 틀린다(실측: DESCENDER_PT 를
+  // 1.5→4 로 올리자 59회·65회 되살리기가 사라졌다).
+  const yBottom = (item.transform[5] - DESCENDER_PT) * ocrScale;
+  const h = (item.height + DESCENDER_PT) * ocrScale;
   const w = item.width * ocrScale;
   const pad = Math.round(h * 0.35);
   const meta = await sharp(pngBuffer).metadata();
@@ -535,6 +544,20 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
       }
     }
     dbg(`  후보 ${candidates.length}개: ${candidates.map((c) => `${c.how} "${c.it.str}" ${JSON.stringify(c.key)}`).join(" | ")}`);
+    if (candidates.length === 0 && digitWorker && n > 5) {
+      // (d) 조각이 아예 없는 자리 — 두 OCR 패스가 그 낱말을 하나도 내놓지 않은 경우
+      // (실측 65회 7번, 64회 20번: 지면에는 또렷한데 조각 0개). 앞뒤 번호 사이의 마커
+      // 띠만 3배로 키워 숫자 전용으로 다시 읽고, 빠진 번호와 **정확히** 같은 낱말이
+      // 하나뿐일 때만 그 자리에 마커를 만든다. 1~5 는 선지 원문자와 헷갈릴 수 있어
+      // 이 길로는 안 만든다.
+      const found = await rereadGapForNumber(pages, ranges, before, after, n, digitWorker, ocrScale, columnOf);
+      if (found) {
+        markerAt.set(n, found.key);
+        rescued++;
+        dbg(`  띠 재판독으로 되살림: p${found.key[0] + 1} y=${(-found.key[2]).toFixed(0)}`);
+      }
+      continue;
+    }
     if (candidates.length !== 1) continue;
     candidates[0].it.str = `${n}.`;
     candidates[0].it.confidence = Math.max(candidates[0].it.confidence ?? 0, MARKER_MIN_CONFIDENCE);
@@ -542,6 +565,94 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
     rescued++;
   }
   return rescued;
+}
+
+/**
+ * 앞뒤 번호 사이의 마커 띠에서 **픽셀로** 글리프를 찾아 빠진 번호를 읽는다(rescueMissingMarkers (d)).
+ *
+ * OCR 로 띠를 다시 읽는 방식은 안 됐다(실측 65회 7번: 지면에 또렷한 "7." 을 전면 OCR·
+ * 띠 훑기·3배 확대 재판독 모두 낱말로 내놓지 않았고, 띠를 토막 내면 아무것도 안 읽는다).
+ * 그래서 띠 안의 세로 잉크 덩어리를 직접 찾아 마커 글리프 크기(8~22pt)인 것만 골라
+ * 한 덩어리씩 숫자 전용으로 읽는다.
+ *
+ * 훑을 구간: 앞 번호와 뒤 번호가 같은 쪽·같은 열이면 그 사이. 열이나 쪽이 바뀌면
+ * 앞 번호 아래(그 열 끝까지)와 뒤 번호 위(그 열 처음부터) 두 토막.
+ * @returns { key } 만든 마커의 읽기 순서 키. 못 찾거나 둘 이상이면 null.
+ */
+async function rereadGapForNumber(pages, ranges, before, after, n, digitWorker, ocrScale, columnOf) {
+  const ordered = [...ranges].sort((a, b) => a[0] - b[0]);
+  // 마커 글리프가 서는 띠: 열 왼쪽 4pt 앞에서 18pt 폭. 선지 원문자(①~⑤)는 열보다
+  // 18pt 남짓 오른쪽에 서므로(실측 65회: 마커 x≈49, 원문자 x≈60) 이 폭으로 갈린다.
+  const BAND_LEFT_PT = 4;
+  const BAND_WIDTH_PT = 18;
+  const MIN_H_PT = 8;
+  const MAX_H_PT = 22;
+  const segments = [];
+  const pageHeightOf = (i) => pages[i].heightPt ?? 0;
+  if (before && after && before[0] === after[0] && before[1] === after[1]) {
+    segments.push({ page: before[0], col: before[1], yTop: -before[2] - 2, yBottom: -after[2] + 4 });
+  } else {
+    if (before && before[1] >= 0 && before[1] < ordered.length)
+      segments.push({ page: before[0], col: before[1], yTop: -before[2] - 2, yBottom: pageHeightOf(before[0]) * 0.05 });
+    if (after && after[1] >= 0 && after[1] < ordered.length)
+      segments.push({ page: after[0], col: after[1], yTop: pageHeightOf(after[0]) * 0.93, yBottom: -after[2] + 4 });
+  }
+
+  const hits = [];
+  for (const seg of segments) {
+    const { png, items, heightPt } = pages[seg.page];
+    if (!png || !heightPt || seg.yTop - seg.yBottom < 8) continue;
+    const [lo] = ordered[seg.col];
+    const { data: px, info } = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true });
+    const left = Math.max(0, Math.round((lo - BAND_LEFT_PT) * ocrScale));
+    const right = Math.min(info.width - 1, Math.round((lo - BAND_LEFT_PT + BAND_WIDTH_PT) * ocrScale));
+    const top = Math.max(0, Math.round((heightPt - seg.yTop) * ocrScale));
+    const bottom = Math.min(info.height - 1, Math.round((heightPt - seg.yBottom) * ocrScale));
+    if (right <= left || bottom <= top) continue;
+
+    // 띠 안에서 세로로 이어진 잉크 덩어리(행 구간)를 찾는다. 마커 글리프 높이만 남긴다.
+    const rowHasInk = (y) => {
+      const row = y * info.width;
+      for (let x = left; x <= right; x++) if (px[row + x] < 160) return true;
+      return false;
+    };
+    let y = top;
+    while (y <= bottom) {
+      while (y <= bottom && !rowHasInk(y)) y++;
+      if (y > bottom) break;
+      const start = y;
+      while (y <= bottom && rowHasInk(y)) y++;
+      const end = y - 1;
+      const hPt = (end - start + 1) / ocrScale;
+      if (hPt < MIN_H_PT || hPt > MAX_H_PT) continue;
+      // 이 덩어리만 넉넉히 잘라 숫자 전용(한 낱말)으로 읽는다 — readSpotAsDigits 와 같은 규약.
+      // readSpotAsDigits 는 baseline·height 에 DESCENDER_PT 가 반영된 조각을 기대한다.
+      const item = {
+        str: "",
+        transform: [1, 0, 0, 1, (lo - BAND_LEFT_PT), (info.height - (end + 1)) / ocrScale + DESCENDER_PT],
+        width: BAND_WIDTH_PT + 6,
+        height: hPt - DESCENDER_PT,
+      };
+      const read = await readSpotAsDigits(png, item, digitWorker, ocrScale);
+      if (read !== String(n)) continue;
+      hits.push({
+        seg,
+        items,
+        item: {
+          str: `${n}.`,
+          transform: [1, 0, 0, 1, lo, (info.height - (end + 1)) / ocrScale + DESCENDER_PT],
+          width: BAND_WIDTH_PT,
+          height: hPt - DESCENDER_PT,
+          confidence: MARKER_MIN_CONFIDENCE,
+          fromSweep: true,
+        },
+      });
+    }
+  }
+  if (hits.length !== 1) return null;
+  const hit = hits[0];
+  hit.items.push(hit.item);
+  return { key: readingKey(hit.seg.page, columnOf(hit.item.transform[4]), hit.item.transform[5]) };
 }
 
 /**
@@ -677,6 +788,36 @@ export async function buildOcrTextLayer(
 
     const png = canvas.toBuffer("image/png");
     const { data } = await worker.recognize(png, {}, { blocks: true });
+    // 줄의 **진짜 잉크 아랫변**을 재기 위한 회색조 래스터. tesseract 의 낱말 상자 아랫변은
+    // 실제 잉크보다 몇 pt 아래로 처지는 일이 있어(실측 59회 25번: 상자 아랫변 440.0,
+    // 잉크 아랫변 ≈444) 그 값을 baseline 으로 넘기면 크롭 쪽 dropInkAboveBaseline 이
+    // "이 줄은 baseline 위에서 끝난다"고 보고 발문 줄을 통째로 걷어낸다. 고정 1.5pt
+    // 들어올리기로는 못 넘는 오차라, 상자 근처를 직접 훑어 잉크가 끝나는 행을 쓴다.
+    const gray = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true });
+    const inkBottomPx = (x0, x1, yFrom, yTo) => {
+      const { data: px, info } = gray;
+      const left = Math.max(0, Math.floor(x0));
+      const right = Math.min(info.width - 1, Math.ceil(x1));
+      const lo = Math.max(0, Math.floor(yFrom));
+      const hi = Math.min(info.height - 1, Math.ceil(yTo));
+      if (hi < lo || right < left) return null;
+      // **세로 실선 열은 빼고 본다.** 칼럼 사이 구분선이 낱말 상자 안에 걸치면(실측 59회
+      // 25번 "25." — 구분선 x≈373~376 이 상자 x0 안쪽) 그 열은 창 전체가 잉크라 훑는
+      // 즉시 창 맨 아래에서 "잉크"를 찾아 상자 아랫변을 그대로 돌려준다. 창 높이의
+      // 90% 넘게 잉크인 열은 글자가 아니라 선이다.
+      const rows = hi - lo + 1;
+      const skip = new Uint8Array(right - left + 1);
+      for (let x = left; x <= right; x++) {
+        let n = 0;
+        for (let y = lo; y <= hi; y++) if (px[y * info.width + x] < 160) n++;
+        if (n >= rows * 0.9) skip[x - left] = 1;
+      }
+      for (let y = hi; y >= lo; y--) {
+        const row = y * info.width;
+        for (let x = left; x <= right; x++) if (!skip[x - left] && px[row + x] < 160) return y;
+      }
+      return null;
+    };
 
     const items = [];
     for (const block of data.blocks ?? []) {
@@ -693,16 +834,40 @@ export async function buildOcrTextLayer(
           // (머리글의 큰 글자 등)은 제 값을 지킨다 — 최댓값으로 맞추면 그런 낱말 하나가
           // 줄 전체를 끌어내려 띠 훑기의 같은 자리 판정(5pt)까지 어긋난다. 아랫변만
           // 옮기고 윗변은 그대로 두므로 "잉크 윗선"(y + height)은 낱말마다 변하지 않는다.
-          const bottoms = (line.words ?? [])
+          // 낱말마다 **제 x 범위 안에서** 잉크가 끝나는 행을 잰다(상자 아랫변에서 위로 글자
+          // 높이의 60%, 아래로 3px). 줄 전체 x 범위로 재면 안 된다 — 발문 바로 아래 말풍선의
+          // 점선 윗변이 그 범위에 걸려 "잉크 아랫변"으로 잡히고, 상자가 9pt 처진 줄(59회
+          // 25번)이 그대로 남아 발문이 걷혀 나갔다. 마커 "25." 의 x 범위(380~400)에는
+          // 말풍선이 없으니 낱말별로 재면 제값이 나온다. 줄의 아랫변은 그 중앙값.
+          const measuredBottoms = (line.words ?? [])
             .filter((w) => (w.text ?? "").trim())
-            .map((w) => w.bbox.y1)
+            .map((w) => {
+              const span = Math.max(4, w.bbox.y1 - w.bbox.y0);
+              const m = inkBottomPx(w.bbox.x0, w.bbox.x1, w.bbox.y1 - span * 0.6, w.bbox.y1 + 3);
+              return m === null ? w.bbox.y1 : m + 1; // 잉크 마지막 행 바로 아래 = 아랫변
+            })
             .sort((a, b) => a - b);
-          const lineBottom = bottoms.length ? bottoms[Math.floor(bottoms.length / 2)] : null;
-          const SNAP_PX = 4 * OCR_SCALE;
+          const lineBottom = measuredBottoms.length
+            ? measuredBottoms[Math.floor(measuredBottoms.length / 2)]
+            : null;
+          // 6pt: 상자 아랫변이 잉크보다 4~5pt 처진 낱말(위 59회 25번)까지 실측값으로 끌어와야
+          // 한다. 그보다 더 벗어난 낱말(머리글의 큰 글자 등)은 제 값을 지킨다.
+          const SNAP_PX = 6 * OCR_SCALE;
 
           for (const word of line.words ?? []) {
             const text = (word.text ?? "").trim();
             if (!text) continue;
+            // **글자·숫자·원문자 흔적이 없는 부스러기는 넣지 않는다.** 칼럼 사이 세로
+            // 구분선·지문 상자 테두리가 ":" "|" "ㅣ" "]" "." 같은 조각으로 지면 곳곳에
+            // 읽히는데, 크롭 쪽은 이것도 "줄"로 세어 줄간격 중앙값이 몇 pt 로 내려앉는다.
+            // 그러면 꼬리말 판정(본문과 줄간격의 2.1배 넘게 떨어진 한두 줄)이 마지막
+            // 선지 줄에 걸려, 칼럼 마지막 문항의 ⑤ 가 꼬리말로 잘려 나갔다(실측 69회 2번).
+            // 되살리기의 선지 묶음 판정도 같은 부스러기에 흔들렸다(60회 11번).
+            if (!/[0-9A-Za-z가-힣ㄱ-ㅎ①-⑳⑴-⒇©®@()\[\]~∼～]/.test(text)) continue;
+            // 높이 3pt 미만은 글자가 아니라 글리프 윗동강·얼룩이다(실측 59회 25번: 발문 줄
+            // 11pt 위에 h=1.4~1.6 짜리 "ao" "vo]" "mall" 이 따로 읽혀 가짜 줄이 되고, 그
+            // 줄이 크롭 위 경계를 흐트러뜨려 발문이 통째로 빠졌다). 본문 글자는 5pt 넘는다.
+            if ((word.bbox.y1 - word.bbox.y0) / OCR_SCALE < 3) continue;
             const { x0, y0, x1 } = word.bbox;
             const y1 =
               lineBottom !== null && Math.abs(word.bbox.y1 - lineBottom) <= SNAP_PX

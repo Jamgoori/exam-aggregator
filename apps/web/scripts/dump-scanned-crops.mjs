@@ -119,7 +119,9 @@ async function sheet(numbers, file) {
     .png()
     .toFile(path.join(outDir, file));
 }
-await sheet([1, 2, 3, 4], "병합-1-4.png");
-await sheet([7, 8, 9, 10], "병합-7-10.png");
-await sheet([25, 26, 27], "병합-25-27.png");
+// 전 문항을 다섯 개씩 병합해 둔다 — 눈으로 전수 확인할 때 한 장에 다섯 문항.
+for (let start = 1; start <= paper.question_count; start += 5) {
+  const numbers = Array.from({ length: 5 }, (_, i) => start + i).filter((n) => n <= paper.question_count);
+  await sheet(numbers, `병합-${String(start).padStart(2, "0")}-${String(numbers[numbers.length - 1]).padStart(2, "0")}.png`);
+}
 console.log(outDir);
