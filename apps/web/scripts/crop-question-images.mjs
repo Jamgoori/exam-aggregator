@@ -274,6 +274,9 @@ function findAnnotationLines(items, half) {
       height: line.height,
       text,
       indices: sorted.map((p) => p.idx),
+      // 이웃 줄과 x 순서로 다시 엮어 볼 때 쓴다 (아래 "베이스라인이 몇 pt 어긋난
+      // 안내문" 처리). 여기 조각을 그대로 들고 있어야 합쳐진 줄도 x 순서가 맞는다.
+      parts: sorted.map((p) => ({ x: p.x, str: p.str, idx: p.idx })),
     });
     const inked = sorted.filter((p) => p.str.trim());
     if (inked.length > 0) {
@@ -303,6 +306,13 @@ function findAnnotationLines(items, half) {
   for (const [col, arr] of linesByCol) {
     for (let i = 0; i < arr.length; i++) {
       const line = arr[i];
+      // 이 줄의 조각이 앞선 안내문 처리에 이미 전부 쓰였으면 건너뛴다. 아래
+      // "이웃 줄 다시 엮기"가 한 안내문을 이루는 줄 서넛을 한꺼번에 소비하는데,
+      // 그 줄들을 각각 다시 보면 **같은 안내문이 그룹으로 여러 번 등록되어**
+      // 세트 이미지가 번호마다 중복 생성된다(실측: 한능검 62회 "49번이 두 번
+      // 잘렸습니다" 크래시).
+      if (line.indices.length > 0 && line.indices.every((idx) => consumedIndices.has(idx)))
+        continue;
       let match = ANNOTATION_RANGE_RE.exec(line.text);
       const usedIndices = [...line.indices];
       if (!match && line.text.includes("[") && !line.text.includes("]")) {
@@ -310,6 +320,26 @@ function findAnnotationLines(items, half) {
         if (next) {
           match = ANNOTATION_RANGE_RE.exec(line.text + next.text);
           if (match) usedIndices.push(...next.indices);
+        }
+      }
+      // 한 안내문이 baseline 이 몇 pt 어긋난 조각들로 쪼개져 오는 조판이 있다.
+      // 실측(2022 한능검 62회 12쪽 "[49 ~ 50] 다음 자료를 읽고 물음에 답하시오."):
+      // 대괄호는 y=977.3, 숫자 49·50 은 y=976.1(살짝 올라간 자리), 물결표와 뒤
+      // 문장은 y=978.2 로 세 줄이 된다. 정수 반올림(lineKey)은 0.5pt 흔들림까지만
+      // 흡수하므로 이런 줄은 어느 조각도 정규식에 안 걸리고, 세트가 병합되지
+      // 않은 채 **개수는 정확히 맞는다** — 공통 자료가 빠진 49·50번 이미지가
+      // "성공"으로 올라갔다(이 문서가 경고하는 "개수만 맞고 반쪽" 그대로).
+      //
+      // 그래서 위 두 시도가 다 실패했을 때만, 같은 칼럼에서 y 가 3pt 이내인
+      // 이웃 줄들을 x 순서로 다시 엮어 한 번 더 본다. 매치되는 경우에만 쓰이므로
+      // 이미 인식되던 안내문의 결과는 달라지지 않는다. 줄 간격은 보통 수십 pt라
+      // 진짜 이웃 줄을 잘못 끌어오지도 않는다.
+      if (!match) {
+        const near = arr.filter((l) => Math.abs(l.y - line.y) <= 3);
+        if (near.length > 1) {
+          const parts = near.flatMap((l) => l.parts).sort((a, b) => a.x - b.x);
+          match = ANNOTATION_RANGE_RE.exec(parts.map((p) => p.str).join(""));
+          if (match) usedIndices.push(...parts.map((p) => p.idx));
         }
       }
       if (!match) continue;
