@@ -91,6 +91,7 @@ const cropped = await extractQuestionsFromPdf(pdfBuffer, {
   scale: 3,
   expectedCount: paper.question_count,
   textLayer,
+  footerDetection: false, // crop-scanned-questions.mjs 와 같은 설정
 });
 console.log(
   `${paper.title}: ${cropped.length}/${paper.question_count}개 (되살린 마커 ${rescued}개, 중복 바로잡음 ${deduped}개, 순서 어긋나 내림 ${demoted}개)`,

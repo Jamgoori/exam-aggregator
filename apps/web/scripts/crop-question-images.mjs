@@ -2091,7 +2091,7 @@ async function normalizeWidths(cropped) {
   }
 }
 
-async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
+async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, footerDetection = true) {
   // 1차 패스: 렌더링 없이 텍스트만 뽑아 페이지 폭 절반 기준으로 findQuestionMarkers를
   // 한 번 돌려본다.
   const roughMarkerData = [];
@@ -2151,8 +2151,17 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     columnSplitX,
   );
 
-  const footerInkTopByPage = computeFooterInkTopByPage(pageMarkerData.map((d) => d.data));
-  const footerBaselineByPage = computeFooterBaselineByPage(pageMarkerData.map((d) => d.data));
+  // footerDetection=false: 되풀이 꼬리말을 찾지 않는다(칼럼 마지막 문항은 지면 바닥까지).
+  // 스캔본(OCR 텍스트 레이어) 전용 — 쪽마다 같은 y 에 서는 얇은 줄이 진짜 꼬리말인지
+  // 마지막 선지 줄인지 OCR 좌표로는 못 가른다. 실측 69회 2번 ⑤, 57회 11번 "① (가) …" 줄이
+  // 꼬리말로 몰려 잘렸다. 꼬리말 조각이 남는 것(보기 흉함)과 선지가 잘리는 것(오답)
+  // 사이에서 전자를 택했다. 텍스트 레이어 문제지는 예전과 완전히 같은 경로다.
+  const footerInkTopByPage = footerDetection
+    ? computeFooterInkTopByPage(pageMarkerData.map((d) => d.data))
+    : pageMarkerData.map(() => null);
+  const footerBaselineByPage = footerDetection
+    ? computeFooterBaselineByPage(pageMarkerData.map((d) => d.data))
+    : pageMarkerData.map(() => null);
   const headerInkBottomByPage = computeHeaderInkBottomByPage(pageMarkerData.map((d) => d.data));
 
   const cropped = [];
@@ -2330,7 +2339,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
 // 호출자와의 호환) 예전 방식이 에러 없이 끝나는 한 그대로 쓴다.
 export async function extractQuestionsFromPdf(
   pdfBuffer,
-  { scale = 3, onPage, expectedCount, textLayer } = {},
+  { scale = 3, onPage, expectedCount, textLayer, footerDetection = true } = {},
 ) {
   const realPdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
   // textLayer: 스캔본(텍스트 레이어 0자)을 위해 호출자가 OCR 로 만들어 넘긴 가짜
@@ -2341,7 +2350,7 @@ export async function extractQuestionsFromPdf(
   let legacyResult;
   let legacyError;
   try {
-    legacyResult = await extractWithStrategy(pdf, scale, onPage, false);
+    legacyResult = await extractWithStrategy(pdf, scale, onPage, false, footerDetection);
   } catch (err) {
     legacyError = err;
   }
@@ -2369,7 +2378,7 @@ export async function extractQuestionsFromPdf(
   let overrideResult;
   let overrideError;
   try {
-    overrideResult = await extractWithStrategy(pdf, scale, onPage, true);
+    overrideResult = await extractWithStrategy(pdf, scale, onPage, true, footerDetection);
   } catch (err) {
     overrideError = err;
   }

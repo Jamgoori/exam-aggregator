@@ -193,6 +193,9 @@ async function cropOnePaper(supabase, paper, { dryRun, scale, worker, digitWorke
       scale,
       expectedCount: paper.question_count,
       textLayer,
+      // 스캔본은 되풀이 꼬리말을 찾지 않는다 — OCR 좌표로는 마지막 선지 줄과 못 가려서
+      // 선지가 잘렸다(실측 69회 2번, 57회 11번). 쪽번호 조각이 남는 쪽을 택한다.
+      footerDetection: false,
     });
   } catch (err) {
     return { paper, error: `크롭 실패: ${err.message}` };

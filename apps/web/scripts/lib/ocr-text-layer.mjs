@@ -206,6 +206,47 @@ function dropMarkersOutsideColumns(pagesItems, ranges) {
 }
 
 /**
+ * 회색조 래스터에서 [x0,x1]×[yFrom,yTo](px) 창 안의 **첫 잉크 띠 아랫행**을 찾는다.
+ * 전면 OCR 조각과 띠 훑기 조각이 같은 규칙으로 잉크 아랫변을 잰다 — 한쪽만 재면 그쪽
+ * 마커만 상자 아랫변(잉크보다 처진 값)을 쓰게 되어 발문이 걷힌다(실측 57회 11번:
+ * 띠 훑기 조각이 아래 지문 상자 윗변까지 삼킨 23pt 상자였다).
+ */
+function inkBottomIn(gray, x0, x1, yFrom, yTo) {
+    const { data: px, info } = gray;
+    const left = Math.max(0, Math.floor(x0));
+    const right = Math.min(info.width - 1, Math.ceil(x1));
+    const lo = Math.max(0, Math.floor(yFrom));
+    const hi = Math.min(info.height - 1, Math.ceil(yTo));
+    if (hi < lo || right < left) return null;
+    // **세로 실선 열은 빼고 본다.** 칼럼 사이 구분선이 낱말 상자 안에 걸치면(실측 59회
+    // 25번 "25." — 구분선 x≈373~376 이 상자 x0 안쪽) 그 열은 창 전체가 잉크라 훑는
+    // 즉시 창 맨 아래에서 "잉크"를 찾아 상자 아랫변을 그대로 돌려준다. 창 높이의
+    // 90% 넘게 잉크인 열은 글자가 아니라 선이다.
+    const rows = hi - lo + 1;
+    const skip = new Uint8Array(right - left + 1);
+    for (let x = left; x <= right; x++) {
+      let n = 0;
+      for (let y = lo; y <= hi; y++) if (px[y * info.width + x] < 160) n++;
+      if (n >= rows * 0.9) skip[x - left] = 1;
+    }
+    // **위에서 내려오며 처음 만나는 잉크 띠의 아랫행**을 돌려준다. 아래에서 올라오며
+    // 첫 잉크를 찾으면, 상자가 아래 요소까지 삼킨 낱말(실측 57회 11번 "11." — 높이
+    // 23pt, 바로 밑 지문 상자 윗변까지 한 상자)에서 그 테두리 선을 아랫변으로 잡아
+    // baseline 이 발문보다 12pt 아래로 가고 발문이 통째로 걷혔다. 글리프 몸통은
+    // 상자 위쪽에서 시작하는 첫 띠다. 아래 요소·쉼표는 빈 행으로 갈려 안 섞인다.
+    const rowHasInk = (y) => {
+      const row = y * info.width;
+      for (let x = left; x <= right; x++) if (!skip[x - left] && px[row + x] < 160) return true;
+      return false;
+    };
+    let y = lo;
+    while (y <= hi && !rowHasInk(y)) y++;
+    if (y > hi) return null;
+    while (y + 1 <= hi && rowHasInk(y + 1)) y++;
+    return y;
+}
+
+/**
  * 마커 열만 세로로 길게 잘라 **숫자 전용으로 다시 훑는다.**
  *
  * 전면 OCR 의 단어 분할에 마커를 맡기면 인식률이 회차마다 출렁인다(실측: 같은
@@ -220,6 +261,7 @@ function dropMarkersOutsideColumns(pagesItems, ranges) {
 async function sweepMarkerColumns(pngBuffer, items, sweepWorker, ranges, ocrScale) {
   if (ranges.length === 0) return;
   const meta = await sharp(pngBuffer).metadata();
+  const gray = await sharp(pngBuffer).greyscale().raw().toBuffer({ resolveWithObject: true });
   // 마커 바로 오른쪽 발문 글자는 최대한 배제하되, 세 자리 번호("100.")까지는 담기게.
   const STRIP_WIDTH_PT = 34;
   for (const [lo] of ranges) {
@@ -287,9 +329,12 @@ async function sweepMarkerColumns(pngBuffer, items, sweepWorker, ranges, ocrScal
     for (const w of found) {
       const x = (left + w.bbox.x0) / ocrScale;
       // 전면 OCR 조각과 같은 규약으로 맞춘다(디센더 몫만큼 내린 baseline).
-      const heightPt = (w.bbox.y1 - w.bbox.y0) / ocrScale;
+      // 띠 좌표 → 지면 좌표(가로만 left 만큼 밀려 있다). 잉크 아랫변은 전면 OCR 과 같은 규칙.
+      const measured = inkBottomIn(gray, left + w.bbox.x0, left + w.bbox.x1, w.bbox.y0, w.bbox.y1 + 3);
+      const y1 = measured === null ? w.bbox.y1 : measured + 1;
+      const heightPt = (y1 - w.bbox.y0) / ocrScale;
       const descender = Math.min(DESCENDER_PT, heightPt * 0.4);
-      const yHere = (meta.height - w.bbox.y1) / ocrScale + descender;
+      const yHere = (meta.height - y1) / ocrScale + descender;
       if (existing.some((it) => Math.abs(it.transform[5] - yHere) <= 5)) continue;
       // 세트 안내문("[29~30] 다음 자료를 …")이 서는 줄은 건너뛴다. 띠 안에서는 "[29" 의
       // 숫자만 보여 29. 로 읽히는데, 마커로 넣으면 진짜 29번과 겹치고(실측 61회 "29번이
@@ -598,10 +643,12 @@ async function rescueMissingMarkers(pages, ranges, expectedMarkerCount, digitWor
  */
 async function rereadGapForNumber(pages, ranges, before, after, n, digitWorker, ocrScale, columnOf) {
   const ordered = [...ranges].sort((a, b) => a[0] - b[0]);
-  // 마커 글리프가 서는 띠: 열 왼쪽 4pt 앞에서 18pt 폭. 선지 원문자(①~⑤)는 열보다
-  // 18pt 남짓 오른쪽에 서므로(실측 65회: 마커 x≈49, 원문자 x≈60) 이 폭으로 갈린다.
+  // 마커 글리프가 서는 띠: 열 범위(lo~hi) 왼쪽 4pt 앞부터 오른쪽 12pt 뒤까지. 열 범위는
+  // 쪽마다 흔들리는 마커 x 를 담은 것이라(64회: 373~389, "20." 은 389 에서 시작) 왼쪽
+  // 끝 기준 고정 폭으로 자르면 오른쪽에 선 마커를 놓친다(실측 64회 20번). 선지 원문자
+  // (①~⑤)가 띠에 걸려도 재판독 값이 빠진 번호와 같아야만 하므로 해가 없다.
   const BAND_LEFT_PT = 4;
-  const BAND_WIDTH_PT = 18;
+  const BAND_RIGHT_PT = 12;
   const MIN_H_PT = 8;
   const MAX_H_PT = 22;
   const segments = [];
@@ -619,19 +666,31 @@ async function rereadGapForNumber(pages, ranges, before, after, n, digitWorker, 
   for (const seg of segments) {
     const { png, items, heightPt } = pages[seg.page];
     if (!png || !heightPt || seg.yTop - seg.yBottom < 8) continue;
-    const [lo] = ordered[seg.col];
-    dbg(`  띠 탐색 p${seg.page + 1} 열${seg.col}(lo=${lo.toFixed(0)}) y ${seg.yTop.toFixed(0)}→${seg.yBottom.toFixed(0)}`);
+    const [lo, hi] = ordered[seg.col];
+    const bandWidthPt = hi - lo + BAND_LEFT_PT + BAND_RIGHT_PT;
+    dbg(`  띠 탐색 p${seg.page + 1} 열${seg.col}(${lo.toFixed(0)}~${hi.toFixed(0)}) y ${seg.yTop.toFixed(0)}→${seg.yBottom.toFixed(0)}`);
     const { data: px, info } = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true });
     const left = Math.max(0, Math.round((lo - BAND_LEFT_PT) * ocrScale));
-    const right = Math.min(info.width - 1, Math.round((lo - BAND_LEFT_PT + BAND_WIDTH_PT) * ocrScale));
+    const right = Math.min(info.width - 1, Math.round((hi + BAND_RIGHT_PT) * ocrScale));
     const top = Math.max(0, Math.round((heightPt - seg.yTop) * ocrScale));
     const bottom = Math.min(info.height - 1, Math.round((heightPt - seg.yBottom) * ocrScale));
     if (right <= left || bottom <= top) continue;
 
     // 띠 안에서 세로로 이어진 잉크 덩어리(행 구간)를 찾는다. 마커 글리프 높이만 남긴다.
+    //
+    // **세로 선이 든 열은 빼고 센다.** 칼럼 구분선·지문 상자 테두리가 띠에 걸치면 구간
+    // 전체가 한 덩어리(실측 64회 p5: h=602.8pt)가 되어 마커 크기 덩어리가 나올 수 없다.
+    // 구간 높이의 절반 넘게 잉크인 열은 글자가 아니다.
+    const segRows = bottom - top + 1;
+    const skipCol = new Uint8Array(right - left + 1);
+    for (let x = left; x <= right; x++) {
+      let n = 0;
+      for (let y = top; y <= bottom; y++) if (px[y * info.width + x] < 160) n++;
+      if (n >= segRows * 0.5) skipCol[x - left] = 1;
+    }
     const rowHasInk = (y) => {
       const row = y * info.width;
-      for (let x = left; x <= right; x++) if (px[row + x] < 160) return true;
+      for (let x = left; x <= right; x++) if (!skipCol[x - left] && px[row + x] < 160) return true;
       return false;
     };
     let y = top;
@@ -642,13 +701,16 @@ async function rereadGapForNumber(pages, ranges, before, after, n, digitWorker, 
       while (y <= bottom && rowHasInk(y)) y++;
       const end = y - 1;
       const hPt = (end - start + 1) / ocrScale;
-      if (hPt < MIN_H_PT || hPt > MAX_H_PT) continue;
+      if (hPt < MIN_H_PT || hPt > MAX_H_PT) {
+        dbg(`  띠 덩어리(크기 제외) p${seg.page + 1} y=${((info.height - (end + 1)) / ocrScale).toFixed(0)} h=${hPt.toFixed(1)}`);
+        continue;
+      }
       // 이 덩어리만 넉넉히 잘라 숫자 전용(한 낱말)으로 읽는다 — readSpotAsDigits 와 같은 규약.
       // readSpotAsDigits 는 baseline·height 에 DESCENDER_PT 가 반영된 조각을 기대한다.
       const item = {
         str: "",
         transform: [1, 0, 0, 1, (lo - BAND_LEFT_PT), (info.height - (end + 1)) / ocrScale + DESCENDER_PT],
-        width: BAND_WIDTH_PT + 6,
+        width: bandWidthPt + 6,
         height: hPt - DESCENDER_PT,
       };
       const read = await readSpotAsDigits(png, item, digitWorker, ocrScale);
@@ -660,7 +722,7 @@ async function rereadGapForNumber(pages, ranges, before, after, n, digitWorker, 
         item: {
           str: `${n}.`,
           transform: [1, 0, 0, 1, lo, (info.height - (end + 1)) / ocrScale + DESCENDER_PT],
-          width: BAND_WIDTH_PT,
+          width: bandWidthPt,
           height: hPt - DESCENDER_PT,
           confidence: MARKER_MIN_CONFIDENCE,
           fromSweep: true,
@@ -813,30 +875,7 @@ export async function buildOcrTextLayer(
     // "이 줄은 baseline 위에서 끝난다"고 보고 발문 줄을 통째로 걷어낸다. 고정 1.5pt
     // 들어올리기로는 못 넘는 오차라, 상자 근처를 직접 훑어 잉크가 끝나는 행을 쓴다.
     const gray = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true });
-    const inkBottomPx = (x0, x1, yFrom, yTo) => {
-      const { data: px, info } = gray;
-      const left = Math.max(0, Math.floor(x0));
-      const right = Math.min(info.width - 1, Math.ceil(x1));
-      const lo = Math.max(0, Math.floor(yFrom));
-      const hi = Math.min(info.height - 1, Math.ceil(yTo));
-      if (hi < lo || right < left) return null;
-      // **세로 실선 열은 빼고 본다.** 칼럼 사이 구분선이 낱말 상자 안에 걸치면(실측 59회
-      // 25번 "25." — 구분선 x≈373~376 이 상자 x0 안쪽) 그 열은 창 전체가 잉크라 훑는
-      // 즉시 창 맨 아래에서 "잉크"를 찾아 상자 아랫변을 그대로 돌려준다. 창 높이의
-      // 90% 넘게 잉크인 열은 글자가 아니라 선이다.
-      const rows = hi - lo + 1;
-      const skip = new Uint8Array(right - left + 1);
-      for (let x = left; x <= right; x++) {
-        let n = 0;
-        for (let y = lo; y <= hi; y++) if (px[y * info.width + x] < 160) n++;
-        if (n >= rows * 0.9) skip[x - left] = 1;
-      }
-      for (let y = hi; y >= lo; y--) {
-        const row = y * info.width;
-        for (let x = left; x <= right; x++) if (!skip[x - left] && px[row + x] < 160) return y;
-      }
-      return null;
-    };
+    const inkBottomPx = (x0, x1, yFrom, yTo) => inkBottomIn(gray, x0, x1, yFrom, yTo);
 
     const items = [];
     for (const block of data.blocks ?? []) {
@@ -858,14 +897,14 @@ export async function buildOcrTextLayer(
           // 점선 윗변이 그 범위에 걸려 "잉크 아랫변"으로 잡히고, 상자가 9pt 처진 줄(59회
           // 25번)이 그대로 남아 발문이 걷혀 나갔다. 마커 "25." 의 x 범위(380~400)에는
           // 말풍선이 없으니 낱말별로 재면 제값이 나온다. 줄의 아랫변은 그 중앙값.
-          const measuredBottoms = (line.words ?? [])
-            .filter((w) => (w.text ?? "").trim())
-            .map((w) => {
-              const span = Math.max(4, w.bbox.y1 - w.bbox.y0);
-              const m = inkBottomPx(w.bbox.x0, w.bbox.x1, w.bbox.y1 - span * 0.6, w.bbox.y1 + 3);
-              return m === null ? w.bbox.y1 : m + 1; // 잉크 마지막 행 바로 아래 = 아랫변
-            })
-            .sort((a, b) => a - b);
+          // 낱말별 실측 아랫변(상자 윗변부터 아랫변 3px 아래까지 창; 첫 잉크 띠를 위에서 찾는다).
+          const measuredByWord = new Map();
+          for (const w of line.words ?? []) {
+            if (!(w.text ?? "").trim()) continue;
+            const m = inkBottomPx(w.bbox.x0, w.bbox.x1, w.bbox.y0, w.bbox.y1 + 3);
+            measuredByWord.set(w, m === null ? w.bbox.y1 : m + 1); // 잉크 마지막 행 바로 아래 = 아랫변
+          }
+          const measuredBottoms = [...measuredByWord.values()].sort((a, b) => a - b);
           const lineBottom = measuredBottoms.length
             ? measuredBottoms[Math.floor(measuredBottoms.length / 2)]
             : null;
@@ -888,10 +927,11 @@ export async function buildOcrTextLayer(
             // 줄이 크롭 위 경계를 흐트러뜨려 발문이 통째로 빠졌다). 본문 글자는 5pt 넘는다.
             if ((word.bbox.y1 - word.bbox.y0) / OCR_SCALE < 3) continue;
             const { x0, y0, x1 } = word.bbox;
-            const y1 =
-              lineBottom !== null && Math.abs(word.bbox.y1 - lineBottom) <= SNAP_PX
-                ? lineBottom
-                : word.bbox.y1;
+            // **비교도 실측값끼리.** 상자 아랫변과 비교하면, 상자가 12pt 처진 낱말(실측 57회 11번
+            // "11." — 밑은 흰 여백인데 상자 높이 27pt)은 6pt 밖이라 "제 값을 지킨다"며 그
+            // 나쁜 상자 아랫변으로 돌아가 발문이 걷혔다. 안 붙는 낱말도 제 실측값을 쓴다.
+            const own = measuredByWord.get(word) ?? word.bbox.y1;
+            const y1 = lineBottom !== null && Math.abs(own - lineBottom) <= SNAP_PX ? lineBottom : own;
             // pdfjs 조각과 같은 규약: transform[4]=x, transform[5]=baseline y,
             // 좌표계 원점은 지면 왼쪽 아래. OCR 은 왼쪽 위 기준 상자를 주므로 아래
             // 변(y1)에서 디센더 몫만큼 글리프 안쪽으로 올려 baseline 으로 삼는다(위 DESCENDER_PT).
