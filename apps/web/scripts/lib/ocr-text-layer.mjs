@@ -1110,7 +1110,14 @@ function normalizeTallMarkers(pagesItems, expectedMarkerCount) {
       if (best && best.ys.length >= 2) {
         const ys = [...best.ys].sort((p, q) => p - q);
         const lineY = ys[Math.floor(ys.length / 2)];
-        dbg(`마커 ${m.str} 상자 큼(h=${oldH.toFixed(1)}→${median.toFixed(1)}): y ${my.toFixed(1)}→${lineY.toFixed(1)} (줄 낱말 ${ys.length}개)`);
+        // 높이는 중앙값으로 누르되, 같은 줄 낱말 중 baseline 이 더 높은 조각(스냅에 실패해
+        // 제 y 를 가진 것)까지는 덮어야 한다. 안 그러면 공유 크롭 코드가 그 조각을 "마커
+        // 윗줄"로 보고 위 경계를 그 baseline 까지 내려 발문이 한가운데서 잘린다(실측 50회
+        // 33번: 12.3→7.5 로 눌렀더니 "33. (가) 운동에…" 이 반 토막). 마커 y+높이가 근처
+        // 낱말 어느 y 보다도 중앙값만큼 더 위에 오게 둔다.
+        const lineTop = Math.max(...near.map((it) => it.transform[5]));
+        m.height = Math.max(median, lineTop - lineY + median);
+        dbg(`마커 ${m.str} 상자 큼(h=${oldH.toFixed(1)}→${m.height.toFixed(1)}): y ${my.toFixed(1)}→${lineY.toFixed(1)} (줄 낱말 ${ys.length}개)`);
         m.transform[5] = lineY;
       } else {
         dbg(`마커 ${m.str} 상자 큼(h=${oldH.toFixed(1)}→${median.toFixed(1)}): 발문 줄 못 찾아 y 그대로`);

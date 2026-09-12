@@ -1463,6 +1463,10 @@ async function cropQuestionsFromPage(
   const results = [];
 
   for (const set of mergedSets) {
+    if (process.env.CROP_DEBUG)
+      console.error(
+        `[crop] 쪽내 세트 ${set.numbers.join(",")}: ${set.segments.map((sg) => `${sg.colDef.key} top=${sg.top.toFixed(1)} bottom=${sg.bottom.toFixed(1)}`).join(" | ")}`,
+      );
     // 조각이 둘 이상이면(칼럼을 넘는 세트) 각 조각의 세로 여백을 먼저 걷어낸 뒤
     // 이어붙인다 — 안 걷어내면 왼쪽 칼럼 아래쪽 빈 공간이 두 조각 사이에 커다란
     // 흰 띠로 남는다.
@@ -2254,14 +2258,15 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, f
       // 첫 조각은 안내문에서 시작한다 — 그래도 안내문 바로 위에 붙은 머리글·괘선이
       // 딸려 올 수 있으므로 안내문 baseline 기준으로 걷어낸다. 이어지는 조각은
       // 칼럼 맨 위부터라 되풀이 머리글 제거를 그대로 쓴다.
-      // 되풀이 머리글을 좌표로 못 잡은 문서(headerBandPx null — 스캔본은 머리글이
-      // 그림이고 OCR 도 쪽마다 다르게 읽어 되풀이 판정이 안 된다)에서는 이어지는 조각
-      // 위에 머리글 띠가 통째로 남았다(실측 57회 [35~36]: 왼쪽 35번 아래에 9쪽 머리글
-      // "…력검정시험 (심화) 9" 가 끼고 36번이 왔다). 그 조각에서 가장 먼저 오는 멤버의
-      // 마커 baseline 위 잉크를 걷어낸다 — 단문항 크롭이 마커에서 시작하는 것과 같다.
-      // 단, 그 마커 위에 본문 줄이 있으면(지문이 앞 쪽에서 이어져 칼럼 맨 위에서
-      // 계속되는 세트) 걷어내면 지문이 날아가므로 손대지 않는다 — 맨 위 7.5% 띠(머리글
-      // 자리)의 줄만 무시한다.
+      // 이어지는 조각이 **멤버 마커로 바로 시작하면**(그 위에 본문 줄이 없으면) 마커
+      // baseline 위 잉크를 몽땅 걷어낸다 — 단문항 크롭이 마커에서 시작하는 것과 같다.
+      // dropRunningHeader 는 머리글 덩어리가 40pt 를 넘으면 "지문 상자"로 보고 손대지
+      // 않는데, 스캔본 머리글은 쪽번호 빨간 상자(지면 맨 위부터 약 75pt)와 표제가 한
+      // 덩어리라 그대로 남았다(실측 57회 [35~36]: 왼쪽 35번 아래에 9쪽 머리글
+      // "…력검정시험 (심화) 9" 가 끼고 36번이 왔다. headerBandPx 는 209 로 잡혀 있었다).
+      // 마커 위에 본문 줄이 있으면(지문이 앞 쪽에서 이어져 칼럼 맨 위에서 계속되는 세트)
+      // 걷어내면 지문이 날아가므로 예전대로 dropRunningHeader 만 쓴다. 맨 위 7.5% 띠
+      // (머리글 자리)의 줄과 마커 줄의 조각(baseline 6pt 안)은 "위 줄"로 안 친다.
       const slotFirstMember = plan.members?.find(
         (m) => m.pageIdx === slot.pageIdx && m.col === slot.col,
       );
@@ -2270,12 +2275,20 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, f
         !ctx.lines.some(
           (l) =>
             l.col === slot.col &&
-            l.y > slotFirstMember.marker.y + 2 &&
+            l.y > slotFirstMember.marker.y + 6 &&
             l.y < ctx.pageHeightPt * (1 - 0.075),
         );
+      if (process.env.CROP_DEBUG && !isFirst) {
+        const aboveLines = ctx.lines.filter(
+          (l) => l.col === slot.col && slotFirstMember && l.y > slotFirstMember.marker.y + 6,
+        );
+        console.error(
+          `[crop] 세트 ${plan.numbers.join(",")} 조각 p${slot.pageIdx + 1}${slot.col}: headerBandPx=${ctx.headerBandPx} 첫멤버=${slotFirstMember?.marker.number ?? "없음"} y=${slotFirstMember?.marker.y.toFixed(1)} 위 줄 ${aboveLines.map((l) => l.y.toFixed(0)).join("/")} → 걷기 ${nothingAboveFirstMember ? "함" : "안 함"}`,
+        );
+      }
       const deheaded = isFirst
         ? await ctx.dropTopJunk(raw, top, plan.annotation.y)
-        : ctx.headerBandPx === null && nothingAboveFirstMember
+        : nothingAboveFirstMember
           ? await dropInkAboveBaseline(
               raw,
               Math.round((ctx.pageHeightPt - slotFirstMember.marker.y) * scale),
