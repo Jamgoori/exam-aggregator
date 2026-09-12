@@ -107,7 +107,24 @@ async function readSpotAsDigits(pngBuffer, item, digitWorker, ocrScale) {
     .png()
     .toBuffer();
   const { data } = await digitWorker.recognize(crop);
-  return (data.text ?? "").replace(/[^\d]/g, "");
+  const first = (data.text ?? "").replace(/[^\d]/g, "");
+  if (first) return first;
+  // 한 낱말 모드는 굵은 한 자리 번호에서 심심찮게 빈 결과를 낸다(실측 65회 7번: 같은
+  // 상자를 SINGLE_WORD 3배로 읽으면 신뢰도 33 에서 흔들리다 빈 문자열, SINGLE_LINE 2배
+  // + 흰 테두리 20px 로는 "7." 신뢰도 83). 비었을 때만 그 설정으로 한 번 더 읽는다.
+  await digitWorker.setParameters({ tessedit_pageseg_mode: "7" }); // PSM.SINGLE_LINE
+  try {
+    const padded = await sharp(pngBuffer)
+      .extract({ left, top, width, height })
+      .resize({ width: width * 2 })
+      .extend({ top: 20, bottom: 20, left: 20, right: 20, background: "#ffffff" })
+      .png()
+      .toBuffer();
+    const { data: second } = await digitWorker.recognize(padded);
+    return (second.text ?? "").replace(/[^\d]/g, "");
+  } finally {
+    await digitWorker.setParameters({ tessedit_pageseg_mode: "8" }); // PSM.SINGLE_WORD 복원
+  }
 }
 
 /**
@@ -603,6 +620,7 @@ async function rereadGapForNumber(pages, ranges, before, after, n, digitWorker, 
     const { png, items, heightPt } = pages[seg.page];
     if (!png || !heightPt || seg.yTop - seg.yBottom < 8) continue;
     const [lo] = ordered[seg.col];
+    dbg(`  띠 탐색 p${seg.page + 1} 열${seg.col}(lo=${lo.toFixed(0)}) y ${seg.yTop.toFixed(0)}→${seg.yBottom.toFixed(0)}`);
     const { data: px, info } = await sharp(png).greyscale().raw().toBuffer({ resolveWithObject: true });
     const left = Math.max(0, Math.round((lo - BAND_LEFT_PT) * ocrScale));
     const right = Math.min(info.width - 1, Math.round((lo - BAND_LEFT_PT + BAND_WIDTH_PT) * ocrScale));
@@ -634,6 +652,7 @@ async function rereadGapForNumber(pages, ranges, before, after, n, digitWorker, 
         height: hPt - DESCENDER_PT,
       };
       const read = await readSpotAsDigits(png, item, digitWorker, ocrScale);
+      dbg(`  띠 덩어리 p${seg.page + 1} y=${((info.height - (end + 1)) / ocrScale).toFixed(0)} h=${hPt.toFixed(1)} → 재판독 "${read}"`);
       if (read !== String(n)) continue;
       hits.push({
         seg,
