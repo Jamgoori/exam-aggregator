@@ -28,6 +28,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | 과목명 표기 (시행처마다 다른 과목명, `subject-label.ts`, `SUBJECT_ALIASES`, 새 과목 행 추가) | `docs/agents/subject-names.md` |
 | 자유게시판 본문(HTML)·이미지 업로드·알림 (`rich-text.ts` 새니타이저, `board/actions.ts`, `notifications`, `avatars`/`board-images` 버킷) | `docs/agents/board-rich-text.md` |
 | 한국사능력검정시험(한능검) 회차 추가·전용 과목/탭 (`upload-korean-history-exam.mjs`, `lib/korean-history-exam.ts`) | `docs/agents/korean-history-exam.md` |
+| 광고(구글 애드센스) — 게시자 ID, `<head>` 로더, `/ads.txt`, 광고 관련 개인정보 고지 | `docs/agents/adsense.md` |
 
 # 금지선 (문서 안 읽었어도 이것만은 절대)
 
@@ -122,6 +123,13 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - **한능검**: 한국사능력검정시험 문제지를 공무원 "한국사"(`korean-history`) 과목 행에
   붙이지 말 것 — 전용 과목 행(`korean-history-exam`)에만 붙인다. 50문항 5지선다라
   20~25문항짜리 공무원 한국사 목록에 섞이면 그 과목이 통째로 못 쓰게 된다.
+- **광고**: 자동 광고에서 **CBT 풀이 화면(`/papers/*/cbt`)·복습 세션을 제외**할 것
+  (애드센스 대시보드 설정) — OMR 버튼 위 오클릭은 무효 트래픽이 되고, 무효 트래픽은
+  경고 없이 계정 정지로 이어진다. 자기 광고 클릭 금지(테스트로도).
+  게시자 ID 정본을 환경변수로 옮기지 말 것 (`lib/adsense.ts` 상수 — 값이 비면 광고가
+  조용히 멈추고 `/ads.txt` 가 404 가 된다). `/ads.txt` 를 정적 파일로 다시 만들지 말 것
+  (ID 가 두 곳에 나뉘어 적힌다). 로더를 `next/script` 로 바꾸지 말 것 (심사 크롤러가
+  서버 HTML 에서 태그를 찾는다).
 - **정답 등록**: `question_count`와 길이가 다른 정답 배열을 덮어쓰지 말 것.
   공통과목이라고 정답을 다른 직류(track) 문제지에 수동 복사하지 말 것 (법원직
   서기보는 국어·한국사 15문항/영어 20문항 별도 문제지 — 실측 사고 있음).

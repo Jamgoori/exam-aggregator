@@ -51,6 +51,10 @@ const INFRA_FILES = [
   "/robots.txt",
   "/sitemap.xml",
   "/rss.xml",
+  // 광고 재고 판매 권한 파일(애드센스). 읽는 쪽이 구글의 ads.txt 크롤러라 언제나
+  // 해외 IP 다 — 막히면 대시보드에 "ads.txt 를 찾을 수 없음" 경고가 뜨고 광고주
+  // 일부가 입찰을 멈춘다.
+  "/ads.txt",
   "/manifest.webmanifest",
   "/favicon.ico",
 ] as const;

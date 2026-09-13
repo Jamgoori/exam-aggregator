@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { isTossConfigured } from "@/lib/toss";
+import { isAdsenseConfigured } from "@/lib/adsense";
 
 export const metadata: Metadata = {
   title: "개인정보처리방침",
@@ -10,6 +11,11 @@ export const metadata: Metadata = {
 // 여기 적힌 항목들은 supabase/schema.sql의 실제 테이블(댓글 ip_address, cbt_attempts,
 // explanation_access_log 등)과 1:1로 맞춰 작성됐다.
 const CONTACT_EMAIL = "lks2354@gmail.com";
+
+// 광고(애드센스) 고지가 더해진 방침의 시행일. 광고를 실제로 켜는 날로 맞추고,
+// 개인정보 보호법에 따라 **그 날보다 최소 7일 먼저** 공지사항을 올린 뒤 광고를 켠다
+// (아래 부칙이 스스로 약속하는 절차다). 광고 켜는 날을 미루면 이 날짜도 같이 미룰 것.
+const ADSENSE_POLICY_EFFECTIVE_DATE = "2026년 9월 22일";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -182,6 +188,21 @@ export default function PrivacyPage() {
                 <td className="py-2 pr-4">구글 로그인, 방문 통계(Google Analytics)</td>
                 <td className="py-2">통계 도구는 설정된 경우에만 동작</td>
               </tr>
+              {/* 광고가 실제로 붙은 환경에서만 적는다(결제와 같은 판단) — 게시자 ID 가
+                  설정되지 않았으면 광고 스크립트 자체가 붙지 않으므로, 그 상태에서
+                  "광고를 위해 쿠키를 쓴다"고 고지하면 방침이 사실과 어긋난다.
+                  반대로 광고를 켠 뒤 이 고지가 없으면 애드센스 프로그램 정책 위반이다
+                  (제3자 광고 게재·쿠키 사용을 방침에 밝힐 의무). */}
+              {isAdsenseConfigured() && (
+                <tr className="border-b border-zinc-100 dark:border-zinc-800">
+                  <td className="py-2 pr-4">Google LLC (미국)</td>
+                  <td className="py-2 pr-4">광고 게재(Google AdSense)</td>
+                  <td className="py-2">
+                    광고 게재·측정을 위해 쿠키 등 식별자와 접속 기기·브라우저 정보가
+                    처리됩니다. 이메일·닉네임·학습 기록은 전달하지 않습니다.
+                  </td>
+                </tr>
+              )}
               <tr className="border-b border-zinc-100 dark:border-zinc-800">
                 <td className="py-2 pr-4">Microsoft Corporation (미국)</td>
                 <td className="py-2 pr-4">이용 행태 분석(Microsoft Clarity)</td>
@@ -246,6 +267,35 @@ export default function PrivacyPage() {
             쿠키 또는 유사 기술로 방문·이용 통계를 수집할 수 있습니다. 브라우저 설정에서
             쿠키 저장을 거부할 수 있으며, 이 경우에도 서비스 이용에는 지장이 없습니다.
           </li>
+          {/* 애드센스 프로그램 정책이 게시자에게 요구하는 고지다: 제3자 공급업체가
+              광고를 게재하며 쿠키를 사용한다는 것, 그리고 이용자가 맞춤 광고를
+              끌 수 있는 곳. 광고를 켠 상태에서 이 문단이 빠지면 정책 위반이다. */}
+          {isAdsenseConfigured() && (
+            <li>
+              <strong>광고 쿠키</strong>: 서비스는 Google AdSense로 광고를 게재하며, Google
+              등 제3자 공급업체가 쿠키를 사용해 이용자의 이 서비스 및 다른 웹사이트 방문
+              기록을 바탕으로 광고를 제공할 수 있습니다. 맞춤 광고는{" "}
+              <a
+                href="https://myadcenter.google.com/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+              >
+                Google 광고 설정
+              </a>
+              에서 끌 수 있고, 제3자 공급업체의 쿠키는{" "}
+              <a
+                href="https://www.aboutads.info/choices/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+              >
+                aboutads.info
+              </a>
+              에서 일괄 거부할 수 있습니다. 맞춤 광고를 끄더라도 광고 자체는 계속 표시되며,
+              서비스 이용에는 지장이 없습니다.
+            </li>
+          )}
         </ul>
       </Section>
 
@@ -273,11 +323,23 @@ export default function PrivacyPage() {
       </Section>
 
       <Section title="부칙">
-        <p>
-          이 개인정보처리방침은 2026년 9월 5일부터 적용됩니다. 직전 방침(2026년 7월 17일 시행)
-          대비 AI 약점 진단이 처리하는 항목과 국외 이전 내용을 실제 동작에 맞게 구체화했습니다.
-          내용이 변경되는 경우 시행 7일 전부터 서비스 내 공지로 알립니다.
-        </p>
+        {/* 광고를 켜면 위탁 표와 쿠키 항목이 함께 늘어나므로(위 5항·9항) 시행일도 그때
+            바뀐다. 광고가 꺼진 환경에서는 직전 방침 그대로 보여야 한다 — 켜지도 않은
+            변경의 시행일을 미리 적으면 방침이 사실과 어긋난다. */}
+        {isAdsenseConfigured() ? (
+          <p>
+            이 개인정보처리방침은 {ADSENSE_POLICY_EFFECTIVE_DATE}부터 적용됩니다. 직전
+            방침(2026년 9월 5일 시행) 대비 광고 게재(Google AdSense)에 따른 처리 위탁과 광고
+            쿠키 항목을 추가했습니다. 내용이 변경되는 경우 시행 7일 전부터 서비스 내 공지로
+            알립니다.
+          </p>
+        ) : (
+          <p>
+            이 개인정보처리방침은 2026년 9월 5일부터 적용됩니다. 직전 방침(2026년 7월 17일
+            시행) 대비 AI 약점 진단이 처리하는 항목과 국외 이전 내용을 실제 동작에 맞게
+            구체화했습니다. 내용이 변경되는 경우 시행 7일 전부터 서비스 내 공지로 알립니다.
+          </p>
+        )}
       </Section>
     </div>
   );
