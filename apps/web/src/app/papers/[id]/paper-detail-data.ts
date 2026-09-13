@@ -3,6 +3,7 @@ import { cache } from "react";
 import { cacheLife, cacheTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createPublicClient } from "@/lib/supabase/public";
+import { PAPER_CACHE_LIFE } from "@/lib/cache-profiles";
 import { resolvePaperId } from "@/lib/paper-slug-map";
 import { fetchAllExamPapers } from "@/lib/all-papers";
 import { compareLevels } from "@/lib/level-colors";
@@ -65,7 +66,7 @@ async function fetchPaperById(id: string): Promise<ExamPaper | null> {
   // 업로드된 문제지는 내용이 거의 바뀌지 않는다. 관리자가 제목·직류를 고치면
   // 홈 데이터와 같은 태그를 달아 revalidateTag("home-data") 에 묻어간다
   // (주소 표 getSlugMap 도 같은 태그로 함께 갱신된다).
-  cacheLife({ revalidate: 3600 });
+  cacheLife(PAPER_CACHE_LIFE);
   cacheTag("home-data");
 
   const supabase = createPublicClient();
@@ -88,7 +89,7 @@ async function fetchPaperById(id: string): Promise<ExamPaper | null> {
  */
 export async function getNewestPaperSlugs(limit: number): Promise<string[]> {
   "use cache";
-  cacheLife({ revalidate: 3600 });
+  cacheLife(PAPER_CACHE_LIFE);
   cacheTag("home-data");
 
   const { papers } = await fetchAllExamPapers(createPublicClient());
@@ -122,7 +123,7 @@ type RepresentativeSourceRow = {
  */
 async function getRepresentativeSlugById(): Promise<Record<string, string>> {
   "use cache";
-  cacheLife({ revalidate: 3600 });
+  cacheLife(PAPER_CACHE_LIFE);
   cacheTag("home-data");
 
   const supabase = createPublicClient();

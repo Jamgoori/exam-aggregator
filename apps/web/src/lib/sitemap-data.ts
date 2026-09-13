@@ -6,6 +6,7 @@ import { fetchAllPages } from "@/lib/fetch-paged";
 import { comboSlug, examHref, getExamIndex } from "@/lib/exam-index";
 import { paperHref } from "@/lib/paper-href";
 import { absoluteUrl } from "@/lib/site-url";
+import { PAPER_CACHE_LIFE } from "@/lib/cache-profiles";
 
 // 사이트맵 데이터. 파일은 둘로 나뉜다 — 허브(홈·목록·과목·시험) 한 장과 시험(시행처
 // +급수)별 문제지 파일 열여덟 장, 그리고 그 목록을 담은 인덱스(/sitemap.xml).
@@ -85,7 +86,10 @@ export async function getSitemapData(): Promise<SitemapData> {
   "use cache";
   // 사이트맵은 크롤러만 읽으므로 자주 다시 만들 이유가 없다. 새 업로드 즉시 반영은
   // 홈 데이터와 같은 태그를 달아 revalidateTag("home-data")에 묻어가게 한다.
-  cacheLife({ revalidate: 3600 });
+  //
+  // 문제지 워밍(/api/cron/warm-papers)이 돌 주소 목록이 이 값이라, 수명이 문제지
+  // 캐시보다 짧으면 워밍이 시작될 때마다 이것부터 다시 만들게 된다 — 같은 수명을 쓴다.
+  cacheLife(PAPER_CACHE_LIFE);
   cacheTag("home-data");
 
   const supabase = createPublicClient();

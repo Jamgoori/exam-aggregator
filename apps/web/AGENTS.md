@@ -90,6 +90,17 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   PowerShell 루프). 확인은 미승격 문제지 하나를 크롤러 UA 로 받아
   `x-vercel-cache` 와 `<head>` 길이를 보는 것 — 승격 전 PRERENDER·headLen 1766·
   title/canonical 0개, 승격 후 HIT·headLen 4084·각 1개(2026-09-06 실측).
+- **문제지 캐시 수명**: `lib/cache-profiles.ts` 의 `PAPER_CACHE_LIFE`(revalidate 7일)를
+  워밍 주기(하루)보다 짧게 되돌리지 말 것 — 짧으면 워밍 크론이 올 때마다 문제지
+  4,400장이 예외 없이 stale 이라 전부 재생성된다(2026-08 청구서의 ISR Writes 295만
+  건·Fast Origin Transfer 80.7GB 가 그것이다). 이 수명을 쓰는 캐시에는 반드시
+  `cacheTag("home-data")` 를 함께 달 것 — 태그가 빠지면 아래 만료 장치가 그 캐시를
+  못 건드려 최대 7일간 옛 값이 남는다. CLI 업로드 스크립트(`bulk-upload.mjs` 등)는
+  Next 밖에서 돌아 `revalidateTag` 를 부를 수 없으므로, `/api/cron/warm` 이 하루 한 번
+  DB 지문(행 수 + 최신 `created_at`)을 캐시된 지문과 맞춰 보고 어긋날 때만 태그를
+  만료시킨다(`lib/paper-fingerprint.ts`) — 이 검사를 지우면 새로 올린 문제지가 최대
+  7일간 사이트에 안 나온다. 반대로 업로드가 없는 날에도 응답의 `revalidated` 가 계속
+  true 면 지문 비교가 깨진 것이고, 그 상태는 요금이 예전으로 돌아간 상태다.
 - **다운로드 집계**: `download-counting.ts` 의 봇 목록(`NON_HUMAN_UA`)에 `naver`·`daum`·
   `kakaotalk` 을 넣지 말 것 — 셋 다 크롤러가 아니라 **인앱 브라우저**의 UA 표식이라
   (`NAVER(inapp;...)`, `KAKAOTALK 10.x`, `DaumApps/...`) 넣는 순간 국내 모바일 유입이

@@ -1,7 +1,13 @@
 import { connection } from "next/server";
+import { revalidateTag } from "next/cache";
 import { timingSafeEqual } from "node:crypto";
 import { createPublicClient } from "@/lib/supabase/public";
 import { getCachedHomeData } from "@/lib/home-data";
+import {
+  fetchPaperFingerprint,
+  getCachedPaperFingerprint,
+  paperFingerprintsDiffer,
+} from "@/lib/paper-fingerprint";
 
 // 워밍업 엔드포인트. Vercel 크론(vercel.json)이 주기적으로 호출한다.
 // 목적: (1) 무료 티어 Supabase가 오래 쉬면 자동 일시정지(1주) → 첫 방문자가 몇 초
@@ -40,6 +46,26 @@ export async function GET(request: Request) {
   const supabase = createPublicClient();
   await supabase.from("subjects").select("id").limit(1);
 
+  // **CLI 업로드 반영 장치.** 문제지 캐시 수명은 7일이다(lib/cache-profiles.ts) —
+  // 워밍 크론이 매일 올 때마다 4,400장을 통째로 재생성하던 것을 멈추려고 늘렸다.
+  // 그 대신 `npm run bulk-upload` 같은 스크립트로 넣은 새 문제지가 최대 7일간
+  // 안 보이게 되는데, 스크립트는 Next 밖에서 도니 revalidateTag 를 부를 수 없다.
+  //
+  // 그래서 하루 한 번 여기서 "지금 DB"와 "캐시가 아는 DB"의 지문(행 수 + 최신
+  // 업로드 시각)을 맞춰 본다. 어긋날 때만 태그를 만료시키므로, 업로드가 없던 날은
+  // 아무것도 재생성되지 않는다 — 이 크론(09:00 KST)이 문제지 워밍(09:30~10:00 KST)
+  // 보다 먼저 도는 순서라, 만료시킨 그날의 워밍이 곧바로 새로 데운다.
+  //
+  // "max" = stale-while-revalidate (예전 값을 즉시 주고 뒤에서 새로 받아 교체).
+  const [live, cachedFingerprint] = await Promise.all([
+    fetchPaperFingerprint(),
+    getCachedPaperFingerprint(),
+  ]);
+  const revalidated = paperFingerprintsDiffer(live, cachedFingerprint);
+  if (revalidated) {
+    revalidateTag("home-data", "max");
+  }
+
   // 홈 전역 데이터 캐시를 데운다(비어있으면 채우고, stale이면 백그라운드 갱신 트리거).
   const data = await getCachedHomeData();
 
@@ -47,6 +73,11 @@ export async function GET(request: Request) {
     ok: true,
     at: new Date().toISOString(),
     papers: data.papers.length,
+    // 지문이 어긋나 태그를 만료시켰는지. 업로드한 날은 true 가 한 번 나와야 하고,
+    // 아무것도 안 올린 날에 계속 true 면 지문 비교가 고장난 것이다(그 상태로 두면
+    // 매일 4,400장이 재생성돼 요금이 예전으로 돌아간다).
+    revalidated,
+    papersInDb: live.count,
   });
 }
 

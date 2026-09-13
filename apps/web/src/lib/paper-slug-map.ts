@@ -2,6 +2,7 @@ import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import { getPaperSlug, isPaperUuid, normalizePaperSlugParam } from "@gongmoa/core";
 import { createPublicClient } from "@/lib/supabase/public";
+import { PAPER_CACHE_LIFE } from "@/lib/cache-profiles";
 import { fetchAllPages } from "@/lib/fetch-paged";
 
 // slug 는 제목에서 계산되는 값이라(packages/core/src/paper-slug.ts) 거꾸로 되돌릴 수
@@ -12,7 +13,7 @@ import { fetchAllPages } from "@/lib/fetch-paged";
 // 반영되도록 홈 데이터와 같은 태그를 달아 revalidateTag("home-data")에 묻어간다.
 async function getSlugMap(): Promise<Record<string, string>> {
   "use cache";
-  cacheLife({ revalidate: 3600 });
+  cacheLife(PAPER_CACHE_LIFE);
   cacheTag("home-data");
 
   const supabase = createPublicClient();
