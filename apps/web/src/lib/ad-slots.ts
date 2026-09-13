@@ -11,12 +11,23 @@
 
 // 광고를 두는 자리. 자리마다 애드센스에서 광고 단위를 따로 만들어야 수익 보고서에서
 // "어느 화면이 버는지"가 갈려 보인다 — 하나를 세 곳에 돌려 쓰면 그 구분이 사라진다.
-export type AdPlacement = "home" | "papersList" | "paperDetail";
+export type AdPlacement =
+  | "home"
+  | "papersList"
+  | "paperDetail"
+  // 화면 오른쪽에 세로로 붙는 레일. 본문 옆에 자리가 남는 넓은 화면에서만 보인다
+  // (globals.css 의 .ad-rail). 같은 페이지의 아래쪽 자리와 광고 단위를 나눠 두는 건,
+  // 가로 배너와 세로 레일은 단가도 성적도 달라서 한 단위로 묶으면 어느 쪽이 버는지
+  // 보이지 않기 때문이다.
+  | "papersSide"
+  | "paperDetailSide";
 
 const SLOT_IDS: Record<AdPlacement, string> = {
   home: process.env.NEXT_PUBLIC_ADSENSE_SLOT_HOME ?? "",
   papersList: process.env.NEXT_PUBLIC_ADSENSE_SLOT_PAPERS ?? "",
   paperDetail: process.env.NEXT_PUBLIC_ADSENSE_SLOT_PAPER ?? "",
+  papersSide: process.env.NEXT_PUBLIC_ADSENSE_SLOT_PAPERS_SIDE ?? "",
+  paperDetailSide: process.env.NEXT_PUBLIC_ADSENSE_SLOT_PAPER_SIDE ?? "",
 };
 
 export function adSlotId(placement: AdPlacement): string | null {
