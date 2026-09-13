@@ -14,6 +14,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { HomePopupSlider } from "@/components/home-popup-slider";
 import { HomeSearchBox } from "@/components/home-search-box";
+import { AdBanner } from "@/components/ad-banner";
 import type { SuggestibleSubject } from "@/lib/subject-suggestions";
 import { getLandingData } from "@/lib/landing-data";
 import { examHref, type ExamCombo } from "@/lib/exam-index";
@@ -82,6 +83,11 @@ export default async function Home() {
       <PastQuestions combos={combos} subjects={subjects} />
       <Diagnosis />
       <ClosingCta freeForAll={freeForAll} />
+      {/* 가입 유도(ClosingCta) 아래. 위에 두면 이 사이트가 파는 것보다 광고를 먼저
+          보여주는 꼴이 된다. */}
+      <div className="mx-auto w-full max-w-5xl px-4 py-8">
+        <AdBanner placement="home" />
+      </div>
     </div>
   );
 }

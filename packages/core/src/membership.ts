@@ -118,6 +118,35 @@ export function hasOwnPremiumPeriod(
   return new Date(membership.expiresAt).getTime() > now.getTime();
 }
 
+// 광고를 빼줄 자격이 있는가 — 비로그인·무료 회원에게만 광고를 띄우기 위한 판정.
+//
+// isPremiumMembership 도 hasOwnPremiumPeriod 도 여기서는 쓸 수 없다. 둘 다 지금
+// 로그인한 사람 거의 전부에게 true 를 준다. 앞의 것은 전면 무료 이벤트를 보고,
+// 뒤의 것은 가입할 때 켜지는 체험을 보는데 그 체험의 만료가 trialExpiresAt 때문에
+// FREE_UNTIL 까지 박혀 있다. 둘 중 아무거나 쓰면 "무료 회원에게도 광고"가 조용히
+// "비로그인에게만 광고"로 바뀐다 — 화면상 차이가 없어서 알아채기도 어렵다.
+//
+// 그래서 남은 기간이 아니라 그 기간의 **출처**(source)를 본다. 광고를 빼주는 쪽은
+// 둘뿐이다:
+//   paid       — 결제. 광고 없는 화면은 그 대가의 일부다.
+//   attendance — 출석 보상으로 받은 일수. 보상으로 유료 기능을 열어주면서 광고만
+//                그대로 두면 보상이 초라해진다.
+// trial(가입 체험)은 일부러 뺐다. 지금은 가입자 전원이 들고 있어서, 넣는 순간 이
+// 판정이 "로그인했는가"와 같은 말이 된다.
+//
+// 관리자는 여기서 보지 않는다 — 멤버십 행과 무관한 별도 판정(is_admin)이라 부르는
+// 쪽이 함께 본다(apps/web/src/lib/ads.ts).
+export function isAdFreeMembership(
+  membership: Membership | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!membership) return false;
+  if (membership.source !== "paid" && membership.source !== "attendance") {
+    return false;
+  }
+  return hasOwnPremiumPeriod(membership, now);
+}
+
 // 만료까지 남은 일수(올림). 만료가 없으면 null. source 를 주면 그 출처일 때만 계산한다
 // (trialDaysLeft·attendanceDaysLeft 처럼 "이 화면은 체험/보상일 때만 말한다"는 쪽).
 // source 를 생략하면 출처를 가리지 않는다 — 결제든 체험이든 출석 보상이든, 지금 열려
