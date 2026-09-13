@@ -19,6 +19,8 @@ const EXAM_TYPE_ICONS: Record<string, string> = {
   법원직: "/exam-types/court.webp",
   국회직: "/exam-types/assembly.webp",
   계리직: "/exam-types/post.webp",
+  // 한능검(국사편찬위원회)도 정부상징을 쓴다 — 국가직·지방직과 같은 마크.
+  한능검: "/exam-types/government.webp",
 };
 
 export function examTypeIcon(name: string): string | null {

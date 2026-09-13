@@ -3,7 +3,7 @@ import { cache } from "react";
 import { isAdFreeMembership } from "@gongmoa/core";
 import { createClient } from "@/lib/supabase/server";
 import { getMembership, isAdminUser } from "@/lib/membership";
-import { ADSENSE_CLIENT } from "@/lib/ad-slots";
+import { isAdsenseConfigured } from "@/lib/adsense";
 
 // 이 방문자에게 광고를 띄울 것인가.
 //
@@ -24,7 +24,7 @@ import { ADSENSE_CLIENT } from "@/lib/ad-slots";
 export const shouldShowAds = cache(async (): Promise<boolean> => {
   // 게시자 ID 가 없으면 애초에 광고가 붙지 않는다. 여기서 먼저 끊어야 심사 전
   // 배포에서 쓸데없는 조회가 돌지 않는다.
-  if (!ADSENSE_CLIENT) return false;
+  if (!isAdsenseConfigured()) return false;
 
   const supabase = await createClient();
   const { data } = await supabase.auth.getClaims();

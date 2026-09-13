@@ -84,6 +84,27 @@ jobs:
             bad "sitemap.xml → HTTP $code, \`gongmoa.kr\` URL $urls 개"
           fi
 
+          # 6. 애드센스 — 광고를 켠 뒤에만 점검한다(게시자 ID 가 없으면 둘 다 안 붙는다).
+          #    둘 중 하나가 조용히 사라지는 것이 실제 위험이다: 로더가 빠지면 심사가
+          #    실패하거나 광고가 멈추고, ads.txt 가 빠지면 애드센스가 "수익 손실 위험"
+          #    경고를 띄운다. 화면에는 아무 표시가 없어서 밖에서 찔러보는 수밖에 없다.
+          adstxt=$(curl -sS "${hdr[@]}" -o /tmp/ads.txt -w '%{http_code}' --max-time 20 "$APEX/ads.txt" || echo 000)
+          if grep -qi 'adsbygoogle\.js?client=ca-pub-' /tmp/home.html 2>/dev/null; then
+            pub=$(grep -oi 'client=ca-pub-[0-9]*' /tmp/home.html | head -1 | sed 's/client=ca-//')
+            ok "애드센스 로더 \`<head>\` 에 있음 (\`$pub\`)"
+            # ads.txt 의 번호가 로더의 번호와 같아야 한다 — 다르면 광고는 나오는데
+            # 그 도메인의 재고를 팔 권한이 없는 것으로 처리된다.
+            if [ "$adstxt" = "200" ] && grep -q "google.com, $pub, DIRECT" /tmp/ads.txt; then
+              ok "ads.txt → HTTP 200, 게시자 ID 일치"
+            else
+              bad "ads.txt → HTTP $adstxt, \`$pub\` 줄을 찾지 못했다: \`$(head -c 120 /tmp/ads.txt | tr '\n' ' ')\`"
+            fi
+          elif [ "$adstxt" = "200" ]; then
+            bad "ads.txt 는 있는데 \`<head>\` 에 애드센스 로더가 없다 — 광고가 멈춘 상태다."
+          else
+            note "- ⏭️ 애드센스: 게시자 ID 미설정(광고 꺼짐) — 건너뜀"
+          fi
+
           {
             echo "## 도메인 점검 — gongmoa.kr"
             echo ""

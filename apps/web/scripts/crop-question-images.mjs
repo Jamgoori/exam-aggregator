@@ -18,6 +18,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { QUESTION_IMAGE_UPLOAD_OPTIONS } from "./lib/question-image-upload.mjs";
+import { withTextLayer } from "./lib/ocr-text-layer.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -274,6 +275,9 @@ function findAnnotationLines(items, half) {
       height: line.height,
       text,
       indices: sorted.map((p) => p.idx),
+      // 이웃 줄과 x 순서로 다시 엮어 볼 때 쓴다 (아래 "베이스라인이 몇 pt 어긋난
+      // 안내문" 처리). 여기 조각을 그대로 들고 있어야 합쳐진 줄도 x 순서가 맞는다.
+      parts: sorted.map((p) => ({ x: p.x, str: p.str, idx: p.idx })),
     });
     const inked = sorted.filter((p) => p.str.trim());
     if (inked.length > 0) {
@@ -303,6 +307,13 @@ function findAnnotationLines(items, half) {
   for (const [col, arr] of linesByCol) {
     for (let i = 0; i < arr.length; i++) {
       const line = arr[i];
+      // 이 줄의 조각이 앞선 안내문 처리에 이미 전부 쓰였으면 건너뛴다. 아래
+      // "이웃 줄 다시 엮기"가 한 안내문을 이루는 줄 서넛을 한꺼번에 소비하는데,
+      // 그 줄들을 각각 다시 보면 **같은 안내문이 그룹으로 여러 번 등록되어**
+      // 세트 이미지가 번호마다 중복 생성된다(실측: 한능검 62회 "49번이 두 번
+      // 잘렸습니다" 크래시).
+      if (line.indices.length > 0 && line.indices.every((idx) => consumedIndices.has(idx)))
+        continue;
       let match = ANNOTATION_RANGE_RE.exec(line.text);
       const usedIndices = [...line.indices];
       if (!match && line.text.includes("[") && !line.text.includes("]")) {
@@ -310,6 +321,26 @@ function findAnnotationLines(items, half) {
         if (next) {
           match = ANNOTATION_RANGE_RE.exec(line.text + next.text);
           if (match) usedIndices.push(...next.indices);
+        }
+      }
+      // 한 안내문이 baseline 이 몇 pt 어긋난 조각들로 쪼개져 오는 조판이 있다.
+      // 실측(2022 한능검 62회 12쪽 "[49 ~ 50] 다음 자료를 읽고 물음에 답하시오."):
+      // 대괄호는 y=977.3, 숫자 49·50 은 y=976.1(살짝 올라간 자리), 물결표와 뒤
+      // 문장은 y=978.2 로 세 줄이 된다. 정수 반올림(lineKey)은 0.5pt 흔들림까지만
+      // 흡수하므로 이런 줄은 어느 조각도 정규식에 안 걸리고, 세트가 병합되지
+      // 않은 채 **개수는 정확히 맞는다** — 공통 자료가 빠진 49·50번 이미지가
+      // "성공"으로 올라갔다(이 문서가 경고하는 "개수만 맞고 반쪽" 그대로).
+      //
+      // 그래서 위 두 시도가 다 실패했을 때만, 같은 칼럼에서 y 가 3pt 이내인
+      // 이웃 줄들을 x 순서로 다시 엮어 한 번 더 본다. 매치되는 경우에만 쓰이므로
+      // 이미 인식되던 안내문의 결과는 달라지지 않는다. 줄 간격은 보통 수십 pt라
+      // 진짜 이웃 줄을 잘못 끌어오지도 않는다.
+      if (!match) {
+        const near = arr.filter((l) => Math.abs(l.y - line.y) <= 3);
+        if (near.length > 1) {
+          const parts = near.flatMap((l) => l.parts).sort((a, b) => a.x - b.x);
+          match = ANNOTATION_RANGE_RE.exec(parts.map((p) => p.str).join(""));
+          if (match) usedIndices.push(...parts.map((p) => p.idx));
         }
       }
       if (!match) continue;
@@ -593,6 +624,42 @@ export function computeColumnCropX(pageMarkerDataList) {
   if (!second) return null;
   const right = first.x < second.x ? second : first;
   return right.min - COLUMN_CROP_BACKOFF_PT;
+}
+
+// computeColumnCropX 의 **페이지별** 판. 스캔본은 쪽마다 지면이 좌우로 몇 pt 씩 흔들려
+// (실측 61회: 우측 칼럼 마커 x 가 369·380·389) 문서 하나의 경계로는 안 된다 — 오른쪽으로
+// 밀린 쪽에서는 왼쪽 칼럼의 "[1점]" 꼬리가 잘리고 오른쪽 칼럼 크롭에 그 꼬리가 딸려
+// 들어온다. 문서 전체 클러스터로 우측 칼럼이 어디인지만 정하고, 잘라낼 x 는 **그 쪽에
+// 실제로 선 우측 마커의 최소 x** 에서 물러선다. 우측 마커가 둘 미만인 쪽은 null(문서값).
+// 텍스트 레이어 문제지는 쪽이 정렬돼 있어 문서값과 같지만, 호출자가 켤 때만 쓴다.
+export function computeColumnCropXByPage(pageMarkerDataList) {
+  const xs = pageMarkerDataList.flatMap((d) => d.markers.map((m) => m.x)).sort((a, b) => a - b);
+  if (xs.length < 4) return pageMarkerDataList.map(() => null);
+  const clusters = [];
+  let current = [xs[0]];
+  for (let i = 1; i < xs.length; i++) {
+    if (xs[i] - current[current.length - 1] <= COLUMN_CLUSTER_TOLERANCE_PT) current.push(xs[i]);
+    else {
+      clusters.push(current);
+      current = [xs[i]];
+    }
+  }
+  clusters.push(current);
+  if (clusters.length < 2) return pageMarkerDataList.map(() => null);
+  const summarized = clusters
+    .map((c) => ({ count: c.length, x: c.reduce((a, b) => a + b, 0) / c.length }))
+    .sort((a, b) => b.count - a.count);
+  const first = summarized[0];
+  const second = summarized.find((c) => Math.abs(c.x - first.x) >= COLUMN_SPLIT_MIN_GAP_PT);
+  if (!second) return pageMarkerDataList.map(() => null);
+  const rightCenter = Math.max(first.x, second.x);
+  return pageMarkerDataList.map((d) => {
+    const onPage = d.markers
+      .map((m) => m.x)
+      .filter((x) => Math.abs(x - rightCenter) <= COLUMN_CLUSTER_TOLERANCE_PT);
+    if (onPage.length < 2) return null;
+    return Math.min(...onPage) - COLUMN_CROP_BACKOFF_PT;
+  });
 }
 
 // 문서 전체 마커에서 칼럼별 최빈 x를 구한다. "문" 신호가 하나라도 있으면
@@ -1085,6 +1152,21 @@ async function makePageContext(page, markerData, scale, opts) {
     const baselinePx = Math.round((regionTopPt - anchorY) * scale);
     if (baselinePx <= 0) return raw;
     const cleaned = await dropInkAboveBaseline(raw, baselinePx, Math.round(TOP_JUNK_MAX_PT * scale));
+    if (process.env.CROP_DEBUG && cleaned) {
+      const before = (await sharp(raw).metadata()).height;
+      const after = (await sharp(cleaned).metadata()).height;
+      if (after !== before) {
+        console.error(
+          `[crop]   dropTopJunk: regionTop=${regionTopPt.toFixed(1)} anchorY=${anchorY.toFixed(1)} baselinePx=${baselinePx} → ${before}px → ${after}px (${before - after}px 걷어냄)`,
+        );
+        // CROP_DEBUG 가 디렉터리면 걷어내기 전 원본을 남긴다(anchorY 로 파일명).
+        if (process.env.CROP_DEBUG.length > 1) {
+          const { writeFileSync, existsSync } = await import("node:fs");
+          if (existsSync(process.env.CROP_DEBUG))
+            writeFileSync(`${process.env.CROP_DEBUG}/raw-y${anchorY.toFixed(0)}.png`, raw);
+        }
+      }
+    }
     return cleaned ?? raw;
   }
 
@@ -1381,6 +1463,10 @@ async function cropQuestionsFromPage(
   const results = [];
 
   for (const set of mergedSets) {
+    if (process.env.CROP_DEBUG)
+      console.error(
+        `[crop] 쪽내 세트 ${set.numbers.join(",")}: ${set.segments.map((sg) => `${sg.colDef.key} top=${sg.top.toFixed(1)} bottom=${sg.bottom.toFixed(1)}`).join(" | ")}`,
+      );
     // 조각이 둘 이상이면(칼럼을 넘는 세트) 각 조각의 세로 여백을 먼저 걷어낸 뒤
     // 이어붙인다 — 안 걷어내면 왼쪽 칼럼 아래쪽 빈 공간이 두 조각 사이에 커다란
     // 흰 띠로 남는다.
@@ -1407,6 +1493,11 @@ async function cropQuestionsFromPage(
       const override = topOverrideByNumber.get(marker.number);
       const top = override ?? topBoundaryFor(colDef.key, marker);
       const bottom = findBottomBoundary(colDef, marker.y);
+      // CROP_DEBUG=1: 문항마다 고른 경계를 stderr 에 찍는다(왜 이렇게 잘렸는지 볼 때).
+      if (process.env.CROP_DEBUG)
+        console.error(
+          `[crop] ${marker.number}번 col=${colDef.key} marker y=${marker.y.toFixed(1)} h=${(marker.height ?? 0).toFixed(1)} top=${top.toFixed(1)}${override ? "(override)" : ""} bottom=${bottom.toFixed(1)}`,
+        );
 
       // topOverride 가 걸린 문항(안내문 바로 아래 첫 문제)은 크롭이 **안내문 바로
       // 밑에서** 시작한다 — 마커 위쪽도 이 문항의 내용이므로 위쪽 잉크를 걷어내면
@@ -1785,6 +1876,7 @@ function planCrossPageSets(pageDataList, columnMode) {
         numbers: members.map((m) => m.marker.number),
         annotation: { pageIdx: p, col: g.col, y: g.y, height: g.height },
         slots: slots.slice(startSlot, endSlot + 1),
+        members,
         lastMember: members[wanted - 1],
       });
     }
@@ -2040,7 +2132,7 @@ async function normalizeWidths(cropped) {
   }
 }
 
-async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
+async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, footerDetection = true, perPageColumnCrop = false) {
   // 1차 패스: 렌더링 없이 텍스트만 뽑아 페이지 폭 절반 기준으로 findQuestionMarkers를
   // 한 번 돌려본다.
   const roughMarkerData = [];
@@ -2074,6 +2166,11 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
   const columnCropX = useColumnSplitOverride
     ? computeColumnCropX(pageMarkerData.map((d) => d.data))
     : null;
+  // perPageColumnCrop(스캔본 전용): 쪽마다 흔들리는 지면에 맞춰 크롭 x 를 쪽별로 잡는다.
+  // 값이 없는 쪽(우측 마커 둘 미만)은 위 문서값(없으면 지면 절반)으로 떨어진다.
+  const columnCropXByPage = perPageColumnCrop
+    ? computeColumnCropXByPage(pageMarkerData.map((d) => d.data))
+    : pageMarkerData.map(() => null);
   const columnMode =
     columnSplitX != null || pageMarkerData.some((d) => d.data.markers.some((m) => m.x >= d.data.pageWidthPt / 2))
       ? "double"
@@ -2100,8 +2197,17 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
     columnSplitX,
   );
 
-  const footerInkTopByPage = computeFooterInkTopByPage(pageMarkerData.map((d) => d.data));
-  const footerBaselineByPage = computeFooterBaselineByPage(pageMarkerData.map((d) => d.data));
+  // footerDetection=false: 되풀이 꼬리말을 찾지 않는다(칼럼 마지막 문항은 지면 바닥까지).
+  // 스캔본(OCR 텍스트 레이어) 전용 — 쪽마다 같은 y 에 서는 얇은 줄이 진짜 꼬리말인지
+  // 마지막 선지 줄인지 OCR 좌표로는 못 가른다. 실측 69회 2번 ⑤, 57회 11번 "① (가) …" 줄이
+  // 꼬리말로 몰려 잘렸다. 꼬리말 조각이 남는 것(보기 흉함)과 선지가 잘리는 것(오답)
+  // 사이에서 전자를 택했다. 텍스트 레이어 문제지는 예전과 완전히 같은 경로다.
+  const footerInkTopByPage = footerDetection
+    ? computeFooterInkTopByPage(pageMarkerData.map((d) => d.data))
+    : pageMarkerData.map(() => null);
+  const footerBaselineByPage = footerDetection
+    ? computeFooterBaselineByPage(pageMarkerData.map((d) => d.data))
+    : pageMarkerData.map(() => null);
   const headerInkBottomByPage = computeHeaderInkBottomByPage(pageMarkerData.map((d) => d.data));
 
   const cropped = [];
@@ -2121,7 +2227,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
           columnMode,
           columnSplitX,
           footerInkTopY: footerInkTopByPage[pageIdx],
-          columnCropX,
+          columnCropX: columnCropXByPage[pageIdx] ?? columnCropX,
           headerInkBottomY: headerInkBottomByPage[pageIdx],
           footerBaselineY: footerBaselineByPage[pageIdx],
         }),
@@ -2152,9 +2258,42 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
       // 첫 조각은 안내문에서 시작한다 — 그래도 안내문 바로 위에 붙은 머리글·괘선이
       // 딸려 올 수 있으므로 안내문 baseline 기준으로 걷어낸다. 이어지는 조각은
       // 칼럼 맨 위부터라 되풀이 머리글 제거를 그대로 쓴다.
+      // 이어지는 조각이 **멤버 마커로 바로 시작하면**(그 위에 본문 줄이 없으면) 마커
+      // baseline 위 잉크를 몽땅 걷어낸다 — 단문항 크롭이 마커에서 시작하는 것과 같다.
+      // dropRunningHeader 는 머리글 덩어리가 40pt 를 넘으면 "지문 상자"로 보고 손대지
+      // 않는데, 스캔본 머리글은 쪽번호 빨간 상자(지면 맨 위부터 약 75pt)와 표제가 한
+      // 덩어리라 그대로 남았다(실측 57회 [35~36]: 왼쪽 35번 아래에 9쪽 머리글
+      // "…력검정시험 (심화) 9" 가 끼고 36번이 왔다. headerBandPx 는 209 로 잡혀 있었다).
+      // 마커 위에 본문 줄이 있으면(지문이 앞 쪽에서 이어져 칼럼 맨 위에서 계속되는 세트)
+      // 걷어내면 지문이 날아가므로 예전대로 dropRunningHeader 만 쓴다. 맨 위 7.5% 띠
+      // (머리글 자리)의 줄과 마커 줄의 조각(baseline 6pt 안)은 "위 줄"로 안 친다.
+      const slotFirstMember = plan.members?.find(
+        (m) => m.pageIdx === slot.pageIdx && m.col === slot.col,
+      );
+      const nothingAboveFirstMember =
+        slotFirstMember &&
+        !ctx.lines.some(
+          (l) =>
+            l.col === slot.col &&
+            l.y > slotFirstMember.marker.y + 6 &&
+            l.y < ctx.pageHeightPt * (1 - 0.075),
+        );
+      if (process.env.CROP_DEBUG && !isFirst) {
+        const aboveLines = ctx.lines.filter(
+          (l) => l.col === slot.col && slotFirstMember && l.y > slotFirstMember.marker.y + 6,
+        );
+        console.error(
+          `[crop] 세트 ${plan.numbers.join(",")} 조각 p${slot.pageIdx + 1}${slot.col}: headerBandPx=${ctx.headerBandPx} 첫멤버=${slotFirstMember?.marker.number ?? "없음"} y=${slotFirstMember?.marker.y.toFixed(1)} 위 줄 ${aboveLines.map((l) => l.y.toFixed(0)).join("/")} → 걷기 ${nothingAboveFirstMember ? "함" : "안 함"}`,
+        );
+      }
       const deheaded = isFirst
         ? await ctx.dropTopJunk(raw, top, plan.annotation.y)
-        : await dropRunningHeader(raw, ctx.headerBandPx, scale);
+        : nothingAboveFirstMember
+          ? await dropInkAboveBaseline(
+              raw,
+              Math.round((ctx.pageHeightPt - slotFirstMember.marker.y) * scale),
+            )
+          : await dropRunningHeader(raw, ctx.headerBandPx, scale);
       if (!deheaded) continue;
       const trimmed = await trimVerticalWhitespace(deheaded);
       if (trimmed) pieces.push(trimmed);
@@ -2234,7 +2373,7 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
       columnMode,
       columnSplitX,
       footerInkTopByPage[p - 1],
-      columnCropX,
+      columnCropXByPage[p - 1] ?? columnCropX,
       headerInkBottomByPage[p - 1],
       handledNumbers,
       footerBaselineByPage[p - 1],
@@ -2277,13 +2416,20 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride) {
 // 재시도하고, 그 결과가 더 나으면(에러 없음 + expectedCount와 일치하거나, 최소
 // 예전 방식보다 인식 개수가 많으면) 그걸 쓴다. expectedCount를 안 넘기면(옛
 // 호출자와의 호환) 예전 방식이 에러 없이 끝나는 한 그대로 쓴다.
-export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage, expectedCount } = {}) {
-  const pdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
+export async function extractQuestionsFromPdf(
+  pdfBuffer,
+  { scale = 3, onPage, expectedCount, textLayer, footerDetection = true, perPageColumnCrop = false } = {},
+) {
+  const realPdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
+  // textLayer: 스캔본(텍스트 레이어 0자)을 위해 호출자가 OCR 로 만들어 넘긴 가짜
+  // 텍스트 조각들(scripts/lib/ocr-text-layer.mjs). 렌더·크롭은 언제나 원본 PDF 로
+  // 하고 **글자 좌표만** 이쪽에서 읽는다. 안 넘기면 예전과 완전히 같은 경로다.
+  const pdf = textLayer ? withTextLayer(realPdf, textLayer) : realPdf;
 
   let legacyResult;
   let legacyError;
   try {
-    legacyResult = await extractWithStrategy(pdf, scale, onPage, false);
+    legacyResult = await extractWithStrategy(pdf, scale, onPage, false, footerDetection, perPageColumnCrop);
   } catch (err) {
     legacyError = err;
   }
@@ -2311,7 +2457,7 @@ export async function extractQuestionsFromPdf(pdfBuffer, { scale = 3, onPage, ex
   let overrideResult;
   let overrideError;
   try {
-    overrideResult = await extractWithStrategy(pdf, scale, onPage, true);
+    overrideResult = await extractWithStrategy(pdf, scale, onPage, true, footerDetection, perPageColumnCrop);
   } catch (err) {
     overrideError = err;
   }

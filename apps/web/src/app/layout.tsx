@@ -13,6 +13,7 @@ import { getMembership } from "@/lib/membership";
 import { avatarUrl } from "@/lib/avatars";
 import { isPremiumMembership } from "@gongmoa/core";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site-url";
+import { adsenseLoaderSrc } from "@/lib/adsense";
 import { JsonLd } from "@/components/json-ld";
 import "./globals.css";
 
@@ -135,6 +136,8 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const adsenseSrc = adsenseLoaderSrc();
+
   return (
     <html lang="ko" className="h-full antialiased" suppressHydrationWarning>
       <head>
@@ -145,6 +148,20 @@ export default function RootLayout({
             __html: `(function(){try{var t=localStorage.getItem("theme");if(t!=="light"&&t!=="dark"){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}document.documentElement.setAttribute("data-theme",t)}catch(e){}})()`,
           }}
         />
+        {/* 구글 애드센스 로더. 게시자 ID 가 설정되지 않은 환경에서는 아무것도 붙지 않는다
+            (lib/adsense.ts).
+
+            next/script(GA·Clarity 가 쓰는 것) 대신 평범한 <script async> 를 <head> 에
+            직접 두는 이유: 애드센스는 **사이트 심사와 자동 광고 모두 서버가 보낸 HTML
+            에서 이 태그를 찾는다**. next/script 의 afterInteractive 는 하이드레이션
+            뒤에 자바스크립트로 태그를 심으므로 심사 크롤러가 받는 HTML 에는 없을 수
+            있고, beforeInteractive 는 반대로 우리 코드보다 먼저 프리로드돼(문서가
+            "정말 급한 스크립트만" 쓰라고 하는 전략) 본문 표시가 광고 스크립트에 밀린다.
+            async 태그 하나면 정적 셸에 그대로 실리면서 본문 렌더를 막지도 않는다.
+
+            자동 광고를 켤 위치·제외 페이지는 코드가 아니라 애드센스 대시보드에서
+            정한다(docs/agents/adsense.md) — 특히 CBT 풀이 화면은 반드시 제외할 것. */}
+        {adsenseSrc && <script async src={adsenseSrc} crossOrigin="anonymous" />}
       </head>
       <body className="min-h-full">
         {/* 사이트 전역 구조화 데이터. WebSite+SearchAction은 검색 결과에 사이트

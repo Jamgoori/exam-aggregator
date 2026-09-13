@@ -4,6 +4,11 @@ import { useState } from "react";
 import Link from "next/link";
 import { CONSONANTS, initialConsonant } from "@gongmoa/core";
 import { SubjectBookmarkButton } from "@/components/subject-bookmark-button";
+import {
+  KHE_TAB_LABEL,
+  kheHref,
+  withoutKheSubject,
+} from "@/lib/korean-history-exam";
 import type { Subject } from "@gongmoa/core";
 
 export function SubjectIndexTabs({
@@ -21,8 +26,13 @@ export function SubjectIndexTabs({
 }) {
   const [active, setActive] = useState<string | null>(null);
 
+  // 한능검 전용 과목은 초성 목록에서 뺀다 — 바로 옆에 전용 탭이 있고, 두 군데에
+  // 보이면 ㅎ 탭에 "한국사"와 "한국사능력검정시험"이 나란히 떠 헷갈린다
+  // (lib/korean-history-exam.ts).
   const filtered = active
-    ? subjects.filter((s) => initialConsonant(s.name) === active)
+    ? withoutKheSubject(subjects).filter(
+        (s) => initialConsonant(s.name) === active,
+      )
     : [];
 
   return (
@@ -31,6 +41,17 @@ export function SubjectIndexTabs({
           것을, 옆으로 스와이프하는 한 줄로 압축한다(스크롤바는 숨김). 폭이 넉넉한
           sm 이상에서는 기존처럼 전부 펼쳐 보여준다. */}
       <div className="flex gap-x-2 overflow-x-auto border-t border-zinc-100 pt-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:gap-x-3 sm:gap-y-2 sm:overflow-visible sm:pb-0 dark:border-zinc-700">
+        {/* 한능검 탭. 공무원 과목이 아니라 시험 하나라서 초성 자리가 없고, 모달로
+            과목을 고를 것도 없다 — 눌리면 곧장 한능검 시험 페이지로 간다. 초성 원형
+            버튼들과 같은 색·높이를 유지하되 글자 수만큼 넓은 알약 모양으로 두어, 맨 앞의
+            이 하나만 성격이 다르다는 것이 모양으로만 드러나게 한다 — 색을 채워 두면
+            아무것도 고르지 않았는데 이 탭이 켜져 있는 것처럼 보인다. */}
+        <Link
+          href={kheHref()}
+          className="flex h-8 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-400 dark:hover:border-blue-700 dark:hover:bg-blue-950/40 dark:hover:text-blue-400"
+        >
+          {KHE_TAB_LABEL}
+        </Link>
         {CONSONANTS.map((c) => (
           <button
             key={c}

@@ -117,6 +117,7 @@ test("메타데이터 라우트는 통과, 비슷하게 생긴 일반 주소는 
   assert.equal(isInfraPath("/papers/2026-국가직-9급-국어/opengraph-image"), true);
   assert.equal(isInfraPath("/subjects/korean/opengraph-image-a1b2c3.png"), true);
   assert.equal(isInfraPath("/robots.txt"), true);
+  assert.equal(isInfraPath("/ads.txt"), true);
   // 앞부분만 같은 멀쩡한 주소까지 새면 안 된다.
   assert.equal(isInfraPath("/apidocs"), false);
   assert.equal(isInfraPath("/papers/icons-of-history"), false);

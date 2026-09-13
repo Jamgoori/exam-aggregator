@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import Script from "next/script";
-import { ADSENSE_CLIENT } from "@/lib/ad-slots";
+import { ADSENSE_CLIENT } from "@/lib/adsense";
 
 // 애드센스 스크립트가 읽어가는 전역 큐. 스크립트가 오기 전에 push 된 것들이 여기
 // 쌓였다가 로드 시점에 한꺼번에 처리된다.
@@ -17,6 +16,10 @@ declare global {
 // 애드센스는 <ins> 를 DOM 에 올린 **뒤에** adsbygoogle 큐에 한 번 push 해야 그 자리를
 // 채운다. 스크립트가 아직 안 왔어도 괜찮다 — push 된 것들은 배열에 쌓여 있다가
 // 스크립트가 로드되면서 한꺼번에 처리된다.
+//
+// 로더(<script async>)는 여기서 싣지 않는다. layout.tsx 의 <head> 에 이미 있고, 그
+// 자리를 지키는 이유가 따로 있다(심사 크롤러가 서버 HTML 에서 태그를 찾는다 —
+// docs/agents/adsense.md). 여기서 한 벌 더 실으면 같은 라이브러리를 두 번 받는다.
 //
 // 높이는 부모(ad-banner.tsx)가 잡아 준다. 여기서 다시 잡으면 두 곳이 서로 다른 값을
 // 갖게 되어, 광고가 도착하는 순간 화면이 그만큼 덜컹인다.
@@ -35,24 +38,16 @@ export function AdSlot({ slotId }: { slotId: string }) {
     }
   }, []);
 
+  if (!ADSENSE_CLIENT) return null;
+
   return (
-    <>
-      {/* id 가 같으면 next/script 가 한 번만 싣는다 — 한 화면에 광고 자리가 둘이어도
-          라이브러리는 하나다. */}
-      <Script
-        id="adsbygoogle-js"
-        strategy="afterInteractive"
-        crossOrigin="anonymous"
-        src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
-      />
-      <ins
-        className="adsbygoogle block w-full"
-        style={{ display: "block" }}
-        data-ad-client={ADSENSE_CLIENT}
-        data-ad-slot={slotId}
-        data-ad-format="auto"
-        data-full-width-responsive="true"
-      />
-    </>
+    <ins
+      className="adsbygoogle block w-full"
+      style={{ display: "block" }}
+      data-ad-client={ADSENSE_CLIENT}
+      data-ad-slot={slotId}
+      data-ad-format="auto"
+      data-full-width-responsive="true"
+    />
   );
 }

@@ -123,6 +123,33 @@ function useFullscreen(ref: RefObject<HTMLElement | null>) {
   return { isFullscreen, supported, toggle };
 }
 
+// 전체화면일 때 탭 줄을 헤더 줄로 끌어올려도 한 줄에 다 담기는 폭인지(태블릿·PC)
+// 가르는 기준. Tailwind의 md(768px)와 같은 값이라 CSS 쪽 반응형 규칙과 어긋나지 않는다.
+const WIDE_HEADER_QUERY = "(min-width: 768px)";
+
+// 탭을 헤더로 합칠지는 화면 폭에 따라 갈리는데, 합치면 탭과 자물쇠가 DOM의 다른 자리로
+// 옮겨가야 해서 CSS(hidden/flex)만으로는 처리할 수 없다 — 양쪽에 한 벌씩 두면 자물쇠
+// 버튼이 둘이 되어 안내 말풍선도 둘이 뜬다. 그래서 폭을 직접 구독해 한 벌만 그린다.
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(false);
+
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    // 서버에서는 뷰포트 폭을 알 수 없어 SSR은 항상 "아님"으로 그리고, 하이드레이션
+    // 이후 여기서 실제 값으로 맞춘다(서버/클라 첫 렌더 불일치를 피하려는 의도적인
+    // 마운트 후 setState라, 이 줄에 한해 set-state-in-effect 경고를 끈다).
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMatches(mql.matches);
+    function handleChange(event: MediaQueryListEvent) {
+      setMatches(event.matches);
+    }
+    mql.addEventListener("change", handleChange);
+    return () => mql.removeEventListener("change", handleChange);
+  }, [query]);
+
+  return matches;
+}
+
 // 모바일 전체보기에서 OMR을 오른쪽에 붙여 쓸 때, 시험지와 OMR 사이 경계선을
 // 끌어 폭을 바꾸는 훅. 손가락으로 끄는 동작이라 pointer capture 로 경계선이
 // 포인터를 붙잡아, 끄는 도중 시험지 위로 넘어가도 시험지가 같이 밀리지 않게 한다.
@@ -355,6 +382,15 @@ export function CbtSolver({
     supported: fullscreenSupported,
     toggle: toggleFullscreen,
   } = useFullscreen(solverRootRef);
+  // 전체화면(태블릿·PC)에서는 탭 줄을 헤더 줄로 끌어올려 한 줄로 합친다 — 줄 하나
+  // (약 36px)를 통째로 되찾아 시험지를 그만큼 더 크게 본다. 전체화면은 브라우저 크롬을
+  // 걷어내 세로를 벌자고 켜는 것이라, 남은 줄도 같이 줄이는 게 목적에 맞다. 폭이 좁은
+  // 화면은 한 줄에 다 담기지 않아 예전처럼 두 줄로 둔다.
+  const isWideViewport = useMediaQuery(WIDE_HEADER_QUERY);
+  const tabsInHeader = isFullscreen && isWideViewport;
+  // 자물쇠가 저장해 둔 시작 모드. 자물쇠 버튼은 전체화면을 켜고 끌 때 탭 줄과 헤더 줄
+  // 사이를 오가며 다시 마운트되므로, 그 사이에 눌린 값이 날아가지 않게 여기서 들고 있다.
+  const [savedDefaultViewMode, setSavedDefaultViewMode] = useState(defaultViewMode);
 
   const hasQuestionImages = Object.keys(questionImages).length > 0;
   const [viewMode, setViewMode] = useState<CbtViewMode>(
@@ -530,6 +566,74 @@ export function CbtSolver({
   const sideOmr = omrOpen && viewMode === "full";
   const sheetOmr = omrOpen && viewMode !== "full";
 
+  // 탭(문제별 풀기·전체보기)과 자물쇠 한 벌. 전체화면이면 헤더 줄 안에, 아니면 그
+  // 아래 탭 줄에 — 자리만 달라질 뿐 같은 것이라 한 번만 만들어 옮겨 쓴다.
+  const viewModeTabs = (
+    <>
+      <button
+        type="button"
+        onClick={() => switchViewMode("single")}
+        disabled={!hasQuestionImages}
+        title={hasQuestionImages ? undefined : "문항별 이미지가 아직 등록되지 않았어요"}
+        className={`shrink-0 rounded-full px-3 py-1 text-[15px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+          viewMode === "single"
+            ? "bg-blue-600 text-white"
+            : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
+        }`}
+      >
+        문제별 풀기
+      </button>
+      <button
+        type="button"
+        onClick={() => switchViewMode("full")}
+        className={`shrink-0 rounded-full px-3 py-1 text-[15px] font-medium ${
+          viewMode === "full"
+            ? "bg-blue-600 text-white"
+            : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
+        }`}
+      >
+        전체보기
+      </button>
+      <CbtViewModeLock
+        viewMode={viewMode}
+        savedDefaultViewMode={savedDefaultViewMode}
+        onSavedDefaultViewModeChange={setSavedDefaultViewMode}
+      />
+    </>
+  );
+
+  // 문제별 풀기(lg)에서 보여주는 문항 번호·신고·제출. 문제별 뷰가 따로 갖던 헤더 한
+  // 줄(약 40px)을 없애려고 위쪽 줄에 얹어둔 것이라, 탭이 헤더로 합쳐질 때 같이 따라
+  // 올라간다. 폭이 좁은 화면에서는 줄이 넘쳐 숨기고, 그쪽은 문제별 뷰의 자체 헤더를
+  // 그대로 쓴다.
+  const singleModeStatus = viewMode === "single" && (
+    <div className="ml-auto hidden shrink-0 items-center gap-2 lg:flex">
+      <div className="flex items-center gap-1 text-sm">
+        <span className="font-bold text-zinc-800 dark:text-zinc-200">
+          {groupFirstNumber === groupLastNumber
+            ? `${groupFirstNumber}번`
+            : `${groupFirstNumber}~${groupLastNumber}번`}
+        </span>
+        <span className="text-zinc-400 dark:text-zinc-600"> / {totalQuestions}</span>
+        <ReportQuestionButton
+          paperId={paperId}
+          questionNumber={groupFirstNumber}
+          context="cbt"
+        />
+      </div>
+      {!result && (
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isPending}
+          className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
+        >
+          {isPending ? "채점 중..." : `제출 (${answeredCount}/${totalQuestions})`}
+        </button>
+      )}
+    </div>
+  );
+
   return (
     // SiteHeaderGate가 lg 이상에서는 전역 사이트 헤더(약 65px)를 그대로 보여주는데,
     // 100dvh는 그 헤더를 포함한 뷰포트 전체 높이라서 그만큼을 빼주지 않으면
@@ -558,6 +662,11 @@ export function CbtSolver({
               <h1 className="truncate text-sm font-medium text-zinc-700 dark:text-zinc-300">
                 {paperTitle}
               </h1>
+              {/* 전체화면(태블릿·PC)에서는 탭·자물쇠가 아래 줄 대신 제목 옆에 붙어,
+                  상단이 한 줄로 끝난다. */}
+              {tabsInHeader && (
+                <div className="flex shrink-0 items-center gap-1">{viewModeTabs}</div>
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <div className="flex items-center gap-1 text-sm font-medium text-zinc-600 dark:text-zinc-400">
@@ -665,78 +774,19 @@ export function CbtSolver({
               >
                 답안 입력
               </button>
+              {tabsInHeader && singleModeStatus}
             </div>
           </div>
         </header>
 
-        <div>
+        {/* 전체화면(태블릿·PC)에서는 이 줄이 통째로 헤더 줄로 올라가므로 여기서는
+            그리지 않는다. */}
+        {!tabsInHeader && (
           <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 py-1.5">
-            <button
-              type="button"
-              onClick={() => switchViewMode("single")}
-              disabled={!hasQuestionImages}
-              title={
-                hasQuestionImages ? undefined : "문항별 이미지가 아직 등록되지 않았어요"
-              }
-              className={`rounded-full px-3 py-1 text-[15px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
-                viewMode === "single"
-                  ? "bg-blue-600 text-white"
-                  : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
-              }`}
-            >
-              문제별 풀기
-            </button>
-            <button
-              type="button"
-              onClick={() => switchViewMode("full")}
-              className={`rounded-full px-3 py-1 text-[15px] font-medium ${
-                viewMode === "full"
-                  ? "bg-blue-600 text-white"
-                  : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
-              }`}
-            >
-              전체보기
-            </button>
-            <CbtViewModeLock
-              viewMode={viewMode}
-              initialDefaultViewMode={defaultViewMode}
-            />
-            {/* 문제별 풀기(lg)에서는 문항 번호·제출을 이 탭 줄 오른쪽에 붙여, 문제별
-                뷰가 따로 갖던 헤더 한 줄(약 40px)을 없앤다 — 태블릿 가로에서 문제가
-                한눈에 들어오도록 세로 공간을 아끼는 게 목적. 폭이 좁은 모바일에서는
-                줄이 넘칠 수 있어 숨기고, 그쪽은 문제별 뷰의 자체 헤더를 그대로 쓴다. */}
-            {viewMode === "single" && (
-              <div className="ml-auto hidden items-center gap-2 lg:flex">
-                <div className="flex items-center gap-1 text-sm">
-                  <span className="font-bold text-zinc-800 dark:text-zinc-200">
-                    {groupFirstNumber === groupLastNumber
-                      ? `${groupFirstNumber}번`
-                      : `${groupFirstNumber}~${groupLastNumber}번`}
-                  </span>
-                  <span className="text-zinc-400 dark:text-zinc-600">
-                    {" "}
-                    / {totalQuestions}
-                  </span>
-                  <ReportQuestionButton
-                    paperId={paperId}
-                    questionNumber={groupFirstNumber}
-                    context="cbt"
-                  />
-                </div>
-                {!result && (
-                  <button
-                    type="button"
-                    onClick={handleSubmit}
-                    disabled={isPending}
-                    className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
-                  >
-                    {isPending ? "채점 중..." : `제출 (${answeredCount}/${totalQuestions})`}
-                  </button>
-                )}
-              </div>
-            )}
+            {viewModeTabs}
+            {singleModeStatus}
           </div>
-        </div>
+        )}
 
         <CbtDrawingToolbar
           tool={tool}

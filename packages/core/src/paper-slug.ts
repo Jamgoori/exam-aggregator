@@ -41,7 +41,9 @@ function slugifyText(text: string): string {
  *
  * **왜 회차를 "round > 1 이면 무조건" 붙이지 않나:** 경찰 문제지는 제목에 이미
  * "공채 2차"가 들어 있어서 그대로 붙이면 `2016-경찰-공채-2차-한국사-2회` 처럼
- * 같은 말이 두 번 나온다. 제목이 이미 회차를 말하고 있으면 생략한다.
+ * 같은 말이 두 번 나온다. 제목이 이미 회차를 말하고 있으면 생략한다. 한능검은 같은
+ * 회차를 "제50회"라고 부르므로("2020 한능검 제50회 심화", round=50) `N차`뿐 아니라
+ * `N회`도 함께 본다 — 안 그러면 `2020-한능검-제50회-심화-50회`가 된다.
  */
 export function getPaperSlug(
   title: string,
@@ -54,7 +56,8 @@ export function getPaperSlug(
 
   let slug = slugifyText(bare);
   if (track) slug += `-${slugifyText(track)}`;
-  if (round > 1 && !bare.includes(`${round}차`)) slug += `-${round}회`;
+  if (round > 1 && !bare.includes(`${round}차`) && !bare.includes(`${round}회`))
+    slug += `-${round}회`;
   return slug;
 }
 

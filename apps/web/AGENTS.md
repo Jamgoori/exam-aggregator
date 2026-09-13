@@ -16,7 +16,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 | 작업 | 먼저 읽을 문서 |
 |---|---|
-| 문항 이미지 크롭 (`crop-question-images.mjs`/`batch-crop-questions.mjs`, 새 시험유형 등록 포함) | `docs/agents/crop-question-images.md` |
+| 문항 이미지 크롭 (`crop-question-images.mjs`/`batch-crop-questions.mjs`, 새 시험유형 등록 포함; **텍스트 레이어 없는 스캔본**은 `crop-scanned-questions.mjs` — 같은 문서 맨 위 "스캔본 크롭 절차" 절) | `docs/agents/crop-question-images.md` |
 | 해설 배치 루틴·해설 스크립트·해설 관련 RLS/스키마 (`next-explanation-chunk.mjs`, `save-explanations.mjs`, 루틴 프롬프트/훅) | `docs/agents/explanation-batch-routines.md` |
 | 법령 문항 해설 (생성·재생성·삭제·판별) | `docs/agents/law-explanations.md` |
 | 중복 시험지 표시 통합 (`dedup-papers.ts`, 목록에 같은 시험지가 여러 장 보이는 문제) | `docs/agents/dedup-papers.md` |
@@ -27,12 +27,18 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | 해외 IP 차단 (`geo-block.ts`, `proxy.ts`, `GEO_BLOCK*` 환경변수, 크롤러 예외) | `docs/agents/geo-block.md` |
 | 과목명 표기 (시행처마다 다른 과목명, `subject-label.ts`, `SUBJECT_ALIASES`, 새 과목 행 추가) | `docs/agents/subject-names.md` |
 | 자유게시판 본문(HTML)·이미지 업로드·알림 (`rich-text.ts` 새니타이저, `board/actions.ts`, `notifications`, `avatars`/`board-images` 버킷) | `docs/agents/board-rich-text.md` |
+| 한국사능력검정시험(한능검) 회차 추가·전용 과목/탭 (`upload-korean-history-exam.mjs`, `lib/korean-history-exam.ts`) | `docs/agents/korean-history-exam.md` |
+| 광고(구글 애드센스) — 게시자 ID, `<head>` 로더, `/ads.txt`, 광고 관련 개인정보 고지 | `docs/agents/adsense.md` |
 
 # 금지선 (문서 안 읽었어도 이것만은 절대)
 
 - **크롭**: 배치 스크립트를 한 번 돌리고 성공/실패 개수만 보고 끝내지 말 것.
   "개수 일치 = 성공"으로 판단 금지 (반쪽 크롭이 개수만 맞은 실측 사례 있음).
   크롭 로직 수정 시 이미 완료한 다른 시험유형/급수 전체 재검증 필수.
+  **스캔본(OCR 경로)은 더하다**: 개수·번호 대조 게이트가 50/50 이어도 발문 유실·세트
+  자료 누락·머리글 끼임은 못 잡는다(실측 4종) — `dump-scanned-crops.mjs` 병합본을
+  회차마다 끝까지 눈으로 본 뒤에만 올릴 것. 되풀이 꼬리말 판정을 스캔본에서 다시 켜지
+  말 것(⑤가 잘린다).
 - **해설 배치**: 레포의 `scripts/` 해설 스크립트 사본을 Supabase Storage에 업로드
   금지 (배포는 소유자 전용 절차). `question_explanations_question_uidx` unique
   인덱스 삭제 금지 (upsert 전제조건). `question_explanations` RLS/`admins` 변경 시
@@ -114,6 +120,20 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   (2026-09-05 `/mix` 사고, 하루치 배포가 그 상태였다). 주소·문구 조립은 필요한 값만
   문자열로 넘기고 컴포넌트 안에서 한다. 배포 확인은 상태 코드가 아니라 **본문에
   `digest\":` 가 있는지**로 볼 것: `curl -s <url> | grep -o 'digest[^,]*'`.
+- **한능검**: 한국사능력검정시험 문제지를 공무원 "한국사"(`korean-history`) 과목 행에
+  붙이지 말 것 — 전용 과목 행(`korean-history-exam`)에만 붙인다. 50문항 5지선다라
+  20~25문항짜리 공무원 한국사 목록에 섞이면 그 과목이 통째로 못 쓰게 된다.
+- **광고**: 자동 광고에서 **CBT 풀이 화면(`/papers/*/cbt`)·복습 세션을 제외**할 것
+  (애드센스 대시보드 설정) — OMR 버튼 위 오클릭은 무효 트래픽이 되고, 무효 트래픽은
+  경고 없이 계정 정지로 이어진다. 자기 광고 클릭 금지(테스트로도).
+  게시자 ID 정본을 환경변수로 옮기지 말 것 (`lib/adsense.ts` 상수 — 값이 비면 광고가
+  조용히 멈추고 `/ads.txt` 가 404 가 된다). `/ads.txt` 를 정적 파일로 다시 만들지 말 것
+  (ID 가 두 곳에 나뉘어 적힌다). 로더를 `next/script` 로 바꾸지 말 것 (심사 크롤러가
+  서버 HTML 에서 태그를 찾는다).
+  **자동 광고를 켜면 멤버십 회원에게도 광고가 나간다** — 광고 노출은 코드
+  (`lib/ads.ts` + `components/ad-banner.tsx`)가 손으로 배치한 자리에서만 판정하므로,
+  대시보드의 자동 광고는 그 판정을 지나쳐 결제 회원·관리자 화면에도 광고를 꽂는다
+  (관리자에게 꽂히면 자기 광고 클릭 사고로 이어진다). 자동 광고는 꺼 둘 것.
 - **정답 등록**: `question_count`와 길이가 다른 정답 배열을 덮어쓰지 말 것.
   공통과목이라고 정답을 다른 직류(track) 문제지에 수동 복사하지 말 것 (법원직
   서기보는 국어·한국사 15문항/영어 20문항 별도 문제지 — 실측 사고 있음).

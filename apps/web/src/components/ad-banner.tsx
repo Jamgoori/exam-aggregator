@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { shouldShowAds } from "@/lib/ads";
-import { ADSENSE_CLIENT, adSlotId, type AdPlacement } from "@/lib/ad-slots";
+import { adSlotId, type AdPlacement } from "@/lib/ad-slots";
+import { isAdsenseConfigured } from "@/lib/adsense";
 import { AdSlot } from "@/components/ad-slot";
 
 // 광고 자리. 쓰는 쪽은 <AdBanner placement="paperDetail" /> 한 줄이면 된다.
@@ -27,7 +28,7 @@ const RESERVED_HEIGHT = "min-h-[100px]";
 export function AdBanner({ placement }: { placement: AdPlacement }) {
   // 게시자 ID·슬롯 ID 는 빌드 시점 환경변수라 셸에서 바로 판정해도 된다(사람마다
   // 다른 값이 아니다). 심사 전이거나 슬롯을 아직 안 만든 자리는 빈 칸도 남기지 않는다.
-  if (!ADSENSE_CLIENT || !adSlotId(placement)) return null;
+  if (!isAdsenseConfigured() || !adSlotId(placement)) return null;
 
   return (
     <Suspense
