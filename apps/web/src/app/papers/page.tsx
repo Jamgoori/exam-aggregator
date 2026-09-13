@@ -11,7 +11,7 @@ export const unstable_instant = {
 
 import { createClient } from "@/lib/supabase/server";
 import { ExamBrowser } from "@/components/exam-browser";
-import { AdBanner } from "@/components/ad-banner";
+import { AdBanner, AdSideRail } from "@/components/ad-banner";
 import { getMyRoundCounts } from "@/lib/my-round-counts";
 import { getAllMyBookmarkedPaperIds } from "@/lib/bookmarks";
 import { getMyBookmarkedSubjectIds } from "@/lib/subject-bookmarks";
@@ -140,6 +140,8 @@ export default async function PapersPage({
       />
       {/* 카드 목록을 다 훑고 난 자리. 목록 중간에 끼우면 찾던 문제지를 가린다. */}
       <AdBanner placement="papersList" />
+      {/* 화면이 아주 넓을 때만 오른쪽 여백에 붙는 세로 레일. 좁으면 저절로 빠진다. */}
+      <AdSideRail placement="papersSide" />
     </div>
   );
 }

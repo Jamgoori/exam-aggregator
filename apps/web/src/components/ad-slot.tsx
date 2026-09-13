@@ -23,7 +23,17 @@ declare global {
 //
 // 높이는 부모(ad-banner.tsx)가 잡아 준다. 여기서 다시 잡으면 두 곳이 서로 다른 값을
 // 갖게 되어, 광고가 도착하는 순간 화면이 그만큼 덜컹인다.
-export function AdSlot({ slotId }: { slotId: string }) {
+export function AdSlot({
+  slotId,
+  width,
+  height,
+}: {
+  slotId: string;
+  // 둘 다 주면 그 크기로 고정한다(세로 레일). 안 주면 자리 폭에 맞춰 늘어나는
+  // 반응형 단위가 된다 — 가로 배너 쪽.
+  width?: number;
+  height?: number;
+}) {
   const pushed = useRef(false);
 
   useEffect(() => {
@@ -40,14 +50,23 @@ export function AdSlot({ slotId }: { slotId: string }) {
 
   if (!ADSENSE_CLIENT) return null;
 
+  // 고정 크기일 때 data-ad-format 을 함께 주면 안 된다 — 애드센스가 자동 크기를
+  // 우선해서 지정한 크기를 무시하고, 부모가 잡아 둔 자리와 어긋난다.
+  const fixed = width !== undefined && height !== undefined;
+
   return (
     <ins
-      className="adsbygoogle block w-full"
-      style={{ display: "block" }}
+      className={fixed ? "adsbygoogle" : "adsbygoogle block w-full"}
+      style={
+        fixed
+          ? { display: "inline-block", width, height }
+          : { display: "block" }
+      }
       data-ad-client={ADSENSE_CLIENT}
       data-ad-slot={slotId}
-      data-ad-format="auto"
-      data-full-width-responsive="true"
+      {...(fixed
+        ? {}
+        : { "data-ad-format": "auto", "data-full-width-responsive": "true" })}
     />
   );
 }

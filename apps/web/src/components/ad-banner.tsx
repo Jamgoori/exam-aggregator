@@ -51,3 +51,59 @@ async function StreamedAd({ placement }: { placement: AdPlacement }) {
     </div>
   );
 }
+
+// ── 화면 오른쪽 세로 레일 ────────────────────────────────────────────────────
+// 본문 옆에 자리가 남는 넓은 화면에서만 보인다. 보일지 말지는 CSS 미디어 쿼리가
+// 정하고(globals.css 의 .ad-rail — 폭과 높이를 함께 본다), 여기서는 자리만 만든다.
+// 자바스크립트로 창 크기를 재서 판정하지 않는 이유: 서버가 보낸 HTML 과 첫 렌더가
+// 달라져 하이드레이션이 어긋나고, 창을 줄일 때마다 광고가 붙었다 떨어졌다 한다.
+//
+// position: fixed 라 문서 흐름에서 빠져 있다 — 그래서 높이를 예약할 것도, 늦게 와서
+// 본문을 밀 일도 없다(아래 fallback 이 null 인 이유).
+//
+// 왼쪽이 아니라 오른쪽인 건 채팅 버튼이 왼쪽 아래에 있어서다. 옮기고 싶으면 아래
+// right-4 를 left-4 로 바꾸면 되는데, 그때는 채팅 버튼과의 세로 간격을 다시 볼 것.
+const RAIL_WIDTH = 160;
+const RAIL_HEIGHT = 600;
+
+// 자리마다 본문 폭이 달라서 "레일이 들어갈 만큼 넓은 화면"의 기준이 다르다.
+const RAIL_BREAKPOINT: Record<"papersSide" | "paperDetailSide", string> = {
+  // 기출문제 목록은 본문이 max-w-7xl 이라 더 넓은 화면이어야 자리가 남는다.
+  papersSide: "ad-rail-7xl",
+  // 문제지 상세는 max-w-5xl.
+  paperDetailSide: "ad-rail-5xl",
+};
+
+export function AdSideRail({
+  placement,
+}: {
+  placement: "papersSide" | "paperDetailSide";
+}) {
+  if (!isAdsenseConfigured() || !adSlotId(placement)) return null;
+
+  return (
+    <Suspense fallback={null}>
+      <StreamedSideRail placement={placement} />
+    </Suspense>
+  );
+}
+
+async function StreamedSideRail({
+  placement,
+}: {
+  placement: "papersSide" | "paperDetailSide";
+}) {
+  const slotId = adSlotId(placement);
+  if (!slotId) return null;
+  if (!(await shouldShowAds())) return null;
+
+  return (
+    <div
+      className={`ad-rail ${RAIL_BREAKPOINT[placement]} fixed right-4 top-24 z-30 print:hidden`}
+      // 화면 아래 고정 버튼(z-40)보다 뒤에 둔다. 혹시 겹치는 화면이 있어도 버튼이
+      // 광고 위로 올라오게 해서, 누르려던 버튼 대신 광고가 눌리는 일을 막는다.
+    >
+      <AdSlot slotId={slotId} width={RAIL_WIDTH} height={RAIL_HEIGHT} />
+    </div>
+  );
+}

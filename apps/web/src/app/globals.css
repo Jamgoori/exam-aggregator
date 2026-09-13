@@ -508,3 +508,30 @@ button:not(:disabled) {
 .board-content {
   overflow-wrap: anywhere;
 }
+
+/* 사이드 광고 레일(화면 오른쪽에 세로로 붙는 광고). 본문은 가운데 정렬이라,
+   광고 160px + 본문과의 간격 24px 만큼이 양옆에 남아야 본문을 가리지 않는다.
+   남는 폭은 그 페이지의 본문 폭에 달렸으므로 기준이 자리마다 다르다:
+     본문 max-w-5xl(1024px) → 1024 + 184×2 ≈ 1400px  (문제지 상세)
+     본문 max-w-7xl(1280px) → 1280 + 184×2 ≈ 1650px  (기출문제 목록)
+   좁은 화면에서 억지로 띄우면 본문 위에 광고가 얹혀 글을 가린다 — 그건 애드센스가
+   금지하는 배치다.
+
+   세로 기준(760px)은 화면 아래 고정 버튼(채팅·복습 FAB)과 겹치지 않기 위한 것이다.
+   겹치면 버튼을 누르려다 광고를 누르게 되고, 그 오클릭은 무효 트래픽으로 잡혀
+   계정 정지까지 간다. */
+.ad-rail {
+  display: none;
+}
+
+@media (min-width: 1400px) and (min-height: 760px) {
+  .ad-rail-5xl {
+    display: block;
+  }
+}
+
+@media (min-width: 1650px) and (min-height: 760px) {
+  .ad-rail-7xl {
+    display: block;
+  }
+}

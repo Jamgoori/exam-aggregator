@@ -32,7 +32,7 @@ import {
   paperExplanationsHref,
 } from "@/lib/paper-href";
 import { JsonLd } from "@/components/json-ld";
-import { AdBanner } from "@/components/ad-banner";
+import { AdBanner, AdSideRail } from "@/components/ad-banner";
 import { SITE_URL, absoluteUrl } from "@/lib/site-url";
 import {
   getNewestPaperSlugs,
@@ -415,6 +415,9 @@ export default async function PaperDetailPage({
       {/* 본문(제목·풀기·해설·댓글)이 끝난 자리. 문제 이미지 사이에는 절대 두지 말 것 —
           보기를 고르는 손가락 아래로 광고가 들어온다. */}
       <AdBanner placement="paperDetail" />
+      {/* 넓은 화면에서만 오른쪽 여백에 붙는 세로 레일. 문제 이미지 위로는 절대 오지
+          않는다 — 본문(max-w-5xl) 바깥에 자리가 남을 때만 보인다(globals.css). */}
+      <AdSideRail placement="paperDetailSide" />
 
       {/* 하단 "같은 과목 목록"은 목록 조회 → 중복 통합 신호 → 카드 배지 확인이
           직렬로 이어지는 가장 느린 구간이라, 상단(제목·버튼·평점·댓글)을 먼저
