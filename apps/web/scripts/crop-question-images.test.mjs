@@ -28,6 +28,7 @@ import {
   computeColumnTextBounds,
   computeHeaderInkBottomByPage,
   computeFooterInkTopByPage,
+  collapseVerticalGaps,
 } from "./crop-question-images.mjs";
 
 const SCALE = 3;
@@ -246,4 +247,54 @@ test("테두리 없는 조판에서는 내용이 그대로다(대조군)", async
   const framedWidth = [...framedProfiles.values()][0].width;
   const plainWidth = (await profile(unframed[0].image)).width;
   assert.ok(framedWidth < plainWidth, `테두리 크롭이 폭을 줄이지 못했다 (${framedWidth} vs ${plainWidth})`);
+});
+
+// 한능검 [47~48] 세트처럼 원본 지면이 한 칼럼 안에서 문항을 벌려 놓은 조판 —
+// 자료·47번과 48번 사이의 큰 빈 띠를 maxGapPx 로 줄이되, 그보다 좁은 여백과
+// 잉크(상자 테두리처럼 행마다 잉크가 있는 것)는 그대로 둔다.
+test("collapseVerticalGaps: 큰 빈 띠만 줄이고 좁은 여백·내용은 그대로", async () => {
+  const W = 200;
+  // 위에서부터: 잉크 30, 빈 20, 잉크 30, 빈 500, 잉크 30 (+ 좌우 테두리는 없음)
+  const rows = [
+    { ink: true, h: 30 },
+    { ink: false, h: 20 },
+    { ink: true, h: 30 },
+    { ink: false, h: 500 },
+    { ink: true, h: 30 },
+  ];
+  const H = rows.reduce((s, r) => s + r.h, 0);
+  const parts = [];
+  let y = 0;
+  for (const r of rows) {
+    if (r.ink)
+      parts.push({
+        input: { create: { width: W, height: r.h, channels: 3, background: "#000000" } },
+        top: y,
+        left: 0,
+      });
+    y += r.h;
+  }
+  const png = await sharp({ create: { width: W, height: H, channels: 3, background: "#ffffff" } })
+    .composite(parts)
+    .png()
+    .toBuffer();
+
+  const out = await collapseVerticalGaps(png, 100);
+  const meta = await sharp(out).metadata();
+  assert.equal(meta.width, W);
+  assert.equal(meta.height, 30 + 20 + 30 + 100 + 30, "500px 빈 띠만 100px 로 줄어야 한다");
+  const p = await profile(out);
+  assert.equal(p.blocks, 3, "잉크 덩어리 수는 그대로");
+
+  // 줄일 게 없으면 입력 버퍼를 그대로 돌려준다.
+  const same = await collapseVerticalGaps(png, 1000);
+  assert.equal(same, png);
+
+  // 상자처럼 세로 테두리가 있으면 그 안의 빈 공간은 "빈 행"이 아니라 손대지 않는다.
+  const boxed = await sharp(png)
+    .composite([{ input: { create: { width: 2, height: H, channels: 3, background: "#000000" } }, top: 0, left: 0 }])
+    .png()
+    .toBuffer();
+  const boxedOut = await collapseVerticalGaps(boxed, 100);
+  assert.equal((await sharp(boxedOut).metadata()).height, H);
 });

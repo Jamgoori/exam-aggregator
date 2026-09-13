@@ -15,7 +15,7 @@ import { createWorker, PSM } from "tesseract.js";
 import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
-import { extractQuestionsFromPdf } from "./crop-question-images.mjs";
+import { extractQuestionsFromPdf, KOREAN_HISTORY_MAX_BLANK_GAP_PT } from "./crop-question-images.mjs";
 import { buildOcrTextLayer } from "./lib/ocr-text-layer.mjs";
 
 const pdfjsPromise = import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -93,6 +93,7 @@ const cropped = await extractQuestionsFromPdf(pdfBuffer, {
   textLayer,
   footerDetection: false, // crop-scanned-questions.mjs 와 같은 설정
   perPageColumnCrop: true,
+  maxBlankGapPt: KOREAN_HISTORY_MAX_BLANK_GAP_PT,
 });
 console.log(
   `${paper.title}: ${cropped.length}/${paper.question_count}개 (되살린 마커 ${rescued}개, 중복 바로잡음 ${deduped}개, 순서 어긋나 내림 ${demoted}개)`,

@@ -1,4 +1,7 @@
-// 사용법: npm run crop-questions -- --paper-id <uuid> [--dry-run] [--scale 3]
+// 사용법: npm run crop-questions -- --paper-id <uuid> [--dry-run] [--scale 3] [--max-blank-gap <pt>]
+//
+// --max-blank-gap: 이미지 안쪽의 빈 띠를 이 높이(pt)로 줄인다(collapseVerticalGaps 주석).
+// 한능검 텍스트 레이어본 재크롭에 KOREAN_HISTORY_MAX_BLANK_GAP_PT 를 넘겨 쓴다.
 //
 // exam_papers에 이미 업로드된 문제지 PDF를 다운로드해서, 페이지 텍스트 레이아웃에서
 // "N." 형태의 문제 번호 위치를 찾아 2단 편집 기준으로 문항별 영역을 잘라낸다.
@@ -1002,6 +1005,75 @@ async function trimVerticalWhitespace(rawPng) {
     .toBuffer();
 }
 
+// 이미지 **안쪽**의 큰 빈 띠를 줄인다. 원본 지면이 한 칼럼 안에서 문항을 위아래로
+// 벌려 놓은 조판이 있다 — 한능검 [47~48] 세트는 자료·47번 아래에 칼럼 절반 가까운
+// 빈 공간을 두고 48번을 칼럼 바닥에 앉힌다(실측 67회: 지면 그대로 잘라 붙이면
+// 47번 ⑤ 와 48번 사이가 400pt 넘게 빈다). 지면을 그대로 담는 크롭으로는 없앨 수
+// 없고, 세로 여백 제거(trimVerticalWhitespace)는 위아래 끝만 걷어낸다. 화면(특히
+// 폰)에서는 그 빈 띠가 화면 하나를 통째로 차지해 "문제가 서로 너무 떨어져 있다"
+// 로 보인다(사용자 제보).
+//
+// 규칙은 하나다: 폭 전체가 빈 행이 maxGapPx 넘게 이어지면 maxGapPx 만 남기고 지운다.
+// 폭 전체가 비었으면 그 띠는 어떤 그림·표·상자에도 속하지 않으므로(상자·표는 세로
+// 테두리가 행마다 잉크를 남긴다) 내용이 잘릴 수 없다. 줄이는 것이지 없애는 것이
+// 아니라 문항 사이 구분은 그대로 보인다. 스캔본 잡음(옅은 점)은 잉크로 치지 않도록
+// 문턱을 넉넉히 둔다(200 — 본문 획은 그보다 훨씬 진하다).
+// 한능검이 쓰는 값. 발문↔선지·자료 상자↔발문 사이 여백은 10~25pt 라 손대지 않고,
+// 칼럼 안에서 문항을 벌려 놓은 조판의 빈 띠(수백 pt)만 이 높이로 준다.
+export const KOREAN_HISTORY_MAX_BLANK_GAP_PT = 36;
+
+export async function collapseVerticalGaps(imageBuffer, maxGapPx) {
+  if (!imageBuffer || !(maxGapPx > 0)) return imageBuffer;
+  const { data, info } = await sharp(imageBuffer)
+    .greyscale()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height } = info;
+  const blank = new Uint8Array(height);
+  for (let y = 0; y < height; y++) {
+    const rowStart = y * width;
+    let hasInk = false;
+    for (let x = 0; x < width; x++) {
+      if (data[rowStart + x] < 200) {
+        hasInk = true;
+        break;
+      }
+    }
+    blank[y] = hasInk ? 0 : 1;
+  }
+  // 남길 행 구간들. 빈 띠는 maxGapPx 까지만 남긴다.
+  const keep = [];
+  let y = 0;
+  let removed = 0;
+  while (y < height) {
+    if (!blank[y]) {
+      const start = y;
+      while (y < height && !blank[y]) y++;
+      keep.push({ top: start, height: y - start });
+      continue;
+    }
+    const start = y;
+    while (y < height && blank[y]) y++;
+    const run = y - start;
+    if (run > maxGapPx) removed += run - maxGapPx;
+    keep.push({ top: start, height: Math.min(run, maxGapPx) });
+  }
+  if (removed === 0) return imageBuffer;
+  const format = (await sharp(imageBuffer).metadata()).format;
+  const parts = [];
+  let offset = 0;
+  for (const k of keep) {
+    parts.push({
+      input: await sharp(imageBuffer).extract({ left: 0, top: k.top, width, height: k.height }).png().toBuffer(),
+      top: offset,
+      left: 0,
+    });
+    offset += k.height;
+  }
+  const out = sharp({ create: { width, height: offset, channels: 3, background: "#ffffff" } }).composite(parts);
+  return format === "webp" ? out.webp({ lossless: true }).toBuffer() : out.png().toBuffer();
+}
+
 async function finalizeQuestionImage(rawPng, scale) {
   const pad = Math.round(8 * scale);
   try {
@@ -1151,7 +1223,7 @@ async function makePageContext(page, markerData, scale, opts) {
     if (!raw) return raw;
     const baselinePx = Math.round((regionTopPt - anchorY) * scale);
     if (baselinePx <= 0) return raw;
-    const cleaned = await dropInkAboveBaseline(raw, baselinePx, Math.round(TOP_JUNK_MAX_PT * scale));
+    const cleaned = await dropInkAboveBaseline(raw, baselinePx, Math.round(TOP_JUNK_MAX_PT * scale), scale);
     if (process.env.CROP_DEBUG && cleaned) {
       const before = (await sharp(raw).metadata()).height;
       const after = (await sharp(cleaned).metadata()).height;
@@ -1742,7 +1814,17 @@ async function dropRunningHeader(rawPng, headerBandPx, scale) {
 // 없지만, 일반 문항 크롭은 **바로 위에 앞 문항의 지문 상자가 걸쳐 있을 수 있어**
 // 상한 없이 돌리면 그 상자를 통째로 지운다. 머리글 한 줄·괘선만 걷어내도록
 // TOP_JUNK_MAX_PT 를 넘겨 쓴다.
-async function dropInkAboveBaseline(rawPng, baselinePx, maxBlockPx = Infinity) {
+// 첫 본문 줄의 잉크 덩어리가 baseline 에 "닿았다"고 볼 여유. 디센더가 없는 글리프
+// ("21.", 한글)는 잉크가 정확히 baseline 에서 끝나므로 픽셀로 반올림하면 마지막
+// 잉크 행이 baselinePx-1 이 된다 — 여유 없이 `>= baselinePx` 를 요구하면 그 줄이
+// 통째로 "윗줄 잡음"이 되어 발문이 사라진다(실측 한능검 51회 21번·52회 44번: 잉크
+// 47~83행, baselinePx 84. 같은 문제지의 다른 문항은 84·85행까지 닿아 멀쩡했다 —
+// 마커 y 소수점에 따라 운으로 갈렸다). 1pt 는 글자 한 획보다 작아 머리글 덩어리가
+// 이 여유 안에 걸칠 수는 없다(그러려면 첫 줄과 겹쳐야 한다).
+const BASELINE_TOUCH_PT = 1;
+
+async function dropInkAboveBaseline(rawPng, baselinePx, maxBlockPx = Infinity, scale = 3) {
+  const touchPx = Math.ceil(BASELINE_TOUCH_PT * scale);
   const { data, info } = await sharp(rawPng)
     .greyscale()
     .raw()
@@ -1764,7 +1846,7 @@ async function dropInkAboveBaseline(rawPng, baselinePx, maxBlockPx = Infinity) {
     if (y >= height) return null; // 잉크가 없다 = 빈 조각
     let end = y;
     while (end < height && hasInk[end]) end++;
-    if (end - 1 >= baselinePx) break; // 첫 본문 줄이 속한 덩어리
+    if (end - 1 >= baselinePx - touchPx) break; // 첫 본문 줄이 속한 덩어리
     if (end - y > maxBlockPx) break; // 머리글이라기엔 너무 큰 덩어리 — 손대지 않는다
     y = end;
   }
@@ -2292,6 +2374,8 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, f
           ? await dropInkAboveBaseline(
               raw,
               Math.round((ctx.pageHeightPt - slotFirstMember.marker.y) * scale),
+              Infinity,
+              scale,
             )
           : await dropRunningHeader(raw, ctx.headerBandPx, scale);
       if (!deheaded) continue;
@@ -2350,6 +2434,8 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, f
       const deheaded = await dropInkAboveBaseline(
         raw,
         Math.round((ctx.pageHeightPt - seg.firstLineY) * scale),
+        Infinity,
+        scale,
       );
       if (!deheaded) continue;
       const trimmed = await trimVerticalWhitespace(deheaded);
@@ -2418,7 +2504,35 @@ async function extractWithStrategy(pdf, scale, onPage, useColumnSplitOverride, f
 // 호출자와의 호환) 예전 방식이 에러 없이 끝나는 한 그대로 쓴다.
 export async function extractQuestionsFromPdf(
   pdfBuffer,
-  { scale = 3, onPage, expectedCount, textLayer, footerDetection = true, perPageColumnCrop = false } = {},
+  {
+    scale = 3,
+    onPage,
+    expectedCount,
+    textLayer,
+    footerDetection = true,
+    perPageColumnCrop = false,
+    maxBlankGapPt = null,
+  } = {},
+) {
+  const result = await extractQuestionsFromPdfInner(pdfBuffer, {
+    scale, onPage, expectedCount, textLayer, footerDetection, perPageColumnCrop,
+  });
+  // maxBlankGapPt: 이미지 안쪽의 빈 띠를 이 높이(pt)로 줄인다(collapseVerticalGaps
+  // 주석). 세트 전원이 같은 버퍼를 공유하므로 버퍼마다 한 번만 처리한다.
+  if (maxBlankGapPt != null && maxBlankGapPt > 0) {
+    const maxGapPx = Math.round(maxBlankGapPt * scale);
+    const done = new Map();
+    for (const c of result) {
+      if (!done.has(c.image)) done.set(c.image, await collapseVerticalGaps(c.image, maxGapPx));
+      c.image = done.get(c.image);
+    }
+  }
+  return result;
+}
+
+async function extractQuestionsFromPdfInner(
+  pdfBuffer,
+  { scale, onPage, expectedCount, textLayer, footerDetection, perPageColumnCrop },
 ) {
   const realPdf = await getDocument({ data: new Uint8Array(pdfBuffer) }).promise;
   // textLayer: 스캔본(텍스트 레이어 0자)을 위해 호출자가 OCR 로 만들어 넘긴 가짜
@@ -2481,6 +2595,7 @@ async function main() {
   const paperId = args["paper-id"];
   const dryRun = Boolean(args["dry-run"]);
   const scale = args.scale ? Number(args.scale) : 3;
+  const maxBlankGapPt = args["max-blank-gap"] ? Number(args["max-blank-gap"]) : null;
 
   if (!paperId) {
     console.error("사용법: npm run crop-questions -- --paper-id <uuid> [--dry-run]");
@@ -2525,6 +2640,7 @@ async function main() {
     cropped = await extractQuestionsFromPdf(pdfBuffer, {
       scale,
       expectedCount: paper.question_count,
+      maxBlankGapPt,
       onPage: (p, pageResults) =>
         console.log(`페이지 ${p}: 문제 ${pageResults.map((r) => r.number).join(", ") || "(없음)"}`),
     });

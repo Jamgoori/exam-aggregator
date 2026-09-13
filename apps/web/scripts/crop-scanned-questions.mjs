@@ -23,7 +23,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createWorker, PSM } from "tesseract.js";
 import fs from "node:fs";
 import sharp from "sharp";
-import { extractQuestionsFromPdf } from "./crop-question-images.mjs";
+import { extractQuestionsFromPdf, KOREAN_HISTORY_MAX_BLANK_GAP_PT } from "./crop-question-images.mjs";
 import { buildOcrTextLayer } from "./lib/ocr-text-layer.mjs";
 import { QUESTION_IMAGE_UPLOAD_OPTIONS } from "./lib/question-image-upload.mjs";
 
@@ -193,6 +193,9 @@ async function cropOnePaper(supabase, paper, { dryRun, scale, worker, digitWorke
       scale,
       expectedCount: paper.question_count,
       textLayer,
+      // 칼럼 안에서 문항을 벌려 놓은 조판의 빈 띠를 줄인다(한능검 [47~48] 세트 —
+      // collapseVerticalGaps 주석).
+      maxBlankGapPt: KOREAN_HISTORY_MAX_BLANK_GAP_PT,
       // 스캔본은 되풀이 꼬리말을 찾지 않는다 — OCR 좌표로는 마지막 선지 줄과 못 가려서
       // 선지가 잘렸다(실측 69회 2번, 57회 11번). 쪽번호 조각이 남는 쪽을 택한다.
       footerDetection: false,
