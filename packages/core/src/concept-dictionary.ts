@@ -356,3 +356,58 @@ export function validateConceptSpec(
 
   return { errors, warnings, stats };
 }
+
+// ── 사전을 빌려 쓰는 과목 ────────────────────────────────────────────────────
+//
+// 개념 사전은 과목(`concepts.subject_id`) 단위다. 그런데 과목 행이 갈렸다고 해서
+// 가르칠 개념까지 갈리는 건 아니다 — 한국사능력검정시험(한능검)이 그 경우다.
+//
+// 한능검은 문항 수(50)도 선지 수(5)도 공무원 한국사와 달라서 문제지 목록을 섞을 수
+// 없다. 그래서 전용 과목 행을 따로 뒀다(`lib/korean-history-exam.ts`). 하지만
+// **묻는 내용은 같은 한국사 통사**라, 사전까지 따로 둘 이유는 없다. 실제로 전용 행에
+// 사전이 없어서 한능검 해설 1,500건이 전부 개념 미분류로 남아 있었다(2026-09-14).
+//
+// 복제하지 않고 **빌려 쓴다.** 복제하면 같은 개념이 id 둘로 갈려서:
+//   - 진단 표본이 반씩 쪼개진다("고려 무신정권이 약합니다"를 말하려면 서너 문항이
+//     필요한데, 두 과목에 나뉘면 양쪽 다 못 넘긴다)
+//   - 별칭을 양쪽에 계속 같이 넣어야 하고, 한쪽만 넣으면 조용히 갈린다
+//   - 나중에 합치려면 개념 id 재발급이 필요한데 그건 금지선이다(진단 이력이 끊긴다)
+//
+// 빌린 과목의 문항에는 **빌려준 과목의 `concept_id` 가 그대로 붙는다.** 화면에서
+// 과목을 말할 때는 문제지의 과목(`exam_papers.subject_id`)을 쓰므로 — 진단·오답노트
+// 모두 그렇다 — 한능검 문항이 한국사 문항으로 보이지는 않는다.
+//
+// 이 표는 네 곳에 같은 값으로 있다(루틴 환경은 plain node 라 이 패키지를 import 하지
+// 못한다). 하나만 고치면 경로에 따라 개념이 붙었다 안 붙었다 한다:
+//   - 여기(원본) — concept-inventory
+//   - apps/web/scripts/lib/concept-alias.mjs — 재분류 배치
+//   - apps/web/scripts/save-explanations.mjs — 해설 저장
+//   - apps/web/scripts/next-explanation-chunk.mjs — 해설 청크
+// `src/lib/explanation-concepts.test.ts` 가 넷이 어긋나면 실패한다.
+export const CONCEPT_DICTIONARY_SOURCE_BY_SLUG: Record<string, string> = {
+  // 한국사능력검정시험 → 공무원 한국사
+  "korean-history-exam": "korean-history",
+};
+
+// 과목 목록에서 "빌린 과목 id → 빌려준 과목 id" 를 만든다. 둘 중 하나라도 없는
+// 환경(시드 전)에서는 그 줄을 빼므로, 빌림이 없는 것과 같게 동작한다.
+export function buildDictionarySubjectIds(
+  subjects: { id: string; slug: string | null }[],
+): Map<string, string> {
+  const idBySlug = new Map(subjects.filter((s) => s.slug).map((s) => [s.slug as string, s.id]));
+  const map = new Map<string, string>();
+  for (const [borrower, source] of Object.entries(CONCEPT_DICTIONARY_SOURCE_BY_SLUG)) {
+    const borrowerId = idBySlug.get(borrower);
+    const sourceId = idBySlug.get(source);
+    if (borrowerId && sourceId && borrowerId !== sourceId) map.set(borrowerId, sourceId);
+  }
+  return map;
+}
+
+// 이 과목의 사전이 있는 곳. 빌리지 않는 과목은 자기 자신이다.
+export function dictionarySubjectId(
+  subjectId: string,
+  dictionaryOf: Map<string, string>,
+): string {
+  return dictionaryOf.get(subjectId) ?? subjectId;
+}

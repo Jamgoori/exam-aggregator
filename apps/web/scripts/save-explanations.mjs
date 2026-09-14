@@ -65,6 +65,42 @@ function normalizeConceptAlias(title) {
     .replace(/[\s·,、/()[\]{}<>"'“”‘’:;~\-–—.]/g, "");
 }
 
+// packages/core/src/concept-dictionary.ts 의 CONCEPT_DICTIONARY_SOURCE_BY_SLUG 사본이다
+// (사본을 두는 이유는 위와 같다).
+//
+// 과목 행이 갈렸다고 개념까지 갈리는 건 아니다. 한능검은 문항 수·선지 수가 달라 문제지
+// 목록을 공무원 한국사와 섞을 수 없어 전용 과목 행을 쓰지만, 묻는 내용은 같은 한국사
+// 통사다. 그래서 사전을 복제하지 않고 빌려 쓴다 — 복제하면 같은 개념이 id 둘로 갈려
+// 진단 표본이 반씩 쪼개진다(docs/agents/concept-dictionary.md).
+const CONCEPT_DICTIONARY_SOURCE_BY_SLUG = {
+  // 한국사능력검정시험 → 공무원 한국사
+  "korean-history-exam": "korean-history",
+};
+
+// "빌린 과목 id → 빌려준 과목 id". 조회가 실패해도 던지지 않는다 — 공유가 안 걸리면
+// 그 과목만 예전처럼 "사전 없음"으로 보고될 뿐이고, 해설 저장을 막는 건 손해가 크다.
+async function loadDictionarySubjectIds(supabase) {
+  const slugs = [
+    ...new Set([
+      ...Object.keys(CONCEPT_DICTIONARY_SOURCE_BY_SLUG),
+      ...Object.values(CONCEPT_DICTIONARY_SOURCE_BY_SLUG),
+    ]),
+  ];
+  const { data, error } = await supabase.from("subjects").select("id, slug").in("slug", slugs);
+  if (error) {
+    console.error(`사전 공유 과목 조회 실패 — 공유 없이 진행: ${error.message}`);
+    return new Map();
+  }
+  const idBySlug = new Map((data ?? []).filter((r) => r?.slug).map((r) => [r.slug, r.id]));
+  const map = new Map();
+  for (const [borrower, source] of Object.entries(CONCEPT_DICTIONARY_SOURCE_BY_SLUG)) {
+    const borrowerId = idBySlug.get(borrower);
+    const sourceId = idBySlug.get(source);
+    if (borrowerId && sourceId && borrowerId !== sourceId) map.set(borrowerId, sourceId);
+  }
+  return map;
+}
+
 // PostgREST의 .in() 은 URL 길이 제한이 있어 나눠 던진다.
 async function selectIn(supabase, table, columns, column, values) {
   const rows = [];
@@ -281,7 +317,12 @@ async function resolveConcepts(supabase, items) {
     questionRows.map((q) => [q.id, subjectOfPaper.get(q.paper_id) ?? null]),
   );
 
-  const subjectIds = [...new Set([...subjectOfQuestion.values()].filter(Boolean))];
+  // 사전을 빌려 쓰는 과목(한능검 → 한국사)은 빌려준 과목의 별칭을 본다.
+  const dictionaryOf = await loadDictionarySubjectIds(supabase);
+  const dictionaryIdOf = (subjectId) => dictionaryOf.get(subjectId) ?? subjectId;
+  const subjectIds = [
+    ...new Set([...subjectOfQuestion.values()].filter(Boolean).map(dictionaryIdOf)),
+  ];
   const aliasRows = await selectIn(
     supabase,
     "concept_aliases",
@@ -311,7 +352,7 @@ async function resolveConcepts(supabase, items) {
     if (!name) continue;
 
     const conceptId = subjectId
-      ? conceptByAlias.get(`${subjectId}\u0000${normalizeConceptAlias(name)}`)
+      ? conceptByAlias.get(`${dictionaryIdOf(subjectId)}\u0000${normalizeConceptAlias(name)}`)
       : undefined;
 
     // "?"를 붙였어도 실제로 목록에 있으면 붙인다 — 이름이 맞으면 진단 분포는
@@ -324,7 +365,7 @@ async function resolveConcepts(supabase, items) {
 
     const bucket = isProposal
       ? proposed
-      : subjectId && !subjectsWithDictionary.has(subjectId)
+      : subjectId && !subjectsWithDictionary.has(dictionaryIdOf(subjectId))
         ? noDictionary
         : unmatched;
     const key = `${subjectId ?? "?"}\u0000${name}`;

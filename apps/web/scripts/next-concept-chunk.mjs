@@ -46,7 +46,11 @@
 // concept_aliases 는 읽기만 된다(쓰기 정책이 없다 — 사전은 service_role 로만 바꾼다).
 
 import { createClient } from "@supabase/supabase-js";
-import { shapeConceptList } from "./lib/concept-alias.mjs";
+import {
+  buildDictionarySubjectIds,
+  dictionarySubjectId,
+  shapeConceptList,
+} from "./lib/concept-alias.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -131,7 +135,7 @@ async function main() {
 
   const { data: subjects, error: subjectsError } = await supabase
     .from("subjects")
-    .select("id, name")
+    .select("id, name, slug")
     .order("name");
   if (subjectsError) {
     console.error(`과목 조회 실패: ${subjectsError.message}`);
@@ -187,9 +191,14 @@ async function main() {
     if (list) list.push(r);
     else conceptRowsBySubject.set(r.subject_id, [r]);
   }
+  // 사전을 빌려 쓰는 과목(한능검 → 한국사)은 빌려준 과목의 목록을 그대로 받는다.
+  // 붙는 concept_id 도 빌려준 과목의 것이다 — 복제하지 않는 것이 요점이다
+  // (docs/agents/concept-dictionary.md "사전을 빌려 쓰는 과목").
+  const dictionaryOf = buildDictionarySubjectIds(subjects ?? []);
   const conceptsBySubject = new Map();
   for (const s of targets) {
-    conceptsBySubject.set(s.id, shapeConceptList(conceptRowsBySubject.get(s.id) ?? []));
+    const dictId = dictionarySubjectId(s.id, dictionaryOf);
+    conceptsBySubject.set(s.id, shapeConceptList(conceptRowsBySubject.get(dictId) ?? []));
   }
 
   // mine 모드면 목록 없는 과목만, 아니면 있는 과목만.

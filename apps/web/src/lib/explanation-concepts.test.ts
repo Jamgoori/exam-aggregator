@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { normalizeConceptAlias as coreNormalize } from "@gongmoa/core";
+import {
+  CONCEPT_DICTIONARY_SOURCE_BY_SLUG as CORE_DICTIONARY_SOURCE,
+  normalizeConceptAlias as coreNormalize,
+} from "@gongmoa/core";
 
 // 해설 배치 스크립트 2개(next-explanation-chunk.mjs / save-explanations.mjs)의 개념
 // 관련 로직을 검증한다.
@@ -55,7 +58,7 @@ test("normalizeConceptAlias 사본 둘이 core 와 같은 규칙이다", async (
   // 달라진다 — 같은 문항이 어느 경로로 왔느냐에 따라 다른 개념이 된다.
   const explanationSide = await importWithoutMain(
     "save-explanations.mjs",
-    "export { resolveConcepts, normalizeConceptAlias };\n",
+    "export { resolveConcepts, normalizeConceptAlias, CONCEPT_DICTIONARY_SOURCE_BY_SLUG };\n",
   );
   const reclassifySide = await import(
     path.join(SCRIPTS, "lib/concept-alias.mjs")
@@ -104,6 +107,8 @@ test("재분류: '?' 제안과 실제 미매칭을 가른다", async () => {
 const SUBJ_KOR = "subj-kor";
 const SUBJ_ENG = "subj-eng";
 const SUBJ_NEW = "subj-new"; // 정본 목록이 아직 없는 과목
+const SUBJ_KH = "subj-kh"; // 공무원 한국사 — 사전을 가진 쪽
+const SUBJ_KHE = "subj-khe"; // 한능검 — 사전을 빌리는 쪽
 
 function fakeSupabase() {
   const tables: Record<string, Record<string, string>[]> = {
@@ -114,17 +119,25 @@ function fakeSupabase() {
       { id: "q4", paper_id: "p-eng" },
       { id: "q5", paper_id: "p-new" },
       { id: "q6", paper_id: "p-kor" },
+      { id: "q8", paper_id: "p-khe" },
     ],
     exam_papers: [
       { id: "p-kor", subject_id: SUBJ_KOR },
       { id: "p-eng", subject_id: SUBJ_ENG },
       { id: "p-new", subject_id: SUBJ_NEW },
+      { id: "p-khe", subject_id: SUBJ_KHE },
+    ],
+    subjects: [
+      { id: SUBJ_KH, slug: "korean-history" },
+      { id: SUBJ_KHE, slug: "korean-history-exam" },
     ],
     concept_aliases: [
       { concept_id: "c-kor-ilchi", subject_id: SUBJ_KOR, normalized: "내용일치" },
       { concept_id: "c-kor-eumun", subject_id: SUBJ_KOR, normalized: "음운변동" },
       { concept_id: "c-eng-ilchi", subject_id: SUBJ_ENG, normalized: "내용일치" },
       { concept_id: "c-eng-blank", subject_id: SUBJ_ENG, normalized: "빈칸추론" },
+      // 한능검 과목에는 별칭이 없다. 붙는다면 빌려준 한국사 쪽 별칭으로 붙은 것이다.
+      { concept_id: "c-kh-musin", subject_id: SUBJ_KH, normalized: "무신정권" },
     ],
   };
   return {
@@ -149,7 +162,7 @@ function fakeSupabase() {
 test("개념 이름을 과목 안에서 concept_id 로 바꾼다", async () => {
   const mod = await importWithoutMain(
     "save-explanations.mjs",
-    "export { resolveConcepts, normalizeConceptAlias };\n",
+    "export { resolveConcepts, normalizeConceptAlias, CONCEPT_DICTIONARY_SOURCE_BY_SLUG };\n",
   );
 
   const { byQuestion, report } = await mod.resolveConcepts(fakeSupabase(), [
@@ -186,10 +199,43 @@ test("개념 이름을 과목 안에서 concept_id 로 바꾼다", async () => {
   );
 });
 
+test("사전을 빌려 쓰는 과목은 빌려준 과목의 개념이 붙는다", async () => {
+  // 한능검은 전용 과목 행이라 자기 사전이 없다. 복제하지 않고 공무원 한국사 사전을
+  // 빌려 쓰므로, 붙는 concept_id 는 한국사 쪽 id 그대로다 — 복제하면 같은 개념이 id
+  // 둘로 갈려 진단 표본이 반씩 쪼개진다(docs/agents/concept-dictionary.md).
+  const mod = await importWithoutMain(
+    "save-explanations.mjs",
+    "export { resolveConcepts, normalizeConceptAlias, CONCEPT_DICTIONARY_SOURCE_BY_SLUG };\n",
+  );
+  const { byQuestion, report } = await mod.resolveConcepts(fakeSupabase(), [
+    { question_id: "q8", concept: "무신정권" },
+  ]);
+  assert.equal(byQuestion.get("q8"), "c-kh-musin");
+  assert.equal(report.attached, 1);
+  // 빌려 쓰는 과목을 "사전 없는 과목"으로 세지 않는다 — 그러면 사람이 목록을 또
+  // 만들어야 하는 줄 안다.
+  assert.equal(report.subjects_without_dictionary.length, 0);
+});
+
+test("빌려 쓰는 과목이라도 사전에 없는 이름은 안 붙인다", async () => {
+  const mod = await importWithoutMain(
+    "save-explanations.mjs",
+    "export { resolveConcepts, normalizeConceptAlias, CONCEPT_DICTIONARY_SOURCE_BY_SLUG };\n",
+  );
+  const { byQuestion, report } = await mod.resolveConcepts(fakeSupabase(), [
+    { question_id: "q8", concept: "무신정변의 전개" },
+  ]);
+  assert.equal(byQuestion.has("q8"), false);
+  assert.deepEqual(
+    report.unmatched.map((p: { concept: string }) => p.concept),
+    ["무신정변의 전개"],
+  );
+});
+
 test("'?' 를 붙였어도 목록에 있으면 붙인다", async () => {
   const mod = await importWithoutMain(
     "save-explanations.mjs",
-    "export { resolveConcepts, normalizeConceptAlias };\n",
+    "export { resolveConcepts, normalizeConceptAlias, CONCEPT_DICTIONARY_SOURCE_BY_SLUG };\n",
   );
   const { byQuestion, report } = await mod.resolveConcepts(fakeSupabase(), [
     { question_id: "q1", concept: "?내용 일치" },
@@ -204,7 +250,7 @@ test("concept 없는 입력은 조회 자체를 안 한다", async () => {
   // 문항 수만큼 왕복이 늘어난다.
   const mod = await importWithoutMain(
     "save-explanations.mjs",
-    "export { resolveConcepts, normalizeConceptAlias };\n",
+    "export { resolveConcepts, normalizeConceptAlias, CONCEPT_DICTIONARY_SOURCE_BY_SLUG };\n",
   );
   const throwing = {
     from() {
@@ -235,7 +281,7 @@ test("shapeConceptList 사본 둘이 같은 목록을 낸다", async () => {
   // 각자 갖고 있다. 어긋나면 생성 때 고를 수 있던 개념을 재분류 때는 못 고른다.
   const chunkSide = await importWithoutMain(
     "next-explanation-chunk.mjs",
-    "export { shapeConceptList };\n",
+    "export { shapeConceptList, CONCEPT_DICTIONARY_SOURCE_BY_SLUG };\n",
   );
   const reclassifySide = await import(path.join(SCRIPTS, "lib/concept-alias.mjs"));
   assert.deepEqual(
@@ -244,10 +290,47 @@ test("shapeConceptList 사본 둘이 같은 목록을 낸다", async () => {
   );
 });
 
+test("사전 공유 표 사본 셋이 core 와 같다", async () => {
+  // 표는 네 곳에 있다: core(원본) · save-explanations.mjs(해설 저장) ·
+  // next-explanation-chunk.mjs(해설 청크) · lib/concept-alias.mjs(재분류 배치).
+  // 하나만 고치면 청크는 목록을 싣는데 저장이 못 붙이는 식으로 조용히 어긋난다.
+  const explanationSide = await importWithoutMain(
+    "save-explanations.mjs",
+    "export { resolveConcepts, normalizeConceptAlias, CONCEPT_DICTIONARY_SOURCE_BY_SLUG };\n",
+  );
+  const chunkSide = await importWithoutMain(
+    "next-explanation-chunk.mjs",
+    "export { shapeConceptList, CONCEPT_DICTIONARY_SOURCE_BY_SLUG };\n",
+  );
+  const reclassifySide = await import(path.join(SCRIPTS, "lib/concept-alias.mjs"));
+
+  assert.deepEqual(explanationSide.CONCEPT_DICTIONARY_SOURCE_BY_SLUG, CORE_DICTIONARY_SOURCE);
+  assert.deepEqual(chunkSide.CONCEPT_DICTIONARY_SOURCE_BY_SLUG, CORE_DICTIONARY_SOURCE);
+  assert.deepEqual(reclassifySide.CONCEPT_DICTIONARY_SOURCE_BY_SLUG, CORE_DICTIONARY_SOURCE);
+});
+
+test("빌린 과목 id → 빌려준 과목 id 로 접는다", async () => {
+  const reclassifySide = await import(path.join(SCRIPTS, "lib/concept-alias.mjs"));
+  const subjects = [
+    { id: "subj-kh", slug: "korean-history" },
+    { id: "subj-khe", slug: "korean-history-exam" },
+    { id: "subj-eng", slug: "english" },
+  ];
+  const map = reclassifySide.buildDictionarySubjectIds(subjects);
+  assert.equal(reclassifySide.dictionarySubjectId("subj-khe", map), "subj-kh");
+  // 빌리지 않는 과목은 자기 사전을 본다.
+  assert.equal(reclassifySide.dictionarySubjectId("subj-eng", map), "subj-eng");
+  // 빌려준 과목이 아직 없는 환경(시드 전)에서는 빌림 자체가 없다.
+  const partial = reclassifySide.buildDictionarySubjectIds([
+    { id: "subj-khe", slug: "korean-history-exam" },
+  ]);
+  assert.equal(reclassifySide.dictionarySubjectId("subj-khe", partial), "subj-khe");
+});
+
 test("단원은 빼고 개념만 내려보낸다", async () => {
   const mod = await importWithoutMain(
     "next-explanation-chunk.mjs",
-    "export { shapeConceptList };\n",
+    "export { shapeConceptList, CONCEPT_DICTIONARY_SOURCE_BY_SLUG };\n",
   );
 
   const list = mod.shapeConceptList([

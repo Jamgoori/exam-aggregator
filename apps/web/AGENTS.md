@@ -60,6 +60,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   `apps/web/scripts/save-explanations.mjs`(해설 배치),
   `apps/web/scripts/lib/concept-alias.mjs`(재분류 배치) — **반드시 함께 고칠 것**.
   하나만 고치면 경로에 따라 같은 문항에 다른 개념이 붙는다.
+  사전을 빌려 쓰는 과목 표(`CONCEPT_DICTIONARY_SOURCE_BY_SLUG`, 한능검→한국사)는
+  같은 이유로 **네 곳**이다 — 위 셋 + `scripts/next-explanation-chunk.mjs`.
+  빌린 과목에는 빌려준 과목의 `concept_id` 가 그대로 붙는다. **사전을 복제하지 말 것**
+  (같은 개념이 id 둘로 갈려 진단 표본이 반씩 쪼개지고, 합치려면 id 재발급이 필요하다).
   재분류 배치는 이미 붙은 `concept_id`를 덮어쓰지 말 것 (재실행 시 개념이 흔들리면
   진단 이력이 깨진다).
 - **무료 체험 시작**: `memberships` 를 직접 UPDATE 해서 체험을 켜지 말 것 — 반드시

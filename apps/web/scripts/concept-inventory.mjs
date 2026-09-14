@@ -28,6 +28,8 @@ import { createClient } from "@supabase/supabase-js";
 import {
   buildConceptDrafts,
   buildConceptLookup,
+  buildDictionarySubjectIds,
+  dictionarySubjectId,
   matchConcept,
   summarizeConceptHealth,
   CONCEPT_MAX_SHARE_BY_KIND,
@@ -71,8 +73,10 @@ async function pageAll(table, select, orderBy = ["id"]) {
   return rows;
 }
 
-const subjects = await pageAll("subjects", "id, name");
+const subjects = await pageAll("subjects", "id, name, slug");
 const subjectName = new Map(subjects.map((s) => [s.id, s.name]));
+// 사전을 빌려 쓰는 과목(한능검 → 한국사). 검진은 빌려준 과목의 사전으로 잰다.
+const dictionaryOf = buildDictionarySubjectIds(subjects);
 const wantedSubjects = subjectFilter
   ? subjects.filter((s) => s.name === subjectFilter).map((s) => s.id)
   : subjects.map((s) => s.id);
@@ -202,12 +206,12 @@ async function runVerify() {
   for (const [subjectId, bucket] of perSubject) {
     const titled = bucket.rows.filter((r) => r.keyword_title);
     if (titled.length === 0) continue;
+    const dictId = dictionarySubjectId(subjectId, dictionaryOf);
+    const borrowed = dictId !== subjectId;
     const name = subjectName.get(subjectId) ?? subjectId;
-    const lookup = buildConceptLookup(aliasesBySubject.get(subjectId) ?? []);
+    const lookup = buildConceptLookup(aliasesBySubject.get(dictId) ?? []);
     const matches = titled.map((r) => matchConcept(r.keyword_title, lookup));
-    const subjectConcepts = concepts.filter(
-      (c) => c.subject_id === subjectId && !c.merged_into,
-    );
+    const subjectConcepts = concepts.filter((c) => c.subject_id === dictId && !c.merged_into);
     const kindById = new Map(concepts.map((c) => [c.id, c.kind ?? "knowledge"]));
     const health = summarizeConceptHealth(matches, subjectConcepts.length, CONCEPT_MIN_QUESTIONS, (id) =>
       kindById.get(id) === "skill" ? "skill" : "knowledge",
@@ -216,7 +220,10 @@ async function runVerify() {
     // 실제 DB 에 붙어 있는 값과 규칙이 말하는 값이 어긋나면 백필이 밀린 것이다.
     const storedMatched = titled.filter((r) => r.concept_id).length;
 
-    console.log(`── ${name}`);
+    console.log(
+      `── ${name}` +
+        (borrowed ? ` (사전 공유 — ${subjectName.get(dictId) ?? dictId} 의 개념을 쓴다)` : ""),
+    );
     console.log(
       `   개념 ${health.concepts}개(단원 ${subjectConcepts.filter((c) => !c.parent_id).length}) ·` +
         ` 문항 ${health.questions}`,

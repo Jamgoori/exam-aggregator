@@ -79,6 +79,17 @@ function shapeConceptList(rows) {
     );
 }
 
+// packages/core/src/concept-dictionary.ts 의 CONCEPT_DICTIONARY_SOURCE_BY_SLUG 사본이다
+// (사본을 두는 이유는 shapeConceptList 와 같다 — 루틴 환경은 plain node).
+//
+// 과목 행이 갈렸다고 개념까지 갈리는 건 아니다. 한능검은 문항 수·선지 수가 달라 문제지
+// 목록을 공무원 한국사와 섞을 수 없어 전용 과목 행을 쓰지만, 묻는 내용은 같은 한국사
+// 통사다. 그래서 사전을 복제하지 않고 빌려 쓴다(docs/agents/concept-dictionary.md).
+const CONCEPT_DICTIONARY_SOURCE_BY_SLUG = {
+  // 한국사능력검정시험 → 공무원 한국사
+  "korean-history-exam": "korean-history",
+};
+
 // pending 목록을 세트 경계를 지키며 청크들로 자른다. 각 청크는 targetSize를 채우되,
 // 세트 중간이면 세트 끝까지 포함해서 넘긴다 (기존 단일 청크 로직의 일반화).
 function cutChunks(pending, targetSize) {
@@ -208,19 +219,40 @@ async function main() {
     if (cached) return cached;
 
     let subject = null;
+    let slug = null;
     const { data: subjectRow, error: subjectError } = await supabase
       .from("subjects")
-      .select("id, name")
+      .select("id, name, slug")
       .eq("id", subjectId)
       .maybeSingle();
     if (subjectError) console.error(`과목 조회 실패 (${subjectId}): ${subjectError.message}`);
-    else if (subjectRow) subject = { id: subjectRow.id, name: subjectRow.name };
+    else if (subjectRow) {
+      subject = { id: subjectRow.id, name: subjectRow.name };
+      slug = subjectRow.slug ?? null;
+    }
+
+    // 사전을 빌려 쓰는 과목이면 빌려준 과목의 목록을 싣는다. 청크에 나가는 과목 이름은
+    // 그대로 문제지의 과목이다 — 배치는 목록에서 이름만 고르므로 혼동하지 않는다.
+    let dictSubjectId = subjectId;
+    const sourceSlug = slug ? CONCEPT_DICTIONARY_SOURCE_BY_SLUG[slug] : undefined;
+    if (sourceSlug) {
+      const { data: sourceRow, error: sourceError } = await supabase
+        .from("subjects")
+        .select("id")
+        .eq("slug", sourceSlug)
+        .maybeSingle();
+      if (sourceError) {
+        console.error(`사전 공유 과목 조회 실패 (${sourceSlug}): ${sourceError.message} — 공유 없이 진행`);
+      } else if (sourceRow?.id) {
+        dictSubjectId = sourceRow.id;
+      }
+    }
 
     let concepts = [];
     const { data: rows, error } = await supabase
       .from("concepts")
       .select("id, name, parent_id, kind, merged_into")
-      .eq("subject_id", subjectId);
+      .eq("subject_id", dictSubjectId);
     if (error) {
       console.error(`개념 목록 조회 실패 (${subjectId}): ${error.message} — 개념 없이 진행`);
     } else {

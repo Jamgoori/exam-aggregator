@@ -7,6 +7,9 @@
 // 이 규칙은 지금 세 곳에 있다 — core, scripts/save-explanations.mjs, 여기.
 // 한 곳만 고치면 배치가 붙이는 개념과 백필이 붙이는 개념이 조용히 달라진다.
 // src/lib/explanation-concepts.test.ts 가 세 구현이 어긋나면 실패한다.
+//
+// 사전을 빌려 쓰는 과목 표(CONCEPT_DICTIONARY_SOURCE_BY_SLUG)도 같은 이유로 사본이다
+// — 그쪽은 next-explanation-chunk.mjs 까지 넷이다.
 
 export function normalizeConceptAlias(title) {
   return title
@@ -85,4 +88,52 @@ export function shapeConceptList(rows) {
       (a, b) =>
         (a.unit ?? "").localeCompare(b.unit ?? "", "ko") || a.name.localeCompare(b.name, "ko"),
     );
+}
+
+// ── 사전을 빌려 쓰는 과목 ────────────────────────────────────────────────────
+//
+// packages/core/src/concept-dictionary.ts 의 CONCEPT_DICTIONARY_SOURCE_BY_SLUG 사본이다
+// (이유는 위와 같다 — 루틴 환경은 plain node).
+//
+// 과목 행이 갈렸다고 개념까지 갈리는 건 아니다. 한능검은 문항 수·선지 수가 달라서
+// 문제지 목록을 공무원 한국사와 섞을 수 없어 전용 과목 행을 쓰지만, 묻는 내용은 같은
+// 한국사 통사다. 그래서 사전을 복제하지 않고 빌려 쓴다 — 복제하면 같은 개념이 id 둘로
+// 갈려 진단 표본이 반씩 쪼개지고, 나중에 합치려면 개념 id 재발급(금지선)이 필요하다.
+export const CONCEPT_DICTIONARY_SOURCE_BY_SLUG = {
+  // 한국사능력검정시험 → 공무원 한국사
+  "korean-history-exam": "korean-history",
+};
+
+// 과목 행들에서 "빌린 과목 id → 빌려준 과목 id" 를 만든다.
+export function buildDictionarySubjectIds(subjects) {
+  const idBySlug = new Map((subjects ?? []).filter((s) => s?.slug).map((s) => [s.slug, s.id]));
+  const map = new Map();
+  for (const [borrower, source] of Object.entries(CONCEPT_DICTIONARY_SOURCE_BY_SLUG)) {
+    const borrowerId = idBySlug.get(borrower);
+    const sourceId = idBySlug.get(source);
+    if (borrowerId && sourceId && borrowerId !== sourceId) map.set(borrowerId, sourceId);
+  }
+  return map;
+}
+
+// DB 에서 그 표를 읽어 온다. 조회가 실패해도 던지지 않는다 — 빌림이 안 걸리면 그
+// 과목만 예전처럼 "사전 없음"으로 보고될 뿐이고, 저장 자체를 막는 건 손해가 더 크다.
+export async function loadDictionarySubjectIds(supabase) {
+  const slugs = [
+    ...new Set([
+      ...Object.keys(CONCEPT_DICTIONARY_SOURCE_BY_SLUG),
+      ...Object.values(CONCEPT_DICTIONARY_SOURCE_BY_SLUG),
+    ]),
+  ];
+  const { data, error } = await supabase.from("subjects").select("id, slug").in("slug", slugs);
+  if (error) {
+    console.error(`사전 공유 과목 조회 실패 — 공유 없이 진행: ${error.message}`);
+    return new Map();
+  }
+  return buildDictionarySubjectIds(data);
+}
+
+// 이 과목의 사전이 있는 곳. 빌리지 않는 과목은 자기 자신이다.
+export function dictionarySubjectId(subjectId, dictionaryOf) {
+  return dictionaryOf.get(subjectId) ?? subjectId;
 }
