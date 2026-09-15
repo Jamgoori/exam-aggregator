@@ -1,0 +1,23 @@
+{
+  "name": "@gongmoa/design-tokens",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./tokens.ts",
+  "types": "./tokens.ts",
+  "exports": {
+    ".": "./tokens.ts",
+    "./theme.css": "./theme.css",
+    "./tokens.json": "./tokens.json"
+  },
+  "scripts": {
+    "gen": "node scripts/gen.mjs",
+    "check": "node scripts/gen.mjs --check",
+    "check-web-css": "node scripts/check-web-css.mjs",
+    "test": "node --test scripts/*.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5"
+  }
+}
