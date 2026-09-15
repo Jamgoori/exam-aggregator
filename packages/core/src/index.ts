@@ -70,3 +70,6 @@ export * from "./cbt-attempt";
 // 섞이지 않는다(server.ts 가 아니라 여기서 내보내는 이유). 응답은 추가만(add-only).
 export * from "./edge/contracts";
 export * from "./edge/invoke";
+
+// 로그인 후 복귀 경로 검증 — 웹 auth 콜백·앱 /login 모달이 같은 규칙으로 next 를 거른다.
+export * from "./safe-redirect";

@@ -21,6 +21,7 @@
   "optionalDependencies": {
     "@img/sharp-linux-x64": "0.35.3",
     "@tailwindcss/oxide-linux-x64-gnu": "4.3.3",
-    "lightningcss-linux-x64-gnu": "1.32.0"
+    "lightningcss-linux-x64-gnu": "1.32.0",
+    "@unrs/resolver-binding-linux-x64-gnu": "1.12.2"
   }
 }

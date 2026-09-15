@@ -7,22 +7,51 @@
     "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.gongmoa.app",
-      "usesAppleSignIn": true
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.gongmoa.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "monochromeImage": "./assets/adaptive-icon-monochrome.png",
-        "backgroundColor": "#2563eb"
+        "backgroundColor": "#12b382"
       }
     },
     "plugins": [
       "expo-router",
+      "expo-asset",
+      "expo-secure-store",
+      "expo-sqlite",
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "프로필 사진을 고르기 위해 사진 보관함에 접근해요.",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#12b382",
+          "defaultChannel": "study-reminder"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": false
+          }
+        }
+      ],
       [
         "@react-native-google-signin/google-signin",
         {
@@ -30,17 +59,26 @@
         }
       ],
       [
-        "@react-native-seoul/kakao-login",
+        "@react-native-kakao/core",
         {
-          "kakaoAppKey": "3a97be9e089aaa6027ed56ba337e19c0",
-          "overrideKakaoSDKVersion": "2.20.0",
-          "kotlinVersion": "1.9.25"
+          "nativeAppKey": "3a97be9e089aaa6027ed56ba337e19c0",
+          "android": {
+            "authCodeHandlerActivity": true
+          },
+          "ios": {
+            "handleKakaoOpenUrl": true
+          }
         }
       ],
-      "expo-asset",
       "expo-apple-authentication",
-      "expo-notifications",
-      "expo-file-system"
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "SENTRY_ORG_PLACEHOLDER",
+          "project": "gongmoa-mobile"
+        }
+      ],
+      "./plugins/with-react-native-pdf.js"
     ],
     "experiments": {
       "typedRoutes": true
@@ -55,7 +93,7 @@
     },
     "owner": "kojam",
     "runtimeVersion": {
-      "policy": "appVersion"
+      "policy": "fingerprint"
     },
     "updates": {
       "url": "https://u.expo.dev/ed6b6dd5-0d81-41ef-a322-060859bae5f2"

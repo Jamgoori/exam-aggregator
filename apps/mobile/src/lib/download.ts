@@ -1,20 +1,27 @@
-import { Platform } from "react-native";
-import RNBlobUtil from "react-native-blob-util";
+import { Directory, File, Paths } from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import { supabase } from "./supabase";
 import { publicUrl } from "./storage";
 
-// 원본 PDF 내려받기/열기. 웹은 /download/[id] 라우트가 카운트를 올린 뒤 Storage 로
-// 넘기는데(app/download/[id]/route.ts), 앱은 Storage 공개 URL 을 직접 받으므로 그
-// 라우트를 안 지난다 — 그래서 같은 RPC(increment_download_count)를 여기서 호출한다.
-// 안 그러면 앱 다운로드가 홈의 "누적 다운로드" 집계에서 통째로 빠진다.
+// 원본·정답 PDF 저장/공유(설계서 §5 `/download` 행).
 //
-// 새 의존성 없이 이미 있는 react-native-blob-util 로 받아서 OS 기본 뷰어/공유 시트에
-// 넘긴다(iOS previewDocument, Android ACTION_VIEW).
+// 앱은 웹 /download/* 라우트를 절대 호출하지 않는다(로그인 리다이렉트·봇 필터·geo-block
+// 대상이라 앱 요청은 막히고 집계도 안 된다). 보기는 react-native-pdf 에 Storage 공개 URL 을
+// 직접 주고, 저장/공유는 여기서 expo-file-system 신 API 로 캐시에 받은 뒤 expo-sharing
+// 시트 하나로 iOS "파일에 저장"·Android "다운로드에 저장"·카카오톡 공유를 모두 맡긴다
+// (앱이 직접 Downloads/MediaStore 에 쓰지 않음 → 권한 요청 없음).
+//
+// 캐시: Paths.cache/pdf/<paperId>-<kind>/<safeFileName>. 50MB 초과 시 오래된 것부터 삭제,
+// 로그아웃과 무관하게 유지(정답 PDF 도 공개 파일이라 캐시 금지 대상이 아니다).
+export type PdfKind = "paper" | "answer";
+
+const PDF_DIR = new Directory(Paths.cache, "pdf");
+const MAX_CACHE_BYTES = 50 * 1024 * 1024;
 
 // **화면에 붙일 때 주의**: 웹은 /download/[id] 가 요청을 가려서 사람이 누른 것만 센다
 // (apps/web/src/lib/download-counting.ts — 봇·프리페치 제외). 여기는 RPC 를 그대로
-// 부르므로 그런 판정이 없다. 앱은 사용자가 손으로 누른 자리에서만 이 함수를 부를 것 —
-// 화면 진입이나 프리로드에서 부르면 웹에서 걷어낸 오염이 앱 쪽으로 다시 들어온다.
+// 부르므로 그런 판정이 없다. 사용자가 저장·공유 버튼을 누른 순간에만 부를 것 —
+// 뷰어 진입·프리로드·캐시 워밍에서 부르면 다운로드 집계가 열람 수로 부풀어 웹과 뜻이 달라진다.
 export async function countDownload(paperId: string): Promise<void> {
   // 집계용이라 실패해도 사용자 흐름을 막지 않는다.
   try {
@@ -24,30 +31,80 @@ export async function countDownload(paperId: string): Promise<void> {
   }
 }
 
-function safeFileName(name: string): string {
+export function safeFileName(name: string): string {
   const base = name.replace(/[/\\?%*:|"<>]/g, "_").trim() || "exam";
   return base.toLowerCase().endsWith(".pdf") ? base : `${base}.pdf`;
 }
 
-// 파일을 앱 캐시로 받은 뒤 OS 에 넘긴다. 사용자는 거기서 저장·공유·다른 앱으로 열기를
-// 고를 수 있다.
-export async function downloadAndOpenPdf(
+function cacheDirFor(paperId: string, kind: PdfKind): Directory {
+  return new Directory(PDF_DIR, `${paperId}-${kind}`);
+}
+
+// 캐시에 있으면 그대로, 없으면 받아서 File 을 돌려준다. 여기서는 세지 않는다.
+export async function fetchPdfToCache(
   paperId: string,
-  filePath: string,
+  kind: PdfKind,
+  storagePath: string,
+  fileName: string,
+): Promise<File> {
+  const dir = cacheDirFor(paperId, kind);
+  const file = new File(dir, safeFileName(fileName));
+  if (file.exists) return file;
+  if (!dir.exists) dir.create({ intermediates: true, idempotent: true });
+  try {
+    await File.downloadFileAsync(publicUrl(storagePath), file);
+  } catch (e) {
+    // 반쯤 받은 파일이 "캐시 있음" 으로 오판되지 않게 지운다.
+    try {
+      if (file.exists) file.delete();
+    } catch {
+      // 무시
+    }
+    throw e;
+  }
+  trimPdfCache();
+  return file;
+}
+
+// 저장/공유 — 사용자가 버튼을 누른 자리에서만 부른다. 이 순간에만 다운로드를 센다.
+export async function sharePdf(
+  paperId: string,
+  kind: PdfKind,
+  storagePath: string,
   fileName: string,
 ): Promise<void> {
-  const url = publicUrl(filePath);
-  const target = `${RNBlobUtil.fs.dirs.CacheDir}/${safeFileName(fileName)}`;
+  const file = await fetchPdfToCache(paperId, kind, storagePath, fileName);
+  await countDownload(paperId);
+  if (!(await Sharing.isAvailableAsync())) {
+    throw new Error("이 기기에서는 공유 시트를 열 수 없어요.");
+  }
+  await Sharing.shareAsync(file.uri, {
+    UTI: "com.adobe.pdf",
+    mimeType: "application/pdf",
+    dialogTitle: safeFileName(fileName),
+  });
+}
 
-  const res = await RNBlobUtil.config({ path: target, fileCache: true }).fetch("GET", url);
-  const path = res.path();
-
-  // 여기서 다시 세지 않는다. 이 함수를 부르는 화면(app/papers/[id]/pdf.tsx)이 원본을
-  // 연 시점에 이미 한 번 셌으므로, 저장·공유까지 누른 사람만 한 번 더 세는 셈이 된다.
-
-  if (Platform.OS === "ios") {
-    await RNBlobUtil.ios.previewDocument(path);
-  } else {
-    await RNBlobUtil.android.actionViewIntent(path, "application/pdf");
+// 50MB 초과 시 오래된 폴더부터 삭제. 동기 API 라 try/catch 로 감싸고 실패는 무시한다.
+export function trimPdfCache(): void {
+  try {
+    if (!PDF_DIR.exists) return;
+    const entries = PDF_DIR.list()
+      .filter((e): e is Directory => e instanceof Directory)
+      .map((dir) => {
+        const files = dir.list().filter((f): f is File => f instanceof File);
+        const size = files.reduce((s, f) => s + (f.size ?? 0), 0);
+        const mtime = files.reduce((m, f) => Math.max(m, f.modificationTime ?? 0), 0);
+        return { dir, size, mtime };
+      })
+      .sort((a, b) => a.mtime - b.mtime);
+    let total = entries.reduce((s, e) => s + e.size, 0);
+    for (const e of entries) {
+      if (total <= MAX_CACHE_BYTES) break;
+      e.dir.delete();
+      total -= e.size;
+    }
+  } catch {
+    // 무시
   }
 }

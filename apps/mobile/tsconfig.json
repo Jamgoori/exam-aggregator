@@ -5,8 +5,16 @@
     "paths": {
       "@/*": ["./src/*"],
       "@gongmoa/core": ["../../packages/core/src/index.ts"],
-      "@gongmoa/core/*": ["../../packages/core/src/*"]
+      "@gongmoa/core/*": ["../../packages/core/src/*"],
+      "@gongmoa/design-tokens": ["../../packages/design-tokens/tokens.ts"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts",
+    "uniwind-types.d.ts"
+  ],
+  "exclude": ["node_modules", "android", "ios", "dist"]
 }

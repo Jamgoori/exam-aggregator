@@ -11,13 +11,16 @@
 const REQUIRED = [
   "EXPO_PUBLIC_SUPABASE_URL",
   "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+  // 약관·개인정보처리방침 링크와 /api/app/config 최소 버전 게이트가 이 주소를 쓴다.
+  // 없으면 두 문서가 죽어 스토어 심사에서 반려된다 — 빌드 단계에서 끊는다.
+  "EXPO_PUBLIC_WEB_URL",
 ];
 
 // 없으면 기능이 빠질 뿐 앱이 죽지는 않는 것들 — 경고만 한다.
 const OPTIONAL = [
-  "EXPO_PUBLIC_WEB_URL",
   "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID",
   "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID",
+  "EXPO_PUBLIC_SENTRY_DSN",
 ];
 
 const missing = REQUIRED.filter((name) => !process.env[name]);

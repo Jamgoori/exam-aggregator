@@ -144,8 +144,8 @@ eas update --branch production --message "설명"   # OTA 배포 (스토어 심�
 
 - 앱은 켤 때와 포그라운드로 돌아올 때 업데이트를 확인하고 조용히 받아둔다. 적용은 다음
   실행 — 문제 풀던 중에 화면이 날아가지 않게 즉시 재시작하지 않는다.
-- `runtimeVersion` 이 `appVersion` 정책이라, 네이티브 의존성을 바꾸면 `app.json` 의
-  `version` 을 올리고 스토어 빌드를 새로 올려야 한다(OTA 로는 네이티브가 안 바뀐다).
+- `runtimeVersion` 은 `fingerprint` 정책이라, 네이티브 의존성·설정이 바뀌면 지문이 달라져
+  스토어 빌드를 새로 올려야 한다(OTA 로는 네이티브가 안 바뀐다).
 - **SDK 57 빌드를 설치하기 전에 폰의 구 dev/preview APK 를 먼저 삭제할 것.** 재스캐폴드에서
   `runtimeVersion` 정책이 `appVersion` → `fingerprint` 로 바뀌므로 구 빌드는 새 OTA 를
   받지 못하고, 같은 앱 ID 위에 덮어 설치하면 채널·런타임이 섞여 업데이트 확인이 엉킨다.
@@ -163,6 +163,19 @@ eas update --branch production --message "설명"   # OTA 배포 (스토어 심�
 **원격 푸시(FCM/APNs)는 아직 없다.** 지금 리마인더는 로컬 알림이라 서버가 필요 없다.
 "내 댓글에 답글이 달렸다" 같은 서버발 알림을 넣을 때 FCM 키·기기 토큰 테이블·발송
 함수를 함께 만들면 된다.
+
+**크래시 리포팅(Sentry)·분석(GA4)** — 소유자 결정(`docs/redesign-architecture.md` §12-2 4번).
+
+- Sentry: expo.dev 가 아니라 sentry.io 에서 프로젝트를 만들고 DSN 을 `.env` 의
+  `EXPO_PUBLIC_SENTRY_DSN` 에 넣는다(비어 있으면 앱은 Sentry 를 초기화하지 않는다).
+  `app.json` 의 `@sentry/react-native/expo` 플러그인 `organization` 을 실제 조직 slug 로 바꾼다.
+  소스맵 업로드용 `SENTRY_AUTH_TOKEN` 은 EAS 시크릿에만 두고, 토큰이 없는 빌드에서는
+  `SENTRY_DISABLE_AUTO_UPLOAD=true` 로 업로드 단계를 끈다(없으면 gradle 이 실패한다).
+- GA4(`@react-native-firebase/analytics`)는 **아직 코드에 없다.** Firebase 콘솔에서 Android 앱
+  (`com.gongmoa.app`)을 만들어 받은 `google-services.json` 을 `apps/mobile/` 에 두고(gitignore
+  대상 — EAS 에는 시크릿 파일로 올린다) 나서 패키지·플러그인을 추가한다. 파일 없이 플러그인만
+  넣으면 prebuild 가 실패하기 때문이다. 화면 코드는 `src/lib/analytics.ts` 의 `track`/`screen`
+  만 부르므로 그때 그 파일 하나만 바뀐다.
 
 ---
 
