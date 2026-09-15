@@ -1,12 +1,18 @@
 // 섞어풀기 채점. 웹 submitReviewSessionForUser 포팅. 서버가 정답을 조회해 채점하고
 // review_session_items/sessions 를 갱신, user_question_status(source='review')에 반영.
 // 채점된 뷰(정답·출처 포함)를 돌려준다.
-import { corsHeaders, json, sanitizeSelectedChoice } from "../_shared/cbt.ts";
-import { adminClient, requireUser } from "../_shared/clients.ts";
-import { fetchQuestionMedia } from "../_shared/media.ts";
-import { recordQuestionResults } from "../_shared/status.ts";
-import { attendanceQuestionCount, recordAttendance } from "../_shared/attendance.ts";
-import { resolveStatusTargets, statusTargetKey } from "../_shared/status-targets.ts";
+import { corsHeaders, json } from "../_shared/http.ts";
+import { coreAdmin, requireUser } from "../_shared/clients.ts";
+// @ts-types="../_shared/core.d.ts"
+import {
+  attendanceQuestionCount,
+  fetchQuestionMedia,
+  recordAttendance,
+  recordQuestionResults,
+  resolveStatusTargets,
+  sanitizeSelectedChoice,
+  statusTargetKey,
+} from "../_shared/core.mjs";
 
 type ItemRow = {
   id: string;
@@ -33,11 +39,11 @@ Deno.serve(async (req) => {
   }
   if (!sessionId) return json({ error: "잘못된 접근입니다." }, 400);
 
-  const admin = adminClient();
+  const admin = coreAdmin();
 
   const { data: session } = await admin
     .from("review_sessions")
-    .select("id, user_id, submitted_at, created_at")
+    .select("id, user_id, submitted_at, created_at, scope")
     .eq("id", sessionId)
     .maybeSingle();
   if (!session || session.user_id !== userId) {
@@ -101,13 +107,16 @@ Deno.serve(async (req) => {
   // 극복 판정(문제지별). 실패해도 채점은 유효.
   //
   // 세션 문항의 paper_id 는 dedup 대표 id라, 중복 시험지를 응시한 사용자는 상태·복습
-  // 스케줄이 원본 id 쪽에 있다. 기록 대상을 실제 행이 있는 문제지로 되짚는다.
+  // 스케줄이 원본 id 쪽에 있다. 기록 대상을 실제 행이 있는 문제지로 되짚는다 — core
+  // rules/status-targets.ts(웹과 같은 대표 선정 + 정답 대조). admin 이라 paper_answers 도
+  // 읽을 수 있으므로 answersClient 로 같은 클라이언트를 준다.
   let targets = new Map<string, string[]>();
   try {
     targets = await resolveStatusTargets(
       admin,
       userId,
       graded.map((r) => ({ paperId: r.paper_id, questionNumber: r.question_number })),
+      { answersClient: admin },
     );
   } catch {
     // 무시: 되짚기 실패해도 넘어온 id 로 기록한다(예전 동작).
@@ -123,9 +132,12 @@ Deno.serve(async (req) => {
       byPaper.set(paperId, list);
     }
   }
+  // 기출 섞어풀기(scope 'mix') 세션은 이력(srs_reviews.source)에서만 'mix' 로 구분된다 —
+  // 상태 갱신 규칙은 review 와 같다(웹 submitReviewSessionForUser 와 동일).
+  const source = session.scope === "mix" ? "mix" : "review";
   try {
     for (const [paperId, results] of byPaper) {
-      await recordQuestionResults(admin, userId, paperId, results, "review");
+      await recordQuestionResults(admin, userId, paperId, results, source);
     }
   } catch {
     // 무시

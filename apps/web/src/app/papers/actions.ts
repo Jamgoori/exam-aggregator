@@ -5,19 +5,19 @@ import bcrypt from "bcryptjs";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { getSessionUser } from "@/lib/supabase/session";
-import { recordQuestionResults } from "@/lib/question-status";
-import { recordAttendance } from "@/lib/attendance";
 import {
   canReplyTo,
   COMMENT_CONTENT_MAX,
   COMMENT_MAX_DEPTH,
-  formatDuration,
   getPaperSlug,
-  attendanceQuestionCount,
   authorNickname,
   profanityError,
 } from "@gongmoa/core";
-import { MIN_ATTEMPT_SECONDS, sanitizeSelectedChoice } from "@/lib/cbt-attempt";
+import {
+  isCbtRuleError,
+  startCbtAttempt as startCbtAttemptRule,
+  submitCbtAttempt as submitCbtAttemptRule,
+} from "@gongmoa/core/server";
 
 // 문제지 상세 경로를 다시 만들게 한다.
 //
@@ -304,21 +304,22 @@ export async function startCbtAttempt(paperId: string): Promise<StartCbtAttemptR
   const { user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
-  // started_at은 반드시 서버(service_role)만 쓴다. 사용자 세션으로 쓰게 하면
-  // authenticated insert/update 정책이 필요해지고, 그 정책이 있으면 클라이언트가
-  // REST 호출로 started_at을 과거로 조작해 최소 응시시간 검증을 통째로 우회할 수 있다.
-  const admin = createAdminClient();
-  const startedAt = new Date().toISOString();
-  const { error } = await admin
-    .from("cbt_attempt_starts")
-    .upsert(
-      { user_id: user.id, paper_id: id, started_at: startedAt },
-      { onConflict: "user_id,paper_id" },
-    );
-  if (error) return { error: "시작 기록에 실패했어요." };
-  return { success: true, startedAt };
+  // started_at은 반드시 서버(service_role)만 쓴다 — 규칙 본문은 core rules/cbt-attempt.ts
+  // (Edge cbt-start 와 같은 함수). 본인 확인은 위 세션 검사로 끝났고 user.id만 넘긴다.
+  const result = await startCbtAttemptRule(createAdminClient(), user.id, id);
+  if (isCbtRuleError(result)) return { error: result.error };
+  return { success: true, startedAt: result.startedAt };
 }
 
+// 채점의 웹 어댑터. 정답 조회·시작 행 원자 회수·최소 응시시간·채점·응시 기록·문항
+// 상태·출석·진단 진행률까지 전부 core rules/cbt-attempt.ts#submitCbtAttempt 가 하고
+// (Edge cbt-submit 과 같은 함수), 여기는 세션 검사와 service_role 클라이언트 주입만 한다.
+//
+// 정답은 anon/authenticated에 전혀 노출하지 않으므로 service role로만 조회한다.
+// 응시 기록(cbt_attempts/cbt_attempt_answers/cbt_attempt_starts) 쓰기도 전부
+// service role로만 한다 — 사용자 세션 쓰기를 허용하면 클라이언트가 REST 호출로
+// 점수·시작시각을 위조해 회독 배지와 공개 통계(회차별 평균, 전국 오답률, 총 응시
+// 수)를 오염시킬 수 있다. 본인 확인은 세션 검사로 끝났고 user.id만 기록한다.
 export async function submitCbtAttempt(input: {
   paperId: string;
   answers: (number | null)[];
@@ -329,151 +330,19 @@ export async function submitCbtAttempt(input: {
   const { user } = await getSessionUser();
   if (!user) return { error: "로그인 후 이용할 수 있어요." };
 
-  // 정답은 anon/authenticated에 전혀 노출하지 않으므로 service role로만 조회한다.
-  // 응시 기록(cbt_attempts/cbt_attempt_answers/cbt_attempt_starts) 쓰기도 전부
-  // service role로만 한다 — 사용자 세션 쓰기를 허용하면 클라이언트가 REST 호출로
-  // 점수·시작시각을 위조해 회독 배지와 공개 통계(회차별 평균, 전국 오답률, 총 응시
-  // 수)를 오염시킬 수 있다. 본인 확인은 위 세션 검사로 끝났고 user.id만 기록한다.
-  const admin = createAdminClient();
-  const { data: paperAnswers } = await admin
-    .from("paper_answers")
-    .select("answers, voided_questions")
-    .eq("paper_id", paperId)
-    .maybeSingle();
-
-  if (!paperAnswers) return { error: "이 문제지는 CBT를 지원하지 않아요." };
-
-  const correctAnswers = (paperAnswers.answers ?? []) as number[];
-  const voided = new Set((paperAnswers.voided_questions ?? []) as number[]);
-  const totalQuestions = correctAnswers.length;
-  if (totalQuestions === 0) return { error: "이 문제지는 CBT를 지원하지 않아요." };
-
   const submitted = Array.isArray(input.answers) ? input.answers : [];
-
-  const { data: startRecord } = await admin
-    .from("cbt_attempt_starts")
-    .select("started_at")
-    .eq("user_id", user.id)
-    .eq("paper_id", paperId)
-    .maybeSingle();
-
-  if (!startRecord) {
-    return { error: "새로고침 후 다시 시작해주세요." };
-  }
-
-  const elapsedSeconds =
-    (Date.now() - new Date(startRecord.started_at).getTime()) / 1000;
-  if (elapsedSeconds < MIN_ATTEMPT_SECONDS) {
-    const waitSeconds = Math.ceil(MIN_ATTEMPT_SECONDS - elapsedSeconds);
-    return {
-      error: `최소 ${formatDuration(MIN_ATTEMPT_SECONDS)}은 풀어야 채점할 수 있어요. ${waitSeconds}초 후에 다시 시도해주세요.`,
-    };
-  }
-
-  // 저장용 duration도 클라이언트 값 대신 서버가 기록한 시작 시각 기준으로 계산한다.
-  const durationSeconds = Math.round(elapsedSeconds);
-
-  let score = 0;
-  const questionResults: CbtQuestionResult[] = [];
-  for (let i = 0; i < totalQuestions; i++) {
-    const questionNumber = i + 1;
-    const selected = sanitizeSelectedChoice(submitted[i]);
-    const isCorrect = voided.has(questionNumber) || selected === correctAnswers[i];
-    if (isCorrect) score++;
-    questionResults.push({
-      question_number: questionNumber,
-      selected_choice: selected,
-      is_correct: isCorrect,
-    });
-  }
-
-  const { data: attempt, error: attemptError } = await admin
-    .from("cbt_attempts")
-    .insert({
-      user_id: user.id,
-      paper_id: paperId,
-      score,
-      total_questions: totalQuestions,
-      duration_seconds: durationSeconds,
-    })
-    .select("id")
-    .single();
-
-  if (attemptError || !attempt) return { error: "채점에 실패했어요." };
-
-  const { error: answersError } = await admin.from("cbt_attempt_answers").insert(
-    questionResults.map((q) => ({ attempt_id: attempt.id, ...q })),
-  );
-
-  if (answersError) {
-    // service_role이라 이 롤백이 실제로 지워진다 (사용자 세션에는 delete 정책이
-    // 없어서 예전엔 이 줄이 조용히 아무것도 안 지우고 고아 응시 행을 남겼다).
-    await admin.from("cbt_attempts").delete().eq("id", attempt.id);
-    return { error: "채점에 실패했어요." };
-  }
-
-  // 문항 단위 통합 상태 갱신(오답노트 극복 판정·섞어풀기 공유). 부가 집계라 실패해도
-  // 채점 결과는 그대로 돌려준다 — 마이그레이션 적용 전이면 테이블이 없어 조용히 무시된다.
-  try {
-    await recordQuestionResults(user.id, paperId, questionResults, "cbt");
-  } catch {
-    // 무시: 상태 갱신 실패가 채점을 막지 않는다.
-  }
-
-  // 출석 도장(월간 카드 → 멤버십 일수). 접속이 아니라 푼 것이 출석이라, 채점된 문항이
-  // 아니라 **답을 고른 문항**만 센다 — 빈 답안을 제출해도 문항 수만큼 도장이 찍히면
-  // 최소 응시시간(90초)만 기다렸다 제출하는 스크립트가 멤버십 일수를 받아간다.
-  // 부가 처리이고, 실패해도 채점을 되돌리지 않는다.
-  try {
-    await recordAttendance(
-      user.id,
-      attendanceQuestionCount({
-        answeredCount: questionResults.filter((q) => q.selected_choice !== null).length,
-        elapsedSeconds: durationSeconds,
-      }),
-    );
-  } catch {
-    // 무시: 출석 기록 실패가 채점을 막지 않는다.
-  }
-
-  // 채점에 성공했으니 시작 기록을 지워, 같은 시작 시각으로 다시 제출(replay)해
-  // 대기 없이 회독을 늘리는 걸 막는다. 다음 응시는 startCbtAttempt가 새로 기록한다.
-  await admin
-    .from("cbt_attempt_starts")
-    .delete()
-    .eq("user_id", user.id)
-    .eq("paper_id", paperId);
-
-  // 결과 모달에 "AI 약점 진단까지 응시 N/3"를 그리기 위한 누적치. 채점이 끝난 뒤라
-  // 방금 응시도 포함된다. 진단 자격 판정(lib/ai-diagnosis getDiagnosisEligibility)과
-  // 같은 두 집계다 — 부가 정보라 실패해도 채점 결과는 그대로 돌려준다.
-  let diagnosisProgress: CbtSubmitResult["diagnosisProgress"];
-  try {
-    const [{ count: attemptCount }, { count: wrongCount }] = await Promise.all([
-      admin
-        .from("cbt_attempts")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", user.id),
-      admin
-        .from("user_question_status")
-        .select("paper_id", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .gt("wrong_count", 0),
-    ]);
-    diagnosisProgress = { attemptCount: attemptCount ?? 0, wrongCount: wrongCount ?? 0 };
-  } catch {
-    // 무시: 진행 바 한 줄이 빠질 뿐이다.
-  }
+  const result = await submitCbtAttemptRule(createAdminClient(), user.id, paperId, submitted);
+  if (isCbtRuleError(result)) return { error: result.error };
 
   return {
     success: true,
-    attemptId: attempt.id as string,
-    score,
-    totalQuestions,
-    durationSeconds,
-    voidedQuestions: [...voided],
-    questionResults,
-    diagnosisProgress,
+    attemptId: result.attemptId,
+    score: result.score,
+    totalQuestions: result.totalQuestions,
+    durationSeconds: result.durationSeconds,
+    voidedQuestions: result.voidedQuestions,
+    questionResults: result.questionResults,
+    diagnosisProgress: result.diagnosisProgress,
   };
 }
 

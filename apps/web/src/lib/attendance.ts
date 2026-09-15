@@ -1,20 +1,16 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  ATTENDANCE_MIN_QUESTIONS,
-  isAttendanceOpen,
-  attendanceMilestonesReached,
-  kstDateKey,
-  kstMonthKey,
-} from "@gongmoa/core";
+import { kstDateKey, kstMonthKey } from "@gongmoa/core";
+import { recordAttendance as recordAttendanceRule } from "@gongmoa/core/server";
 import type { createClient } from "@/lib/supabase/server";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 // 출석 보상의 웹 서버측 경로. 규칙(단계·최소 문항 수·날짜 키)의 정본은
-// packages/core/attendance.ts 이고, 여기는 그 규칙으로 DB 를 두드리는 일만 한다.
-// Edge Function 쪽 같은 코드는 supabase/functions/_shared/attendance.ts 에 있다 —
-// 한쪽만 고치면 웹에서 푼 날과 앱에서 푼 날의 출석 기준이 달라진다.
+// packages/core/attendance.ts 이고, DB 를 두드리는 본문은 packages/core/src/rules/
+// attendance-record.ts 에 있다 — Edge Function(cbt-submit·review-submit)도 번들
+// (_shared/core.mjs)로 같은 함수를 부르므로 웹에서 푼 날과 앱에서 푼 날의 출석 기준이
+// 갈릴 수 없다. 여기는 service_role 클라이언트를 만들어 넘기는 일만 한다.
 //
 // 쓰기는 전부 service_role 로 한다. attendance_days·attendance_grants 는 select-own 만
 // 열려 있고 쓰기 정책이 없다 — 클라이언트가 직접 올릴 수 있으면 문제를 안 풀고도
@@ -28,40 +24,9 @@ export async function recordAttendance(
   userId: string,
   questionCount: number,
 ): Promise<void> {
-  // 출석체크가 닫혀 있는 동안(전면 무료 이벤트)에는 기록도 지급도 하지 않는다.
-  // 이유는 core 의 isAttendanceOpen 머리말에 있다. Edge Function 쪽(_shared/
-  // attendance.ts)에도 같은 검사가 같은 자리에 있다 — 한쪽만 막으면 앱으로 푼
-  // 사람에게만 도장이 계속 찍힌다.
-  if (!isAttendanceOpen()) return;
-  if (!Number.isFinite(questionCount) || questionCount <= 0) return;
-
-  const admin = createAdminClient();
-  const now = new Date();
-  const date = kstDateKey(now);
-  const month = kstMonthKey(now);
-
-  // 누계 증분과 "이 달 며칠째인가"를 한 번에 받는다(원자적 upsert + count).
-  const { data, error } = await admin.rpc("record_attendance_day", {
-    p_user_id: userId,
-    p_date: date,
-    p_questions: Math.floor(questionCount),
-    p_min_questions: ATTENDANCE_MIN_QUESTIONS,
-  });
-  if (error) return;
-
-  const attendedDays = typeof data === "number" ? data : 0;
-
-  // 열린 단계를 전부 시도한다. 이미 준 단계는 DB 가 원장 충돌로 'already' 를
-  // 돌려주므로, 여기서 "어디까지 줬는지"를 따로 기억하지 않아도 된다. 그 기억을
-  // 앱이 들고 있으면 재시도·동시 채점에서 두 번 주는 경로가 생긴다.
-  for (const milestone of attendanceMilestonesReached(attendedDays)) {
-    await admin.rpc("grant_attendance_membership", {
-      p_user_id: userId,
-      p_month: month,
-      p_milestone: milestone.days,
-      p_days: milestone.grantDays,
-    });
-  }
+  // 닫혀 있거나(전면 무료 이벤트) 셀 문항이 없으면 규칙 쪽이 바로 돌아온다 — 그 검사
+  // 전에 admin 클라이언트를 만드는 비용은 무시할 만하다.
+  await recordAttendanceRule(createAdminClient(), userId, questionCount);
 }
 
 export type AttendanceSummary = {

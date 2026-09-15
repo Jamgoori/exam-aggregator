@@ -187,8 +187,8 @@ export function attendanceMilestoneDates(
 // ── KST 날짜 키 ──────────────────────────────────────────────────────────────
 // 하루의 경계는 AI 진단의 "일 1회"·무료 해설 일일 한도와 같은 KST 달력 날짜다.
 // 사용자가 기억해야 할 하루 경계를 서비스 전체에서 하나로 두려는 것.
-// (웹 lib/ai-diagnosis.ts 의 kstToday, Edge _shared/membership.ts 의 kstToday 와
-//  같은 계산이다. 저쪽은 각자의 이유로 남아 있고, 출석은 이 함수를 쓴다.)
+// (웹 lib/ai-diagnosis.ts 의 kstToday, core rules/membership-server.ts 의 kstToday 와
+//  같은 계산이다 — 셋 다 format.ts 의 kstDayKey 와 같은 값을 낸다. 출석은 이 함수를 쓴다.)
 
 // "YYYY-MM-DD" (KST).
 export function kstDateKey(now: Date = new Date()): string {

@@ -58,3 +58,6 @@ export * from "./data/subjects";
 export * from "./badge-classes";
 export * from "./nav-items";
 export * from "./diagnosis-progress";
+
+// CBT 최소 응시시간·답안 정제 — 클라이언트(솔버)와 서버 규칙이 같은 값을 쓴다
+export * from "./cbt-attempt";

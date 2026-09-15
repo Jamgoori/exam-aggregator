@@ -9,9 +9,10 @@
 //
 // 아직 채점 전(submitted_at = null)인 세션은 어느 쪽으로도 내보내지 않는다. 풀기 전에
 // 정답을 미리 볼 수 있게 되면 안 되기 때문이다.
-import { corsHeaders, json } from "../_shared/cbt.ts";
-import { adminClient, requireUser } from "../_shared/clients.ts";
-import { fetchQuestionMedia } from "../_shared/media.ts";
+import { corsHeaders, json } from "../_shared/http.ts";
+import { coreAdmin, requireUser } from "../_shared/clients.ts";
+// @ts-types="../_shared/core.d.ts"
+import { fetchQuestionMedia } from "../_shared/core.mjs";
 
 const LIST_LIMIT = 50;
 
@@ -33,7 +34,7 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => ({}));
   const sessionId = typeof body?.sessionId === "string" ? body.sessionId : "";
 
-  const admin = adminClient();
+  const admin = coreAdmin();
 
   // ── 목록 ──────────────────────────────────────────────────────────────────
   if (!sessionId) {

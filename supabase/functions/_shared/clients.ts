@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { json } from "./cbt.ts";
+import { json } from "./http.ts";
+// @ts-types="./core.d.ts"
+import type { startTrialIfEligible } from "./core.mjs";
 
 // Edge 런타임이 자동 주입하는 환경변수. 서비스 롤 키는 함수 안에서만 쓰고 절대
 // 클라이언트로 나가지 않는다.
@@ -26,6 +28,16 @@ export function adminClient(): SupabaseClient {
   return createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
   });
+}
+
+// core(_shared/core.mjs) 규칙 함수가 받는 SupabaseClient 타입. core.d.ts 는
+// `@supabase/supabase-js` 를 import type 으로 참조하고 supabase/functions/deno.json 의
+// import map 이 그걸 같은 esm.sh 모듈로 풀지만, 버전 핀이 어긋나면 타입 동일성이 깨질
+// 수 있어 여기서 한 번 캐스팅해 둔다 — Edge 파일들은 core 에 넘길 admin 을 이걸로 만든다.
+export type CoreClient = Parameters<typeof startTrialIfEligible>[0];
+
+export function coreAdmin(): CoreClient {
+  return adminClient() as unknown as CoreClient;
 }
 
 // 공통: 로그인 사용자 확인. 없으면 401 응답을 반환한다(호출부에서 early return).

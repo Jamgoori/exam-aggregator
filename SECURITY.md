@@ -153,7 +153,7 @@ POST /functions/v1/review-submit  {"sessionId":"…","answers":[]}   # 1초 미�
 끝났으면(문항당 2초 미만) 세지 않는다. 경과 시간은 서버 기록(`review_sessions.created_at` /
 `cbt_attempt_starts.started_at`)으로만 잰다. 하한에 걸려도 **채점은 그대로 한다** — 출석만
 남기지 않는다(여기서 채점을 막으면 조금 빠른 진짜 사용자의 답안이 사라진다).
-규칙 정본은 `packages/core` 의 `attendanceQuestionCount`, Deno 사본은 `_shared/attendance.ts`.
+규칙 정본은 `packages/core` 의 `attendanceQuestionCount`·`rules/attendance-record.ts`, Edge 는 `_shared/core.mjs` 번들로 같은 함수를 쓴다.
 네 곳(웹·앱 × CBT·섞어풀기)을 함께 고쳤다.
 
 ## 4. 작성자 이름 폴백 → 운영진 사칭 — ✅ (`20887b6`)

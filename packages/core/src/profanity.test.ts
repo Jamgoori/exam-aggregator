@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   containsProfanity,
   findProfanity,
@@ -10,11 +10,13 @@ import {
   PROFANITY_WORDS,
 } from "./profanity";
 
-// 비속어 목록은 두 곳에 있다: 웹 서버 액션이 쓰는 여기(core)와, 앱이 호출하는 Edge
-// Function 이 쓰는 supabase/functions/_shared/profanity.ts(Deno 라 core 를 import 할 수
-// 없어 사본). 두 목록이 갈리면 앱에서만 통과하는 구멍이 생기므로 대조한다.
-test("Edge Function 사본의 목록이 core 와 같다", () => {
-  const copyPath = join(
+// 비속어 목록의 정본은 여기(core) 하나다. 앱이 호출하는 Edge Function 은
+// supabase/functions/_shared/core.mjs(이 패키지의 esbuild 번들)로 같은 목록을 받고,
+// 예전 사본 _shared/profanity.ts 는 그 번들의 re-export 한 줄로 남아 있다(AGENTS.md 문구
+// 갱신 전까지). 여기서는 (1) 사본 파일에 목록이 다시 생기지 않았는지, (2) 커밋된 번들이
+// 지금 목록과 같은지 대조한다 — 번들을 안 돌리고 목록만 고치면 앱에서만 통과하는 구멍이 된다.
+test("Edge Function 사본의 목록이 core 와 같다", async () => {
+  const sharedDir = join(
     dirname(fileURLToPath(import.meta.url)),
     "..",
     "..",
@@ -22,25 +24,20 @@ test("Edge Function 사본의 목록이 core 와 같다", () => {
     "supabase",
     "functions",
     "_shared",
-    "profanity.ts",
   );
-  const copy = readFileSync(copyPath, "utf8");
+  const copy = readFileSync(join(sharedDir, "profanity.ts"), "utf8");
+  assert.ok(
+    /export \{[\s\S]*PROFANITY_WORDS[\s\S]*\} from "\.\/core\.mjs"/.test(copy),
+    "_shared/profanity.ts 는 core.mjs 의 re-export 여야 한다",
+  );
+  assert.equal(copy.includes("PROFANITY_WORDS = ["), false, "사본에 목록을 다시 쓰지 말 것");
 
-  const arrayValues = (source: string, name: string): string[] => {
-    const marker = `export const ${name} = [`;
-    const start = source.indexOf(marker);
-    assert.ok(start > 0, `${name} 배열을 찾지 못했다`);
-    const end = source.indexOf("\n];", start);
-    return [...source.slice(start + marker.length, end).matchAll(/"([^"]*)"/g)].map(
-      (m) => m[1],
-    );
+  const bundle = (await import(pathToFileURL(join(sharedDir, "core.mjs")).href)) as {
+    PROFANITY_WORDS: readonly string[];
+    PROFANITY_ALLOWED_PHRASES: readonly string[];
   };
-
-  assert.deepEqual(arrayValues(copy, "PROFANITY_WORDS"), PROFANITY_WORDS);
-  assert.deepEqual(
-    arrayValues(copy, "PROFANITY_ALLOWED_PHRASES"),
-    PROFANITY_ALLOWED_PHRASES,
-  );
+  assert.deepEqual([...bundle.PROFANITY_WORDS], [...PROFANITY_WORDS]);
+  assert.deepEqual([...bundle.PROFANITY_ALLOWED_PHRASES], [...PROFANITY_ALLOWED_PHRASES]);
 });
 
 test("욕설이 섞인 글을 잡는다", () => {

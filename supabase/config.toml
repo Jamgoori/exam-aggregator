@@ -104,3 +104,36 @@ inspector_port = 8083
 [analytics]
 # 로그 파이프라인(Logflare·Vector) 컨테이너. 로컬 개발엔 불필요하고 start 만 느려진다.
 enabled = false
+
+# Edge Function 은 core 번들(_shared/core.mjs)을 쓰고, 타입 선언(core-types)의
+# `@supabase/supabase-js` 베어 지정자는 이 import map 으로 esm.sh 에 매핑한다.
+[functions.account-delete]
+import_map = "./functions/deno.json"
+
+[functions.ai-diagnose]
+import_map = "./functions/deno.json"
+
+[functions.cbt-start]
+import_map = "./functions/deno.json"
+
+[functions.cbt-submit]
+import_map = "./functions/deno.json"
+
+[functions.comments-write]
+import_map = "./functions/deno.json"
+
+[functions.explanations-get]
+import_map = "./functions/deno.json"
+
+[functions.membership-get]
+import_map = "./functions/deno.json"
+
+[functions.review-create]
+import_map = "./functions/deno.json"
+
+[functions.review-history]
+import_map = "./functions/deno.json"
+
+[functions.review-submit]
+import_map = "./functions/deno.json"
+

@@ -6,7 +6,7 @@
 //
 // 앱은 로그인 사용자 댓글만 다룬다(비회원 댓글은 웹 전용 password_hash 방식). 닉네임은
 // 클라이언트 값을 믿지 않고 서버가 user_metadata 에서 읽어 채운다.
-import { corsHeaders, json } from "../_shared/cbt.ts";
+import { corsHeaders, json } from "../_shared/http.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
 import { profanityError } from "../_shared/profanity.ts";
 

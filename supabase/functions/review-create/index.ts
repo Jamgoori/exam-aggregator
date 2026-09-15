@@ -4,13 +4,14 @@
 //
 // ⚠️ 웹은 dedup(중복 시험지)·수동 표시·복습 쿨다운까지 반영한다. 이 v1 은 그걸
 // 단순화했다(user_question_status wrong_count>0 기준). 상세 규칙은 웹 참고.
-import { corsHeaders, json } from "../_shared/cbt.ts";
-import { adminClient, requireUser } from "../_shared/clients.ts";
-import { fetchQuestionMedia } from "../_shared/media.ts";
+import { corsHeaders, json } from "../_shared/http.ts";
+import { coreAdmin, requireUser } from "../_shared/clients.ts";
+// @ts-types="../_shared/core.d.ts"
 import {
+  fetchQuestionMedia,
   pickReviewCandidates,
   type ReviewPickStrategy,
-} from "../_shared/review-pick.ts";
+} from "../_shared/core.mjs";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -41,7 +42,7 @@ Deno.serve(async (req) => {
   }
   limit = Math.min(Math.max(1, limit), MAX_LIMIT);
 
-  const admin = adminClient();
+  const admin = coreAdmin();
 
   // 멤버십을 확인하지 않는다. 섞어풀기(내 오답을 모아 다시 풀기)는 무료다 — 웹의
   // 같은 기능(app/mypage/wrong-notes/actions.ts 의 createReviewSession 계열)도

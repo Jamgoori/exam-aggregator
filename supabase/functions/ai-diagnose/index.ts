@@ -3,9 +3,10 @@
 //
 // 필요 시크릿: ANTHROPIC_API_KEY (supabase secrets set). 모델은 DIAGNOSIS_MODEL 로 override.
 // 자격: 누적 오답 15개 또는 응시 3회 이상(웹 DIAGNOSIS_MIN_* 와 동일). 주 1회 캐시.
-import { corsHeaders, json } from "../_shared/cbt.ts";
-import { adminClient, requireUser } from "../_shared/clients.ts";
-import { isPremiumUser } from "../_shared/membership.ts";
+import { corsHeaders, json } from "../_shared/http.ts";
+import { adminClient, coreAdmin, requireUser } from "../_shared/clients.ts";
+// @ts-types="../_shared/core.d.ts"
+import { isPremiumUserFor } from "../_shared/core.mjs";
 
 const MIN_WRONG = 15;
 const MIN_ATTEMPTS = 3;
@@ -42,7 +43,7 @@ Deno.serve(async (req) => {
 
   // AI 약점 진단은 멤버십 기능. 아래에서 실제로 모델을 호출하므로, 막지 않으면
   // 화면을 우회한 호출이 그대로 비용이 된다.
-  if (!(await isPremiumUser(admin, userId, auth.email))) {
+  if (!(await isPremiumUserFor(coreAdmin(), { userId, email: auth.email }))) {
     return json({ error: "AI 약점 진단은 멤버십 기능이에요." }, 403);
   }
 

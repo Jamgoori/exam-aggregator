@@ -17,6 +17,12 @@ import {
 } from "@gongmoa/core";
 import type { QuestionExplanationContent } from "@/components/wrong-note-question-card";
 import {
+  fetchQuestionMedia,
+  toExplanationContent,
+  type ExplanationRow,
+  type QuestionMediaEntry,
+} from "@gongmoa/core/server";
+import {
   collidingPaperIds,
   fetchPaperIdentitySignals,
   representativePaperIds,
@@ -172,92 +178,10 @@ export type WrongNoteQuestionDetail = WrongNoteQuestionSummary & {
   pinned: boolean;
 };
 
-export type QuestionMediaEntry = {
-  choiceCount: number | null;
-  images: string[];
-  // questions.id — 해설(question_explanations)을 되짚을 때 쓴다. 이 조회가 이미
-  // 문항 행을 훑으므로 id를 함께 실어 오면 왕복이 하나 준다.
-  questionId: string;
-};
-
-const QUESTION_MEDIA_SELECT =
-  "id, paper_id, question_number, choice_count, question_images(order_index, image_path)";
-
-type QuestionMediaRow = {
-  id: string;
-  paper_id: string;
-  question_number: number;
-  choice_count: number;
-  question_images: { order_index: number; image_path: string }[] | null;
-};
-
-// 문제지들의 문항별 크롭 이미지(공개 URL)와 선지 수를 한 번에 받아온다.
-// questions/question_images는 public read라 사용자 세션 클라이언트로 충분하다.
-//
-// wanted를 주면 문제지별로 그 문항 번호만 조회한다. 오답노트는 문제지 한 장에서 보통
-// 일부만 틀리는데, 예전에는 언제나 문제지 전체 문항 + 이미지 행을 받아 와서 화면에
-// 쓰지도 않는 데이터가 대부분이었다(문제지가 수십 장 쌓이는 과목에서 특히 크다).
-export async function fetchQuestionMedia(
-  supabase: Supabase,
-  paperIds: string[],
-  wanted?: Map<string, Set<number>>,
-): Promise<Map<string, Map<number, QuestionMediaEntry>>> {
-  const byPaper = new Map<string, Map<number, QuestionMediaEntry>>();
-
-  function consume(rows: QuestionMediaRow[]) {
-    for (const row of rows) {
-      const images = [...(row.question_images ?? [])]
-        .sort((a, b) => a.order_index - b.order_index)
-        .map(
-          (img) =>
-            supabase.storage.from("exam-papers").getPublicUrl(img.image_path)
-              .data.publicUrl,
-        );
-      const paperMap =
-        byPaper.get(row.paper_id) ?? new Map<number, QuestionMediaEntry>();
-      paperMap.set(row.question_number, {
-        choiceCount: row.choice_count,
-        images,
-        questionId: row.id,
-      });
-      byPaper.set(row.paper_id, paperMap);
-    }
-  }
-
-  if (wanted) {
-    await inParallel(paperIds, async (paperId) => {
-      const numbers = [...(wanted.get(paperId) ?? [])];
-      if (numbers.length === 0) return;
-      // 문항 번호로 좁히면 한 문제지가 BATCH_SIZE를 넘길 일이 없어 페이지네이션이
-      // 필요 없다(embedded question_images는 행 수에 포함되지 않는다).
-      const { data } = await supabase
-        .from("questions")
-        .select(QUESTION_MEDIA_SELECT)
-        .eq("paper_id", paperId)
-        .in("question_number", numbers);
-      consume((data ?? []) as unknown as QuestionMediaRow[]);
-    });
-    return byPaper;
-  }
-
-  await inParallel(chunk(paperIds, 10), async (ids) => {
-    let from = 0;
-    while (true) {
-      const { data } = await supabase
-        .from("questions")
-        .select(QUESTION_MEDIA_SELECT)
-        .in("paper_id", ids)
-        .order("paper_id")
-        .order("question_number")
-        .range(from, from + BATCH_SIZE - 1);
-      if (!data || data.length === 0) break;
-      consume(data as unknown as QuestionMediaRow[]);
-      if (data.length < BATCH_SIZE) break;
-      from += BATCH_SIZE;
-    }
-  });
-  return byPaper;
-}
+// 문항 이미지·선지 수 조회의 본문은 packages/core/src/data/question-media.ts 로 옮겼다
+// (Edge review-*·explanations-get 도 같은 함수 — 10문제지 청크 페이지네이션). 기존
+// import 경로(@/lib/wrong-notes)를 그대로 쓰도록 재노출한다.
+export { fetchQuestionMedia, type QuestionMediaEntry };
 
 // 문제지별 정답 배열. paper_answers는 정답 유출 방지를 위해 일반 select가 막혀 있어
 // service role로만 읽는다 — 반드시 "본인 응시 기록이 있는 문제지"로 좁힌 뒤 호출할 것.
@@ -280,102 +204,10 @@ export async function fetchCorrectAnswers(
   return byPaper;
 }
 
-// 선지 번호가 "①"/"1번"/객체/배열 등 어떤 형태로 저장돼 있어도 숫자로 되살린다.
-function parseChoiceNumber(raw: unknown, fallback: number): number {
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-  if (typeof raw === "string") {
-    const circled = "①②③④⑤⑥⑦⑧".indexOf(raw.trim().charAt(0));
-    if (circled >= 0) return circled + 1;
-    const n = Number.parseInt(raw, 10);
-    if (Number.isFinite(n)) return n;
-  }
-  return fallback;
-}
-
-// choice_explanations는 해설 제작 루틴이 jsonb로 저장한다. 배열([문자열] 또는
-// [{choice, explanation}]) / 객체({"1": "..."} 또는 {"①": "..."}) 어느 형태로
-// 들어와도 화면용 목록으로 정규화한다. 법령 문항 선지는 항목에 current_status
-// ("유효"/"개정됨"/"확인불가")와 original_note(개정됨일 때 "출제 당시엔 어땠나"
-// 한 줄)가 더 붙는데, 있을 때만 실어 보낸다(없으면 null — 화면이 있는 것만 그린다).
-// 해설 본문(explanation)은 현행법 기준으로 생성된다 — 프롬프트 참조.
-type NormalizedChoice = {
-  choice: number;
-  text: string;
-  currentStatus: string | null;
-  originalNote: string | null;
-};
-
-function normalizeChoiceExplanations(raw: unknown): NormalizedChoice[] {
-  if (!raw) return [];
-
-  const textOf = (v: unknown): string => {
-    if (typeof v === "string") return v;
-    if (v && typeof v === "object") {
-      const o = v as Record<string, unknown>;
-      const t = o.explanation ?? o.text ?? o.content ?? o.reason;
-      if (typeof t === "string") return t;
-    }
-    return "";
-  };
-  const strOrNull = (v: unknown): string | null =>
-    typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
-
-  let entries: NormalizedChoice[] = [];
-  if (Array.isArray(raw)) {
-    entries = raw.map((item, i) => {
-      const o = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
-      return {
-        choice: parseChoiceNumber(o.choice ?? o.number ?? o.choice_number, i + 1),
-        text: textOf(item),
-        currentStatus: strOrNull(o.current_status),
-        originalNote: strOrNull(o.original_note),
-      };
-    });
-  } else if (typeof raw === "object") {
-    entries = Object.entries(raw as Record<string, unknown>).map(([key, v], i) => ({
-      choice: parseChoiceNumber(key, i + 1),
-      text: textOf(v),
-      currentStatus: null,
-      originalNote: null,
-    }));
-  }
-
-  return entries
-    .filter((e) => e.text.trim().length > 0)
-    .sort((a, b) => a.choice - b.choice);
-}
-
-type ExplanationRow = {
-  keyword_title: string | null;
-  keyword_explanation: string | null;
-  choice_explanations: unknown;
-  correct_choice_summary: string | null;
-  law_amendment_note: string | null;
-  current_answer_status: string | null;
-  current_answer_note: string | null;
-  law_basis_date: string | null;
-};
-
-function toExplanationContent(row: ExplanationRow): QuestionExplanationContent | null {
-  const content: QuestionExplanationContent = {
-    keywordTitle: row.keyword_title?.trim() || null,
-    keywordExplanation: row.keyword_explanation?.trim() || null,
-    choiceExplanations: normalizeChoiceExplanations(row.choice_explanations),
-    correctChoiceSummary: row.correct_choice_summary?.trim() || null,
-    lawAmendmentNote: row.law_amendment_note?.trim() || null,
-    currentAnswerStatus: row.current_answer_status?.trim() || null,
-    currentAnswerNote: row.current_answer_note?.trim() || null,
-    lawBasisDate: row.law_basis_date?.trim() || null,
-  };
-  const empty =
-    !content.keywordTitle &&
-    !content.keywordExplanation &&
-    content.choiceExplanations.length === 0 &&
-    !content.correctChoiceSummary &&
-    !content.lawAmendmentNote &&
-    !content.currentAnswerNote;
-  return empty ? null : content;
-}
+// choice_explanations 정규화(normalizeChoiceExplanations)와 행 → 화면용 해설 변환
+// (toExplanationContent)은 packages/core/src/rules/explanations.ts 로 옮겼다 — Edge
+// explanations-get 이 같은 함수를 쓴다(예전엔 _shared/explanations.ts 에 복사본이 있었다).
+// 화면 컴포넌트가 쓰는 QuestionExplanationContent 타입과 구조가 같다.
 
 // 문항 해설. question_explanations는 해설 제작 루틴이 관리하는 테이블로
 // questions.id(question_id)를 키로 쓰므로, questions를 거쳐 (paper_id,
