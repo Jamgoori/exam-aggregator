@@ -73,3 +73,21 @@ export * from "./edge/invoke";
 
 // 로그인 후 복귀 경로 검증 — 웹 auth 콜백·앱 /login 모달이 같은 규칙으로 next 를 거른다.
 export * from "./safe-redirect";
+
+// 세트문제 묶기 — 웹 cbt-solver questionGroups·오답노트 groupRowsBySharedImages 와 앱이 같은 규칙.
+export * from "./question-groups";
+// CBT 시작 모드 판정(웹 lib/cbt-view-mode.ts 는 re-export).
+export * from "./cbt-view-mode";
+// 문항 이미지 미리받기 큐(웹 lib/image-preload-queue.ts 는 re-export).
+export * from "./image-preload-queue";
+// CBT 응시 복원(DI) — 앱 타임아웃·이중 제출 복구(설계서 §6.6).
+export * from "./data/cbt";
+
+// 카탈로그·문제지 상세·즐겨찾기·댓글·슬러그 역색인 (DI — 모바일 Phase 1a 카탈로그 스트림)
+export * from "./data/papers";
+export * from "./data/paper-detail";
+export * from "./data/bookmarks";
+export * from "./data/comments";
+export * from "./data/paper-slug-map";
+// 문항 이미지·선지 수(DI) — 앱 CBT·오답노트가 웹 lib/wrong-notes.ts 와 같은 조회를 쓴다.
+export * from "./data/question-media";

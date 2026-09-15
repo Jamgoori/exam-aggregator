@@ -90,7 +90,8 @@ const TIER_GRADIENT: Record<RoundTierName, { colors: readonly [string, string, .
   브론즈: { colors: ["#ffd6a7", "#ff8904"], text: "text-orange-900" },
 };
 
-export function TierBadge({ round, className }: { round: number; className?: string }) {
+// compact: 카드(exam-card.tsx)처럼 `{n}회독` 글자만 그리고 등급명은 접근성 라벨(웹 title)로만 둔다.
+export function TierBadge({ round, className, compact }: { round: number; className?: string; compact?: boolean }) {
   const tier = getRoundTier(round);
   const g = TIER_GRADIENT[tier.name];
   return (
@@ -102,7 +103,7 @@ export function TierBadge({ round, className }: { round: number; className?: str
       accessibilityLabel={`${tier.name} (${round}회독)`}
     >
       <AppText variant="xs" weight="bold" allowFontScaling={false} className={g.text}>
-        {tier.name} ({round}회독)
+        {compact ? `${round}회독` : `${tier.name} (${round}회독)`}
       </AppText>
     </LinearGradient>
   );
