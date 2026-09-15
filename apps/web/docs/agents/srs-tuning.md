@@ -103,3 +103,12 @@ group by 1 order by 2 desc limit 30;
 - 조기 채점(회독) 완화 규칙(`SRS_EARLY_LAPSE_RATIO`, `boundByElapsed`)을 지울 때는
   회독형 프로필 시뮬레이션을 먼저 돌릴 것. 이 규칙들이 없으면 회독을 성실히 할수록
   복습 큐가 미래로 비워진다.
+
+## 번들 게이트 이후 — `_shared/srs.ts` 는 re-export 다
+
+`supabase/functions/_shared/srs.ts` 는 이제 `_shared/core.mjs`(packages/core 의 esbuild
+번들, 생성물)를 re-export 하는 한 줄이다. 위 3절의 "양쪽을 함께 고친다"는
+**`packages/core/src/srs.ts` 를 고치고 `npm run bundle-edge -w @gongmoa/core` 를 돌려
+`core.mjs` 를 함께 커밋한다**로 바뀐다. `_shared/srs.ts` 에 상수를 다시 쓰지 말 것 —
+번들이 안 맞으면 `bundle-edge:check` 가 PR 을 막는다. 파일 자체를 지우는 것은 소유자 승인 후
+AGENTS.md 문구 수정과 같은 PR 에서만(`docs/agents/edge-core-bundle.md`).

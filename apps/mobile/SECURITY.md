@@ -76,6 +76,11 @@ REST 로 `auth.updateUser` 를 직접 호출해 "관리자"·"운영자" 같은 
 새 토큰은 채팅/코드/커밋에 넣지 말고, 로컬 `export EXPO_TOKEN=` 또는 GitHub Actions
 **Secret** 으로만 주입.
 
+**재발급은 앱 재시작 Phase 0 의 선행 조건이다**(`docs/redesign-architecture.md` §11
+"Phase 0 전(소유자)", §12). `.github/workflows/eas-build.yml` 이 이 시크릿으로 클라우드
+빌드를 올리므로, 폐기만 하고 새 값을 저장소 Secrets `EXPO_TOKEN` 에 넣지 않으면 스파이크
+빌드(SDK 57 dev build)부터 막힌다. 노출된 옛 토큰을 그대로 두고 Phase 0 을 시작하지 말 것.
+
 ---
 
 ## 5. OAuth id_token nonce — ✅ Apple 적용 / ⛔ Google·Kakao 는 SDK 미지원

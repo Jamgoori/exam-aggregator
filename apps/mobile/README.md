@@ -51,6 +51,10 @@ npx eas build --profile development --platform android
 
 ## 구조
 
+> 이 절과 아래 "현재 구현 상태"는 **멈춰 있던 SDK 52 트리** 기준이다. SDK 57 재스캐폴드 후의
+> 배치(`src/queries/`, 드로어 내비게이션, `packages/design-tokens`, `core/edge/*`)는
+> `docs/redesign-architecture.md` §3.2·§5·§10 이 정본이다. 앱 금지선은 `AGENTS.md`.
+
 ```
 app/                      expo-router 파일 기반 라우팅 (Next.js app-router와 유사)
   _layout.tsx             제스처 루트 + 인증 프로바이더 + 스택
@@ -65,9 +69,8 @@ src/
     auth.ts               네이티브 소셜 → signInWithIdToken
     papers.ts             목록/상세/CBT 데이터 (RLS·RPC 재사용)
     cbt.ts                채점 Edge Function 호출 래퍼 (start/submit)
-    format.ts             formatDuration (웹과 동일 표기)
     storage.ts            공개 URL 헬퍼
-    types.ts              웹 types.ts 복사본 (스키마 바뀌면 동기화)
+    (types.ts·format.ts 는 없다 — 타입·formatDuration 은 @gongmoa/core 에서 import)
   providers/auth-provider.tsx  세션 컨텍스트 + 자동 갱신
   components/
     single-question-view.tsx   문제별 보기 (이미지 핀치줌 + 선택지 + 이전/다음)
@@ -112,7 +115,7 @@ supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 
 - ✅ 인증(네이티브 소셜), 세션, 탭 네비, 문제지 목록/상세
 - ✅ **CBT 문제별 풀기**: 5초 카운트다운 → 서버 시작기록 → 문항 이미지 핀치줌 +
-  OMR 답안지 + 최소 3분 검증 + Edge Function 채점 + 결과. 세트문제(공통지문) 묶음 지원.
+  OMR 답안지 + 최소 90초(1분 30초, `MIN_ATTEMPT_SECONDS`) 검증 + Edge Function 채점 + 결과. 세트문제(공통지문) 묶음 지원.
 - ✅ **전체 PDF + 펜 필기** (`pdf-pen-viewer.tsx`): react-native-pdf 로 페이지 렌더 +
   Skia 오버레이 필기. 이동/펜/지우개, 색·굵기, 페이지 이동, 줌·팬. 획은 페이지 정규화
   좌표로 저장(줌해도 페이지에 붙어 있음). 크롭 이미지 없는 문제지도 PDF 로 풀 수 있다.
@@ -128,7 +131,8 @@ supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
 - ✅ **섞어풀기** (`app/review.tsx` + review-create/submit): 내 오답(이미지 있는)을
   무작위로 모아 다시 풀고 서버 채점. 극복 시 `user_question_status`(source='review') 갱신.
 - ✅ **AI 약점 진단** (`app/diagnosis.tsx` + ai-diagnose): 과목별 오답/극복·최근 응시를
-  Claude 에 넘겨 요약·약점 개념·과목 추세를 생성. 하루 1회 캐시. 약점 개념 → 오답노트 딥링크.
+  Claude 에 넘겨 요약·약점 개념·과목 추세를 생성. 주기는 **마지막으로 받은 날 기준 7일**
+  (`DIAGNOSIS_CYCLE_DAYS`, `apps/web/src/lib/ai-diagnosis.ts` — 달력 주가 아니다). 약점 개념 → 오답노트 딥링크.
 
 - ✅ **문제지 상세**: 즐겨찾기 토글, 난이도 평가(평균·내 평가), 원본 PDF 보기,
   댓글(작성·삭제). 모두 RLS 본인 쓰기라 서버 없이 클라이언트에서.
@@ -145,11 +149,13 @@ supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
   Function)에서만 읽는다. 비로그인은 미리보기 2문항, 로그인은 시간당 40회 조회 한도
   넘기면 마찬가지로 미리보기(`explanation_access_log` 로 웹과 동일 규칙).
 
-> 댓글 수정은 지원 안 함(테이블에 update RLS 정책이 없음 — 작성·삭제만).
+> 댓글 작성·수정·삭제는 Edge Function `comments-write`(`action: create|update|delete`)로 한다
+> (테이블에 클라이언트 update 정책은 없고 서버가 소유권을 검사한다).
 
 > 섞어풀기 후보 수집은 v1 단순화(웹의 dedup·수동표시·복습 쿨다운 미반영).
 > AI 진단은 웹(요청행만 만들고 배치가 채움)과 달리 앱은 Edge Function 에서 온디맨드로
-> 바로 생성한다. 같은 `ai_diagnoses` 테이블·스키마·하루 1회 규칙을 공유한다.
+> 바로 생성한다. 같은 `ai_diagnoses` 테이블·스키마·7일 주기 규칙을 공유한다(설계서 §6.7 #21 에서
+> `diagnosis-request` 로 대체 예정 — 웹 배치 파이프라인 재사용).
 
 > 마이페이지의 "남은 오답"은 `user_question_status`(마지막 제출 오답) 기준 근사치다.
 > 웹은 dedup·수동표시·복습 쿨다운까지 반영한 권위 집계를 쓰므로 숫자가 미세하게 다를 수 있다.
@@ -170,8 +176,9 @@ react-native-pdf 의 **네이티브 줌을 잠그고**(min=max=1), 줌/팬은 re
 
 ## 유지보수 주의
 
-- `src/lib/types.ts`는 웹 `src/lib/supabase/types.ts` **복사본**이다. 스키마 변경 시 둘 다 갱신.
-- `supabase/functions/` 채점 로직은 웹 `src/app/papers/actions.ts` 와 **동일 규칙**을
-  유지해야 한다(최소 응시시간·정답 비공개·service_role 쓰기). 한쪽만 바꾸지 말 것.
+- 타입 사본 파일은 없다. 타입·순수 규칙은 `@gongmoa/core` 에서 import 한다(스키마가 바뀌면 core 를 고친다).
+- `supabase/functions/` 채점 로직은 웹 서버 액션과 **같은 core 규칙**(`packages/core/src/rules/*`)을
+  `_shared/core.mjs` 번들로 부른다. 규칙을 Edge 나 서버 액션에 따로 쓰지 말 것
+  (`apps/web/docs/agents/edge-core-bundle.md`).
 - RLS·RPC는 웹과 공유 자원 — 앱에서 스키마를 바꾸지 말 것.
 - publishable(anon) 키만 앱에 넣는다. service_role 키는 **절대** 앱 번들에 넣지 말 것.
