@@ -2770,3 +2770,204 @@ drop policy if exists "update own notifications" on notifications;
 drop policy if exists "delete own notifications" on notifications;
 
 revoke insert, update, delete on notifications from anon, authenticated;
+
+-- ===== 모바일 앱 재시작 Phase 0 (2026-09-15) =====
+-- 앱이 RLS 로 직접 읽을 수 없는 것(정답·dedup 신호·해설 개수)을 authenticated 에 여는
+-- security definer RPC 세 개 (apps/mobile/docs/redesign-architecture.md §6.7 #3·#4·#5).
+--
+-- 공통 규칙(같은 문서 §6.7 "SD 공통 규칙"): (1) auth.uid() 가 null 이면 raise;
+-- (2) set search_path = public; (3) 사용자 범위가 있는 조회는 where 에 user_id = auth.uid()
+-- 를 명시(SD 라 RLS 가 적용되지 않는다); (4) 서버 액션의 인자 검증을 본문에서 반복;
+-- (5) revoke all from public, anon 뒤 grant execute to authenticated.
+-- 정답 "내용"(answers 배열·md5 해시)은 어느 함수도 그대로 돌려주지 않는다.
+
+-- 중복 시험지(직류만 다른 같은 시험지) 판정용 내용 신호. 웹 lib/dedup-papers.ts#
+-- fetchPaperIdentitySignals(→ core data/dedup-signals.ts)의 SQL 판: 문항 수·정답 개수와
+-- "같은 정답 지문끼리 같은 번호"(answer_cluster). 지문 해시 자체는 돌려주지 않는다 —
+-- 앱은 번호가 같은지만 보면 되고, 해시가 나가면 정답이 등록된 문제지끼리 대조표를
+-- 만들 여지가 생긴다. 정답이 없는 문제지는 answer_length·answer_cluster 가 null.
+create or replace function paper_identity_signals(p_paper_ids uuid[])
+returns table(paper_id uuid, question_count int, answer_length int, answer_cluster int)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if p_paper_ids is null or cardinality(p_paper_ids) = 0 then
+    return;
+  end if;
+  if cardinality(p_paper_ids) > 500 then
+    raise exception 'too many paper ids';
+  end if;
+
+  return query
+  select p.id as paper_id,
+         (select count(*)::int from questions q where q.paper_id = p.id) as question_count,
+         case when pa.paper_id is null then null
+              else coalesce(array_length(pa.answers, 1), 0) end as answer_length,
+         case when pa.paper_id is null then null
+              else dense_rank() over (
+                order by md5(pa.answers::text || coalesce(pa.voided_questions::text, ''))
+              )::int end as answer_cluster
+    from exam_papers p
+    left join paper_answers pa on pa.paper_id = p.id
+   where p.id = any(p_paper_ids);
+end $$;
+
+revoke all on function paper_identity_signals(uuid[]) from public, anon;
+grant execute on function paper_identity_signals(uuid[]) to authenticated;
+
+-- 문제지별 해설 등록 문항 수. 웹 lib/wrong-notes.ts#countPaperExplanations 의 SQL 판 —
+-- 상세 화면이 "해설 열기" 버튼을 보여줄지 정하는 데 쓴다(본문은 돌려주지 않는다).
+-- question_explanations 는 question_id 가 unique 라 행 하나 = 문항 하나다.
+create or replace function paper_explanation_counts(p_paper_ids uuid[])
+returns table(paper_id uuid, count int)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  if p_paper_ids is null or cardinality(p_paper_ids) = 0 then
+    return;
+  end if;
+  if cardinality(p_paper_ids) > 500 then
+    raise exception 'too many paper ids';
+  end if;
+
+  return query
+  select q.paper_id, count(*)::int as count
+    from question_explanations e
+    join questions q on q.id = e.question_id
+   where q.paper_id = any(p_paper_ids)
+   group by q.paper_id;
+end $$;
+
+revoke all on function paper_explanation_counts(uuid[]) from public, anon;
+grant execute on function paper_explanation_counts(uuid[]) to authenticated;
+
+-- 본인이 답한 문항의 정답. 웹 lib/wrong-notes.ts#fetchCorrectAnswers + lib/review-session.ts#
+-- filterQuestionsAnsweredByUser 가드의 SQL 판 — 응시 상세·오답노트가 "내가 푼 문항"의
+-- 정답을 보여주는 데 쓴다(정답지 PDF 가 공개라 응시자 본인에게 문항 정답을 보이는 건
+-- 새로운 노출이 아니다. 대신 **안 푼 문항의 정답은 절대 나가지 않는다**).
+--
+-- 입력: '[{"paperId": "...", "questionNumber": 7}, ...]' (jsonb 배열, 최대 500건).
+-- 각 항목은 요청한 paper_id **또는 같은 dedup 그룹의 형제 paper_id** 에 호출자의
+-- user_question_status 행이나 cbt_attempt_answers 행(selected_choice null 포함 — 응시
+-- 상세는 건너뛴 문항에도 정답을 보여주므로 "답했다" = "행이 있다")이 있을 때만 돌려준다.
+-- 형제 판정은 paper_identity_signals 와 같은 기준: (subject_id, exam_type_id, year, round,
+-- level) 동일 + 정답 지문 md5 동일. 근거는 설계서 §6.7 #3 — 웹 오답노트는 dedup 대표 id 로
+-- 정답을 조회하고 상태 행은 실제(형제) id 에 있어, 요청 id 로만 검사하면 형제 문제지
+-- 응시자는 정답이 null 이 된다.
+create or replace function own_wrong_answers(p_items jsonb)
+returns table(paper_id uuid, question_number int, correct_choice int)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'not authenticated';
+  end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' then
+    raise exception 'p_items must be a json array';
+  end if;
+  if jsonb_array_length(p_items) > 500 then
+    raise exception 'too many items';
+  end if;
+
+  return query
+  with req as (
+    select (i->>'paperId')::uuid as paper_id,
+           (i->>'questionNumber')::int as question_number
+      from jsonb_array_elements(p_items) i
+     where (i->>'paperId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+       and (i->>'questionNumber') ~ '^[0-9]{1,3}$'
+       and (i->>'questionNumber')::int between 1 and 300
+  ),
+  ident as (
+    select p.id, p.subject_id, p.exam_type_id, p.year, p.round, p.level,
+           md5(pa.answers::text || coalesce(pa.voided_questions::text, '')) as sig
+      from exam_papers p
+      join paper_answers pa on pa.paper_id = p.id
+     where p.id in (select r.paper_id from req r)
+  ),
+  siblings as (
+    -- 요청 문제지 자신도 포함된다(같은 메타데이터·같은 지문).
+    select i.id as req_paper_id, s.id as sibling_id
+      from ident i
+      join exam_papers s
+        on s.subject_id = i.subject_id
+       and s.exam_type_id = i.exam_type_id
+       and s.year = i.year
+       and s.round = i.round
+       and s.level is not distinct from i.level
+      join paper_answers spa
+        on spa.paper_id = s.id
+       and md5(spa.answers::text || coalesce(spa.voided_questions::text, '')) = i.sig
+  )
+  select r.paper_id, r.question_number, pa.answers[r.question_number]::int as correct_choice
+    from req r
+    join paper_answers pa on pa.paper_id = r.paper_id
+   where exists (
+     select 1
+       from siblings sb
+      where sb.req_paper_id = r.paper_id
+        and (
+          exists (
+            select 1 from user_question_status s
+             where s.user_id = v_uid
+               and s.paper_id = sb.sibling_id
+               and s.question_number = r.question_number
+          )
+          or exists (
+            select 1
+              from cbt_attempt_answers a
+              join cbt_attempts t on t.id = a.attempt_id
+             where t.user_id = v_uid
+               and t.paper_id = sb.sibling_id
+               and a.question_number = r.question_number
+          )
+        )
+   );
+end $$;
+
+revoke all on function own_wrong_answers(jsonb) from public, anon;
+grant execute on function own_wrong_answers(jsonb) to authenticated;
+
+-- 복습 세션 생성 멱등 키(설계서 §6.6 "복습 세션 생성 연타", §6.7 #8). 앱은 세션 생성 요청마다
+-- 새 UUID 를 requestId 로 보내고 서버(core rules/review-session.ts)는 그대로 request_id 에 넣는다.
+-- 네트워크 재시도로 같은 요청이 두 번 오면 아래 부분 유니크 인덱스가 두 번째 insert 를
+-- 23505 로 거절하고, 서버는 (user_id, request_id) 로 기존 세션을 찾아 같은 응답을 돌려준다 —
+-- "최근 N 분" 창 없이 같은 requestId 는 언제나 같은 세션. Edge 아이솔레이트는 메모리를
+-- 공유하지 않으므로 select-then-insert 로는 동시 재시도를 못 막는다(판정은 DB 유니크로만).
+-- 웹은 request_id 를 넣지 않아(null) 인덱스에 안 걸린다 — 웹 동작 불변. Edge 의 예전
+-- "30분 안 미제출 세션 재사용"은 이 컬럼과 함께 제거됐다.
+alter table review_sessions add column if not exists request_id text;
+create unique index if not exists review_sessions_request_uidx
+  on review_sessions(user_id, request_id) where request_id is not null;
+
+-- 하루 복습 문항 수의 방어선(§6.7 #13). 서버(core rules/review-preferences.ts#setDailyLimit)가
+-- DAILY_LIMIT_OPTIONS(packages/core/src/review-queue.ts = 10/20/40/60)로 거르지만, 웹은 이
+-- 테이블을 사용자 세션(RLS insert/update own)으로 쓰므로 REST 로 직접 "하루 1문항"을 넣어
+-- 복습을 사실상 정지시킬 수 있다 — DB 에서 같은 목록으로 막는다. 목록을 바꿀 때는
+-- DAILY_LIMIT_OPTIONS 와 이 제약을 함께 고칠 것. (study_phase 의 check 는 위
+-- review_preferences_study_phase_check 에 이미 있다.)
+do $$
+begin
+  alter table review_preferences
+    add constraint review_preferences_daily_limit_check
+    check (daily_limit in (10, 20, 40, 60));
+exception
+  when duplicate_object then null;
+end $$;

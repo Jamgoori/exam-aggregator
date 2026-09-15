@@ -1,0 +1,69 @@
+# PR 게이트 — 타입체크·린트·단위 테스트·생성물 신선도.
+#
+# 왜 필요한가: 규칙은 packages/core/src 한 곳에 있고 Edge Function 은 그 esbuild 번들
+# (supabase/functions/_shared/core.mjs) 을, 웹·앱은 packages/design-tokens/theme.css 의 생성물
+# (tokens.ts) 을 쓴다. 원본만 고치고 생성물을 안 만들면 웹과 앱이 조용히 갈린다 — 그래서
+# 두 생성물이 커밋본과 같은지(--check) 를 여기서 막는다(apps/web/docs/agents/edge-core-bundle.md,
+# packages/design-tokens/README.md). 같은 명령 목록이 docs/dev-workflow.md 에 있다.
+#
+# 계약 테스트(Docker 필요)는 contract-tests.yml 이 따로 돈다.
+name: 모바일·공유 코어 CI
+
+on:
+  pull_request:
+    paths:
+      - "packages/**"
+      - "apps/mobile/**"
+      - "supabase/**"
+      - "package.json"
+      - "package-lock.json"
+      - "turbo.json"
+      - ".github/workflows/mobile-ci.yml"
+  push:
+    branches: [master]
+    paths:
+      - "packages/**"
+      - "apps/mobile/**"
+      - "supabase/**"
+      - "package.json"
+      - "package-lock.json"
+      - "turbo.json"
+      - ".github/workflows/mobile-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: mobile-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 워크스페이스 설치
+        run: npm ci
+
+      - name: 타입체크
+        run: npm run typecheck
+
+      - name: 린트 (웹)
+        run: npm run lint --workspace @gongmoa/web
+
+      - name: 단위 테스트
+        run: npm run test
+
+      # 생성물 신선도. 실패하면 원본을 고친 커밋에 재생성본이 빠진 것이다:
+      #   npm run bundle-edge -w @gongmoa/core
+      #   npm run gen -w @gongmoa/design-tokens
+      - name: Edge 번들 신선도 (_shared/core.mjs)
+        run: npm run bundle-edge:check -w @gongmoa/core
+
+      - name: 디자인 토큰 생성물 신선도 (tokens.ts)
+        run: npm run check -w @gongmoa/design-tokens

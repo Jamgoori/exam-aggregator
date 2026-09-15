@@ -20,7 +20,7 @@ import {
   type LightPaper,
   type PaperWire,
 } from "@/lib/paper-search";
-import { getSubjectNameForQuery } from "@gongmoa/core";
+import { getSubjectNameForQuery, papersGroupColor } from "@gongmoa/core";
 import type { Subject } from "@gongmoa/core";
 import type { ExamPaper } from "@gongmoa/core";
 
@@ -36,12 +36,8 @@ const GROUPS: { label: string; level?: string; examType?: string }[] = [
   { label: "소방", examType: "소방" },
   { label: "계리직", examType: "계리직" },
 ];
-// 시행처 묶음은 급수 색(levelColor)에 해당하는 값이 없어 여기서 따로 정한다.
-const EXAM_TYPE_COLORS: Record<string, string> = {
-  경찰: "bg-sky-700 text-white",
-  소방: "bg-red-600 text-white",
-  계리직: "bg-emerald-600 text-white",
-};
+// 시행처 묶음은 급수 색(levelColor)에 해당하는 값이 없어 따로 정한다 — 값은
+// @gongmoa/core 의 PAPERS_GROUP_CLASSES(모바일 /papers 화면과 공유).
 // 브라우저 히스토리 갱신(URL 공유용)은 타이핑 자체를 막지 않도록 아주 살짝만
 // 늦춘다 — 실제 필터링은 이 지연과 무관하게 매 입력마다 즉시 일어난다.
 const URL_SYNC_DEBOUNCE_MS = 200;
@@ -560,7 +556,7 @@ export function ExamBrowser({
                   active
                     ? g.level
                       ? levelColor(g.level)
-                      : EXAM_TYPE_COLORS[g.label]
+                      : papersGroupColor(g.label)
                     : "border border-zinc-200 text-zinc-600 hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600"
                 }`}
               >

@@ -1,0 +1,109 @@
+# 계약 테스트 — 같은 입력을 웹 어댑터(node, @gongmoa/core/server)와 Edge Function
+# (supabase functions serve)에 넣고 로컬 DB 에 남는 결과 행이 같은지 비교한다.
+# 무엇을·왜 보는지는 apps/web/docs/agents/contract-tests.md.
+#
+# Docker(supabase start)가 필요해 로컬 PR 게이트에 넣지 않고 여기서만 돈다.
+# 프로덕션 Supabase 는 절대 가리키지 않는다 — 픽스처가 사용자 행을 덮는다.
+name: 계약 테스트 (웹 ↔ Edge)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "supabase/**"
+      - "packages/core/**"
+      - ".github/workflows/contract-tests.yml"
+
+concurrency:
+  group: contract-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 워크스페이스 설치
+        run: npm ci
+
+      # Edge 가 읽는 번들이 커밋본과 같은지 먼저 본다. 여기서 틀리면 아래 비교는 의미가 없다.
+      - name: Edge 번들 신선도
+        run: npm run bundle-edge:check -w @gongmoa/core
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # studio·imgproxy·logflare·vector 는 테스트에 필요 없어 뺀다(start 시간 단축).
+      # config.toml 의 [db.seed] 가 schema.sql → seed.sql 순으로 적재한다.
+      - name: 로컬 Supabase 시작
+        run: supabase start -x studio,imgproxy,logflare,vector
+
+      # 첫 start 가 이미 적재하지만, 러너 캐시·재실행에 관계없이 같은 상태에서 시작하도록 한 번 더.
+      - name: 스키마·픽스처 적재 (db reset)
+        run: supabase db reset
+
+      - name: 로컬 키를 환경변수로
+        # `supabase status -o env` 는 API_URL="..." / ANON_KEY="..." 꼴로 찍는다.
+        # 테스트가 읽는 이름(SUPABASE_*)으로 바꿔 GITHUB_ENV 에 넣는다.
+        run: |
+          supabase status -o env > status.env
+          val() { sed -n "s/^$1=\"\(.*\)\"$/\1/p" status.env; }
+          {
+            echo "SUPABASE_URL=$(val API_URL)"
+            echo "SUPABASE_ANON_KEY=$(val ANON_KEY)"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(val SERVICE_ROLE_KEY)"
+            echo "SUPABASE_DB_URL=$(val DB_URL)"
+          } >> "$GITHUB_ENV"
+
+      # 계약 테스트는 Anthropic 을 부르지 않으므로 더미 값이면 된다.
+      # GONGMOA_TEST_HOOKS=1 은 Edge 가 x-gongmoa-test-clock / x-gongmoa-test-fuzz 헤더를 읽게
+      # 하는 스위치다(_shared/clients.ts#testOverrides) — 웹 어댑터와 같은 now·fuzz 를 넣어야
+      # 스냅샷이 결정적으로 비교된다. **로컬 serve 전용**: 프로덕션 `supabase secrets` 에 절대
+      # 넣지 말 것(클라이언트가 채점 시각을 지정하면 최소 응시시간·SRS 가 조작된다).
+      - name: Edge 환경 파일
+        run: |
+          {
+            echo "ANTHROPIC_API_KEY=contract-test-dummy"
+            echo "GONGMOA_TEST_HOOKS=1"
+          } > supabase/.env.local
+
+      - name: Edge Function 서빙 (백그라운드)
+        run: |
+          nohup supabase functions serve --env-file supabase/.env.local > functions-serve.log 2>&1 &
+          # 첫 요청 전에 esm.sh 의존을 받아야 하므로 잠시 기다린다. 준비 판정은 헬스 대신
+          # 한 함수의 OPTIONS(preflight) 응답으로 한다.
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS "$SUPABASE_URL/functions/v1/cbt-start" || echo 000)
+            if [ "$code" = "200" ] || [ "$code" = "204" ]; then
+              echo "functions serve 준비 (${i}s)"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::functions serve 가 30초 안에 응답하지 않았다."
+          cat functions-serve.log
+          exit 1
+
+      # packages/core/scripts/contract-tests.mjs — 픽스처 적재 → 케이스별 웹 어댑터/Edge 실행 →
+      # 결과 행 스냅샷 비교. 실패 시 diff 를 찍고 exit 1.
+      - name: 계약 테스트
+        run: npm run test:contract -w @gongmoa/core
+
+      - name: Edge 로그 (실패 시)
+        if: failure()
+        run: |
+          echo "## functions serve 로그" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 200 functions-serve.log >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 로컬 Supabase 종료
+        if: always()
+        run: supabase stop --no-backup || true

@@ -35,3 +35,11 @@ export function kstDayKey(value: Date | string): string {
   // en-CA 로케일이 YYYY-MM-DD 를 준다(정렬·비교가 그대로 되는 유일한 표준 표기).
   return d.toLocaleDateString("en-CA", { timeZone: KST_TIME_ZONE });
 }
+
+// id 목록을 size 개씩 자른다. "id 목록을 청크로 잘라 여러 번 왕복"하는 조회가 웹·Edge
+// 양쪽에 수십 곳이라(각자 같은 함수를 한 벌씩 들고 있었다) 여기 하나로 모은다.
+export function chunk<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}

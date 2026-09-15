@@ -6,11 +6,14 @@
 ```
 apps/web/        Next.js 웹앱 (SSR·SEO·관리자). 배포: Vercel
 apps/mobile/     Expo(React Native) 앱. 배포: EAS
-packages/core/   @gongmoa/core — 웹·모바일 공유(타입·순수로직·DI 데이터접근)
-supabase/        Edge Functions + schema.sql
+packages/core/   @gongmoa/core — 웹·모바일 공유(타입·순수로직·DI 데이터접근·서버 규칙 rules/)
+packages/design-tokens/  @gongmoa/design-tokens — theme.css 정본 + 생성물 tokens.ts
+supabase/        Edge Functions + schema.sql + config.toml/seed.sql(로컬 개발용)
 ```
 
 npm workspaces + Turborepo. 상세 규칙은 `apps/web/AGENTS.md`, `apps/mobile/README.md`.
+모바일 앱 재시작(웹과 같은 디자인·경험, 계정·응시·해설 연동) 설계서는
+`apps/mobile/docs/redesign-architecture.md`.
 
 ## 개발
 
@@ -20,6 +23,9 @@ npm run web              # 웹 dev 서버 (localhost:3000)
 npm run mobile           # 모바일 Metro (Expo)
 npm run typecheck        # 전체 타입체크 (turbo)
 ```
+
+웹·로컬 Supabase(Edge Function 포함)·앱을 한 번에 띄우는 터미널 3개 워크플로, 에뮬레이터/
+실기기별 env 값, PR 게이트 명령 목록은 **`docs/dev-workflow.md`**.
 
 공유 코어는 `@gongmoa/core` 로 import. TS 소스 그대로 배포되며 Next 는
 `transpilePackages`, Metro 는 `apps/mobile/metro.config.js` 로 번들한다.

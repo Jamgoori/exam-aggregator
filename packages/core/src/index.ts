@@ -50,6 +50,23 @@ export * from "./study-phase";
 
 // 오답노트 집계 (표시는 각 앱, 판정 규칙은 여기 하나)
 export * from "./wrong-notes";
+// 문항 해설 화면 타입 — 웹 컴포넌트(explanation-body)·앱 해설 카드가 같은 모양을 그린다.
+// 정규화 함수 본문은 서버 진입점(server.ts → rules/explanations)에 있고 여기는 타입만.
+export type { NormalizedChoiceExplanation, QuestionExplanationContent } from "./rules/explanations";
 
 // 데이터 접근 (DI — SupabaseClient 주입)
 export * from "./data/subjects";
+
+// 웹·앱이 같은 문자열을 그리는 표시 데이터 (배지 클래스 맵·메뉴 항목·진단 진행률)
+export * from "./badge-classes";
+export * from "./nav-items";
+export * from "./diagnosis-progress";
+
+// CBT 최소 응시시간·답안 정제 — 클라이언트(솔버)와 서버 규칙이 같은 값을 쓴다
+export * from "./cbt-attempt";
+
+// Edge Function 계약(요청/응답 타입)과 호출기 — 앱(apps/mobile)이 Edge 를 부르는 유일한 경로.
+// contracts.ts 는 rules/* 를 `import type` 으로만 참조해 service_role 규칙 본문이 앱 번들에
+// 섞이지 않는다(server.ts 가 아니라 여기서 내보내는 이유). 응답은 추가만(add-only).
+export * from "./edge/contracts";
+export * from "./edge/invoke";

@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { signInWithGoogle, signInWithKakao } from "@/app/actions";
+import { signInWithApple, signInWithGoogle, signInWithKakao } from "@/app/actions";
 import { GoogleIcon } from "@/components/google-icon";
 import { KakaoIcon } from "@/components/kakao-icon";
+import { AppleIcon } from "@/components/apple-icon";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
 import { BookOpenCheck, BrainCircuit, Monitor } from "lucide-react";
 import { DIAGNOSIS_MIN_ATTEMPTS } from "@/lib/ai-diagnosis-thresholds";
@@ -69,6 +70,20 @@ export default async function LoginPage({
             카카오로 계속하기
           </button>
         </form>
+
+        {/* Apple HIG: 라이트에서는 검정 바탕·흰 글자, 다크에서는 흰 바탕·검정 글자.
+            Supabase 대시보드에서 Apple provider(Services ID + .p8)를 켜기 전에는
+            눌러도 로그인이 시작되지 않는다 — actions.ts 의 signInWithProvider 주석. */}
+        <form action={signInWithApple}>
+          <input type="hidden" name="next" value={next} />
+          <button
+            type="submit"
+            className="flex w-full items-center justify-center gap-2 rounded bg-black px-4 py-2.5 text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+          >
+            <AppleIcon />
+            Apple로 계속하기
+          </button>
+        </form>
       </div>
 
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
@@ -89,7 +104,7 @@ export default async function LoginPage({
         >
           개인정보처리방침
         </Link>
-        에 동의한 것으로 간주돼요. 계정 관리(비밀번호·복구)는 구글/카카오 계정 설정을 따라요.
+        에 동의한 것으로 간주돼요. 계정 관리(비밀번호·복구)는 구글/카카오/Apple 계정 설정을 따라요.
       </p>
     </div>
   );

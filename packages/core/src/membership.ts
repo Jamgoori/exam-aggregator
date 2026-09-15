@@ -15,9 +15,8 @@
 // 이미 시작된 무료 기간은 memberships.expires_at 에 날짜가 박혀 있어 영향받지 않는다
 // (만료는 읽는 시점에 expires_at 으로만 판정한다).
 //
-// 바꿀 때는 supabase/functions/_shared/membership.ts 의 TRIAL_DAYS 도 반드시 함께
-// 고칠 것 — 한쪽만 고치면 웹으로 접속했을 때와 앱으로 접속했을 때 무료 기간이
-// 달라진다(무료 기간을 켜는 UPDATE 가 양쪽에 하나씩 있다).
+// Edge Function 은 이 값을 _shared/core.mjs(이 패키지의 esbuild 번들)로 받으므로 여기
+// 하나만 고치면 웹·앱이 같이 바뀐다(예전엔 _shared/membership.ts 에 사본이 있었다).
 export const TRIAL_DAYS = 60;
 
 // 전면 무료 기간(2027-06-30 까지, KST). 이 기간에는 **계정 상태와 무관하게 모두**
@@ -31,8 +30,8 @@ export const TRIAL_DAYS = 60;
 // 규칙으로 돌아간다. 그때 이미 부여된 memberships.expires_at 은 날짜가 박혀 있어
 // 영향받지 않는다(만료는 읽는 시점에 expires_at 으로만 판정한다).
 //
-// ⚠ 바꿀 때는 supabase/functions/_shared/membership.ts 의 FREE_UNTIL 도 반드시 함께
-// 고칠 것 — 한쪽만 고치면 웹은 열려 있는데 앱·Edge Function 은 잠기는 상태가 된다.
+// Edge Function 도 _shared/core.mjs 번들로 이 값을 읽는다 — 바꾼 뒤 `npm run bundle-edge
+// -w @gongmoa/core` 로 번들을 다시 만들어 같은 커밋에 넣을 것(CI 의 --check 가 막는다).
 export const FREE_UNTIL = "2027-07-01T00:00:00+09:00";
 
 // 화면에 쓰는 표기. "언제까지"를 각 화면이 따로 적으면 상수만 바꾸고 문구는 옛 날짜를

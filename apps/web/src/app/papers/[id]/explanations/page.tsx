@@ -10,7 +10,7 @@ import {
 } from "@/components/wrong-note-question-card";
 import { PrintButton } from "@/components/print-button";
 import { ExplanationAutoPrint } from "@/components/explanation-auto-print";
-import { resolveExplanationAccess } from "@/lib/explanation-rate-limit";
+import { ANON_PREVIEW_CARDS, resolveExplanationAccess } from "@/lib/explanation-rate-limit";
 import { isPremium } from "@/lib/membership";
 import { MembershipUpsell } from "@/components/membership-upsell";
 import { FREE_EXPLANATION_DAILY_PAPERS } from "@gongmoa/core";
@@ -44,10 +44,10 @@ export async function generateMetadata({
   };
 }
 
-// 비로그인 사용자에게 실제로 렌더링해주는 해설 카드 수. 해설은 이 서비스가 직접
-// 만드는 자산이라 익명 크롤링에 통째로 내주지 않는다 — 나머지 문항은 CSS로 가리는
-// 게 아니라 서버가 HTML에 아예 담지 않는다.
-const ANON_PREVIEW_CARDS = 2;
+// 비로그인 사용자에게 실제로 렌더링해주는 해설 카드 수(ANON_PREVIEW_CARDS)는 core
+// rules/explanation-access.ts 에 있다 — Edge explanations-get 과 같은 값. 해설은 이
+// 서비스가 직접 만드는 자산이라 익명 크롤링에 통째로 내주지 않는다 — 나머지 문항은
+// CSS로 가리는 게 아니라 서버가 HTML에 아예 담지 않는다.
 
 // 문제지 전체 해설 페이지 ("해설 열기"). 문항 이미지 + 정답 + 해설을 번호순으로
 // 죽 읽어 내려가는 열람용 화면이라, 오답노트와 달리 해설을 펼친 채로 보여준다.

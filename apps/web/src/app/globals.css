@@ -4,65 +4,9 @@
    속성). Tailwind 기본 dark: 변형(prefers-color-scheme)을 이걸로 재정의한다. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-  /* 스크롤바·<select> 드롭다운·자동완성 같은 브라우저 네이티브 UI도 테마를 따라가게 한다. */
-  color-scheme: light;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-}
-
-/* 사이트 강조색 = 초록(브랜드 #12b382, 홈 랜딩·헤더 로고와 같은 값).
-   코드 전체가 bg-blue-600·text-blue-400·border-blue-200 처럼 파랑 토큰으로 쓰여
-   있어서, 토큰 값만 초록으로 갈아 끼운다 — 유틸리티가 var(--color-blue-*) 를 참조하므로
-   여기 한 곳이 버튼·링크·아이콘·배지·포커스 링 전부를 바꾼다. 이름이 blue 인 채로
-   두는 건, 수백 곳의 클래스를 emerald 로 바꾸는 diff 가 색을 바꾸는 일과 무관한
-   잡음이기 때문이다. (기본값은 node_modules/tailwindcss/theme.css)
-   명도는 흰 글자 대비를 맞춰 골랐다: 600 = #0a7d5b 는 흰 글자 5.1:1(AA), 500 은
-   아이콘·배지용(2.7:1, 큰 그래픽 요소). */
-@theme {
-  --color-blue-50: #ecfdf5;
-  --color-blue-100: #d1fae5;
-  --color-blue-200: #a7f3d0;
-  --color-blue-300: #6ee7b7;
-  --color-blue-400: #34d399;
-  --color-blue-500: #12b382;
-  --color-blue-600: #0a7d5b;
-  --color-blue-700: #06664a;
-  --color-blue-800: #065f46;
-  --color-blue-900: #064e3b;
-  --color-blue-950: #022c22;
-}
-
-[data-theme="dark"] {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-  color-scheme: dark;
-
-  /* 어두운 배경에서는 초록이 형광색처럼 튄다 — 다크모드에서만 한 단계씩 어둡고
-     차분한 값으로. 600(버튼 바탕)은 흰 글자 대비 6:1 을 유지한다. */
-  --color-blue-400: #2ec48f;
-  --color-blue-500: #0fa374;
-  --color-blue-600: #096b4e;
-  --color-blue-700: #065a41;
-}
-
-/* JS가 실행되기 전(또는 비활성화된 경우)에는 시스템 설정을 기본값으로 따른다. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    color-scheme: dark;
-    --color-blue-400: #2ec48f;
-    --color-blue-500: #0fa374;
-    --color-blue-600: #096b4e;
-    --color-blue-700: #065a41;
-  }
-}
+/* 테마 토큰(라이트/다크 배경·전경, blue-* → 초록 리맵)의 정본은 packages/design-tokens/theme.css.
+   앱(Uniwind)도 같은 파일을 읽으므로 색을 바꿀 때는 그쪽을 고친다. */
+@import "@gongmoa/design-tokens/theme.css";
 
 /* 다크모드 전환: 모든 요소에 개별 CSS transition을 거는 방식(전 버전)은 DOM 전체를
    동시에 리페인트해서 요소가 많은 페이지에서 프레임이 뚝뚝 끊겼다. 대신 View

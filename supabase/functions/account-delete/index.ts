@@ -16,7 +16,7 @@
 //    Apple Developer > Keys 의 .p8 로 client_secret JWT 를 만들어
 //    https://appleid.apple.com/auth/revoke 를 호출하는 단계인데, 그 키가 아직 없어서
 //    빠져 있다. 키를 발급하면 deleteUser 직전에 추가할 것.
-import { corsHeaders, json } from "../_shared/cbt.ts";
+import { corsHeaders, json } from "../_shared/http.ts";
 import { adminClient, requireUser } from "../_shared/clients.ts";
 
 // comments_nickname_len 제약(1~10자) 안에 들어가야 한다.

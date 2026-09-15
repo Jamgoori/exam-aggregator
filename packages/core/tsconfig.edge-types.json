@@ -1,0 +1,12 @@
+{
+  // Edge(Deno) 계약 타입용 선언 생성 — scripts/bundle-edge.mjs 가 --declarationDir 을 덧붙여 돌린다.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "declarationDir": "../../supabase/functions/_shared/core-types"
+  },
+  "include": ["src/server.ts"]
+}

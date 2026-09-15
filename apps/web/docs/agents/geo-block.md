@@ -42,9 +42,17 @@ Vercel → Settings → Environment Variables 에서 켠다.
 3. **설비 파일** — `robots.txt`·`sitemap.xml`·`rss.xml`·manifest·favicon·
    `opengraph-image` 등. (앞의 셋은 proxy `matcher` 의 확장자 제외로 애초에 판정까지
    오지도 않는다.)
-4. **국가를 모르는 요청** — 로컬 개발, Vercel 이 아닌 호스팅, IP 를 못 알아낸 요청.
+4. **앱 심사·딥링크 검증 경로** — `/terms`·`/privacy`·`/account/delete-request`
+   (INFRA_FILES), `/.well-known/**`(INFRA_DIRS), `/app-ads.txt`. App Review 는 미국,
+   Play 심사자는 해외 IP 에서 약관·개인정보처리방침·계정 삭제 안내 URL(Google Play
+   데이터 안전 섹션에 적는 웹 링크)을 직접 열어 보므로 403 이면 심사가 반려된다.
+   `/.well-known/apple-app-site-association`·`assetlinks.json` 은 Apple/Google 의 검증
+   CDN 이 읽는다 — 막히면 유니버설 링크·앱 링크가 조용히 꺼진다. `.txt` 는 matcher 가
+   이미 제외하지만 `ads.txt` 와 같은 이유로 판정에도 남긴다. 전부 로그인·개인정보가
+   없는 공개 문서·설비 파일이라 국가와 무관하게 내준다.
+5. **국가를 모르는 요청** — 로컬 개발, Vercel 이 아닌 호스팅, IP 를 못 알아낸 요청.
    판정 근거가 없을 때 막는 쪽으로 기울면 배포처를 옮기는 날 사이트가 조용히 닫힌다.
-5. **우회 토큰을 가진 요청** — 아래.
+6. **우회 토큰을 가진 요청** — 아래.
 
 ## 우회 토큰 (코딩 에이전트·모니터링·해외 체류)
 

@@ -1,24 +1,61 @@
-// 섞어풀기 세션 생성. 웹 review-session.ts(createAllReviewSessionForUser)의 v1 포팅.
-// 내 오답(이미지가 있는) 중 무작위로 뽑아 review_sessions/items 를 만든다. 응답에는
-// 정답·출처를 절대 싣지 않는다(힌트 방지) — 이미지·선지 수만.
+// 섞어풀기·복습 세션 생성. 규칙 본문은 packages/core/src/rules/review-session.ts —
+// 웹 mypage/wrong-notes/actions.ts 의 createReviewSession/createReviewAll/
+// createReviewFromPapers/createReviewFromWrong/createReviewFromConcept 과 같은 함수를
+// 부른다(설계서 §6.7 #8). 예전 v1 은 "user_question_status wrong_count>0" 만 보는 단순화
+// 포팅이라 dedup 대표 접기·삭제 마크·복습 쿨다운이 빠져 있었고, 30분 안에 만든 미제출
+// 세션을 그대로 돌려주는 재사용(REUSE_WINDOW_MINUTES)이 있었다 — 둘 다 없앴다. 연타
+// 멱등은 요청의 requestId(앱이 생성마다 새 UUID)로만 한다(§6.6 "복습 세션 생성 연타").
 //
-// ⚠️ 웹은 dedup(중복 시험지)·수동 표시·복습 쿨다운까지 반영한다. 이 v1 은 그걸
-// 단순화했다(user_question_status wrong_count>0 기준). 상세 규칙은 웹 참고.
-import { corsHeaders, json } from "../_shared/cbt.ts";
-import { adminClient, requireUser } from "../_shared/clients.ts";
-import { fetchQuestionMedia } from "../_shared/media.ts";
+// 요청(전부 optional — 아무것도 없으면 예전과 같은 "전 과목 미극복 오답 20문항"):
+//   subjectSlug        과목 섞어풀기(웹 createReviewSession). onlyUnresolved·onlyDue·limit·strategy
+//   paperIds[]         시험지별 틀린 문제 다시 풀기(웹 createReviewFromPapers)
+//   items[]            결과 화면 "틀린 문항만 다시 풀기"(웹 createReviewFromWrong) —
+//                      서버가 filterQuestionsAnsweredByUser 로 "내가 푼 문항"만 남긴다
+//   conceptId/concept  같은개념 기출(웹 createReviewFromConcept, 유료)
+//   (없음)             전 과목(웹 createReviewAll). onlyDue·includeResolved·strategy·limit
+//   onlyDue            복습(간격 반복 lite) — 유료. 웹과 같은 멤버십 확인.
+//   requestId          멱등 키(UUID). 같은 값이면 언제나 같은 세션.
+//
+// 응답: { sessionId, total, items: [{ position, images, choiceCount }], scope, subjectSlug,
+// subjectName } — 정답·출처(paperId/correctChoice/paperTitle/questionNumber)는 절대 싣지
+// 않는다(toReviewSolveItems, 계약 테스트 13번). scope 이하는 추가 필드.
+import { corsHeaders, isUuid, json } from "../_shared/http.ts";
+import { coreAdmin, requireUser } from "../_shared/clients.ts";
+// @ts-types="../_shared/core.d.ts"
 import {
-  pickReviewCandidates,
+  createAllReviewSessionForUser,
+  createConceptReviewSessionForUser,
+  createPaperReviewSessionForUser,
+  createReviewSessionForUser,
+  createReviewSessionFromItems,
+  filterQuestionsAnsweredByUser,
+  getReviewSessionView,
+  isPremiumUserFor,
+  toReviewSolveItems,
   type ReviewPickStrategy,
-} from "../_shared/review-pick.ts";
+} from "../_shared/core.mjs";
 
+// 앱의 기본 문항 수. 웹 전 과목판은 50(REVIEW_SESSION_MAX_LIMIT)까지 담지만 앱은 예전
+// v1 부터 20 이었다 — 요청에 limit 이 없으면 그대로 20.
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
-// 연타·남용으로 review_sessions 가 쌓이는 걸 막는다(SECURITY.md 7번). 에러로 막지 않고
-// "최근에 만든 아직 안 푼 세션"을 그대로 돌려준다 — 사용자가 버튼을 두 번 눌러도 새 세션이
-// 생기는 대신 같은 문제 묶음을 이어서 풀게 되므로, 막는 느낌 없이 목적이 달성된다.
-const REUSE_WINDOW_MINUTES = 30;
+// 웹 actions.ts 와 같은 문구·같은 기준: 섞어풀기는 무료, 복습(onlyDue)·같은개념 기출은 멤버십.
+const REVIEW_LOCKED = "오늘의 복습(간격 반복)은 멤버십 기능이에요.";
+
+type Body = {
+  subjectSlug?: unknown;
+  onlyUnresolved?: unknown;
+  includeResolved?: unknown;
+  onlyDue?: unknown;
+  paperIds?: unknown;
+  items?: unknown;
+  conceptId?: unknown;
+  concept?: unknown;
+  limit?: unknown;
+  strategy?: unknown;
+  requestId?: unknown;
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -27,150 +64,90 @@ Deno.serve(async (req) => {
   if ("error" in auth) return auth.error;
   const userId = auth.userId;
 
-  let onlyUnresolved = true;
-  let limit = DEFAULT_LIMIT;
+  const body: Body = await req.json().catch(() => ({}));
+  const onlyUnresolved = typeof body.onlyUnresolved === "boolean" ? body.onlyUnresolved : true;
+  const onlyDue = body.onlyDue === true;
+  const includeResolved =
+    typeof body.includeResolved === "boolean" ? body.includeResolved : !onlyUnresolved;
+  const limit = Number.isInteger(body.limit)
+    ? Math.min(Math.max(1, body.limit as number), MAX_LIMIT)
+    : DEFAULT_LIMIT;
   // 뽑기 방식. 클라이언트가 보내는 값이라 모르는 값은 기본값으로 떨어뜨린다.
-  let strategy: ReviewPickStrategy = "weighted";
-  try {
-    const body = await req.json().catch(() => ({}));
-    if (typeof body?.onlyUnresolved === "boolean") onlyUnresolved = body.onlyUnresolved;
-    if (Number.isInteger(body?.limit)) limit = body.limit;
-    if (body?.strategy === "random") strategy = "random";
-  } catch {
-    // 기본값 사용
-  }
-  limit = Math.min(Math.max(1, limit), MAX_LIMIT);
+  const strategy: ReviewPickStrategy = body.strategy === "random" ? "random" : "weighted";
+  const requestId = typeof body.requestId === "string" && isUuid(body.requestId) ? body.requestId : null;
+  const subjectSlug = typeof body.subjectSlug === "string" ? body.subjectSlug.trim() : "";
+  const paperIds = Array.isArray(body.paperIds)
+    ? (body.paperIds as unknown[]).filter((id): id is string => typeof id === "string" && isUuid(id))
+    : [];
+  const items = Array.isArray(body.items)
+    ? (body.items as { paperId?: unknown; questionNumber?: unknown }[]).map((it) => ({
+        paperId: String(it?.paperId ?? ""),
+        questionNumber: Number(it?.questionNumber),
+      }))
+    : [];
+  const conceptId = typeof body.conceptId === "string" && body.conceptId ? body.conceptId : null;
+  const concept = typeof body.concept === "string" ? body.concept.trim() : "";
 
-  const admin = adminClient();
+  const admin = coreAdmin();
 
-  // 멤버십을 확인하지 않는다. 섞어풀기(내 오답을 모아 다시 풀기)는 무료다 — 웹의
-  // 같은 기능(app/mypage/wrong-notes/actions.ts 의 createReviewSession 계열)도
-  // 열려 있고, 여기만 막으면 같은 계정이 웹에서는 되고 앱에서는 안 된다.
-  //
-  // 유료로 남는 것은 "오늘의 복습"(간격 반복 일정)·AI 진단·해설이고, 그중 앱이
-  // 부르는 입구는 ai-diagnose 와 explanations-get 이라 각자 확인한다. 이 응답에는
-  // 정답도 해설도 싣지 않으므로(아래 items 참고) 해설 페이월과도 무관하다.
-
-  // 최근에 만들고 아직 제출하지 않은 세션이 있으면 그걸 그대로 이어준다.
-  {
-    const since = new Date(Date.now() - REUSE_WINDOW_MINUTES * 60_000).toISOString();
-    const { data: recent } = await admin
-      .from("review_sessions")
-      .select("id, total_questions")
-      .eq("user_id", userId)
-      .is("submitted_at", null)
-      .gte("created_at", since)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (recent) {
-      const { data: itemRows } = await admin
-        .from("review_session_items")
-        .select("paper_id, question_number, position")
-        .eq("session_id", recent.id)
-        .order("position", { ascending: true });
-      const rows = (itemRows ?? []) as {
-        paper_id: string;
-        question_number: number;
-        position: number;
-      }[];
-
-      // 항목이 비어 있는 세션(생성 중 실패로 남은 껍데기)은 재사용하지 않고 새로 만든다.
-      if (rows.length > 0) {
-        const media = await fetchQuestionMedia(admin, [
-          ...new Set(rows.map((r) => r.paper_id)),
-        ]);
-        // 새로 만들 때와 같은 모양 — 정답·출처는 싣지 않는다.
-        const items = rows.map((r) => {
-          const m = media.get(r.paper_id)?.get(r.question_number);
-          return {
-            position: r.position,
-            images: m?.images ?? [],
-            choiceCount: m?.choiceCount ?? 4,
-          };
-        });
-        return json({ sessionId: recent.id, total: rows.length, items });
-      }
+  // 멤버십: 섞어풀기(내 오답 다시 풀기)는 무료 — 웹의 같은 기능도 열려 있다. 복습(onlyDue)과
+  // 같은개념 기출만 웹 서버 액션과 같은 기준으로 잠근다.
+  if (onlyDue || conceptId || concept) {
+    if (!(await isPremiumUserFor(admin, { userId, email: auth.email }))) {
+      return json({ error: REVIEW_LOCKED }, 403);
     }
   }
 
-  // 내 오답 문항. wrong_count·last_answered_at 은 층 정원제 추출의 재료다.
-  let q = admin
-    .from("user_question_status")
-    .select("paper_id, question_number, wrong_count, last_answered_at")
-    .eq("user_id", userId)
-    .gt("wrong_count", 0);
-  if (onlyUnresolved) q = q.eq("last_is_correct", false);
-  const { data: statusRows, error } = await q;
-  if (error) return json({ error: "오답을 불러오지 못했어요." }, 500);
-
-  const rows = (statusRows ?? []) as {
-    paper_id: string;
-    question_number: number;
-    wrong_count: number | null;
-    last_answered_at: string | null;
-  }[];
-  if (rows.length === 0) {
-    return json({ error: "다시 풀 오답이 없어요." }, 400);
+  let created: { sessionId?: string; error?: string };
+  if (paperIds.length > 0) {
+    created = await createPaperReviewSessionForUser(admin, admin, userId, paperIds, { requestId });
+  } else if (items.length > 0) {
+    const mine = await filterQuestionsAnsweredByUser(admin, items, userId);
+    created =
+      mine.length === 0
+        ? { error: "다시 풀 문항이 없어요." }
+        : await createReviewSessionFromItems(admin, userId, mine, MAX_LIMIT, { requestId });
+  } else if (conceptId || concept) {
+    created = await createConceptReviewSessionForUser(admin, admin, userId, {
+      concept,
+      conceptId,
+      subjectSlug: subjectSlug || null,
+      limit: Number.isInteger(body.limit) ? limit : 5,
+      requestId,
+    });
+  } else if (subjectSlug) {
+    created = await createReviewSessionForUser(admin, admin, userId, {
+      subjectSlug,
+      onlyUnresolved,
+      onlyDue,
+      limit,
+      strategy,
+      requestId,
+    });
+  } else {
+    created = await createAllReviewSessionForUser(admin, admin, userId, {
+      onlyDue,
+      includeResolved,
+      strategy,
+      limit,
+      requestId,
+    });
   }
 
-  // 이미지가 있는 문항만 출제 가능.
-  const paperIds = [...new Set(rows.map((r) => r.paper_id))];
-  const media = await fetchQuestionMedia(admin, paperIds);
-  const candidates = rows
-    .filter((r) => (media.get(r.paper_id)?.get(r.question_number)?.images.length ?? 0) > 0)
-    .map((r) => ({
-      paper_id: r.paper_id,
-      question_number: r.question_number,
-      wrongCount: r.wrong_count ?? 0,
-      lastWrongAt: r.last_answered_at ?? "",
-    }));
-  if (candidates.length === 0) {
-    return json({ error: "다시 풀 (이미지가 있는) 오답이 없어요." }, 400);
+  if (created.error || !created.sessionId) {
+    const message = created.error ?? "세션 생성에 실패했어요.";
+    return json({ error: message }, message === "세션 생성에 실패했어요." ? 500 : 400);
   }
 
-  // 균등 무작위가 아니라 층 정원제(2번 이상 틀림 > 최근 오답 > 나머지). 오답이 수백
-  // 개 쌓인 계정에서 균등 추출은 위험한 문항을 만날 확률을 계속 희석시킨다.
-  const picked = pickReviewCandidates(candidates, limit, strategy);
+  const view = await getReviewSessionView(admin, admin, userId, created.sessionId);
+  if (!view) return json({ error: "세션 생성에 실패했어요." }, 500);
 
-  const { data: session, error: sErr } = await admin
-    .from("review_sessions")
-    .insert({
-      user_id: userId,
-      subject_id: null,
-      scope: "subject",
-      only_unresolved: onlyUnresolved,
-      total_questions: picked.length,
-    })
-    .select("id")
-    .single();
-  if (sErr || !session) return json({ error: "세션 생성에 실패했어요." }, 500);
-
-  const { error: iErr } = await admin.from("review_session_items").insert(
-    picked.map((c, i) => ({
-      session_id: session.id,
-      paper_id: c.paper_id,
-      question_number: c.question_number,
-      position: i,
-      selected_choice: null,
-      is_correct: null,
-    })),
-  );
-  if (iErr) {
-    await admin.from("review_sessions").delete().eq("id", session.id);
-    return json({ error: "세션 생성에 실패했어요." }, 500);
-  }
-
-  // 풀이용 응답 — 정답/출처 없음.
-  const items = picked.map((c, i) => {
-    const m = media.get(c.paper_id)?.get(c.question_number);
-    return {
-      position: i,
-      images: m?.images ?? [],
-      choiceCount: m?.choiceCount ?? 4,
-    };
+  return json({
+    sessionId: view.id,
+    total: view.total,
+    items: toReviewSolveItems(view),
+    scope: view.scope,
+    subjectSlug: view.subjectSlug,
+    subjectName: view.subjectName,
   });
-
-  return json({ sessionId: session.id, total: picked.length, items });
 });
