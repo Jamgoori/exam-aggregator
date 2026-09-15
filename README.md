@@ -11,6 +11,8 @@ supabase/        Edge Functions + schema.sql
 ```
 
 npm workspaces + Turborepo. 상세 규칙은 `apps/web/AGENTS.md`, `apps/mobile/README.md`.
+모바일 앱 재시작(웹과 같은 디자인·경험, 계정·응시·해설 연동) 설계서는
+`apps/mobile/docs/redesign-architecture.md`.
 
 ## 개발
 
