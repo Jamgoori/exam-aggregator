@@ -70,3 +70,34 @@ export * from "./cbt-attempt";
 // 섞이지 않는다(server.ts 가 아니라 여기서 내보내는 이유). 응답은 추가만(add-only).
 export * from "./edge/contracts";
 export * from "./edge/invoke";
+
+// 로그인 후 복귀 경로 검증 — 웹 auth 콜백·앱 /login 모달이 같은 규칙으로 next 를 거른다.
+export * from "./safe-redirect";
+
+// 세트문제 묶기 — 웹 cbt-solver questionGroups·오답노트 groupRowsBySharedImages 와 앱이 같은 규칙.
+export * from "./question-groups";
+// CBT 시작 모드 판정(웹 lib/cbt-view-mode.ts 는 re-export).
+export * from "./cbt-view-mode";
+// 문항 이미지 미리받기 큐(웹 lib/image-preload-queue.ts 는 re-export).
+export * from "./image-preload-queue";
+// CBT 응시 복원(DI) — 앱 타임아웃·이중 제출 복구(설계서 §6.6).
+export * from "./data/cbt";
+
+// 카탈로그·문제지 상세·즐겨찾기·댓글·슬러그 역색인 (DI — 모바일 Phase 1a 카탈로그 스트림)
+export * from "./data/papers";
+export * from "./data/paper-detail";
+export * from "./data/bookmarks";
+export * from "./data/comments";
+export * from "./data/paper-slug-map";
+// 문항 이미지·선지 수(DI) — 앱 CBT·오답노트가 웹 lib/wrong-notes.ts 와 같은 조회를 쓴다.
+export * from "./data/question-media";
+// 홈 랜딩·진단 소개의 순수 계산(시험 색인·오늘의 학습 현황·진단 주기·소개 CTA) — 웹 page.tsx·
+// exam-index.ts·ai-diagnosis.ts 의 집계부와 앱 `/`·`/diagnosis` 가 같은 함수를 부른다.
+export * from "./data/home";
+
+// 마이페이지·응시 기록·출석·정답(RPC own_wrong_answers)·멤버십 FAQ (DI — 모바일 Phase 1a 계정 스트림)
+export * from "./data/attempts";
+export * from "./data/attendance";
+export * from "./data/mypage";
+export * from "./data/wrong-answers";
+export * from "./membership-faq";

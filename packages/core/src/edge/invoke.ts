@@ -107,12 +107,26 @@ function errorMessageOf(body: unknown): string | null {
   return typeof e === "string" && e.length > 0 ? e : null;
 }
 
-function isAbortError(v: unknown): boolean {
-  return typeof v === "object" && v !== null && (v as { name?: unknown }).name === "AbortError";
+// AbortSignal 로 끊긴 fetch 가 던지는 이름. 수동 abort 는 "AbortError", `AbortSignal.timeout()` 은
+// "TimeoutError"(DOMException) — 둘 다 "응답을 못 받았다"이지 네트워크 단절이 아니다(§6.6: CBT
+// 제출은 이 경우 재제출 대신 recoverAttempt 로 복원해야 한다).
+const ABORT_NAMES = new Set(["AbortError", "TimeoutError"]);
+
+function nameOf(v: unknown): unknown {
+  return typeof v === "object" && v !== null ? (v as { name?: unknown }).name : undefined;
+}
+
+// Expo(winter) fetch 는 원본을 `FetchError { cause: signal.reason }` 로 감싸고, 그것을 functions-js 가
+// 다시 FunctionsFetchError.context 에 넣는다 — 이름을 context 자체와 cause 사슬에서 찾는다.
+function isAbortError(v: unknown, depth = 0): boolean {
+  if (typeof v !== "object" || v === null || depth > 3) return false;
+  const name = nameOf(v);
+  if (typeof name === "string" && ABORT_NAMES.has(name)) return true;
+  return isAbortError((v as { cause?: unknown }).cause, depth + 1);
 }
 
 async function toEdgeError(error: unknown): Promise<EdgeError> {
-  const name = typeof error === "object" && error !== null ? (error as { name?: unknown }).name : undefined;
+  const name = nameOf(error);
   const context = typeof error === "object" && error !== null ? (error as { context?: unknown }).context : undefined;
 
   // fetch 실패(오프라인·DNS·중단). context 는 fetch 가 던진 원본 오류.
@@ -121,6 +135,8 @@ async function toEdgeError(error: unknown): Promise<EdgeError> {
       ? new EdgeError(ABORTED_MESSAGE, 0, "aborted")
       : new EdgeError(NETWORK_MESSAGE, 0, "network");
   }
+  // fetch 가 감싸지 않고 그대로 올라온 중단·타임아웃(폴리필 fetch 가 throw 한 경우).
+  if (isAbortError(error)) return new EdgeError(ABORTED_MESSAGE, 0, "aborted");
   // 릴레이 실패 — 함수까지 못 갔으니 HTTP 계약 밖.
   if (name === "FunctionsRelayError") return new EdgeError(NETWORK_MESSAGE, 0, "network");
 

@@ -1,0 +1,36 @@
+/* 생성 파일 — 직접 고치지 말 것. 정본은 packages/design-tokens/theme.css,
+   갱신은 `node scripts/gen-theme-css.mjs`. Uniwind 가 읽는 라이트/다크 테마 변수. */
+@layer theme {
+  :root {
+    @variant light {
+      --background: #ffffff;
+      --foreground: #171717;
+      --color-blue-50: #ecfdf5;
+      --color-blue-100: #d1fae5;
+      --color-blue-200: #a7f3d0;
+      --color-blue-300: #6ee7b7;
+      --color-blue-400: #34d399;
+      --color-blue-500: #12b382;
+      --color-blue-600: #0a7d5b;
+      --color-blue-700: #06664a;
+      --color-blue-800: #065f46;
+      --color-blue-900: #064e3b;
+      --color-blue-950: #022c22;
+    }
+    @variant dark {
+      --background: #0a0a0a;
+      --foreground: #ededed;
+      --color-blue-50: #ecfdf5;
+      --color-blue-100: #d1fae5;
+      --color-blue-200: #a7f3d0;
+      --color-blue-300: #6ee7b7;
+      --color-blue-400: #2ec48f;
+      --color-blue-500: #0fa374;
+      --color-blue-600: #096b4e;
+      --color-blue-700: #065a41;
+      --color-blue-800: #065f46;
+      --color-blue-900: #064e3b;
+      --color-blue-950: #022c22;
+    }
+  }
+}

@@ -135,6 +135,41 @@ test("FunctionsFetchError(AbortError) → status 0, code aborted", async () => {
   );
 });
 
+// `AbortSignal.timeout()` 은 reason 이 TimeoutError 다 — 네트워크가 아니라 "응답을 못 받음"(§6.6).
+test("FunctionsFetchError(TimeoutError) → status 0, code aborted", async () => {
+  const timeout = new Error("The operation timed out");
+  timeout.name = "TimeoutError";
+  const { client } = fakeClient({ data: null, error: functionsError("FunctionsFetchError", timeout) });
+  await assert.rejects(
+    invokeEdge(client, "cbt-submit", { paperId: "p1", answers: [] }),
+    (e: EdgeError) => e.status === 0 && e.code === "aborted",
+  );
+});
+
+// Expo(winter) fetch 는 `FetchError { cause: signal.reason }` 로 감싼다 — cause 사슬에서 찾는다.
+test("FunctionsFetchError(FetchError cause TimeoutError/AbortError) → code aborted", async () => {
+  for (const reasonName of ["TimeoutError", "AbortError"]) {
+    const reason = new Error("signal reason");
+    reason.name = reasonName;
+    const wrapped = Object.assign(new Error("fetch failed: The operation was aborted."), { cause: reason });
+    const { client } = fakeClient({ data: null, error: functionsError("FunctionsFetchError", wrapped) });
+    await assert.rejects(
+      invokeEdge(client, "cbt-submit", { paperId: "p1", answers: [] }),
+      (e: EdgeError) => e.status === 0 && e.code === "aborted",
+    );
+  }
+});
+
+test("fetch 가 감싸지 않은 TimeoutError 가 error 로 오면 → code aborted", async () => {
+  const timeout = new Error("The operation timed out");
+  timeout.name = "TimeoutError";
+  const { client } = fakeClient({ data: null, error: timeout });
+  await assert.rejects(
+    invokeEdge(client, "cbt-submit", { paperId: "p1", answers: [] }),
+    (e: EdgeError) => e.status === 0 && e.code === "aborted",
+  );
+});
+
 test("FunctionsRelayError → status 0 (context 가 Response 여도 HTTP 계약 밖)", async () => {
   const relay = new Response("relay", { status: 502, headers: { "x-relay-error": "true" } });
   const { client } = fakeClient({ data: null, error: functionsError("FunctionsRelayError", relay) });

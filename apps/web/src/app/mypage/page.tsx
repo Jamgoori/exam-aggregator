@@ -39,6 +39,8 @@ import {
   membershipDaysLeft,
   trialDaysLeft,
   DUE_QUEUE_LIMIT,
+  // "N회독" 계산은 core(data/attempts.ts) — 앱 마이페이지가 같은 회독 번호를 붙인다.
+  computeAttemptRounds,
 } from "@gongmoa/core";
 import { getCbtAvailability } from "@/lib/cbt-availability";
 import { formatDuration } from "@gongmoa/core";
@@ -76,25 +78,6 @@ type MyAttempt = {
     exam_types?: ExamPaper["exam_types"];
   }) | null;
 };
-
-// 같은 문제지를 몇 번째 풀었는지("N회독") 계산. myAttempts는 전체를 최신순으로 이미
-// 받아왔으므로, 문제지별로 묶어 오래된 순으로 다시 정렬해 순번을 매긴다.
-function computeAttemptRounds(myAttempts: MyAttempt[]) {
-  const attemptsByPaper = new Map<string, MyAttempt[]>();
-  for (const a of myAttempts) {
-    if (!a.exam_papers) continue;
-    const list = attemptsByPaper.get(a.exam_papers.id) ?? [];
-    list.push(a);
-    attemptsByPaper.set(a.exam_papers.id, list);
-  }
-  const roundNumberByAttemptId = new Map<string, number>();
-  for (const list of attemptsByPaper.values()) {
-    [...list]
-      .sort((x, y) => new Date(x.created_at).getTime() - new Date(y.created_at).getTime())
-      .forEach((a, i) => roundNumberByAttemptId.set(a.id, i + 1));
-  }
-  return { attemptsByPaper, roundNumberByAttemptId };
-}
 
 // 만료일을 "9월 29일까지" 로. 해가 바뀌면 연도까지 적는다 — 12월에 보는 "1월 5일"이
 // 올해인지 내년인지 헷갈리면 남은 일수를 다시 세게 된다.

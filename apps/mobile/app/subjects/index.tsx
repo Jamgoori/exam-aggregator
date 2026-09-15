@@ -1,169 +1,143 @@
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
-import { CONSONANTS, initialConsonant } from "@gongmoa/core";
-import {
-  listSubjectsCached,
-  toggleSubjectBookmark,
-  type SubjectWithFav,
-} from "../../src/lib/subjects";
-import { useAuth } from "../../src/providers/auth-provider";
-import { useColors, type Colors } from "../../src/theme/colors";
+import { CONSONANTS, initialConsonant, type ExamCombo, type SubjectIndexEntry } from "@gongmoa/core";
+import { router, type Href } from "expo-router";
+import { useMemo } from "react";
+import { Pressable, View } from "react-native";
+import { AppText } from "../../src/components/app-text";
+import { QueryState } from "../../src/components/query-state";
+import { Screen } from "../../src/components/screen";
+import { Skeleton } from "../../src/components/skeleton";
+import { useSubjectIndex } from "../../src/queries/catalog";
+import { useHomeLanding } from "../../src/queries/home";
 
-// 과목별 보기: 과목 목록(즐겨찾기 별) + 가나다 인덱스. 과목이 160개가 넘어 스크롤로만
-// 찾기 어려워서, 웹 subject-index-tabs 처럼 초성으로 좁힐 수 있게 한다. 초성 판정은
-// @gongmoa/core 의 initialConsonant 라 웹과 같은 규칙이다.
-export default function SubjectsScreen() {
-  const colors = useColors();
-  const router = useRouter();
-  const { session } = useAuth();
-  const [subjects, setSubjects] = useState<SubjectWithFav[]>([]);
-  // 홈의 가나다 인덱스에서 넘어오면 그 초성이 선택된 채로 열린다(웹이 초성 모달을 띄우는
-  // 자리에 대응).
-  const { consonant: consonantParam } = useLocalSearchParams<{ consonant?: string }>();
-  const [consonant, setConsonant] = useState<string | null>(
-    typeof consonantParam === "string" && consonantParam ? consonantParam : null,
-  );
-  const [loading, setLoading] = useState(true);
+// `/subjects`(설계서 §5 행) — 웹 app/subjects/page.tsx 1:1: "← 홈으로" → "과목별 기출문제" → ㄱㄴㄷ
+// 묶음 목록(묶음 안 가나다순, 영문·숫자 시작은 맨 뒤 "기타") → "시험으로 찾기" 콤보 칩(시행처+급수,
+// exam-index combos) + 전체보기 링크. 웹에 없는 초성 탭 스트립·즐겨찾는 과목 섹션은 두지 않는다.
+// 콤보 칩은 /exams/[slug] 가 Phase 2 까지 없어 홈 시험 카드처럼 같은 필터의 /papers 로 보낸다.
 
-  useEffect(() => {
-    listSubjectsCached()
-      .then(setSubjects)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
+function comboPapersHref(c: ExamCombo): Href {
+  const params: Record<string, string> = { type: c.examTypeName };
+  if (c.level) params.level = c.level;
+  return { pathname: "/papers", params } as Href;
+}
 
-  async function toggleFav(s: SubjectWithFav) {
-    if (!session) return;
-    const next = !s.favorited;
-    setSubjects((prev) => prev.map((x) => (x.id === s.id ? { ...x, favorited: next } : x)));
-    try {
-      await toggleSubjectBookmark(s.id, next);
-    } catch {
-      setSubjects((prev) => prev.map((x) => (x.id === s.id ? { ...x, favorited: !next } : x)));
-    }
+// ㄱㄴㄷ 묶음 안에서는 가나다순, 묶음 자체는 CONSONANTS 순서를 그대로 따른다.
+function groupByConsonant(entries: SubjectIndexEntry[]) {
+  const groups = new Map<string, SubjectIndexEntry[]>();
+  for (const entry of entries) {
+    const key = initialConsonant(entry.name);
+    const bucket = key && (CONSONANTS as readonly string[]).includes(key) ? key : "기타";
+    const list = groups.get(bucket);
+    if (list) list.push(entry);
+    else groups.set(bucket, [entry]);
   }
+  const order = [...CONSONANTS, "기타"];
+  return order.flatMap((key) => {
+    const list = groups.get(key);
+    if (!list || list.length === 0) return [];
+    return [{ key, items: [...list].sort((a, b) => a.name.localeCompare(b.name, "ko")) }];
+  });
+}
 
-  const visible = useMemo(() => {
-    const filtered = consonant
-      ? subjects.filter((s) => initialConsonant(s.name) === consonant)
-      : subjects;
-    return [...filtered].sort((a, b) => Number(b.favorited) - Number(a.favorited));
-  }, [subjects, consonant]);
+function yearRange(entry: SubjectIndexEntry) {
+  return entry.minYear === entry.maxYear ? `${entry.maxYear}년` : `${entry.minYear}~${entry.maxYear}년`;
+}
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
+export default function SubjectsIndexScreen() {
+  const { query, data } = useSubjectIndex();
+  const landing = useHomeLanding();
+  const groups = useMemo(() => (data ? groupByConsonant(data.entries) : []), [data]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen options={{ headerShown: true, title: "과목별 보기" }} />
+    <Screen contentClassName="gap-8" refreshing={query.isRefetching} onRefresh={() => void query.refetch()}>
+      <View className="gap-3">
+        <Pressable accessibilityRole="link" onPress={() => router.navigate("/")} hitSlop={6} className="self-start">
+          <AppText variant="sm" className="text-zinc-500 dark:text-zinc-500">
+            ← 홈으로
+          </AppText>
+        </Pressable>
+        <AppText variant="3xl" weight="bold">
+          과목별 기출문제
+        </AppText>
+      </View>
 
-      {/* 초성 칩 14개를 세로로 쌓으면 첫 화면에서 목록을 밀어내서, 한 줄 가로 스크롤로 둔다
-          (웹도 모바일 폭에서 같은 처리를 한다). */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 10, gap: 6 }}
-        style={{ flexGrow: 0, borderBottomWidth: 1, borderBottomColor: colors.border }}
-      >
-        <Chip label="전체" active={!consonant} onPress={() => setConsonant(null)} />
-        {CONSONANTS.map((c) => (
-          <Chip
-            key={c}
-            label={c}
-            active={consonant === c}
-            onPress={() => setConsonant(consonant === c ? null : c)}
-          />
-        ))}
-      </ScrollView>
+      <QueryState query={query} skeleton={<SubjectsSkeleton />}>
+        {() => (
+          <>
+            {groups.map((group) => (
+              <View key={group.key} className="gap-3">
+                <View className="flex-row items-center gap-2 border-b border-zinc-100 pb-2 dark:border-zinc-800">
+                  <View className="h-7 w-7 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-950/40">
+                    <AppText variant="sm" allowFontScaling={false} className="text-blue-600 dark:text-blue-400">
+                      {group.key}
+                    </AppText>
+                  </View>
+                  <AppText variant="sm" className="text-zinc-400 dark:text-zinc-600">
+                    {group.items.length}과목
+                  </AppText>
+                </View>
+                <View className="gap-2">
+                  {group.items.map((entry) => (
+                    <Pressable
+                      key={entry.slug}
+                      accessibilityRole="link"
+                      onPress={() => router.push(`/subjects/${entry.slug}` as Href)}
+                      className="flex-row items-baseline justify-between gap-2 rounded-lg border border-zinc-200 px-3 py-2.5 active:border-blue-300 active:bg-blue-50 dark:border-zinc-700 dark:active:border-blue-800 dark:active:bg-blue-950/40"
+                    >
+                      <AppText weight="medium" className="min-w-0 flex-1">
+                        {entry.name}
+                      </AppText>
+                      <AppText variant="xs" className="shrink-0 text-zinc-400 dark:text-zinc-600">
+                        {entry.count.toLocaleString()}건 · {yearRange(entry)}
+                      </AppText>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ))}
 
-      <FlatList
-        data={visible}
-        keyExtractor={(s) => s.id}
-        contentContainerStyle={{ padding: 12 }}
-        ListEmptyComponent={
-          <Text
-            style={{
-              color: colors.textMuted,
-              textAlign: "center",
-              padding: 32,
-              fontSize: 13,
-            }}
-          >
-            {consonant ? `'${consonant}' 로 시작하는 과목이 없어요.` : "과목이 없어요."}
-          </Text>
-        }
-        renderItem={({ item: s }) => (
-          <View style={rowStyle(colors)}>
-            <Pressable
-              onPress={() => router.push(`/subjects/${s.slug}`)}
-              style={{ flex: 1 }}
-            >
-              <Text style={{ fontSize: 15, fontWeight: "500" }}>{s.name}</Text>
-            </Pressable>
-            {session && (
-              <Pressable onPress={() => toggleFav(s)} hitSlop={8}>
-                <Text style={{ fontSize: 20, color: s.favorited ? "#f59e0b" : colors.border }}>
-                  {s.favorited ? "★" : "☆"}
-                </Text>
+            {/* 과목축의 짝인 시험축(시행처+급수)으로 건너가는 자리. */}
+            <View className="gap-3 border-t border-zinc-100 pt-6 dark:border-zinc-800">
+              <AppText variant="lg" weight="semibold">
+                시험으로 찾기
+              </AppText>
+              <View className="flex-row flex-wrap gap-2">
+                {(landing.data?.combos ?? []).map((combo) => (
+                  <Pressable
+                    key={combo.slug}
+                    accessibilityRole="link"
+                    onPress={() => router.push(comboPapersHref(combo))}
+                    className="rounded-full border border-zinc-200 px-4 py-1.5 active:border-blue-300 active:bg-blue-50 dark:border-zinc-700 dark:active:border-blue-800 dark:active:bg-blue-950/40"
+                  >
+                    <AppText variant="sm" weight="medium" className="text-zinc-600 dark:text-zinc-400">
+                      {combo.label} 기출문제
+                    </AppText>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable accessibilityRole="link" onPress={() => router.push("/exams" as Href)} hitSlop={6} className="self-start">
+                <AppText variant="sm" weight="medium" className="text-blue-600 dark:text-blue-400">
+                  시험별 기출문제 전체보기 →
+                </AppText>
               </Pressable>
-            )}
-            <Text style={{ color: colors.textMuted, marginLeft: 10 }}>›</Text>
-          </View>
+            </View>
+          </>
         )}
-      />
+      </QueryState>
+    </Screen>
+  );
+}
+
+function SubjectsSkeleton() {
+  return (
+    <View className="gap-8">
+      {[0, 1, 2].map((i) => (
+        <View key={i} className="gap-3">
+          <Skeleton className="h-7 w-24 rounded-lg" delay={i * 100} />
+          {[0, 1, 2].map((j) => (
+            <Skeleton key={j} className="h-11 w-full rounded-lg" delay={i * 100 + j * 40} />
+          ))}
+        </View>
+      ))}
     </View>
   );
 }
-
-function Chip({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  const colors = useColors();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={{
-        minWidth: 34,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-        alignItems: "center",
-        backgroundColor: active ? colors.primary : colors.card,
-        borderWidth: 1,
-        borderColor: active ? colors.primary : colors.border,
-      }}
-    >
-      <Text style={{ color: active ? colors.primaryText : colors.text, fontSize: 13 }}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-const rowStyle = (colors: Colors) => ({
-  flexDirection: "row" as const,
-  alignItems: "center" as const,
-  paddingHorizontal: 8,
-  paddingVertical: 14,
-  borderBottomWidth: 1,
-  borderBottomColor: colors.border,
-});

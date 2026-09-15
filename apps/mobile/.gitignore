@@ -6,13 +6,16 @@ web-build/
 .env
 .env.local
 
-# Native
+# Native (CNG — prebuild 산출물은 커밋하지 않는다)
 ios/
 android/
 *.keystore
 *.p8
 *.p12
 *.mobileprovision
+credentials.json
+google-services.json
+GoogleService-Info.plist
 
 # Misc
 .DS_Store

@@ -1,554 +1,290 @@
-import { Link, useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  ScrollView,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import {
-  buildCommentTree,
-  canReplyTo,
-  COMMENT_CONTENT_MAX,
-  getPaperDisplayTitle,
+  getPaperDocumentTitle,
+  getSubjectDisplayName,
+  levelColor,
+  subjectColor,
+  type ExamPaper,
 } from "@gongmoa/core";
-import {
-  deleteComment,
-  getComments,
-  updateComment,
-  getRatingSummary,
-  isBookmarked,
-  postComment,
-  postRating,
-  setBookmark,
-  type RatingSummary,
-} from "../../../src/lib/paper-detail";
-import { getPaper, hasCbtAnswers } from "../../../src/lib/papers";
-import type { Comment, CommentNode, ExamPaper } from "@gongmoa/core";
+import { router, useLocalSearchParams, type Href } from "expo-router";
+import { BookOpenCheck, Download, ExternalLink, Monitor } from "lucide-react-native";
+import { useMemo } from "react";
+import { Pressable, View } from "react-native";
+import { AppText } from "../../../src/components/app-text";
+import { Skeleton } from "../../../src/components/skeleton";
+import { BookmarkButton } from "../../../src/components/papers/bookmark-button";
+import { CommentsSection } from "../../../src/components/papers/comments-section";
+import { DifficultyRating } from "../../../src/components/papers/difficulty-rating";
+import { MyPaperHistory } from "../../../src/components/papers/my-paper-history";
+import { PaperGate } from "../../../src/components/papers/paper-gate";
+import { parseExamTypesParam } from "../../../src/components/papers/paper-filter-chips";
+import { RelatedPapersSection } from "../../../src/components/papers/related-papers";
+import { QueryState } from "../../../src/components/query-state";
+import { Screen } from "../../../src/components/screen";
+import { paperCbtHref, paperExplanationsHref, paperHref } from "../../../src/lib/paper-href";
+import { useSetScreenParams } from "../../../src/lib/screen-params";
+import { usePaperMyDetail, usePaperPublicDetail } from "../../../src/queries/papers";
 import { useAuth } from "../../../src/providers/auth-provider";
-import {
-  examTypeBadge,
-  levelBadge,
-  subjectBadge,
-} from "../../../src/theme/badges";
-import { useColors, type Colors } from "../../../src/theme/colors";
+import { themedIcon } from "../../../src/theme/icons";
 
-export default function PaperDetailScreen() {
-  const colors = useColors();
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const paperId = String(id ?? "");
-  const router = useRouter();
-  const { session } = useAuth();
-  const userId = session?.user.id ?? null;
+// `/papers/[id]`(설계서 §5 행) — 웹 app/papers/[id]/page.tsx 의 블록을 같은 순서로:
+// 크럼 → 배지+즐겨찾기 → 제목·메타·태그 → 열기 버튼들(온라인에서 풀기·문제·정답·해설) →
+// 내 시험 기록 → 체감 난이도 → 댓글 → (AdBanner: Phase 5) → 같은 과목 목록.
+// 문제·정답 열기/다운로드는 전부 앱 내 PDF 뷰어(`/papers/[id]/pdf?kind=`)로 — 웹 /download/*
+// 는 부르지 않는다(AGENTS.md). "해설 다운로드"(?download=1 인쇄)는 §1 비목표라 아이콘을 비운다.
+const MonitorIcon = Monitor;
+const ExternalLinkIcon = themedIcon(ExternalLink);
+const DownloadIcon = themedIcon(Download);
+const BookIcon = themedIcon(BookOpenCheck);
 
-  const [paper, setPaper] = useState<ExamPaper | null>(null);
-  const [cbt, setCbt] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [bookmarked, setBookmarked] = useState(false);
-  const [rating, setRating] = useState<RatingSummary>({ average: null, count: 0, myScore: null });
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [draft, setDraft] = useState("");
-  const [posting, setPosting] = useState(false);
-  // 답글/수정은 한 번에 하나만 열린다(모바일 화면에 폼이 여러 개 열리면 헷갈린다).
-  const [replyTo, setReplyTo] = useState<string | null>(null);
-  const [replyDraft, setReplyDraft] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState("");
-
-  useEffect(() => {
-    if (!paperId) return;
-    // 핵심(문제지·CBT 여부)만 먼저 받아 화면을 그리고, 평점·댓글·북마크는 뒤이어
-    // 백그라운드로 채운다 — 초기 페인트가 댓글 로딩을 기다리지 않게.
-    Promise.all([getPaper(paperId), hasCbtAnswers(paperId).catch(() => false)])
-      .then(([p, c]) => {
-        setPaper(p);
-        setCbt(c);
-      })
-      .finally(() => setLoading(false));
-
-    getRatingSummary(paperId)
-      .then(setRating)
-      .catch(() => {});
-    getComments(paperId)
-      .then(setComments)
-      .catch(() => {});
-    if (userId) isBookmarked(paperId).then(setBookmarked).catch(() => {});
-  }, [paperId, userId]);
-
-  function requireLogin(): boolean {
-    if (userId) return true;
-    Alert.alert("로그인 필요", "로그인 후 이용할 수 있어요.", [
-      { text: "취소", style: "cancel" },
-      { text: "로그인", onPress: () => router.push("/(auth)/login") },
-    ]);
-    return false;
-  }
-
-  async function toggleBookmark() {
-    if (!requireLogin()) return;
-    const next = !bookmarked;
-    setBookmarked(next); // 낙관적
-    try {
-      await setBookmark(paperId, next);
-    } catch {
-      setBookmarked(!next);
-      Alert.alert("오류", "북마크 변경에 실패했어요.");
-    }
-  }
-
-  async function rate(score: number) {
-    if (!requireLogin()) return;
-    try {
-      await postRating(paperId, score);
-      setRating(await getRatingSummary(paperId));
-    } catch (e) {
-      Alert.alert("평가", e instanceof Error ? e.message : "평가에 실패했어요.");
-    }
-  }
-
-  async function submitComment() {
-    if (!requireLogin()) return;
-    const content = draft.trim();
-    if (!content) return;
-    setPosting(true);
-    try {
-      await postComment(paperId, content);
-      setDraft("");
-      setComments(await getComments(paperId));
-    } catch (e) {
-      // 서버가 돌려준 사유(비속어 차단 등)를 그대로 보여준다 — 뭉뚱그리면 왜 막혔는지 모른다.
-      Alert.alert("댓글", e instanceof Error ? e.message : "등록에 실패했어요.");
-    } finally {
-      setPosting(false);
-    }
-  }
-
-  async function submitReply(parentId: string) {
-    if (!requireLogin()) return;
-    const content = replyDraft.trim();
-    if (!content) return;
-    setPosting(true);
-    try {
-      await postComment(paperId, content, parentId);
-      setReplyDraft("");
-      setReplyTo(null);
-      setComments(await getComments(paperId));
-    } catch (e) {
-      Alert.alert("답글", e instanceof Error ? e.message : "등록에 실패했어요.");
-    } finally {
-      setPosting(false);
-    }
-  }
-
-  async function saveEdit(cid: string) {
-    const content = editDraft.trim();
-    if (!content) return;
-    setPosting(true);
-    try {
-      await updateComment(cid, content);
-      setEditingId(null);
-      setEditDraft("");
-      setComments(await getComments(paperId));
-    } catch (e) {
-      Alert.alert("수정", e instanceof Error ? e.message : "수정에 실패했어요.");
-    } finally {
-      setPosting(false);
-    }
-  }
-
-  function removeComment(cid: string) {
-    Alert.alert("댓글 삭제", "삭제할까요?", [
-      { text: "취소", style: "cancel" },
-      {
-        text: "삭제",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await deleteComment(cid);
-            setComments((prev) => prev.filter((c) => c.id !== cid));
-          } catch {
-            Alert.alert("오류", "삭제에 실패했어요.");
-          }
-        },
-      },
-    ]);
-  }
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator />
-      </View>
-    );
-  }
-  if (!paper) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <Text style={{ color: colors.textMuted }}>문제지를 찾을 수 없어요.</Text>
-      </View>
-    );
-  }
-
+export default function PaperDetailRoute() {
+  const params = useLocalSearchParams<{ id: string; level?: string; examTypes?: string }>();
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: colors.bg }}
-      contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 40 }}
-      keyboardShouldPersistTaps="handled"
-    >
-      {/* 배지 행 → 제목 → 메타. 웹 papers/[id]/page.tsx 와 같은 순서·색이다. */}
-      <View style={{ gap: 8 }}>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {paper.level && <DetailBadge text={paper.level} {...levelBadge(paper.level)} />}
-          {paper.subjects && (
-            <DetailBadge text={paper.subjects.name} {...subjectBadge(paper.subjects.slug)} />
-          )}
-          {paper.exam_types && (
-            <DetailBadge text={paper.exam_types.name} {...examTypeBadge(paper.exam_types.name)} />
-          )}
-        </View>
-        <Text style={{ fontSize: 22, fontWeight: "700", lineHeight: 30 }}>
-          {getPaperDisplayTitle(paper.title, paper.track)}
-        </Text>
-        <Text style={{ color: colors.textMuted }}>
-          {paper.year}년 {paper.round}회
-          {paper.level ? ` · ${paper.level}` : ""}
-          {paper.question_count ? ` · ${paper.question_count}문항` : ""}
-        </Text>
-      </View>
-
-      {/* 액션 */}
-      <View style={{ flexDirection: "row", gap: 10 }}>
-        <Pressable onPress={toggleBookmark} style={outlineBtn(colors)}>
-          <Text style={{ color: bookmarked ? colors.primary : colors.text, fontWeight: "600" }}>
-            {bookmarked ? "★ 즐겨찾기" : "☆ 즐겨찾기"}
-          </Text>
-        </Pressable>
-        <Link href={`/papers/${paper.id}/pdf`} asChild>
-          <Pressable style={outlineBtn(colors)}>
-            <Text style={{ fontWeight: "600" }}>원본 PDF</Text>
-          </Pressable>
-        </Link>
-        <Link href={`/papers/${paper.id}/explanations`} asChild>
-          <Pressable style={outlineBtn(colors)}>
-            <Text style={{ fontWeight: "600" }}>해설</Text>
-          </Pressable>
-        </Link>
-      </View>
-
-      {cbt ? (
-        <Link href={`/papers/${paper.id}/cbt`} asChild>
-          <Pressable style={primaryBtn(colors)}>
-            <Text style={{ color: colors.primaryText, fontWeight: "600" }}>CBT로 풀기</Text>
-          </Pressable>
-        </Link>
-      ) : (
-        <Text style={{ color: colors.textMuted }}>아직 CBT를 지원하지 않는 문제지예요.</Text>
-      )}
-
-      {/* 난이도 */}
-      <View style={{ gap: 8 }}>
-        <Text style={{ fontWeight: "700" }}>
-          난이도{" "}
-          <Text style={{ color: colors.textMuted, fontWeight: "400" }}>
-            {rating.average != null
-              ? `평균 ${rating.average.toFixed(1)} · ${rating.count}명`
-              : "· 평가 없음"}
-          </Text>
-        </Text>
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          {[1, 2, 3, 4, 5].map((s) => (
-            <Pressable
-              key={s}
-              onPress={() => rate(s)}
-              disabled={rating.myScore != null}
-              style={{
-                width: 44,
-                height: 40,
-                borderRadius: 10,
-                borderWidth: 1,
-                borderColor: rating.myScore === s ? colors.primary : colors.border,
-                backgroundColor: rating.myScore === s ? colors.primary : colors.bg,
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: rating.myScore != null && rating.myScore !== s ? 0.5 : 1,
-              }}
-            >
-              <Text
-                style={{
-                  color: rating.myScore === s ? colors.primaryText : colors.text,
-                  fontWeight: "600",
-                }}
-              >
-                {s}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-        {rating.myScore != null && (
-          <Text style={{ fontSize: 12, color: colors.textMuted }}>내 평가: {rating.myScore}</Text>
-        )}
-      </View>
-
-      {/* 댓글 */}
-      <View style={{ gap: 10 }}>
-        <Text style={{ fontWeight: "700" }}>댓글 ({comments.length})</Text>
-
-        <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-end" }}>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="댓글을 남겨보세요"
-            placeholderTextColor={colors.textMuted}
-            maxLength={COMMENT_CONTENT_MAX}
-            multiline
-            style={{
-              flex: 1,
-              borderWidth: 1,
-              borderColor: colors.border,
-              borderRadius: 10,
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              color: colors.text,
-              maxHeight: 120,
-            }}
-          />
-          <Pressable
-            onPress={submitComment}
-            disabled={posting || !draft.trim()}
-            style={{
-              backgroundColor: posting || !draft.trim() ? colors.border : colors.primary,
-              borderRadius: 10,
-              paddingHorizontal: 16,
-              paddingVertical: 10,
-            }}
-          >
-            <Text style={{ color: colors.primaryText, fontWeight: "600" }}>등록</Text>
-          </Pressable>
-        </View>
-
-        {comments.length === 0 ? (
-          <Text style={{ color: colors.textMuted, fontSize: 13, paddingVertical: 8 }}>
-            아직 댓글이 없어요.
-          </Text>
-        ) : (
-          // 깊이가 여러 단이라 트리로 만들어 재귀로 그린다(규칙은 @gongmoa/core 공유).
-          buildCommentTree(comments).map((node) => (
-            <View
-              key={node.id}
-              style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingVertical: 10 }}
-            >
-              <CommentThread
-                node={node}
-                userId={userId}
-                colors={colors}
-                busy={posting}
-                replyTo={replyTo}
-                replyDraft={replyDraft}
-                editingId={editingId}
-                editDraft={editDraft}
-                onChangeReply={setReplyDraft}
-                onChangeEdit={setEditDraft}
-                onToggleReply={(cid) => {
-                  if (!requireLogin()) return;
-                  setReplyTo(replyTo === cid ? null : cid);
-                  setReplyDraft("");
-                }}
-                onSubmitReply={submitReply}
-                onStartEdit={(c) => {
-                  setEditingId(c.id);
-                  setEditDraft(c.content);
-                }}
-                onCancelEdit={() => setEditingId(null)}
-                onSaveEdit={saveEdit}
-                onDelete={removeComment}
-              />
-            </View>
-          ))
-        )}
-      </View>
-    </ScrollView>
+    <PaperGate param={params.id} skeleton={<PaperDetailSkeleton />}>
+      {(paper) => <PaperDetailScreen paper={paper} level={params.level || undefined} examTypesParam={params.examTypes} />}
+    </PaperGate>
   );
 }
 
-const outlineBtn = (colors: Colors) => ({
-  flex: 1,
-  borderWidth: 1,
-  borderColor: colors.border,
-  borderRadius: 10,
-  paddingVertical: 12,
-  alignItems: "center" as const,
-});
+function PaperDetailScreen({ paper, level, examTypesParam }: { paper: ExamPaper; level: string | undefined; examTypesParam?: string }) {
+  const { userId } = useAuth();
+  const loggedIn = !!userId;
+  const publicDetail = usePaperPublicDetail(paper);
+  const myDetail = usePaperMyDetail(paper);
+  const selectedExamTypeIds = useMemo(() => parseExamTypesParam(examTypesParam), [examTypesParam]);
+  const setScreenParams = useSetScreenParams();
 
-const primaryBtn = (colors: Colors) => ({
-  backgroundColor: colors.primary,
-  borderRadius: 12,
-  paddingVertical: 12,
-  alignItems: "center" as const,
-});
+  const subject = paper.subjects;
+  const examType = paper.exam_types;
+  const displayTitle = getPaperDocumentTitle(paper.title, paper.track);
+  const pdfHref = (kind: "paper" | "answer") => `${paperHref(paper)}/pdf?kind=${kind}` as Href;
 
-// 댓글 한 줄 + 그 아래 답글들을 재귀로 그린다. 답글 폼은 깊이 한도(canReplyTo)에
-// 닿지 않은 댓글에만 붙고, 서버도 같은 한도로 거절한다.
-type ThreadProps = {
-  node: CommentNode;
-  userId: string | null;
-  colors: Colors;
-  busy: boolean;
-  replyTo: string | null;
-  replyDraft: string;
-  editingId: string | null;
-  editDraft: string;
-  onChangeReply: (v: string) => void;
-  onChangeEdit: (v: string) => void;
-  onToggleReply: (commentId: string) => void;
-  onSubmitReply: (parentId: string) => void;
-  onStartEdit: (comment: Comment) => void;
-  onCancelEdit: () => void;
-  onSaveEdit: (commentId: string) => void;
-  onDelete: (commentId: string) => void;
-};
+  function setFilter(next: { level?: string; examTypes?: Set<string> }) {
+    const nextLevel = "level" in next ? next.level : level;
+    const nextTypes = next.examTypes ?? selectedExamTypeIds;
+    setScreenParams({
+      level: nextLevel || undefined,
+      examTypes: nextTypes.size > 0 ? [...nextTypes].join(",") : undefined,
+    });
+  }
 
-function CommentThread(props: ThreadProps) {
-  const { node, userId, colors, busy, replyTo, replyDraft, editingId, editDraft } = props;
-  const mine = !!userId && node.user_id === userId;
-  const editing = editingId === node.id;
-  const replyable = canReplyTo(node.depth);
+  const openBtn = (primary: boolean) =>
+    primary
+      ? "bg-blue-600 active:bg-blue-700"
+      : "border border-blue-200 bg-blue-50 active:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:active:bg-blue-900/40";
+  const openText = (primary: boolean) => (primary ? "text-white" : "text-blue-700 dark:text-blue-400");
+  const iconBtn =
+    "shrink-0 items-center justify-center rounded-xl border border-zinc-300 px-5 active:border-blue-300 active:bg-blue-50 dark:border-zinc-700 dark:active:border-blue-800 dark:active:bg-blue-950/40";
 
   return (
-    <View style={{ gap: 3 }}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-        <Text style={{ fontWeight: "600", fontSize: 13 }}>{node.nickname}</Text>
-        <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-          {new Date(node.created_at).toLocaleDateString("ko-KR")}
-          {node.updated_at ? " (수정됨)" : ""}
-        </Text>
+    <Screen contentClassName="gap-14" refreshing={publicDetail.isRefetching} onRefresh={() => void Promise.all([publicDetail.refetch(), myDetail.refetch()])}>
+      <View className="gap-4">
+        {/* 상위 계층으로 올라가는 링크(웹 breadcrumb). */}
+        <View className="flex-row flex-wrap items-center gap-x-2">
+          <Pressable accessibilityRole="link" onPress={() => router.navigate("/")} hitSlop={6}>
+            <AppText variant="sm" className="text-zinc-500 dark:text-zinc-500">
+              ← 홈으로
+            </AppText>
+          </Pressable>
+          {subject && (
+            <>
+              <AppText variant="sm" className="text-zinc-500 dark:text-zinc-500" accessibilityElementsHidden>
+                ·
+              </AppText>
+              <Pressable accessibilityRole="link" onPress={() => router.push(`/subjects/${subject.slug}` as Href)} hitSlop={6}>
+                <AppText variant="sm" className="text-zinc-500 dark:text-zinc-500">
+                  {subject.name} 기출문제
+                </AppText>
+              </Pressable>
+            </>
+          )}
+        </View>
+
+        <View className="flex-row items-center justify-between gap-4">
+          <View className="min-w-0 flex-1 flex-row flex-wrap items-center gap-2">
+            {paper.level && (
+              <View className={["rounded px-2 py-0.5", levelColor(paper.level)].join(" ")}>
+                <AppText variant="xs" weight="bold" allowFontScaling={false} className={levelColor(paper.level)}>
+                  {paper.level}
+                </AppText>
+              </View>
+            )}
+            {subject && (
+              <View className={["rounded px-2 py-0.5", subjectColor(subject.slug)].join(" ")}>
+                <AppText variant="xs" weight="medium" allowFontScaling={false} className={subjectColor(subject.slug)}>
+                  {/* 이 문제지의 과목명이라 시행처·급수 표기를 따른다. */}
+                  {getSubjectDisplayName(subject.name, examType?.name, paper.level, paper.track)}
+                </AppText>
+              </View>
+            )}
+          </View>
+          <BookmarkButton paperId={paper.id} initialBookmarked={myDetail.data?.isBookmarked ?? false} />
+        </View>
+
+        <View>
+          <AppText variant="27" weight="bold" className="leading-snug" pretty>
+            {displayTitle}
+          </AppText>
+          <AppText variant="sm" className="mt-2 text-zinc-500 dark:text-zinc-500">
+            {examType?.name}
+            {examType?.name ? " · " : ""}
+            {paper.year}년{paper.round > 1 ? ` · ${paper.round}회차` : ""}
+            {paper.question_count ? ` · ${paper.question_count}문제` : ""}
+          </AppText>
+          {paper.tags.length > 0 && (
+            <AppText variant="sm" className="mt-1 text-zinc-400 dark:text-zinc-600">
+              {paper.tags.map((tag) => `#${tag}`).join(" ")}
+            </AppText>
+          )}
+        </View>
       </View>
 
-      {editing ? (
-        <View style={{ gap: 6 }}>
-          <TextInput
-            value={editDraft}
-            onChangeText={props.onChangeEdit}
-            maxLength={COMMENT_CONTENT_MAX}
-            multiline
-            autoFocus
-            style={{
-              borderWidth: 1,
-              borderColor: colors.border,
-              borderRadius: 10,
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              color: colors.text,
-              maxHeight: 120,
-            }}
-          />
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <Pressable
-              onPress={() => props.onSaveEdit(node.id)}
-              disabled={busy || !editDraft.trim()}
-            >
-              <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>저장</Text>
-            </Pressable>
-            <Pressable onPress={props.onCancelEdit} disabled={busy}>
-              <Text style={{ color: colors.textMuted, fontSize: 12 }}>취소</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : (
-        <>
-          <Text style={{ fontSize: 14 }}>{node.content}</Text>
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            {replyable && (
-              <Pressable onPress={() => props.onToggleReply(node.id)}>
-                <Text style={{ color: colors.textMuted, fontSize: 12 }}>답글</Text>
-              </Pressable>
-            )}
-            {mine && (
-              <>
-                <Pressable onPress={() => props.onStartEdit(node)}>
-                  <Text style={{ color: colors.textMuted, fontSize: 12 }}>수정</Text>
-                </Pressable>
-                <Pressable onPress={() => props.onDelete(node.id)}>
-                  <Text style={{ color: colors.danger, fontSize: 12 }}>삭제</Text>
-                </Pressable>
-              </>
-            )}
-          </View>
-        </>
-      )}
+      <QueryState query={publicDetail} skeleton={<ActionsSkeleton />}>
+        {(detail) => {
+          const hasCbt = detail.hasCbtAnswers;
+          return (
+            <>
+              <View className="gap-3">
+                {/* 주 동선 "온라인에서 풀기"를 맨 위 + 단색으로. CBT 미지원이면 문제 열기가 단색을 물려받는다. */}
+                {hasCbt && (
+                  <>
+                    <Pressable
+                      accessibilityRole="link"
+                      onPress={() => router.push(paperCbtHref(paper) as Href)}
+                      className="flex-row items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-4 active:bg-blue-700"
+                    >
+                      <MonitorIcon size={20} color="#ffffff" />
+                      <AppText variant="lg" weight="medium" className="text-white">
+                        온라인에서 풀기
+                      </AppText>
+                    </Pressable>
+                    <AppText variant="xs" className="-mt-1 text-center text-zinc-500 dark:text-zinc-500" pretty>
+                      제출 즉시 채점 · 틀린 문제는 오답노트에 자동 저장{!loggedIn && " · 구글·카카오 1초 로그인"}
+                    </AppText>
+                  </>
+                )}
 
-      {replyTo === node.id && (
-        <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-end", marginTop: 8 }}>
-          <TextInput
-            value={replyDraft}
-            onChangeText={props.onChangeReply}
-            placeholder="답글 달기"
-            placeholderTextColor={colors.textMuted}
-            maxLength={COMMENT_CONTENT_MAX}
-            multiline
-            autoFocus
-            style={{
-              flex: 1,
-              borderWidth: 1,
-              borderColor: colors.border,
-              borderRadius: 10,
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              color: colors.text,
-              maxHeight: 100,
-            }}
-          />
-          <Pressable
-            onPress={() => props.onSubmitReply(node.id)}
-            disabled={busy || !replyDraft.trim()}
-            style={{
-              backgroundColor: busy || !replyDraft.trim() ? colors.border : colors.primary,
-              borderRadius: 10,
-              paddingHorizontal: 14,
-              paddingVertical: 10,
-            }}
-          >
-            <Text style={{ color: colors.primaryText, fontWeight: "600" }}>등록</Text>
-          </Pressable>
-        </View>
-      )}
+                <View className="flex-row items-stretch gap-2">
+                  <Pressable
+                    accessibilityRole="link"
+                    onPress={() => router.push(pdfHref("paper"))}
+                    className={["flex-1 flex-row items-center justify-center gap-2 rounded-xl px-4 py-4", openBtn(!hasCbt)].join(" ")}
+                  >
+                    <ExternalLinkIcon size={20} colorClassName={openText(!hasCbt)} />
+                    <AppText variant="lg" weight="medium" className={openText(!hasCbt)}>
+                      문제 열기
+                    </AppText>
+                  </Pressable>
+                  <Pressable accessibilityRole="link" accessibilityLabel="문제 다운로드" onPress={() => router.push(pdfHref("paper"))} className={iconBtn}>
+                    <DownloadIcon size={20} colorClassName="text-zinc-600 dark:text-zinc-400" />
+                  </Pressable>
+                </View>
 
-      {node.replies.map((child) => (
-        <View
-          key={child.id}
-          style={{
-            marginTop: 8,
-            marginLeft: 12,
-            paddingLeft: 10,
-            borderLeftWidth: 2,
-            borderLeftColor: colors.border,
-          }}
-        >
-          <CommentThread {...props} node={child} />
+                {detail.answerKey && (
+                  <View className="flex-row items-stretch gap-2">
+                    <Pressable
+                      accessibilityRole="link"
+                      onPress={() => router.push(pdfHref("answer"))}
+                      className={["flex-1 flex-row items-center justify-center gap-2 rounded-xl px-4 py-4", openBtn(false)].join(" ")}
+                    >
+                      <ExternalLinkIcon size={20} colorClassName={openText(false)} />
+                      <AppText variant="lg" weight="medium" className={openText(false)}>
+                        정답 열기
+                      </AppText>
+                    </Pressable>
+                    <Pressable accessibilityRole="link" accessibilityLabel="정답 다운로드" onPress={() => router.push(pdfHref("answer"))} className={iconBtn}>
+                      <DownloadIcon size={20} colorClassName="text-zinc-600 dark:text-zinc-400" />
+                    </Pressable>
+                  </View>
+                )}
+
+                {/* 전 문항 해설이 준비된 문제지에만(로그인 사용자 — paper_explanation_counts 는 authenticated 전용). */}
+                {detail.hasFullExplanations && (
+                  <View className="flex-row items-stretch gap-2">
+                    <Pressable
+                      accessibilityRole="link"
+                      onPress={() => router.push(paperExplanationsHref(paper) as Href)}
+                      className="flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 active:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:active:bg-emerald-900/40"
+                    >
+                      <BookIcon size={20} colorClassName="text-emerald-700 dark:text-emerald-400" />
+                      <AppText variant="lg" weight="medium" className="text-emerald-700 dark:text-emerald-400">
+                        해설 열기
+                      </AppText>
+                    </Pressable>
+                    {/* "해설 다운로드"(인쇄) 아이콘 자리 — 앱 비목표. */}
+                  </View>
+                )}
+              </View>
+
+              {/* 내 시험 기록 — 기록이 없는 사람(비회원 포함)에게는 아무것도 그리지 않는다. */}
+              <MyPaperHistory attempts={myDetail.data?.myCbtRecordItems ?? []} roundAverages={detail.roundAverages} />
+
+              <DifficultyRating
+                paperId={paper.id}
+                averageScore={detail.averageScore}
+                voteCount={detail.voteCount}
+                loggedIn={loggedIn}
+                myScore={myDetail.data?.myScore ?? null}
+              />
+
+              <CommentsSection paperId={paper.id} comments={detail.comments} currentUserId={userId} />
+            </>
+          );
+        }}
+      </QueryState>
+
+      {/* AdBanner(paperDetail) 자리 — Phase 5(§12-2 14번). */}
+
+      {subject && (
+        <RelatedPapersSection
+          paper={paper}
+          subject={subject}
+          level={level}
+          selectedExamTypeIds={selectedExamTypeIds}
+          onChangeLevel={(next) => setFilter({ level: next })}
+          onChangeExamTypes={(next) => setFilter({ examTypes: next })}
+        />
+      )}
+    </Screen>
+  );
+}
+
+// 웹 papers/[id]/loading.tsx 상단부.
+function PaperDetailSkeleton() {
+  return (
+    <View className="gap-14">
+      <View className="gap-4">
+        <Skeleton className="h-4 w-20 rounded-lg" />
+        <View className="flex-row items-center justify-between gap-4">
+          <View className="flex-row items-center gap-2">
+            <Skeleton className="h-6 w-12 rounded" />
+            <Skeleton className="h-6 w-16 rounded" />
+          </View>
+          <Skeleton className="h-9 w-9 rounded-full" />
         </View>
-      ))}
+        <View className="gap-3">
+          <Skeleton className="h-8 w-full max-w-md rounded-lg" />
+          <Skeleton className="h-4 w-64 rounded-lg" />
+          <Skeleton className="h-3 w-40 rounded-lg" />
+        </View>
+      </View>
+      <ActionsSkeleton />
     </View>
   );
 }
 
-// 상세 상단의 급수·과목·직렬 배지. 웹과 같은 크기·모양.
-function DetailBadge({ text, bg, fg }: { text: string; bg: string; fg: string }) {
+function ActionsSkeleton() {
   return (
-    <Text
-      style={{
-        fontSize: 11,
-        fontWeight: "700",
-        color: fg,
-        backgroundColor: bg,
-        borderRadius: 4,
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        overflow: "hidden",
-      }}
-    >
-      {text}
-    </Text>
+    <View className="gap-3">
+      <View className="flex-row items-stretch gap-2">
+        <Skeleton className="h-16 flex-1 rounded-xl" />
+        <Skeleton className="h-16 w-16 rounded-xl" />
+      </View>
+      <View className="flex-row items-stretch gap-2">
+        <Skeleton className="h-16 flex-1 rounded-xl" delay={100} />
+        <Skeleton className="h-16 w-16 rounded-xl" delay={100} />
+      </View>
+      <Skeleton className="h-16 w-full rounded-xl" delay={200} />
+      <Skeleton className="h-16 w-full rounded-xl" delay={300} />
+    </View>
   );
 }

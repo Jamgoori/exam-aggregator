@@ -1,0 +1,8 @@
+/* 앱 전역 CSS — Uniwind 가 Metro 빌드 시 읽는다(metro.config.js 의 cssEntryFile).
+   테마 토큰 정본은 packages/design-tokens/theme.css(웹과 같은 파일). 웹의 bg-blue-600 과
+   앱의 bg-blue-600 이 같은 초록을 그리는 이유가 이 import 다. 다크 값은 Uniwind 가 읽는
+   형태(@layer theme > :root > @variant)로 다시 적은 생성물 theme.native.css 에서 온다. */
+@import "tailwindcss";
+@import "uniwind";
+@import "@gongmoa/design-tokens/theme.css";
+@import "./src/theme/theme.native.css";

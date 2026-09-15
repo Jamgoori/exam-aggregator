@@ -1,78 +1,65 @@
-import { Stack, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
-import type { ExamPaper } from "@gongmoa/core";
-import { PdfPenViewer } from "../../../src/components/pdf-pen-viewer";
-import { countDownload, downloadAndOpenPdf } from "../../../src/lib/download";
-import { getPaper } from "../../../src/lib/papers";
-import { publicUrl } from "../../../src/lib/storage";
-import { useColors } from "../../../src/theme/colors";
+import { getPaperDisplayTitle } from "@gongmoa/core";
+import { useLocalSearchParams } from "expo-router";
+import { View } from "react-native";
+import { InlineAlert } from "../../../src/components/feedback";
+import { PaperGate } from "../../../src/components/papers/paper-gate";
+import { PdfViewer } from "../../../src/components/papers/pdf-viewer";
+import { QueryState } from "../../../src/components/query-state";
+import { Screen } from "../../../src/components/screen";
+import { Skeleton } from "../../../src/components/skeleton";
+import { usePaperPublicDetail } from "../../../src/queries/papers";
 
-// 원본 PDF 보기 — 문제지 상세의 "원본 PDF". 필기 도구도 그대로 쓸 수 있다.
-export default function PaperPdfScreen() {
-  const colors = useColors();
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const [paper, setPaper] = useState<ExamPaper | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!id) return;
-    getPaper(String(id))
-      .then((p) => {
-        setPaper(p);
-        // 화면에서 원본을 열어 본 것도 웹의 /download 라우트와 같은 카운트 대상이다.
-        if (p?.file_path) countDownload(p.id);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [id]);
-
-  async function saveOrShare() {
-    if (!paper?.file_path) return;
-    try {
-      setSaving(true);
-      await downloadAndOpenPdf(paper.id, paper.file_path, paper.file_name ?? paper.title);
-    } catch {
-      Alert.alert("내려받기 실패", "잠시 후 다시 시도해 주세요.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const fileUrl = paper?.file_path ? publicUrl(paper.file_path) : null;
+// `/papers/[id]/pdf?kind=paper|answer`(설계서 §5 `/download` 행 — 웹 /download/[id]?view=1 ·
+// /download/answer/[id]?view=1 의 앱 매핑). 몰입 화면(헤더·푸터·탭 없음, 가로 허용).
+// 정답표(answer_keys)는 문제지 공개 상세 조회가 고른 한 장을 쓴다.
+export default function PaperPdfRoute() {
+  const params = useLocalSearchParams<{ id: string; kind?: string }>();
+  const kind = params.kind === "answer" ? "answer" : "paper";
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          title: "원본 PDF",
-          headerRight: () =>
-            fileUrl ? (
-              <Pressable onPress={saveOrShare} disabled={saving} hitSlop={8}>
-                {saving ? (
-                  <ActivityIndicator />
-                ) : (
-                  <Text style={{ color: colors.primary, fontSize: 14, fontWeight: "600" }}>
-                    저장·공유
-                  </Text>
-                )}
-              </Pressable>
-            ) : null,
-        }}
-      />
-      {loading ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <ActivityIndicator />
-        </View>
-      ) : fileUrl ? (
-        <PdfPenViewer fileUrl={fileUrl} />
-      ) : (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-          <Text style={{ color: colors.textMuted }}>PDF를 찾을 수 없어요.</Text>
-        </View>
-      )}
+    <PaperGate param={params.id} immersive skeleton={<PdfSkeleton />}>
+      {(paper) => {
+        const title = getPaperDisplayTitle(paper.title, paper.track);
+        if (kind === "paper") {
+          return (
+            <Screen immersive>
+              <PdfViewer paperId={paper.id} kind="paper" storagePath={paper.file_path} fileName={paper.file_name} title={title} />
+            </Screen>
+          );
+        }
+        return <AnswerPdf paperId={paper.id} title={`${title} 정답`} paper={paper} />;
+      }}
+    </PaperGate>
+  );
+}
+
+function AnswerPdf({ paperId, title, paper }: { paperId: string; title: string; paper: Parameters<typeof usePaperPublicDetail>[0] }) {
+  const detail = usePaperPublicDetail(paper);
+  return (
+    <Screen immersive>
+      <QueryState
+        query={detail}
+        skeleton={<PdfSkeleton />}
+        isEmpty={(d) => !d.answerKey}
+        empty={
+          <View className="px-4 pt-6">
+            <InlineAlert tone="amber" message="이 문제지의 정답표가 아직 등록되지 않았어요." />
+          </View>
+        }
+      >
+        {(d) => (
+          <PdfViewer paperId={paperId} kind="answer" storagePath={d.answerKey!.file_path} fileName={d.answerKey!.file_name} title={title} />
+        )}
+      </QueryState>
+    </Screen>
+  );
+}
+
+function PdfSkeleton() {
+  return (
+    <View className="gap-4">
+      <Skeleton className="h-9 w-full rounded-lg" />
+      <Skeleton className="h-96 w-full rounded-xl" delay={120} />
     </View>
   );
 }

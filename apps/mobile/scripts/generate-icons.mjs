@@ -23,9 +23,10 @@ const SIZE = 1024;
 // 경계를 부드럽게 하려고 4배로 그린 뒤 줄인다(안티에일리어싱).
 const SS = 4;
 
-// 브랜드 색 — apps/mobile/src/theme/colors.ts 의 primary 와 같은 값.
-const BLUE = [0x25, 0x63, 0xeb];
-const BLUE_DEEP = [0x1d, 0x4e, 0xd8];
+// 브랜드 색 — 웹 로고·app.json adaptiveIcon.backgroundColor 와 같은 초록(#12b382).
+// 아래쪽은 packages/design-tokens 의 blue-600(#0a7d5b, 이름은 blue 지만 값은 초록).
+const BLUE = [0x12, 0xb3, 0x82];
+const BLUE_DEEP = [0x0a, 0x7d, 0x5b];
 const WHITE = [0xff, 0xff, 0xff];
 
 // ── PNG 인코더 (RGBA8) ──────────────────────────────────────────────────────
