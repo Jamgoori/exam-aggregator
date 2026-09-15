@@ -112,6 +112,28 @@ test("결제·로그인·API 경로는 국가를 보지 않는다", () => {
   }
 });
 
+test("앱 심사·딥링크 검증이 부르는 공개 경로는 국가를 보지 않는다", () => {
+  // App Review(미국)·Play 심사자가 약관·개인정보처리방침·계정 삭제 안내를 직접 연다.
+  // Apple/Google 검증 CDN 이 /.well-known/* 을 읽는다. 403 이면 심사 반려·딥링크 불능.
+  const paths = [
+    "/terms",
+    "/privacy",
+    "/account/delete-request",
+    "/app-ads.txt",
+    "/.well-known/apple-app-site-association",
+    "/.well-known/assetlinks.json",
+  ];
+  for (const pathname of paths) {
+    assert.equal(decide({ country: "US", pathname }).action, "allow", pathname);
+  }
+  // 앞부분만 같은 주소는 면제가 아니다.
+  assert.equal(isInfraPath("/terms-of-use"), false);
+  assert.equal(isInfraPath("/privacy/edit"), false);
+  assert.equal(isInfraPath("/account"), false);
+  assert.equal(isInfraPath("/account/delete-request/other"), false);
+  assert.equal(isInfraPath("/.well-known-ish"), false);
+});
+
 test("메타데이터 라우트는 통과, 비슷하게 생긴 일반 주소는 안 통과", () => {
   assert.equal(isInfraPath("/opengraph-image"), true);
   assert.equal(isInfraPath("/papers/2026-국가직-9급-국어/opengraph-image"), true);

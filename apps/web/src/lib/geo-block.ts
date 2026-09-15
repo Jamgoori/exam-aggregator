@@ -42,7 +42,10 @@ export const BYPASS_COOKIE = "geo_bypass";
 // - /api/**        : PG 웹훅·Vercel 크론. 호출자가 해외 서버다(크론은 Vercel 인프라).
 // - /payments/**   : 결제창 복귀. 돈이 이동 중인 경로는 절대 막지 않는다.
 // - /auth/**       : 소셜 로그인 콜백. 중간에서 끊으면 세션이 안 심긴 채 멈춘다.
-const INFRA_DIRS = ["/api", "/payments", "/auth"] as const;
+// - /.well-known/** : 앱 딥링크 검증 파일(apple-app-site-association·assetlinks.json).
+//                    읽는 쪽이 Apple/Google 의 검증 CDN 이라 언제나 해외 IP 다 — 막히면
+//                    유니버설 링크·앱 링크가 조용히 꺼진다(사용자 눈에는 브라우저로 열림).
+const INFRA_DIRS = ["/api", "/payments", "/auth", "/.well-known"] as const;
 
 // 검색·SNS·PWA 가 읽는 메타 파일. 페이지가 아니라 설비다.
 // (robots.txt·sitemap.xml·rss.xml 은 proxy matcher 의 확장자 제외로 애초에 여기
@@ -57,6 +60,16 @@ const INFRA_FILES = [
   "/ads.txt",
   "/manifest.webmanifest",
   "/favicon.ico",
+  // 앱 스토어 심사·앱이 부르는 공개 문서. App Review(미국)·Play 심사자(해외)가
+  // 약관·개인정보처리방침·계정 삭제 안내 URL 을 직접 열어 본다 — 403 이면 심사 반려다.
+  // 법적 고지·설비 파일이라 국가와 무관하게 내준다(로그인·개인정보 없음).
+  "/terms",
+  "/privacy",
+  // Google Play 데이터 안전 섹션의 "계정 삭제 요청 웹 링크". 심사자가 해외에서 연다.
+  "/account/delete-request",
+  // 애드몹 앱 광고 판매자 파일. .txt 라 matcher 가 이미 제외하지만 ads.txt 와 같은
+  // 이유(matcher 를 손대는 날 대비)로 판정에도 남긴다.
+  "/app-ads.txt",
 ] as const;
 
 // Next 의 메타데이터 라우트. 마지막 세그먼트로만 판정한다 —

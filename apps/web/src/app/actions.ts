@@ -20,7 +20,14 @@ import {
 // (아이디·비밀번호 찾기)를 전부 자체 구현해야 해서 폐쇄했고, 복구·비밀번호 보안을
 // provider에 위임한다. provider 값은 반드시 이 화이트리스트 안에서만 쓴다 — 폼 데이터로
 // provider 문자열을 받아 그대로 넘기면 대시보드에 켜지 않은 provider로도 시도가 가능해진다.
-async function signInWithProvider(provider: "google" | "kakao", formData: FormData) {
+// "apple" 은 Supabase 대시보드 Authentication → Providers → Apple 을 켜 둬야 동작한다
+// (Apple Developer 의 Services ID·Team ID·Key ID·.p8 비밀키를 넣고, Apple 쪽 Return URL
+// 에 Supabase 콜백 주소를 등록). 대시보드 설정 전에는 버튼을 눌러도 Supabase 가
+// "provider is not enabled" 로 거절해 아래 error 분기로 떨어진다.
+async function signInWithProvider(
+  provider: "google" | "kakao" | "apple",
+  formData: FormData,
+) {
   // 돌아올 주소. 요청 헤더의 호스트를 그대로 쓰지 않는다 — 아는 호스트(정본 도메인·
   // 프리뷰·로컬)가 아니면 정본 주소로 되돌린다(lib/request-origin.ts).
   const origin = await getRequestOrigin();
@@ -49,6 +56,10 @@ export async function signInWithGoogle(formData: FormData) {
 
 export async function signInWithKakao(formData: FormData) {
   await signInWithProvider("kakao", formData);
+}
+
+export async function signInWithApple(formData: FormData) {
+  await signInWithProvider("apple", formData);
 }
 
 export async function signOutUser() {
