@@ -575,7 +575,7 @@ export function CbtSolver({
         onClick={() => switchViewMode("single")}
         disabled={!hasQuestionImages}
         title={hasQuestionImages ? undefined : "문항별 이미지가 아직 등록되지 않았어요"}
-        className={`shrink-0 rounded-full px-3 py-1 text-[15px] font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+        className={`shrink-0 rounded-full px-2.5 py-1 text-[13px] font-medium disabled:cursor-not-allowed disabled:opacity-40 lg:px-3 lg:text-[15px] ${
           viewMode === "single"
             ? "bg-blue-600 text-white"
             : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
@@ -586,7 +586,7 @@ export function CbtSolver({
       <button
         type="button"
         onClick={() => switchViewMode("full")}
-        className={`shrink-0 rounded-full px-3 py-1 text-[15px] font-medium ${
+        className={`shrink-0 rounded-full px-2.5 py-1 text-[13px] font-medium lg:px-3 lg:text-[15px] ${
           viewMode === "full"
             ? "bg-blue-600 text-white"
             : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:bg-zinc-800"
@@ -602,19 +602,33 @@ export function CbtSolver({
     </>
   );
 
-  // 문제별 풀기(lg)에서 보여주는 문항 번호·신고·제출. 문제별 뷰가 따로 갖던 헤더 한
-  // 줄(약 40px)을 없애려고 위쪽 줄에 얹어둔 것이라, 탭이 헤더로 합쳐질 때 같이 따라
-  // 올라간다. 폭이 좁은 화면에서는 줄이 넘쳐 숨기고, 그쪽은 문제별 뷰의 자체 헤더를
-  // 그대로 쓴다.
+  // 문제별 풀기에서 보여주는 문항 번호·신고·제출. 문제별 뷰가 따로 갖던 헤더 한
+  // 줄(약 40px)을 없애려고 탭 줄에 얹어둔 것이라, 탭이 헤더로 합쳐질 때 같이 따라
+  // 올라간다. 모바일도 같은 줄에 태우려면 360px 폭에 탭·자물쇠까지 다 들어가야 해서,
+  // 거기서는 글자와 좌우 여백을 한 단계씩 줄이고 총 문항 수는 제출 버튼 쪽에만
+  // 남긴다("2번 / 25"의 "/ 25"까지 두면 줄이 넘친다 — 360px 실측).
+  // 세트문제(예: "12~13번")는 번호가 길어 그러고도 모자라, 그때만 모바일 제출
+  // 버튼의 진행 개수를 접는다(접지 않으면 번호가 "1.."로 잘린다. 개수는 답안 입력
+  // 시트와 lg 이상에서 그대로 보인다). 그래도 넘치면 버튼이 밀리는 대신 번호가
+  // 줄어든다.
+  const isQuestionSet = groupFirstNumber !== groupLastNumber;
   const singleModeStatus = viewMode === "single" && (
-    <div className="ml-auto hidden shrink-0 items-center gap-2 lg:flex">
-      <div className="flex items-center gap-1 text-sm">
-        <span className="font-bold text-zinc-800 dark:text-zinc-200">
-          {groupFirstNumber === groupLastNumber
-            ? `${groupFirstNumber}번`
-            : `${groupFirstNumber}~${groupLastNumber}번`}
+    <div className="ml-auto flex min-w-0 items-center gap-1 lg:gap-2">
+      <div className="flex min-w-0 items-center gap-1 text-xs lg:text-sm">
+        <span className="truncate font-bold text-zinc-800 dark:text-zinc-200">
+          {isQuestionSet
+            ? `${groupFirstNumber}~${groupLastNumber}번`
+            : `${groupFirstNumber}번`}
         </span>
-        <span className="text-zinc-400 dark:text-zinc-600"> / {totalQuestions}</span>
+        {/* 채점이 끝나 제출 버튼이 빠지면 모바일에서도 자리가 남아 다시 보여준다. */}
+        <span
+          className={`shrink-0 text-zinc-400 dark:text-zinc-600 ${
+            result ? "" : "hidden lg:inline"
+          }`}
+        >
+          {" "}
+          / {totalQuestions}
+        </span>
         <ReportQuestionButton
           paperId={paperId}
           questionNumber={groupFirstNumber}
@@ -626,9 +640,18 @@ export function CbtSolver({
           type="button"
           onClick={handleSubmit}
           disabled={isPending}
-          className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
+          className="shrink-0 rounded-lg bg-blue-600 px-2 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 lg:px-3 dark:disabled:bg-zinc-700"
         >
-          {isPending ? "채점 중..." : `제출 (${answeredCount}/${totalQuestions})`}
+          {isPending ? (
+            "채점 중..."
+          ) : (
+            <>
+              제출
+              <span className={isQuestionSet ? "hidden lg:inline" : ""}>
+                {` ${answeredCount}/${totalQuestions}`}
+              </span>
+            </>
+          )}
         </button>
       )}
     </div>
@@ -782,7 +805,7 @@ export function CbtSolver({
         {/* 전체화면(태블릿·PC)에서는 이 줄이 통째로 헤더 줄로 올라가므로 여기서는
             그리지 않는다. */}
         {!tabsInHeader && (
-          <div className="mx-auto flex max-w-7xl items-center gap-1 px-4 py-1.5">
+          <div className="mx-auto flex max-w-7xl items-center gap-1 px-3 py-1.5 lg:px-4">
             {viewModeTabs}
             {singleModeStatus}
           </div>
@@ -846,7 +869,6 @@ export function CbtSolver({
             {viewMode === "single" && (
               <SingleQuestionView
                 questionIndex={currentQuestionIndex}
-                totalQuestions={totalQuestions}
                 questions={currentGroupNumbers.map((number) => ({
                   number,
                   choiceCount: questionChoiceCounts[number] ?? choiceCount,
@@ -865,17 +887,9 @@ export function CbtSolver({
                 onSubmit={handleSubmit}
                 submitting={isPending}
                 submitted={!!result}
-                answeredCount={answeredCount}
                 error={error}
                 zoom={zoom}
                 onPinchZoom={handlePinchZoom}
-                report={
-                  <ReportQuestionButton
-                    paperId={paperId}
-                    questionNumber={groupFirstNumber}
-                    context="cbt"
-                  />
-                }
               />
             )}
           </div>

@@ -19,7 +19,6 @@ type QuestionAnswerState = {
 
 export function SingleQuestionView({
   questionIndex,
-  totalQuestions,
   questions,
   images,
   prevIndex,
@@ -32,14 +31,11 @@ export function SingleQuestionView({
   onSubmit,
   submitting,
   submitted,
-  answeredCount,
   error,
   zoom = 1,
   onPinchZoom,
-  report,
 }: {
   questionIndex: number;
-  totalQuestions: number;
   // 공통지문 세트문제는 화면 하나에 여러 문제가 같이 보이므로, 답 선택 줄도
   // 세트에 속한 번호 수만큼 나온다(보통은 원소 1개).
   questions: QuestionAnswerState[];
@@ -54,19 +50,14 @@ export function SingleQuestionView({
   onSubmit: () => void;
   submitting: boolean;
   submitted: boolean;
-  answeredCount: number;
   error?: string | null;
   zoom?: number;
   // 두 손가락 핀치로 확대/축소할 때 직전 대비 배율(예: 1.02)을 부모(zoom 상태 보유)에
   // 올려보내는 콜백. 손(이동) 모드에서는 스크롤 영역 터치로, 펜/지우개 모드에서는
   // 캔버스 pointer로 잡아 같은 콜백을 호출한다.
   onPinchZoom?: (factor: number) => void;
-  // 모바일 헤더의 문항 번호 옆에 붙는 오류 신고 버튼. lg 이상은 이 헤더 자체가 숨고
-  // cbt-solver의 탭 줄에 별도로 붙으므로, 여기서는 lg 미만 헤더에만 쓰인다.
-  report?: React.ReactNode;
 }) {
   const firstNumber = questions[0]?.number ?? questionIndex + 1;
-  const lastNumber = questions[questions.length - 1]?.number ?? firstNumber;
   const isLast = nextIndex === null;
 
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -106,30 +97,6 @@ export function SingleQuestionView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* lg(태블릿 가로·데스크톱)에서는 이 번호·제출 줄을 상단 탭 줄로 옮겨 세로
-          공간을 아끼므로 여기서는 숨긴다. 폭이 좁은 모바일에서는 탭 줄에 넣으면
-          넘쳐서, 모바일 한정으로 이 자체 헤더를 그대로 쓴다. */}
-      <div className="relative flex shrink-0 items-center justify-center border-b border-zinc-100 bg-white px-4 py-2 lg:hidden dark:border-zinc-700 dark:bg-zinc-900">
-        <div className="flex items-center gap-1">
-          <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
-            {firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`}
-          </span>
-          <span className="text-sm text-zinc-400 dark:text-zinc-600"> / {totalQuestions}</span>
-          {report}
-        </div>
-        {/* 문제별 풀기 도중에도 언제든 전체 채점할 수 있도록 상단에 제출 버튼을 둔다. */}
-        {!submitted && (
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={submitting}
-            className="absolute right-3 rounded-lg bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
-          >
-            {submitting ? "채점 중..." : `제출 (${answeredCount}/${totalQuestions})`}
-          </button>
-        )}
-      </div>
-
       <div
         ref={scrollAreaRef}
         {...swipeHandlers}
