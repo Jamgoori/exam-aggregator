@@ -696,6 +696,35 @@ Phase 1a 가 끝나면 "쓸모 있는 설치 가능한 앱"(검색·CBT·채점�
 
 ---
 
+## 12-3. Phase 1a 진행 상황 (2026-09-15, 코드 완료 · 실기기 미검증)
+
+앱 트리는 SDK 57 로 재스캐폴드됐고 아래 화면이 웹 URL 과 같은 경로로 존재한다. 전부 `tsc`·`expo lint`·
+`expo export --platform android`·`expo prebuild --platform android`·`expo-doctor 21/21` 을 통과했다. **실기기·에뮬레이터
+실행은 이 환경에서 못 했다** — 첫 Android preview APK 가 그 검증이다.
+
+| 영역 | 화면 | 비고 |
+|---|---|---|
+| 크롬 | `AppHeader`(65px)·`NavDrawer`(core nav-items)·하단 탭 4개(§12-2 #1)·`AppFooter`·테마 토글 | 몰입 화면(CBT·PDF)은 탭·헤더 없음 |
+| 계정 | `/login`(Google·Kakao, Apple 미노출), `/onboarding/nickname`, `/mypage/edit`(닉네임·CBT 시작 모드·리마인더·탈퇴) | 아바타 업로드 Phase 4 |
+| 홈 | `/`(웹 랜딩 5블록), `/diagnosis` 소개 | 팝업 슬라이더 Phase 2, 광고 Phase 5 |
+| 카탈로그 | `/papers`(검색·제안·그룹·즐겨찾기·24/페이지·dedup), `/subjects`, `/subjects/[slug]`, `/papers/[id]`(10블록), `/papers/[id]/pdf`, `/papers/[id]/explanations` | `/exams*` Phase 2 — 링크는 `/papers?type&level` 로 우회 |
+| CBT | `/papers/[id]/cbt` 문제별(카운트다운·Skia 필기·툴바·세트·잠금·이탈 확인·결과 모달), 전체보기(PDF 보기 + OMR 시트) | 전체보기 분할 OMR·필기 Phase 2, 문항 신고 Phase 2 |
+| 마이페이지 | `/mypage` 4탭·스탯·NextAction·멤버십 타일, `/mypage/attempts/[id]`(정답 `own_wrong_answers`), `/membership` 상태 화면 | 오답노트 상세·오늘의 복습·결제 내역은 Phase 2~3 |
+| 인프라 | Uniwind + design-tokens, TanStack Query 퍼시스터(정답·해설·멤버십 비퍼시스트), `invokeEdge` 오류 정책, `/api/app/config` 강제 업데이트, Sentry(DSN 있을 때), analytics 스텁(GA4 는 google-services.json 뒤) | |
+
+**검토 반영(2026-09-15)**: 데이터·런타임·파리티 3관점 검토 31건 전부 수정(커밋 28e8d65). 대표: Uniwind 아이콘 색 매핑,
+Modal 안 RNGH 루트, 드래프트 복원 키, 타임아웃 → `recoverAttempt`, 다크 배경 토큰, `/subjects` 웹 파리티.
+
+**운영 DB 재적용 필요 SQL**: `paper_explanation_counts` 를 anon 에 개방(schema.sql 과 동일, 비로그인도 "해설 열기" 표시).
+적용 전에는 비로그인 상세 화면에서 그 버튼만 안 보인다.
+
+**Phase 1a 종료 조건까지 남은 것(소유자·기기 작업)**: §11 "Phase 0 전" 콘솔 작업(EAS 키스토어 SHA-1·키 해시 → Google Android
+클라이언트·Kakao 플랫폼, Supabase 프로바이더, `EXPO_TOKEN` 재발급, GitHub secrets) → Actions "앱 빌드 (EAS)" preview/android →
+폰 설치 → 수동 시나리오(로그인 → 검색 → CBT → 채점 → 기록 → 응시 상세 정답) → 웹·앱 교차 확인 → Sentry 테스트 크래시.
+Edge Function 배포(§12-1)가 선행돼야 채점·해설·멤버십 호출이 새 계약으로 응답한다.
+
+---
+
 ## 13. 리스크·미결 사항
 
 | 리스크 | 완화 |
