@@ -28,15 +28,21 @@ export function Avatar({
 }) {
   const box = BOX[size];
   if (avatarUrl) {
+    // expo-image 의 Image 는 Uniwind 가 감싸지 않아 className 이 버려진다 — 배경(로딩 중 자리)은
+    // 바깥 View 에 주고 이미지에는 style 만 준다.
     return (
-      <Image
-        source={{ uri: avatarUrl }}
-        cachePolicy="memory-disk"
-        contentFit="cover"
-        accessible={false}
+      <View
+        className="shrink-0 overflow-hidden bg-zinc-100 dark:bg-zinc-800"
         style={{ width: box.px, height: box.px, borderRadius: box.px / 2 }}
-        className="shrink-0 bg-zinc-100 dark:bg-zinc-800"
-      />
+      >
+        <Image
+          source={{ uri: avatarUrl }}
+          cachePolicy="memory-disk"
+          contentFit="cover"
+          accessible={false}
+          style={{ width: box.px, height: box.px, borderRadius: box.px / 2 }}
+        />
+      </View>
     );
   }
   return (
@@ -44,8 +50,8 @@ export function Avatar({
       colors={[tokens.light.blue[500], tokens.light.blue[600]]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      style={{ width: box.px, height: box.px, borderRadius: box.px / 2 }}
-      className="shrink-0 items-center justify-center"
+      // LinearGradient 도 className 이 안 먹는다 — 가운데 정렬은 style 로.
+      style={{ width: box.px, height: box.px, borderRadius: box.px / 2, alignItems: "center", justifyContent: "center" }}
     >
       <View accessible={false}>
         <AppText variant={box.text} weight="bold" allowFontScaling={false} className="text-white">

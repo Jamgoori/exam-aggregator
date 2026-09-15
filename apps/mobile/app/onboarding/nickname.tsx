@@ -1,4 +1,4 @@
-import { NICKNAME_MAX, NICKNAME_MIN, sanitizeNextPath } from "@gongmoa/core";
+import { NICKNAME_MAX, NICKNAME_MIN } from "@gongmoa/core";
 import { router, useLocalSearchParams, type Href } from "expo-router";
 import { useEffect, useState } from "react";
 import { BackHandler, View } from "react-native";
@@ -6,6 +6,7 @@ import { AppText } from "../../src/components/app-text";
 import { Button } from "../../src/components/button";
 import { Input } from "../../src/components/input";
 import { Screen } from "../../src/components/screen";
+import { resolveNextPath } from "../../src/lib/next-path";
 import { currentNickname, updateNickname } from "../../src/lib/profile";
 import { useAuth } from "../../src/providers/auth-provider";
 
@@ -15,8 +16,9 @@ import { useAuth } from "../../src/providers/auth-provider";
 export default function NicknameOnboardingScreen() {
   const params = useLocalSearchParams<{ next?: string }>();
   // 닉네임까지 정한 사람이 갈 곳이 없으면 소개 랜딩(/)이 아니라 문제지 목록으로(웹 규칙).
-  const sanitized = sanitizeNextPath(params.next);
-  const next = sanitized === "/" ? "/papers" : sanitized;
+  // login.tsx 와 같이 앱 화이트리스트(resolveNextPath)를 지난 값에 그 규칙을 얹는다.
+  const resolved = resolveNextPath(params.next);
+  const next = resolved === "/" ? "/papers" : resolved;
   const { session, loading } = useAuth();
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
@@ -53,7 +55,7 @@ export default function NicknameOnboardingScreen() {
   }
 
   return (
-    <Screen header={false} footer={false} contentClassName="max-w-sm gap-6 py-24">
+    <Screen footer={false} contentClassName="max-w-sm gap-6 py-24">
       <View>
         <AppText variant="2xl" weight="semibold">
           닉네임을 설정해주세요

@@ -13,6 +13,7 @@ import { SubjectBookmarkButton } from "../../../src/components/papers/subject-bo
 import { QueryState } from "../../../src/components/query-state";
 import { Screen } from "../../../src/components/screen";
 import { Skeleton } from "../../../src/components/skeleton";
+import { useSetScreenParams } from "../../../src/lib/screen-params";
 import { useMyBookmarkedPaperIds } from "../../../src/queries/bookmarks";
 import { useCbtAvailability, useMyRoundCounts } from "../../../src/queries/papers";
 import { useSubjectBySlug, useSubjectFilters, useSubjectPapers } from "../../../src/queries/subjects";
@@ -54,6 +55,7 @@ function SubjectScreen({ subject, params }: { subject: Subject; params: Params }
   const selectedExamTypeIds = useMemo(() => parseExamTypesParam(params.examTypes), [params.examTypes]);
   const examTypeIds = useMemo(() => [...selectedExamTypeIds], [selectedExamTypeIds]);
   const currentPage = Math.max(1, Number(params.page) || 1);
+  const setScreenParams = useSetScreenParams();
 
   const filters = useSubjectFilters(subject.id);
   const papers = useSubjectPapers(subject.id, level, examTypeIds);
@@ -72,11 +74,11 @@ function SubjectScreen({ subject, params }: { subject: Subject; params: Params }
     const nextLevel = "level" in next ? next.level : level;
     const nextTypes = next.examTypes ?? selectedExamTypeIds;
     const nextPage = next.page ?? 1;
-    router.setParams({
+    setScreenParams({
       level: nextLevel || undefined,
       examTypes: nextTypes.size > 0 ? [...nextTypes].join(",") : undefined,
       page: nextPage > 1 ? String(nextPage) : undefined,
-    } as Record<string, string>);
+    });
   }
 
   const noFilter = !level && selectedExamTypeIds.size === 0;

@@ -37,7 +37,7 @@ export function usePaper(id: string | null) {
   });
 }
 
-// 댓글·난이도 집계·정답표·CBT 지원·회독 평균 — 누구나. 댓글이 바뀌므로 30초 등급.
+// 댓글·난이도 집계·정답표·CBT 지원·회독 평균·해설 유무 — 누구나. 댓글이 바뀌므로 30초 등급.
 export function usePaperPublicDetail(paper: ExamPaper | null | undefined) {
   return useQuery<PaperPublicDetail>({
     queryKey: paperPublicKey(paper?.id ?? ""),
@@ -47,8 +47,7 @@ export function usePaperPublicDetail(paper: ExamPaper | null | undefined) {
   });
 }
 
-// 즐겨찾기·내 난이도·내 응시·해설 유무 — 로그인 사용자만(paper_explanation_counts 가
-// authenticated 전용).
+// 즐겨찾기·내 난이도·내 응시 — 로그인 사용자만.
 export function usePaperMyDetail(paper: ExamPaper | null | undefined) {
   const { userId } = useAuth();
   return useQuery<PaperMyDetail>({

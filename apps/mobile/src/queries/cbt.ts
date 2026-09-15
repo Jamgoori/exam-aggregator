@@ -144,7 +144,9 @@ async function submitOrRecover(
   }
 }
 
-// 채점 성공 후 무효화 지도(§6.3): 응시 목록·오답노트·상태·출석·멤버십·복습 요약·진단 자격.
+// 채점 성공 후 무효화 지도(§6.3): 응시 목록·오답노트·상태·출석·멤버십·복습 요약·진단 자격 +
+// 회독 수(N회독 배지)·문제지 내 기록·홈 오늘의 학습·진단 소개 진행·회독 비교. 전부 ['me', userId, key, …]
+// 접두라 prefix 무효화로 하위 키까지 잡힌다.
 const INVALIDATE_AFTER_SUBMIT = [
   "attempts",
   "wrong-notes",
@@ -153,6 +155,11 @@ const INVALIDATE_AFTER_SUBMIT = [
   "membership",
   "due-summary",
   "diagnosis-eligibility",
+  "round-counts",
+  "paper",
+  "today-study",
+  "diagnosis-intro",
+  "round-compare",
 ] as const;
 
 export function useSubmitCbt(paperId: string, userId: string | null) {

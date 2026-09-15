@@ -40,7 +40,7 @@ function goBackToPaper(paper: ExamPaper) {
 export function ExplanationsScreen({ paper }: { paper: ExamPaper }) {
   const query = usePaperExplanations(paper.id);
   return (
-    <Screen contentClassName="gap-8 py-12">
+    <Screen padded={false} contentClassName="gap-8 px-4 py-12">
       <QueryState query={query} skeleton={<ExplanationsSkeleton />} isEmpty={(d) => d.totalCount === 0} empty={<ExplanationsEmpty paper={paper} />}>
         {(data) => <ExplanationsBody paper={paper} data={data} />}
       </QueryState>

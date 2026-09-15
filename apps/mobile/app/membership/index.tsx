@@ -13,6 +13,7 @@ import { Skeleton } from "../../src/components/skeleton";
 import { resolveNextPath } from "../../src/lib/next-path";
 import { useMembershipDays } from "../../src/queries/membership";
 import { useAuth } from "../../src/providers/auth-provider";
+import { tokens } from "../../src/theme";
 
 // `/membership?next`(설계서 §5 행 O — 로그인 없이도 본다, §8.1). 웹 app/membership/page.tsx 에서
 // 상태 필(CurrentStatus 6가지)·비교표(FEATURE_ROWS)·FAQ 부분집합만 옮긴다. **플랜 카드·가격·구매
@@ -68,7 +69,8 @@ export default function MembershipScreen() {
       {/* 전면 무료 이벤트 배너. 날짜는 core FREE_UNTIL_LABEL 하나에서 온다. */}
       {freeForAll && (
         <LinearGradient
-          colors={["#155dfc", "#4f39f6", "#7f22fe"]}
+          // 웹 from-blue-600 via-indigo-600 to-violet-600 — blue-600 은 재매핑 토큰(초록).
+          colors={[tokens.light.blue[600], "#4f39f6", "#7f22fe"]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           className="gap-2 overflow-hidden rounded-2xl px-6 py-6"

@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { Modal, Pressable, View } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "./app-text";
@@ -30,33 +30,36 @@ export function ImageZoomModal({
 
   return (
     <Modal visible={!!uri} transparent statusBarTranslucent onRequestClose={onClose}>
-      <View className="flex-1 bg-black/90">
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="닫기"
-          onPress={onClose}
-          style={{ top: insets.top + 12 }}
-          className="absolute right-5 z-10 rounded-full bg-white/10 px-3 py-1.5"
-        >
-          <AppText variant="base" className="text-white">
-            닫기
-          </AppText>
-        </Pressable>
-        {uri && (
-          <GestureDetector gesture={pinch}>
-            <Animated.View style={[{ flex: 1 }, style]}>
-              <Image
-                source={{ uri }}
-                style={{ flex: 1 }}
-                contentFit="contain"
-                transition={100}
-                cachePolicy="memory-disk"
-                accessibilityLabel={label}
-              />
-            </Animated.View>
-          </GestureDetector>
-        )}
-      </View>
+      {/* Android 의 RN Modal 은 루트 GestureHandlerRootView 밖 — 안에 하나 더 두어야 핀치가 먹는다. */}
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View className="flex-1 bg-black/90">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="닫기"
+            onPress={onClose}
+            style={{ top: insets.top + 12 }}
+            className="absolute right-5 z-10 rounded-full bg-white/10 px-3 py-1.5"
+          >
+            <AppText variant="base" className="text-white">
+              닫기
+            </AppText>
+          </Pressable>
+          {uri && (
+            <GestureDetector gesture={pinch}>
+              <Animated.View style={[{ flex: 1 }, style]}>
+                <Image
+                  source={{ uri }}
+                  style={{ flex: 1 }}
+                  contentFit="contain"
+                  transition={100}
+                  cachePolicy="memory-disk"
+                  accessibilityLabel={label}
+                />
+              </Animated.View>
+            </GestureDetector>
+          )}
+        </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

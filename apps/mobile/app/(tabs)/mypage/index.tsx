@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import { Pressable, View } from "react-native";
 import { AppText } from "../../../src/components/app-text";
 import { Avatar } from "../../../src/components/avatar";
-import { InlineAlert } from "../../../src/components/feedback";
 import { AttendanceCard } from "../../../src/components/mypage/attendance-card";
 import { BookmarksTab } from "../../../src/components/mypage/bookmarks-tab";
 import { HistoryTab } from "../../../src/components/mypage/history-tab";
@@ -16,6 +15,7 @@ import { WrongNotesTab } from "../../../src/components/mypage/wrong-notes-tab";
 import { QueryState } from "../../../src/components/query-state";
 import { Screen } from "../../../src/components/screen";
 import { Skeleton } from "../../../src/components/skeleton";
+import { useSetScreenParams } from "../../../src/lib/screen-params";
 import { useAttendanceSummary } from "../../../src/queries/attendance";
 import { useMembershipDays } from "../../../src/queries/membership";
 import { useAttemptRounds, useDiagnosisEligibility, useMyAttempts, useStreakDays, useWeeklyDiagnosisStatus } from "../../../src/queries/mypage";
@@ -29,7 +29,7 @@ import { useAuth } from "../../../src/providers/auth-provider";
 // 이번 주 진단 + 출석(열려 있을 때만) + 프리미엄이면 오답노트 그룹(극복 진행률). 멤버십은
 // AuthProvider(EF membership-get) 값을 그린다.
 export default function MypageScreen() {
-  const params = useLocalSearchParams<{ tab?: string; error?: string }>();
+  const params = useLocalSearchParams<{ tab?: string }>();
   const tab = resolveMyPageTab(params.tab);
   const next = params.tab ? `/mypage?tab=${encodeURIComponent(params.tab)}` : "/mypage";
   const { userId, loading } = useRequireLogin(next);
@@ -42,10 +42,10 @@ export default function MypageScreen() {
     );
   }
   if (!userId) return <LoginRequiredScreen />;
-  return <MypageBody tab={tab} errorMessage={params.error} />;
+  return <MypageBody tab={tab} />;
 }
 
-function MypageBody({ tab, errorMessage }: { tab: MyPageTabKey; errorMessage?: string }) {
+function MypageBody({ tab }: { tab: MyPageTabKey }) {
   const { nickname, avatarUrl, isPremium, isAdmin, membership, membershipLoading } = useAuth();
   const attempts = useMyAttempts();
   const unresolved = useUnresolvedBySubject();
@@ -55,6 +55,7 @@ function MypageBody({ tab, errorMessage }: { tab: MyPageTabKey; errorMessage?: s
   // 무거운 집계(극복 진행률)는 웹처럼 프리미엄에게만 돌린다.
   const groups = useWrongNoteGroups(attempts.data, isPremium);
   const { daysLeft } = useMembershipDays();
+  const setScreenParams = useSetScreenParams();
 
   const { attemptsByPaper, roundNumberByAttemptId } = useAttemptRounds(attempts.data);
   const streakDays = useStreakDays(attempts.data);
@@ -73,14 +74,11 @@ function MypageBody({ tab, errorMessage }: { tab: MyPageTabKey; errorMessage?: s
   }
 
   function selectTab(key: MyPageTabKey) {
-    router.setParams({ tab: key } as Record<string, string>);
+    setScreenParams({ tab: key });
   }
 
   return (
     <Screen contentClassName="gap-8" refreshing={refreshing} onRefresh={refetchAll}>
-      {/* 다른 화면이 error 를 실어 보낸 경우(웹은 login 으로 redirect 하며 붙이는 값) 그대로 알린다. */}
-      {errorMessage ? <InlineAlert message={errorMessage} /> : null}
-
       <View>
         <Pressable accessibilityRole="link" onPress={() => router.navigate("/")} hitSlop={6} className="self-start">
           <AppText variant="sm" className="text-zinc-500 dark:text-zinc-500">

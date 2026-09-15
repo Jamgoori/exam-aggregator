@@ -172,14 +172,15 @@ export function CommentsSection({
         </View>
       )}
 
-      <View className="divide-y divide-zinc-100 dark:divide-zinc-700">
+      {/* 웹 divide-y — Uniwind 는 자식 선택자를 버리므로 두 번째 항목부터 border-t 로 그린다. */}
+      <View>
         {tree.length === 0 && (
           <AppText variant="sm" className="py-10 text-center text-zinc-500 dark:text-zinc-500">
             아직 댓글이 없어요. 첫 댓글을 남겨보세요.
           </AppText>
         )}
-        {tree.map((node) => (
-          <View key={node.id} className="py-5">
+        {tree.map((node, i) => (
+          <View key={node.id} className={["py-5", i > 0 ? "border-t border-zinc-100 dark:border-zinc-700" : ""].join(" ")}>
             {renderNode(node)}
           </View>
         ))}

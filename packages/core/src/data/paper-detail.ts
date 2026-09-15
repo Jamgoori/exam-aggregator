@@ -27,9 +27,13 @@ export type PaperPublicDetail = {
   // 표본 3명 미만 회차는 DB 함수(avg_score_by_round)가 이미 제외한다.
   roundAverages: RoundAverage[];
   answerKey: AnswerKey | null;
+  // 전 문항 해설이 준비된 문제지에만 "해설 열기"(반쪽 해설집을 "지원"으로 표시하지 않는다).
+  // paper_explanation_counts 는 anon 에도 열려 있어(schema.sql Phase 0) 게스트도 본다 — 웹이
+  // service_role 로 누구에게나 세어 주는 것과 같다.
+  hasFullExplanations: boolean;
 };
 
-// 로그인 여부와 무관한 부분(댓글·난이도 집계·정답표·CBT 지원·회독 평균).
+// 로그인 여부와 무관한 부분(댓글·난이도 집계·정답표·CBT 지원·회독 평균·해설 유무).
 export async function fetchPaperPublicDetail(
   client: SupabaseClient,
   paper: ExamPaper,
@@ -45,8 +49,14 @@ export async function fetchPaperPublicDetail(
     .eq("round", paper.round);
   answerKeyQuery = paper.level ? answerKeyQuery.eq("level", paper.level) : answerKeyQuery.is("level", null);
 
-  const [{ data: comments }, { data: ratings }, { data: answerKeyRows }, { data: hasCbtAnswers }, { data: roundRows }] =
-    await Promise.all([
+  const [
+    { data: comments },
+    { data: ratings },
+    { data: answerKeyRows },
+    { data: hasCbtAnswers },
+    { data: roundRows },
+    { data: countRows },
+  ] = await Promise.all([
       client
         .from("comments")
         .select("id, paper_id, user_id, nickname, content, created_at, updated_at, parent_id")
@@ -56,7 +66,11 @@ export async function fetchPaperPublicDetail(
       answerKeyQuery,
       client.rpc("has_cbt_answers", { target_paper_id: paper.id }),
       client.rpc("avg_score_by_round", { target_paper_id: paper.id }),
+      client.rpc("paper_explanation_counts", { p_paper_ids: [paper.id] }),
     ]);
+
+  const explanationCount =
+    ((countRows ?? []) as { paper_id: string; count: number }[]).find((r) => r.paper_id === paper.id)?.count ?? 0;
 
   const scores = ((ratings ?? []) as { score: number }[]).map((r) => Number(r.score));
   const averageScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
@@ -78,6 +92,7 @@ export async function fetchPaperPublicDetail(
     hasCbtAnswers: hasCbtAnswers === true,
     roundAverages,
     answerKey,
+    hasFullExplanations: !!paper.question_count && explanationCount >= paper.question_count,
   };
 }
 
@@ -95,18 +110,15 @@ export type PaperMyDetail = {
   myScore: number | null;
   // 오래된 순(1회독부터).
   myCbtRecordItems: MyCbtRecordItem[];
-  // 전 문항 해설이 준비된 문제지에만 "해설 열기"(반쪽 해설집을 "지원"으로 표시하지 않는다).
-  hasFullExplanations: boolean;
 };
 
-// 본인 RLS 데이터(즐겨찾기·내 난이도·내 응시·해설 유무). paper_explanation_counts 는
-// authenticated 전용 RPC 라 이 함수 전체가 로그인 사용자 전용이다.
+// 본인 RLS 데이터(즐겨찾기·내 난이도·내 응시). 해설 유무는 공개 쪽(fetchPaperPublicDetail).
 export async function fetchPaperMyDetail(
   client: SupabaseClient,
   paper: ExamPaper,
   userId: string,
 ): Promise<PaperMyDetail> {
-  const [{ data: bookmarkData }, { data: myRatingData }, { data: attemptRows }, { data: countRows }] =
+  const [{ data: bookmarkData }, { data: myRatingData }, { data: attemptRows }] =
     await Promise.all([
       client.from("bookmarks").select("id").eq("user_id", userId).eq("paper_id", paper.id).maybeSingle(),
       client
@@ -121,7 +133,6 @@ export async function fetchPaperMyDetail(
         .eq("paper_id", paper.id)
         .eq("user_id", userId)
         .order("created_at", { ascending: true }),
-      client.rpc("paper_explanation_counts", { p_paper_ids: [paper.id] }),
     ]);
 
   const attempts = (attemptRows ?? []) as {
@@ -131,9 +142,6 @@ export async function fetchPaperMyDetail(
     duration_seconds: number | null;
     created_at: string;
   }[];
-  const explanationCount =
-    ((countRows ?? []) as { paper_id: string; count: number }[]).find((r) => r.paper_id === paper.id)?.count ?? 0;
-
   return {
     isBookmarked: !!bookmarkData,
     myScore: myRatingData ? Number((myRatingData as { score: number }).score) : null,
@@ -145,7 +153,6 @@ export async function fetchPaperMyDetail(
       durationSeconds: a.duration_seconds,
       createdAt: a.created_at,
     })),
-    hasFullExplanations: !!paper.question_count && explanationCount >= paper.question_count,
   };
 }
 

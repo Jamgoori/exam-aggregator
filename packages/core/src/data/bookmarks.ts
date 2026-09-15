@@ -5,12 +5,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // DI 로 옮긴 것. 전부 RLS(select/insert/delete own) 직접 접근이라 서버 액션이 필요 없다
 // (설계서 §6.2 즐겨찾기 행). 오류 문구는 웹 서버 액션과 같다.
 
-// 이 사용자의 즐겨찾기 전체(본인 것만이라 RLS 로 이미 작다).
+// 이 사용자의 즐겨찾기 전체(본인 것만이라 RLS 로 이미 작다). 순서는 북마크한 순(created_at desc,
+// 웹 mypage/page.tsx 와 동일) — Set 은 삽입 순서를 지키므로 목록 화면이 그대로 쓴다.
 export async function fetchMyBookmarkedPaperIds(
   client: SupabaseClient,
   userId: string,
 ): Promise<Set<string>> {
-  const { data } = await client.from("bookmarks").select("paper_id").eq("user_id", userId);
+  const { data } = await client
+    .from("bookmarks")
+    .select("paper_id")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
   return new Set(((data ?? []) as { paper_id: string }[]).map((row) => row.paper_id));
 }
 

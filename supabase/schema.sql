@@ -2824,6 +2824,8 @@ grant execute on function paper_identity_signals(uuid[]) to authenticated;
 -- 문제지별 해설 등록 문항 수. 웹 lib/wrong-notes.ts#countPaperExplanations 의 SQL 판 —
 -- 상세 화면이 "해설 열기" 버튼을 보여줄지 정하는 데 쓴다(본문은 돌려주지 않는다).
 -- question_explanations 는 question_id 가 unique 라 행 하나 = 문항 하나다.
+-- 웹은 service_role 로 비로그인에게도 세어 주므로(게스트도 "해설 열기"를 본다) anon 에도 연다 —
+-- 개수뿐이라 민감하지 않다. 본문은 explanations-get(rate-limit·미리보기)이 따로 지킨다.
 create or replace function paper_explanation_counts(p_paper_ids uuid[])
 returns table(paper_id uuid, count int)
 language plpgsql
@@ -2832,9 +2834,6 @@ security definer
 set search_path = public
 as $$
 begin
-  if auth.uid() is null then
-    raise exception 'not authenticated';
-  end if;
   if p_paper_ids is null or cardinality(p_paper_ids) = 0 then
     return;
   end if;
@@ -2850,8 +2849,8 @@ begin
    group by q.paper_id;
 end $$;
 
-revoke all on function paper_explanation_counts(uuid[]) from public, anon;
-grant execute on function paper_explanation_counts(uuid[]) to authenticated;
+revoke all on function paper_explanation_counts(uuid[]) from public;
+grant execute on function paper_explanation_counts(uuid[]) to anon, authenticated;
 
 -- 본인이 답한 문항의 정답. 웹 lib/wrong-notes.ts#fetchCorrectAnswers + lib/review-session.ts#
 -- filterQuestionsAnsweredByUser 가드의 SQL 판 — 응시 상세·오답노트가 "내가 푼 문항"의

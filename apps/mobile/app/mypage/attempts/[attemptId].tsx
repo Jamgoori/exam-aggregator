@@ -11,7 +11,7 @@ import {
 } from "@gongmoa/core";
 import { router, useLocalSearchParams, type Href } from "expo-router";
 import { Monitor, PartyPopper } from "lucide-react-native";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Pressable, View } from "react-native";
 import NotFoundScreen from "../../+not-found";
 import { AppText } from "../../../src/components/app-text";
@@ -28,7 +28,7 @@ import { useAuth } from "../../../src/providers/auth-provider";
 
 // `/mypage/attempts/[attemptId]`(설계서 §5 행, 웹 app/mypage/attempts/[attemptId]/page.tsx 1:1) —
 // 내 시험 기록에서 회차 하나를 눌렀을 때 "그 회차에서 틀린 문제만" 모아보는 화면. 본인 응시만
-// (RLS). 정답은 RPC own_wrong_answers(메모리 전용), 기본은 틀린 문항만·"전체 문항 보기" 토글(앱 추가).
+// (RLS). 정답은 RPC own_wrong_answers(메모리 전용). 웹처럼 틀린 문항만 그린다.
 //
 // 해설: 웹은 service_role 로 해설 본문(프리미엄)·유무(무료 잠금 자리)를 받지만, 앱용
 // `explanations-get context:"wrong-note"` 모드(설계서 §6.7 #7, Phase 2)는 아직 Edge 에 없다
@@ -67,22 +67,20 @@ function AttemptScreen({ attemptId }: { attemptId: string }) {
 function AttemptBody({ detail, attemptId }: { detail: AttemptDetail; attemptId: string }) {
   const { isPremium } = useAuth();
   const { attempt, paper, questions } = detail;
-  const [showAll, setShowAll] = useState(false);
   const pct = attempt.totalQuestions > 0 ? Math.round((attempt.score / attempt.totalQuestions) * 100) : 0;
   const wrong = useMemo(() => questions.filter((q) => !q.isCorrect), [questions]);
-  const shown = showAll ? questions : wrong;
 
   // 정답은 보이는 문항만(RPC 는 본인이 답한 문항만 돌려준다 — 이 화면의 문항은 전부 그렇다).
   const items = useMemo(
-    () => (paper ? shown.map((q) => ({ paperId: paper.id, questionNumber: q.questionNumber })) : []),
-    [paper, shown],
+    () => (paper ? wrong.map((q) => ({ paperId: paper.id, questionNumber: q.questionNumber })) : []),
+    [paper, wrong],
   );
   const answers = useOwnWrongAnswers(items);
 
   const groups = useMemo(
     () =>
       groupRowsBySharedImages(
-        shown.map((q) => ({
+        wrong.map((q) => ({
           questionNumber: q.questionNumber,
           selectedChoice: q.selectedChoice,
           correctChoice: paper ? (answers.data?.[wrongAnswerKey(paper.id, q.questionNumber)] ?? null) : null,
@@ -90,7 +88,7 @@ function AttemptBody({ detail, attemptId }: { detail: AttemptDetail; attemptId: 
           images: q.images,
         })),
       ),
-    [shown, paper, answers.data],
+    [wrong, paper, answers.data],
   );
 
   const next = `/mypage/attempts/${attemptId}`;
@@ -162,40 +160,22 @@ function AttemptBody({ detail, attemptId }: { detail: AttemptDetail; attemptId: 
         </View>
       </View>
 
-      {wrong.length === 0 && !showAll ? (
+      {wrong.length === 0 ? (
         <View className="items-center gap-3 rounded-xl border border-zinc-200 py-16 dark:border-zinc-700">
           <PartyPopper size={32} color="#fd9a00" />
           <AppText weight="semibold">이 회차는 모두 맞혔어요!</AppText>
           <AppText variant="sm" className="text-zinc-500 dark:text-zinc-500">
             복습할 오답이 없어요. 다음 회차도 파이팅!
           </AppText>
-          {questions.length > 0 && (
-            <Pressable accessibilityRole="button" onPress={() => setShowAll(true)} className="py-1">
-              <AppText variant="xs" weight="medium" className="text-blue-600 dark:text-blue-400">
-                전체 문항 보기
-              </AppText>
-            </Pressable>
-          )}
         </View>
       ) : (
         <View className="gap-4">
           <View className="flex-row flex-wrap items-center justify-between gap-2">
             <AppText variant="lg" weight="semibold">
-              {showAll ? `전체 문항 (${questions.length})` : `이 회차에서 틀린 문제 (${wrong.length})`}
+              이 회차에서 틀린 문제 ({wrong.length})
             </AppText>
             <WrongNoteLegend />
           </View>
-          {/* 앱 추가: 맞힌 문항까지 같이 보기(정오는 RLS 본인 행). */}
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityState={{ checked: showAll }}
-            onPress={() => setShowAll((v) => !v)}
-            className="self-start rounded-full border border-zinc-200 px-3 py-1 active:border-blue-300 dark:border-zinc-700"
-          >
-            <AppText variant="xs" weight="medium" className="text-zinc-600 dark:text-zinc-400">
-              {showAll ? "틀린 문항만 보기" : "전체 문항 보기"}
-            </AppText>
-          </Pressable>
 
           <View className="rounded-lg bg-zinc-50 px-3 py-2 dark:bg-zinc-800/50">
             <AppText variant="xs" className="text-zinc-500 dark:text-zinc-500" pretty>

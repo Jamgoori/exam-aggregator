@@ -17,8 +17,16 @@ export type CbtDraft = {
   savedAt: string;
 };
 
+// startedAt 은 두 표기로 들어온다 — cbt-start 응답은 `toISOString()`(…Z), PostgREST 의
+// cbt_attempt_starts.started_at 은 `…+00:00`. 같은 순간이 다른 키가 되면 복원이 영영 안 맞으니
+// 둘 다 ms 값으로 정규화한 뒤 키에 쓴다.
+export function normalizeStartedAt(startedAt: string): string {
+  const ms = new Date(startedAt).getTime();
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : startedAt;
+}
+
 function draftKey(paperId: string, startedAt: string): KvKey {
-  return `cbt-draft:${paperId}:${startedAt}`;
+  return `cbt-draft:${paperId}:${normalizeStartedAt(startedAt)}`;
 }
 
 // 서버가 기록해 둔 시작 시각(있으면). RLS 가 본인 행만 보여주므로 user_id 조건은 서버가 건다.
@@ -40,8 +48,10 @@ export async function findServerStart(paperId: string): Promise<string | null> {
 export async function loadCbtDraft(
   paperId: string,
 ): Promise<{ startedAt: string; draft: CbtDraft } | null> {
-  const startedAt = await findServerStart(paperId);
-  if (!startedAt) return null;
+  const serverStartedAt = await findServerStart(paperId);
+  if (!serverStartedAt) return null;
+  // 호출부(resume·저장 키)가 같은 표기를 쓰도록 정규화한 값을 돌려준다.
+  const startedAt = normalizeStartedAt(serverStartedAt);
   const draft = await kvGetJson<CbtDraft>(draftKey(paperId, startedAt));
   if (!draft || !Array.isArray(draft.answers)) return null;
   return { startedAt, draft: { ...draft, strokes: draft.strokes ?? {} } };

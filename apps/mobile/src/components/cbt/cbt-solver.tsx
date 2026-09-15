@@ -24,6 +24,9 @@ const ClockIcon = themedIcon(Clock);
 const HandIcon = themedIcon(Hand);
 const PenIcon = themedIcon(PenLine);
 const EraserIcon = themedIcon(Eraser);
+// 이미지가 없는 문항에 렌더마다 새 [] 를 주면 SingleQuestionView 의 useImageAspectRatios 가 타이머
+// 틱마다 "문항이 바뀌었다"고 보고 실측 비율을 버린다 — 모듈 상수 하나로.
+const EMPTY_IMAGES: string[] = [];
 
 function ToolButton({
   tool,
@@ -115,7 +118,8 @@ export function CbtSolver({
           <View className="shrink-0 flex-row items-center gap-2">
             <View className="flex-row items-center gap-1">
               <ClockIcon size={16} colorClassName="text-zinc-600 dark:text-zinc-400" />
-              {timer.phase === "countdown" ? (
+              {/* idle(드래프트 확인 중)에도 웹처럼 "5초 후 시작" — "시작하는 중..." 은 cbt-start 응답 대기에만. */}
+              {timer.phase === "countdown" || timer.phase === "idle" ? (
                 <AppText variant="sm" weight="medium" tabular className="text-zinc-600 dark:text-zinc-400">
                   {timer.countdown}초 후 시작
                 </AppText>
@@ -240,7 +244,7 @@ export function CbtSolver({
               onSelect: (choice: number) => s.selectChoice(number - 1, choice),
               questionResult: s.result ? (s.resultByQuestion.get(number) ?? null) : null,
             }))}
-            images={questionImages[s.currentQuestionIndex + 1] ?? []}
+            images={questionImages[s.currentQuestionIndex + 1] ?? EMPTY_IMAGES}
             prevIndex={s.prevQuestionIndex}
             nextIndex={s.nextQuestionIndex}
             onNavigate={s.setCurrentQuestionIndex}
@@ -259,8 +263,9 @@ export function CbtSolver({
         )}
       </View>
 
-      {/* OMR 시트(문제별·전체보기 공통, Phase 1a). rounded-t-2xl, max 65%, overlay black/40, 헤더 "답안 입력" + X 18. */}
-      <Sheet visible={s.omrOpen} onClose={() => s.setOmrOpen(false)} rounded="2xl" maxHeight="65%" title="답안 입력">
+      {/* OMR 시트(문제별·전체보기 공통, Phase 1a). rounded-t-2xl, max 65%, overlay black/40, 웹 헤더
+          `px-4 py-2` text-sm font-semibold "답안 입력" + X 18, 그랩 핸들 없음. */}
+      <Sheet visible={s.omrOpen} onClose={() => s.setOmrOpen(false)} rounded="2xl" maxHeight="65%" title="답안 입력" compactHeader showHandle={false}>
         <OmrPanel
           totalQuestions={totalQuestions}
           choiceCount={choiceCount}

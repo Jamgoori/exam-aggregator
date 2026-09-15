@@ -6,7 +6,9 @@ import { AppHeader } from "./app-header";
 import { OfflineBanner } from "./offline-banner";
 import { useIsOnline } from "../lib/net";
 
-// 화면 셸(설계서 §3.5·§4.4). 페이지 `px-4 pt-6 pb-12`, 헤더는 스크롤 밖 상단 고정, 푸터는
+// 화면 셸(설계서 §3.5·§4.4). 배경은 토큰 `bg-background`(웹 --background: 라이트 #fff · 다크
+// #0a0a0a) — `dark:bg-zinc-900` 을 덧붙이면 다크가 #18181b 로 웹과 어긋난다(CBT 풀이 루트만 zinc-900).
+// 페이지 `px-4 pt-6 pb-12`, 헤더는 스크롤 밖 상단 고정, 푸터는
 // 스크롤 끝. `immersive` 는 헤더·푸터·FAB·광고를 빼고 iOS 가장자리 스와이프·Android 예측
 // 뒤로가기를 끈다(응시 이탈 확인은 화면이 자체 버튼 + Alert 로). 몰입 라우트는 (tabs) 그룹
 // 밖(루트 Stack)에 두어 하단 탭도 자연히 빠진다. 폰 가로 폭에서는 1열 + max-w-[640px].
@@ -44,7 +46,7 @@ export function Screen({
   const { insets, online, showHeader, showFooter, pad } = useShell(shell);
   const { immersive } = shell;
   return (
-    <View className={["flex-1 bg-background dark:bg-zinc-900", className ?? ""].join(" ")} style={immersive ? { paddingTop: insets.top } : null}>
+    <View className={["flex-1 bg-background", className ?? ""].join(" ")} style={immersive ? { paddingTop: insets.top } : null}>
       {immersive && <Stack.Screen options={IMMERSIVE_OPTIONS} />}
       {showHeader && <AppHeader />}
       {immersive ? (
@@ -79,7 +81,7 @@ export function ScreenList<T>({
 }: ShellProps & FlatListProps<T>) {
   const { online, showHeader, showFooter, pad } = useShell(props);
   return (
-    <View className={["flex-1 bg-background dark:bg-zinc-900", className ?? ""].join(" ")}>
+    <View className={["flex-1 bg-background", className ?? ""].join(" ")}>
       {showHeader && <AppHeader />}
       <FlatList
         {...props}

@@ -8,14 +8,13 @@ import { NicknameField } from "../../src/components/mypage/nickname-field";
 import { ReminderToggle } from "../../src/components/mypage/reminder-toggle";
 import { LoginRequiredScreen, useRequireLogin } from "../../src/components/mypage/require-login";
 import { Screen } from "../../src/components/screen";
-import { SignOutButton } from "../../src/components/sign-out-button";
 import { currentCbtViewMode } from "../../src/lib/profile";
 import { useUnresolvedBySubject } from "../../src/queries/wrong-notes";
 import { useAuth } from "../../src/providers/auth-provider";
 
 // `/mypage/edit`(설계서 §5 행, 웹 app/mypage/edit/page.tsx 1:1 + 현행 settings.tsx 통합 — §7.1
 // 프로필/아바타 항목): 프로필 사진(읽기 전용 — 업로드는 Phase 4 EF avatar-upload) → 닉네임 →
-// CBT 시작 화면 → 리마인더(앱 전용) → 이메일 → 로그아웃 → 회원 탈퇴.
+// CBT 시작 화면 → 리마인더(앱 전용) → 이메일 → 회원 탈퇴. 로그아웃은 웹처럼 여기 없다(드로어).
 export default function EditAccountScreen() {
   const { userId, loading } = useRequireLogin("/mypage/edit");
   if (loading) return <Screen contentClassName="gap-8" />;
@@ -74,10 +73,6 @@ function EditAccountBody() {
           </AppText>
         </View>
       )}
-
-      <View className="border-t border-zinc-100 pt-6 dark:border-zinc-700">
-        <SignOutButton onDone={() => router.replace("/")} />
-      </View>
 
       <Section title="회원 탈퇴">
         <DeleteAccountButton />

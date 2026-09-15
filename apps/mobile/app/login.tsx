@@ -1,6 +1,6 @@
 import { DIAGNOSIS_MIN_ATTEMPTS } from "@gongmoa/core";
 import { router, useLocalSearchParams, type Href } from "expo-router";
-import { BookOpenCheck, BrainCircuit, Monitor } from "lucide-react-native";
+import { BookOpenCheck, BrainCircuit, Monitor, X } from "lucide-react-native";
 import { useState } from "react";
 import { Alert, Pressable, View } from "react-native";
 import { AppText } from "../src/components/app-text";
@@ -21,6 +21,7 @@ type Provider = "google" | "kakao";
 const MonitorIcon = themedIcon(Monitor);
 const NoteIcon = themedIcon(BookOpenCheck);
 const BrainIcon = themedIcon(BrainCircuit);
+const CloseIcon = themedIcon(X);
 
 function isGoogleCancel(e: unknown): boolean {
   const code = (e as { code?: string })?.code;
@@ -28,7 +29,7 @@ function isGoogleCancel(e: unknown): boolean {
 }
 
 export default function LoginScreen() {
-  const params = useLocalSearchParams<{ next?: string; error?: string }>();
+  const params = useLocalSearchParams<{ next?: string; error?: string; message?: string }>();
   const next = resolveNextPath(params.next);
   // CBT 를 누르다 여기로 튕겨 온 사람에게는 "이 문제지 바로 시작"이 로그인의 이유다.
   const fromCbt = /^\/papers\/[^/]+\/cbt(\/|$)/.test(next);
@@ -66,11 +67,23 @@ export default function LoginScreen() {
   const benefitIcon = "text-emerald-600 dark:text-emerald-400";
 
   return (
-    <Screen footer={false} contentClassName="max-w-sm gap-6 py-16">
+    <Screen contentClassName="max-w-sm gap-6 py-16">
       <View>
-        <AppText variant="2xl" weight="semibold">
-          {fromCbt ? "로그인하고 바로 시작하기" : "로그인"}
-        </AppText>
+        <View className="flex-row items-start justify-between gap-3">
+          <AppText variant="2xl" weight="semibold" className="min-w-0 flex-1">
+            {fromCbt ? "로그인하고 바로 시작하기" : "로그인"}
+          </AppText>
+          {/* 모달 프레젠테이션이라 닫는 손잡이 하나는 둔다(웹 페이지에는 없다) — 아이콘만. */}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="닫기"
+            onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))}
+            hitSlop={8}
+            className="-mr-2 -mt-1 h-9 w-9 items-center justify-center rounded-full active:bg-zinc-100 dark:active:bg-zinc-800"
+          >
+            <CloseIcon size={20} colorClassName="text-zinc-400 dark:text-zinc-500" />
+          </Pressable>
+        </View>
         <AppText variant="sm" className="mt-1 text-zinc-500" pretty>
           {fromCbt
             ? "로그인이 끝나면 고른 문제지의 응시 화면으로 바로 이어져요. 처음이라면 로그인과 동시에 가입돼요."
@@ -131,6 +144,11 @@ export default function LoginScreen() {
           {error}
         </AppText>
       )}
+      {params.message && (
+        <AppText variant="sm" className="text-green-600 dark:text-green-400" pretty>
+          {params.message}
+        </AppText>
+      )}
 
       <AppText variant="xs" className="text-zinc-400 dark:text-zinc-500" pretty>
         로그인하면{" "}
@@ -143,16 +161,6 @@ export default function LoginScreen() {
         </AppText>
         에 동의한 것으로 간주돼요. 계정 관리(비밀번호·복구)는 구글/카카오 계정 설정을 따라요.
       </AppText>
-
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))}
-        className="self-center py-2"
-      >
-        <AppText variant="sm" className="text-zinc-500 dark:text-zinc-400">
-          둘러보기로 돌아가기
-        </AppText>
-      </Pressable>
     </Screen>
   );
 }

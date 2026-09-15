@@ -12,20 +12,23 @@ import { useCatalog } from "../../queries/catalog";
 
 // "즐겨찾기" 탭(웹 mypage/page.tsx BookmarksTab:548): 즐겨찾는 과목 편집 영역 + 북마크한 문제지
 // 카드 목록. 문제지 객체는 카탈로그(디스크 퍼시스트)에서 즐겨찾기 id(['me',u,'bookmarks'])로
-// 고른다 — 웹은 bookmarks 행에 exam_papers 를 임베드해 북마크한 순(created_at desc)으로 두지만,
-// 앱은 카탈로그 순서(연도·회차 내림차순)다. "바로 풀기"는 카탈로그 cbtMask, 회독 배지는 응시 목록.
+// 고른다. 순서는 웹과 같이 북마크한 순(created_at desc) — 즐겨찾기 id 배열이 그 순서라 그대로
+// 따른다. "바로 풀기"는 카탈로그 cbtMask, 회독 배지는 응시 목록.
 export function BookmarksTab({ attemptsByPaper }: { attemptsByPaper: Map<string, MyAttemptRow[]> }) {
   const bookmarks = useMyBookmarkedPaperIds();
   const catalog = useCatalog();
 
+  const bookmarkedIds = bookmarks.query.data;
   const papers = useMemo(() => {
     if (!catalog.data) return [];
     const decoded = decodePapers(catalog.data);
     const mask = catalog.data.cbtMask;
+    const order = new Map((bookmarkedIds ?? []).map((id, i) => [id, i]));
     return decoded
       .map((p, i) => ({ paper: p, hasCbtAnswers: mask[i] === "1" }))
-      .filter(({ paper }) => bookmarks.set.has(paper.id));
-  }, [catalog.data, bookmarks.set]);
+      .filter(({ paper }) => order.has(paper.id))
+      .sort((a, b) => order.get(a.paper.id)! - order.get(b.paper.id)!);
+  }, [catalog.data, bookmarkedIds]);
 
   return (
     <View className="gap-4">

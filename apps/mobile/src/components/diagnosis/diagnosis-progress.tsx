@@ -11,6 +11,7 @@ import { themedIcon } from "../../theme/icons";
 // 마이페이지·진단 소개에 같은 모양으로 붙는다. 자격이 되면 바 대신 "진단 받기" 링크.
 // 이미 이번 주기에 받았는지는 여기서 모른다 — 필요한 자리는 eligibleHref/eligibleLabel 로.
 const ChevronIcon = themedIcon(ChevronRight);
+const BrainIcon = themedIcon(BrainCircuit);
 
 export function DiagnosisProgress({
   attemptCount,
@@ -65,7 +66,7 @@ export function DiagnosisProgress({
     >
       <View className="flex-row items-center justify-between gap-3">
         <View className="flex-row items-center gap-1.5">
-          <BrainCircuit size={15} color="#4d179a" />
+          <BrainIcon size={15} colorClassName="text-violet-900 dark:text-violet-100" />
           <AppText variant="13" weight="bold" className="text-violet-900 dark:text-violet-100">
             AI 약점 진단까지
           </AppText>

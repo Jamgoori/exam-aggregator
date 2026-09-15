@@ -19,6 +19,9 @@ export function SubjectQuickAdd({
   onToggle: (subjectId: string, bookmarked: boolean) => void;
 }) {
   const [query, setQuery] = useState("");
+  // 웹 focus-within:border-blue-400 — RN 의 View 에는 focus 상태가 없어 TextInput 의 포커스를
+  // 상태로 들고 테두리에 반영한다(search-input.tsx 와 같은 방식).
+  const [focused, setFocused] = useState(false);
 
   const visibleSubjects = useMemo(() => {
     if (!query.trim()) return subjects;
@@ -28,11 +31,18 @@ export function SubjectQuickAdd({
 
   return (
     <View className="w-full rounded-2xl border border-zinc-200 p-4 dark:border-zinc-700">
-      <View className="flex-row items-center rounded-lg border border-zinc-200 py-2 pl-3 pr-3 focus:border-blue-400 dark:border-zinc-700">
+      <View
+        className={[
+          "flex-row items-center rounded-lg border py-2 pl-3 pr-3",
+          focused ? "border-blue-400 dark:border-blue-600" : "border-zinc-200 dark:border-zinc-700",
+        ].join(" ")}
+      >
         <SearchIcon size={16} colorClassName="text-zinc-400 dark:text-zinc-500" />
         <TextInput
           value={query}
           onChangeText={setQuery}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholder="과목 이름으로 찾기 (예: 국어, ㄱㅇ)"
           placeholderTextColorClassName="text-zinc-400 dark:text-zinc-500"
           autoCorrect={false}

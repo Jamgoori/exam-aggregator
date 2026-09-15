@@ -1,22 +1,24 @@
-import { CONSONANTS, getSubjectShortName, initialConsonant, type SubjectIndexEntry } from "@gongmoa/core";
+import { CONSONANTS, initialConsonant, type ExamCombo, type SubjectIndexEntry } from "@gongmoa/core";
 import { router, type Href } from "expo-router";
-import { Star, X } from "lucide-react-native";
 import { useMemo } from "react";
 import { Pressable, View } from "react-native";
 import { AppText } from "../../src/components/app-text";
-import { SubjectIndexTabs } from "../../src/components/papers/subject-index-tabs";
 import { QueryState } from "../../src/components/query-state";
 import { Screen } from "../../src/components/screen";
 import { Skeleton } from "../../src/components/skeleton";
-import { useMyBookmarkedSubjectIds, useToggleSubjectBookmark } from "../../src/queries/bookmarks";
-import { useCatalog, useSubjectIndex } from "../../src/queries/catalog";
-import { useAuth } from "../../src/providers/auth-provider";
+import { useSubjectIndex } from "../../src/queries/catalog";
+import { useHomeLanding } from "../../src/queries/home";
 
-// `/subjects`(설계서 §5 행) — 웹 app/subjects/page.tsx: "← 홈으로" → "과목별 기출문제" → ㄱㄴㄷ
-// 묶음 목록(묶음 안 가나다순, 영문·숫자 시작은 맨 뒤 "기타"). 앱 추가분: 상단 초성 탭
-// (SubjectIndexTabs — 초성 원형·한능검 알약·모달)과 로그인 시 "즐겨찾는 과목" 표시 섹션
-// (웹 마이페이지 favorite-subjects-editor.tsx 의 표시부 — 편집 모달은 마이페이지 스트림).
-// "시험으로 찾기"(exam-index combos)는 /exams 스트림에서 붙는다 — 여기서는 전체보기 링크만.
+// `/subjects`(설계서 §5 행) — 웹 app/subjects/page.tsx 1:1: "← 홈으로" → "과목별 기출문제" → ㄱㄴㄷ
+// 묶음 목록(묶음 안 가나다순, 영문·숫자 시작은 맨 뒤 "기타") → "시험으로 찾기" 콤보 칩(시행처+급수,
+// exam-index combos) + 전체보기 링크. 웹에 없는 초성 탭 스트립·즐겨찾는 과목 섹션은 두지 않는다.
+// 콤보 칩은 /exams/[slug] 가 Phase 2 까지 없어 홈 시험 카드처럼 같은 필터의 /papers 로 보낸다.
+
+function comboPapersHref(c: ExamCombo): Href {
+  const params: Record<string, string> = { type: c.examTypeName };
+  if (c.level) params.level = c.level;
+  return { pathname: "/papers", params } as Href;
+}
 
 // ㄱㄴㄷ 묶음 안에서는 가나다순, 묶음 자체는 CONSONANTS 순서를 그대로 따른다.
 function groupByConsonant(entries: SubjectIndexEntry[]) {
@@ -42,7 +44,7 @@ function yearRange(entry: SubjectIndexEntry) {
 
 export default function SubjectsIndexScreen() {
   const { query, data } = useSubjectIndex();
-  const catalog = useCatalog();
+  const landing = useHomeLanding();
   const groups = useMemo(() => (data ? groupByConsonant(data.entries) : []), [data]);
 
   return (
@@ -61,10 +63,6 @@ export default function SubjectsIndexScreen() {
       <QueryState query={query} skeleton={<SubjectsSkeleton />}>
         {() => (
           <>
-            <SubjectIndexTabs subjects={catalog.data?.subjects ?? []} />
-
-            <FavoriteSubjects />
-
             {groups.map((group) => (
               <View key={group.key} className="gap-3">
                 <View className="flex-row items-center gap-2 border-b border-zinc-100 pb-2 dark:border-zinc-800">
@@ -102,6 +100,20 @@ export default function SubjectsIndexScreen() {
               <AppText variant="lg" weight="semibold">
                 시험으로 찾기
               </AppText>
+              <View className="flex-row flex-wrap gap-2">
+                {(landing.data?.combos ?? []).map((combo) => (
+                  <Pressable
+                    key={combo.slug}
+                    accessibilityRole="link"
+                    onPress={() => router.push(comboPapersHref(combo))}
+                    className="rounded-full border border-zinc-200 px-4 py-1.5 active:border-blue-300 active:bg-blue-50 dark:border-zinc-700 dark:active:border-blue-800 dark:active:bg-blue-950/40"
+                  >
+                    <AppText variant="sm" weight="medium" className="text-zinc-600 dark:text-zinc-400">
+                      {combo.label} 기출문제
+                    </AppText>
+                  </Pressable>
+                ))}
+              </View>
               <Pressable accessibilityRole="link" onPress={() => router.push("/exams" as Href)} hitSlop={6} className="self-start">
                 <AppText variant="sm" weight="medium" className="text-blue-600 dark:text-blue-400">
                   시험별 기출문제 전체보기 →
@@ -115,57 +127,9 @@ export default function SubjectsIndexScreen() {
   );
 }
 
-// 로그인 사용자의 "즐겨찾는 과목" 표시(웹 favorite-subjects-editor.tsx 의 칩 부분). X 로 해제.
-function FavoriteSubjects() {
-  const { userId } = useAuth();
-  const catalog = useCatalog();
-  const { set } = useMyBookmarkedSubjectIds();
-  const toggle = useToggleSubjectBookmark();
-  const favorites = useMemo(() => (catalog.data?.subjects ?? []).filter((s) => set.has(s.id)), [catalog.data, set]);
-  if (!userId) return null;
-
-  return (
-    <View className="gap-3">
-      <View className="flex-row items-center justify-between gap-2">
-        <View className="flex-row items-center gap-2">
-          <Star size={18} color="#ffb900" />
-          <AppText variant="lg" weight="semibold">
-            즐겨찾는 과목 ({favorites.length})
-          </AppText>
-        </View>
-      </View>
-      {favorites.length === 0 ? (
-        <AppText variant="sm" className="text-zinc-500 dark:text-zinc-500" pretty>
-          아직 즐겨찾는 과목이 없어요. 과목 옆의 별 아이콘을 눌러 추가해보세요.
-        </AppText>
-      ) : (
-        <View className="flex-row flex-wrap gap-2">
-          {favorites.map((s) => (
-            <View key={s.id} className="flex-row items-center gap-1 rounded-full border border-zinc-200 py-1 pl-3 pr-1.5 dark:border-zinc-700">
-              <Pressable accessibilityRole="link" onPress={() => router.push(`/subjects/${s.slug}` as Href)} hitSlop={4}>
-                <AppText variant="sm">{getSubjectShortName(s.name)}</AppText>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${getSubjectShortName(s.name)} 즐겨찾기 해제`}
-                onPress={() => toggle.mutate({ subjectId: s.id, next: false })}
-                hitSlop={6}
-                className="h-5 w-5 items-center justify-center rounded-full active:bg-zinc-100 dark:active:bg-zinc-800"
-              >
-                <X size={13} color="#9f9fa9" />
-              </Pressable>
-            </View>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
 function SubjectsSkeleton() {
   return (
     <View className="gap-8">
-      <Skeleton className="h-8 w-full rounded-full" />
       {[0, 1, 2].map((i) => (
         <View key={i} className="gap-3">
           <Skeleton className="h-7 w-24 rounded-lg" delay={i * 100} />

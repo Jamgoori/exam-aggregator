@@ -21,6 +21,7 @@ import { RelatedPapersSection } from "../../../src/components/papers/related-pap
 import { QueryState } from "../../../src/components/query-state";
 import { Screen } from "../../../src/components/screen";
 import { paperCbtHref, paperExplanationsHref, paperHref } from "../../../src/lib/paper-href";
+import { useSetScreenParams } from "../../../src/lib/screen-params";
 import { usePaperMyDetail, usePaperPublicDetail } from "../../../src/queries/papers";
 import { useAuth } from "../../../src/providers/auth-provider";
 import { themedIcon } from "../../../src/theme/icons";
@@ -50,6 +51,7 @@ function PaperDetailScreen({ paper, level, examTypesParam }: { paper: ExamPaper;
   const publicDetail = usePaperPublicDetail(paper);
   const myDetail = usePaperMyDetail(paper);
   const selectedExamTypeIds = useMemo(() => parseExamTypesParam(examTypesParam), [examTypesParam]);
+  const setScreenParams = useSetScreenParams();
 
   const subject = paper.subjects;
   const examType = paper.exam_types;
@@ -59,10 +61,10 @@ function PaperDetailScreen({ paper, level, examTypesParam }: { paper: ExamPaper;
   function setFilter(next: { level?: string; examTypes?: Set<string> }) {
     const nextLevel = "level" in next ? next.level : level;
     const nextTypes = next.examTypes ?? selectedExamTypeIds;
-    router.setParams({
+    setScreenParams({
       level: nextLevel || undefined,
       examTypes: nextTypes.size > 0 ? [...nextTypes].join(",") : undefined,
-    } as Record<string, string>);
+    });
   }
 
   const openBtn = (primary: boolean) =>
@@ -196,7 +198,7 @@ function PaperDetailScreen({ paper, level, examTypesParam }: { paper: ExamPaper;
                 )}
 
                 {/* 전 문항 해설이 준비된 문제지에만(로그인 사용자 — paper_explanation_counts 는 authenticated 전용). */}
-                {myDetail.data?.hasFullExplanations && (
+                {detail.hasFullExplanations && (
                   <View className="flex-row items-stretch gap-2">
                     <Pressable
                       accessibilityRole="link"

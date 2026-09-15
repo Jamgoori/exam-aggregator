@@ -19,7 +19,7 @@ import { captureException, initSentry } from "../src/lib/sentry";
 import { supabaseConfigError } from "../src/lib/supabase";
 import { checkForUpdate } from "../src/lib/updates";
 import { AuthProvider, useAuth } from "../src/providers/auth-provider";
-import { useIsDark, useThemePreference } from "../src/theme";
+import { tokens, useIsDark, useThemePreference } from "../src/theme";
 
 // 모듈 로드 시 한 번: 크래시 리포팅, onlineManager ← NetInfo, focusManager ← AppState.
 initSentry();
@@ -80,10 +80,11 @@ function QueryProviders({ children }: { children: React.ReactNode }) {
   const { userId, loading } = useAuth();
   const persistOptions = useMemo(() => buildPersistOptions(userId), [userId]);
   // 인증 판정 전에는 anon buster 로 복원했다가 로그인 사용자 blob 을 다시 버스트하지 않도록
-  // 세션 확정 뒤에 마운트한다.
+  // 세션 확정 뒤에 마운트한다. PersistQueryClientProvider 는 persistOptions 를 첫 마운트에만
+  // 읽으므로(복원·구독 효과가 client·isRestoring 에만 의존) 계정이 바뀌면 key 로 다시 마운트한다.
   if (loading) return null;
   return (
-    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
+    <PersistQueryClientProvider key={userId ?? "anon"} client={queryClient} persistOptions={persistOptions}>
       {children}
     </PersistQueryClientProvider>
   );
@@ -131,7 +132,7 @@ function Gates() {
     <>
       <StatusBar style={dark ? "light" : "dark"} />
       <NicknameGate />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: dark ? "#18181b" : "#ffffff" } }}>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: dark ? tokens.dark.background : tokens.light.background } }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="login" options={{ presentation: "modal" }} />
         <Stack.Screen

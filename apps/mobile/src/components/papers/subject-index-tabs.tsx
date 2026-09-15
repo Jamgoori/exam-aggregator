@@ -19,9 +19,10 @@ export const KHE_EXAM_TYPE_NAME = "한능검";
 export const KHE_LEVEL = "심화";
 export const KHE_TAB_LABEL = "한능검";
 
-/** 한능검 탭이 가는 곳 = 시험 허브(/exams/한능검-심화). 주소 규칙은 웹 lib/exam-index.ts 와 같다. */
-export function kheHref(): string {
-  return `/exams/${encodeURIComponent(`${KHE_EXAM_TYPE_NAME}-${KHE_LEVEL}`)}`;
+/** 한능검 탭이 가는 곳. 웹은 시험 허브(/exams/한능검-심화)지만 /exams 는 Phase 2 까지 라우트가 없어
+ *  홈 시험 카드(home/past-questions.tsx)처럼 같은 필터의 문제지 목록으로 보낸다. */
+export function kheHref(): Href {
+  return { pathname: "/papers", params: { type: KHE_EXAM_TYPE_NAME, level: KHE_LEVEL } } as Href;
 }
 
 /** 과목 초성 목록에서 한능검 전용 과목을 뺀다. */
@@ -55,7 +56,7 @@ export function SubjectIndexTabs({
       >
         <Pressable
           accessibilityRole="link"
-          onPress={() => router.push(kheHref() as Href)}
+          onPress={() => router.push(kheHref())}
           className={[circle, "bg-white px-3 dark:bg-transparent"].join(" ")}
         >
           <AppText variant="sm" weight="semibold" className="text-zinc-600 dark:text-zinc-400">

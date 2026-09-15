@@ -4,7 +4,9 @@ import { AppText } from "./app-text";
 import { themedIcon } from "../theme/icons";
 
 // 페이지네이션(웹 pagination.tsx 의 모바일 폭 = 항상 5블록). 링크 대신 onChange —
-// 호출부가 router.setParams({ page }) 로 URL 파라미터를 바꾼다.
+// 호출부가 navigation.setParams({ page }) 로 URL 파라미터를 바꾼다.
+// 화살표: 웹 pagination.tsx(과목 페이지)는 Chevron 아이콘, exam-browser.tsx(/papers)는 `‹`/`›`
+// 글자 — arrows 로 고른다.
 const Prev = themedIcon(ChevronLeft);
 const Next = themedIcon(ChevronRight);
 const BLOCK_SIZE = 5;
@@ -13,10 +15,12 @@ export function Pagination({
   currentPage,
   totalPages,
   onChange,
+  arrows = "icon",
 }: {
   currentPage: number;
   totalPages: number;
   onChange: (page: number) => void;
+  arrows?: "icon" | "text";
 }) {
   if (totalPages <= 1) return null;
 
@@ -40,7 +44,11 @@ export function Pagination({
         onPress={() => onChange(Math.max(1, prevBlockPage))}
         className={[arrowCls, prevBlockPage < 1 ? "opacity-40" : ""].join(" ")}
       >
-        <Prev size={16} colorClassName="text-zinc-500" />
+        {arrows === "text" ? (
+          <AppText className="text-zinc-500 dark:text-zinc-500">‹</AppText>
+        ) : (
+          <Prev size={16} colorClassName="text-zinc-500" />
+        )}
       </Pressable>
 
       {pages.map((p) => {
@@ -79,7 +87,11 @@ export function Pagination({
         onPress={() => onChange(Math.min(totalPages, nextBlockPage))}
         className={[arrowCls, nextBlockPage > totalPages ? "opacity-40" : ""].join(" ")}
       >
-        <Next size={16} colorClassName="text-zinc-500" />
+        {arrows === "text" ? (
+          <AppText className="text-zinc-500 dark:text-zinc-500">›</AppText>
+        ) : (
+          <Next size={16} colorClassName="text-zinc-500" />
+        )}
       </Pressable>
     </View>
   );

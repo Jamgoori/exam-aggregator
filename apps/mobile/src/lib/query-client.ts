@@ -3,6 +3,7 @@ import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persi
 import type { PersistQueryClientOptions } from "@tanstack/react-query-persist-client";
 import NetInfo from "@react-native-community/netinfo";
 import * as Application from "expo-application";
+import { Image } from "expo-image";
 import { AppState } from "react-native";
 import { kvRemoveByPrefix, kvStorage } from "./kv";
 
@@ -78,8 +79,15 @@ export function bindQueryManagers(): void {
   });
 }
 
-// 로그아웃·탈퇴·401: 메모리 캐시 + 퍼시스트 블롭 + kv `me:*` 를 한 번에(§6.5).
+// 로그아웃·탈퇴·401: 메모리 캐시 + 퍼시스트 블롭 + kv `me:*` + 본인 드래프트(CBT·복습) + expo-image
+// 디스크 캐시(문항 이미지)를 한 번에(§6.5). 드래프트는 답안·필기라 다음 계정에 남기지 않는다.
 export async function clearAllCaches(): Promise<void> {
   queryClient.clear();
-  await Promise.allSettled([persister.removeClient(), kvRemoveByPrefix("me:")]);
+  await Promise.allSettled([
+    persister.removeClient(),
+    kvRemoveByPrefix("me:"),
+    kvRemoveByPrefix("cbt-draft:"),
+    kvRemoveByPrefix("review-draft:"),
+    Image.clearDiskCache().catch(() => {}),
+  ]);
 }

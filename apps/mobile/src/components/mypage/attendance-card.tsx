@@ -14,7 +14,7 @@ import { CalendarCheck, Check, Gift, PartyPopper, Sparkles } from "lucide-react-
 import { View } from "react-native";
 import { AppText } from "../app-text";
 import { Button } from "../button";
-import { useIsDark } from "../../theme";
+import { tokens, useIsDark } from "../../theme";
 import { themedIcon } from "../../theme/icons";
 
 // 마이페이지 월간 출석 카드(웹 attendance-card.tsx, 설계서 §4.5 #26). 화면이 규칙을 다시 적지
@@ -54,7 +54,9 @@ export function AttendanceCard({ month, today, attendedDates, todayQuestions, gr
     <View className="overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
       {/* 머리: 이 달에 몇 일을 벌었나. 카드에서 제일 먼저 읽혀야 하는 숫자다. */}
       <LinearGradient
-        colors={dark ? ["rgba(23,37,84,0.4)", "#18181b"] : ["#eff6ff", "#ffffff"]}
+        // 웹 from-blue-50 to-white / dark:from-blue-950/40 dark:to-zinc-900 — blue-* 는 재매핑 토큰(초록)이라
+        // 진짜 Tailwind 파랑 hex 를 박으면 웹과 다른 색이 된다. 40% 는 #RRGGBBAA(0x66).
+        colors={dark ? [`${tokens.dark.blue[950]}66`, "#18181b"] : [tokens.light.blue[50], "#ffffff"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         className="flex-row flex-wrap items-center justify-between gap-3 border-b border-zinc-100 px-5 py-4 dark:border-zinc-800"
@@ -112,7 +114,7 @@ export function AttendanceCard({ month, today, attendedDates, todayQuestions, gr
                   </AppText>
                   {/* "+1일"이 아니라 "멤버십 +1일". 지급 완료 체크는 원장(granted)에 실제로 남은 것만. */}
                   <View className="flex-row flex-wrap items-center justify-center gap-x-0.5">
-                    {granted.has(m.days) && <Check size={10} strokeWidth={3} color={done ? "#155dfc" : "#d4d4d8"} />}
+                    {granted.has(m.days) && <Check size={10} strokeWidth={3} color={done ? (dark ? tokens.dark.blue[400] : tokens.light.blue[600]) : "#d4d4d8"} />}
                     <AppText variant="10" weight="semibold" allowFontScaling={false} className={["text-center", textCls].join(" ")}>
                       멤버십 +{m.grantDays}일
                     </AppText>

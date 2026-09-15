@@ -9,7 +9,7 @@ export function ForceUpdateScreen({ message, storeUrl }: { message: string | nul
   const insets = useSafeAreaInsets();
   return (
     <View
-      className="flex-1 items-center justify-center gap-4 bg-background px-6 dark:bg-zinc-900"
+      className="flex-1 items-center justify-center gap-4 bg-background px-6"
       style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}
     >
       <AppText variant="2xl" weight="bold" className="text-center" pretty>

@@ -4,7 +4,7 @@ import { useQuery, type UseQueryOptions } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppState } from "react-native";
 import { configureAuth } from "../lib/auth";
-import { callEdge } from "../lib/edge";
+import { callEdge, handleEdgeError } from "../lib/edge";
 import { currentAvatarUrl, currentNickname } from "../lib/profile";
 import { queryClient, STALE } from "../lib/query-client";
 import { supabase } from "../lib/supabase";
@@ -95,6 +95,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 두 번째 인자로 싱글턴 queryClient 를 직접 넘긴다(퍼시스트 복원과 무관한 메모리 쿼리).
   const membershipQuery = useQuery(membershipQueryOptions(userId), queryClient);
   const membershipData = membershipQuery.data;
+
+  // 여기서 부르는 membership-get 은 화면 호출부가 없어 오류가 handleEdgeError(§6.9: 401 → 로컬
+  // signOut + 캐시 초기화 + /login, 426 → 강제 업데이트)에 닿지 않는다 — 효과로 한 번 넘긴다.
+  // 그 외(네트워크·429)는 표시할 화면이 없으니 조용히 지나간다(다음 포커스에 재조회).
+  const membershipError = membershipQuery.error;
+  useEffect(() => {
+    if (!membershipError) return;
+    void handleEdgeError(membershipError);
+  }, [membershipError]);
 
   const value = useMemo<AuthContextValue>(() => {
     const user = session?.user ?? null;

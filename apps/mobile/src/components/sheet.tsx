@@ -1,7 +1,7 @@
 import { X } from "lucide-react-native";
 import { useEffect, useState } from "react";
 import { Dimensions, Modal, Pressable, View, KeyboardAvoidingView, Platform } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { Gesture, GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
 import Animated, {
   Easing,
   runOnJS,
@@ -33,6 +33,10 @@ export type SheetProps = {
   // 헤더 아이콘 타일(h-9 w-9 rounded-xl from-blue-500 to-blue-600) 안에 들어갈 요소.
   icon?: React.ReactNode;
   overlayClassName?: string;
+  // 웹 OMR 시트 헤더(`px-4 py-2`, text-sm font-semibold text-zinc-700, X 18) — 아이콘 타일 없음.
+  compactHeader?: boolean;
+  // 상단 그랩 핸들(웹 OMR 시트에는 없다).
+  showHandle?: boolean;
   children?: React.ReactNode;
 };
 
@@ -45,6 +49,8 @@ export function Sheet({
   title,
   icon,
   overlayClassName = "bg-black/40",
+  compactHeader = false,
+  showHandle = true,
   children,
 }: SheetProps) {
   const insets = useSafeAreaInsets();
@@ -100,13 +106,46 @@ export function Sheet({
   const toPx = (v: `${number}%` | number | undefined) =>
     v == null ? undefined : typeof v === "number" ? v : (screenH * parseFloat(v)) / 100;
 
+  const header = compactHeader ? (
+    <View className="flex-row items-center justify-between border-b border-zinc-100 px-4 py-2 dark:border-zinc-700">
+      <AppText variant="sm" weight="semibold" className="min-w-0 flex-1 text-zinc-700 dark:text-zinc-300" numberOfLines={1}>
+        {title}
+      </AppText>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="닫기"
+        onPress={onClose}
+        className="rounded-lg p-1 active:bg-zinc-100 dark:active:bg-zinc-800"
+      >
+        <CloseIcon size={18} colorClassName="text-zinc-500" />
+      </Pressable>
+    </View>
+  ) : (
+    <View className="flex-row items-center gap-3 border-b border-zinc-100 px-5 py-3 dark:border-zinc-800">
+      {icon && <View className="h-9 w-9 items-center justify-center rounded-xl bg-blue-600">{icon}</View>}
+      <AppText variant="base" weight="bold" className="min-w-0 flex-1" numberOfLines={1}>
+        {title}
+      </AppText>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="닫기"
+        onPress={onClose}
+        className="-mr-1 h-9 w-9 items-center justify-center rounded-full active:bg-zinc-100 dark:active:bg-zinc-800"
+      >
+        <CloseIcon size={18} colorClassName="text-zinc-400" />
+      </Pressable>
+    </View>
+  );
+
   return (
     <Modal visible transparent statusBarTranslucent onRequestClose={onClose} animationType="none">
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 justify-end">
-        <Animated.View style={overlayStyle} className={["absolute inset-0", overlayClassName].join(" ")}>
-          <Pressable accessibilityLabel="닫기" accessibilityRole="button" onPress={onClose} className="flex-1" />
-        </Animated.View>
-        <GestureDetector gesture={pan}>
+      {/* Android 의 RN Modal 은 별도 네이티브 창이라 루트 GestureHandlerRootView 밖 — 안에 하나 더
+          두지 않으면 RNGH 제스처가 터치를 받지 못한다. */}
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} className="flex-1 justify-end">
+          <Animated.View style={overlayStyle} className={["absolute inset-0", overlayClassName].join(" ")}>
+            <Pressable accessibilityLabel="닫기" accessibilityRole="button" onPress={onClose} className="flex-1" />
+          </Animated.View>
           <Animated.View
             style={[
               panelStyle,
@@ -117,31 +156,22 @@ export function Sheet({
               rounded === "3xl" ? "rounded-t-3xl" : "rounded-t-2xl",
             ].join(" ")}
           >
-            <View className="items-center pt-2.5 pb-1">
-              <View className="h-1 w-9 rounded-full bg-zinc-200 dark:bg-zinc-700" />
-            </View>
-            {(title || icon) && (
-              <View className="flex-row items-center gap-3 border-b border-zinc-100 px-5 py-3 dark:border-zinc-800">
-                {icon && (
-                  <View className="h-9 w-9 items-center justify-center rounded-xl bg-blue-600">{icon}</View>
+            {/* 드래그로 닫기는 핸들·헤더에서만 받는다 — 본문(FlatList·ScrollView)의 세로 스크롤과
+                Pan 이 경쟁하지 않도록 시트 전체에 걸지 않는다. */}
+            <GestureDetector gesture={pan}>
+              <View>
+                {showHandle && (
+                  <View className="items-center pt-2.5 pb-1">
+                    <View className="h-1 w-9 rounded-full bg-zinc-200 dark:bg-zinc-700" />
+                  </View>
                 )}
-                <AppText variant="base" weight="bold" className="min-w-0 flex-1" numberOfLines={1}>
-                  {title}
-                </AppText>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="닫기"
-                  onPress={onClose}
-                  className="-mr-1 h-9 w-9 items-center justify-center rounded-full active:bg-zinc-100 dark:active:bg-zinc-800"
-                >
-                  <CloseIcon size={18} colorClassName="text-zinc-400" />
-                </Pressable>
+                {(title || icon) && header}
               </View>
-            )}
+            </GestureDetector>
             <View className="min-h-0 shrink">{children}</View>
           </Animated.View>
-        </GestureDetector>
-      </KeyboardAvoidingView>
+        </KeyboardAvoidingView>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

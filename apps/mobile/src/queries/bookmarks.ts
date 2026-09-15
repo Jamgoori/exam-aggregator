@@ -13,16 +13,15 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../providers/auth-provider";
 
 // 즐겨찾기(문제지·과목) — RLS 직접, 낙관적 업데이트(onMutate) 후 되돌림(설계서 §4.5 #19).
-// 퍼시스트 블롭은 JSON 이라 Set 대신 string[] 로 저장하고 화면에서 Set 으로 감싼다.
+// 퍼시스트 블롭은 JSON 이라 Set 대신 string[] 로 저장하고 화면에서 Set 으로 감싼다. 배열 순서 =
+// 북마크한 순(최신 먼저, core fetch 가 created_at desc) — 낙관적 추가도 맨 앞에 넣는다.
 
 export const bookmarksKey = (userId: string) => ["me", userId, "bookmarks"] as const;
 export const subjectBookmarksKey = (userId: string) => ["me", userId, "subject-bookmarks"] as const;
 
 function toggled(list: string[] | undefined, id: string, on: boolean): string[] {
-  const next = new Set(list ?? []);
-  if (on) next.add(id);
-  else next.delete(id);
-  return [...next];
+  const rest = (list ?? []).filter((x) => x !== id);
+  return on ? [id, ...rest] : rest;
 }
 
 export function useMyBookmarkedPaperIds() {
