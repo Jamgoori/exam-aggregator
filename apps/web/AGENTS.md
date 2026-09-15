@@ -29,7 +29,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | 자유게시판 본문(HTML)·이미지 업로드·알림 (`rich-text.ts` 새니타이저, `board/actions.ts`, `notifications`, `avatars`/`board-images` 버킷) | `docs/agents/board-rich-text.md` |
 | 한국사능력검정시험(한능검) 회차 추가·전용 과목/탭 (`upload-korean-history-exam.mjs`, `lib/korean-history-exam.ts`) | `docs/agents/korean-history-exam.md` |
 | 광고(구글 애드센스) — 게시자 ID, `<head>` 로더, `/ads.txt`, 광고 관련 개인정보 고지 | `docs/agents/adsense.md` |
-| Edge Function 용 core 번들 (`packages/core/scripts/bundle-edge.mjs`, `supabase/functions/_shared/core.mjs` 재생성, `packages/core/src/rules/*` 신설·이동, `_shared/srs.ts` 동시수정 규칙의 후신, Edge 응답 "추가만") | `docs/agents/edge-core-bundle.md` |
+| Edge Function 용 core 번들 (`packages/core/scripts/bundle-edge.mjs`, `supabase/functions/_shared/core.mjs` 재생성, `packages/core/src/rules/*` 신설·이동, 옛 `_shared/srs.ts` 동시수정 규칙의 후신, Edge 응답 "추가만") | `docs/agents/edge-core-bundle.md` |
 | 계약 테스트 (웹 어댑터 ↔ Edge Function 결과 행 비교, `contract-tests.yml`, 픽스처 `rules/__fixtures__/`, `now`/`fuzz` 주입) | `docs/agents/contract-tests.md` |
 | 모바일 파리티 (웹에 기능 추가 시 규칙→core·서버 액션↔Edge/RPC 어댑터·계약 테스트·매트릭스 절차, 앱이 절대 하지 않는 것) | `docs/agents/mobile-parity.md` |
 
@@ -53,8 +53,10 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - **dedup**: 목록의 카드 병합은 버그가 아님 — 표시 로직을 되돌리거나 중복으로
   보이는 `exam_papers` 행을 삭제하지 말 것.
 - **SRS 상수**: 실측(`npm run retention-report`) 없이 간격·ease·leech 상수를 바꾸지
-  말 것. 바꿀 때는 `packages/core/src/srs.ts`와 `supabase/functions/_shared/srs.ts`를
-  반드시 함께 고칠 것 (한쪽만 고치면 웹과 앱의 복습일이 조용히 어긋난다).
+  말 것. 정본은 `packages/core/src/srs.ts` 하나다 — 고친 뒤 반드시
+  `npm run bundle-edge -w @gongmoa/core` 로 `supabase/functions/_shared/core.mjs` 를 재생성해
+  같은 커밋에 넣을 것 (번들이 낡으면 웹과 앱의 복습일이 조용히 어긋난다;
+  `bundle-edge:check` 가 PR 게이트). Edge 안에 SRS 상수를 따로 쓰지 말 것.
 - **개념 사전**: `keyword_title` 원본을 UPDATE 하지 말 것 (화면에 그대로 보여주는
   값 — 정리 결과는 `concept_id` 축으로만). 개념 id 재발급 금지, 삭제 대신
   `merged_into`. 미매칭을 "기타"로 뭉치지 말 것.
@@ -145,8 +147,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   Edge Function 은 그 규칙을 부르는 어댑터다(둘 중 한쪽에만 있는 규칙은 웹과 앱이 다른 결과를
   내는 버그). `supabase/functions/_shared/core.mjs` 는 생성물이라 손으로 고치지 말 것 —
   core 를 고치고 `npm run bundle-edge -w @gongmoa/core` 로 재생성해 같은 커밋에 넣는다
-  (`bundle-edge:check` 가 PR 게이트). 위 "SRS 상수" 금지선의 `_shared/srs.ts` 동시 수정 규칙은
-  번들 게이트가 들어온 뒤 `srs.ts`·`review-pick.ts`·`profanity.ts` 를 `core.mjs` 의 re-export
-  한 줄로 유지하는 것으로 지키고 있다 — 세 파일 삭제는 소유자 승인 후 **이 문서의 문구 수정과
-  같은 PR 에서만**. Edge 응답은 필드 추가만(삭제·의미 변경은 새 함수명).
+  (`bundle-edge:check` 가 PR 게이트). `_shared/` 에 규칙 사본(`srs.ts`·`review-pick.ts`·
+  `profanity.ts`·`status.ts` 같은 것)을 다시 만들지 말 것 — 2026-09-15 소유자 승인으로 전부
+  삭제됐고 Edge 는 `core.mjs` 만 import 한다. Edge 응답은 필드 추가만(삭제·의미 변경은 새 함수명).
   절차는 `docs/agents/edge-core-bundle.md`·`docs/agents/mobile-parity.md`.

@@ -64,19 +64,16 @@ npm run bundle-edge:check -w @gongmoa/core      # 재생성해 커밋본과 diff
 6. 계약 테스트 케이스 추가(`docs/agents/contract-tests.md`), 파리티 매트릭스 행
    (`docs/agents/mobile-parity.md`).
 
-## `_shared/srs.ts`·`review-pick.ts`·`profanity.ts` 는 re-export 로 남아 있다
+## `_shared/` 의 규칙 사본은 전부 삭제됐다
 
 `_shared/{status,status-targets,membership,attendance,explanations,media}.ts` 는 번들 도입과
-함께 삭제됐고 `_shared/cbt.ts` 는 `http.ts` 로 갈라진 뒤 삭제됐다. 그러나 **`srs.ts`·
-`review-pick.ts`·`profanity.ts` 세 파일은 지우지 않고 `core.mjs` 의 re-export 한 줄로 바꿔
-뒀다.** `apps/web/AGENTS.md` 의 SRS 금지선이 `supabase/functions/_shared/srs.ts` 를
-파일명으로 지목하고 있어서다 — 파일이 사라지면 금지선 문구가 존재하지 않는 파일을 가리킨다.
+함께, `_shared/cbt.ts` 는 `http.ts` 로 갈라진 뒤 삭제됐다. 마지막까지 re-export 로 남겨 뒀던
+`srs.ts`·`review-pick.ts`·`profanity.ts` 도 2026-09-15 소유자 승인(설계서 §13 질문 9)으로
+AGENTS.md 문구 수정과 같은 커밋에서 삭제했다. 지금 `_shared/` 에는 `clients.ts`·`http.ts` 와
+생성물(`core.mjs`·`core.d.ts`·`core-types/`)만 있다.
 
-- 지금 상태: 두 경로(`_shared/srs.ts` 와 `core.mjs`)가 같은 코드를 가리킨다. 금지선의 의도
-  ("한쪽만 고치면 어긋난다")는 번들 게이트가 대신 지킨다.
-- 삭제 조건: 소유자가 설계서 §13 질문 9 를 승인한 뒤, **AGENTS.md 문구 수정과 같은 PR 에서만**
-  세 파일을 지운다. 그 전에 파일만 먼저 지우지 말 것.
-- re-export 파일에 코드를 다시 채우지 말 것. 한 줄이 아니게 되는 순간 복사본이 부활한다.
+- Edge Function 이 규칙을 쓰는 경로는 `../_shared/core.mjs` 하나뿐이다.
+- `_shared/` 에 규칙 파일이나 re-export 파일을 다시 만들지 말 것 — 사본이 부활하는 첫걸음이다.
 
 ## 응답 계약 — Edge 응답은 "추가만"
 
@@ -107,6 +104,5 @@ npm run bundle-edge:check -w @gongmoa/core      # 재생성해 커밋본과 diff
   다른 결과를 내는 버그다.
 - `packages/core` 에서 `@supabase/supabase-js` 를 값으로 import 하지 말 것(`import type` 만).
   번들에 들어가면 Edge 가 supabase-js 를 두 번 로드한다.
-- `_shared/srs.ts`·`review-pick.ts`·`profanity.ts` 를 소유자 승인·AGENTS.md 수정 없이 지우지 말
-  것. 반대로 그 안에 코드를 다시 쓰지도 말 것.
+- `_shared/` 에 규칙 사본·re-export 파일을 다시 만들지 말 것(`srs.ts` 등은 2026-09-15 삭제됨).
 - Edge 응답에서 필드를 빼거나 의미를 바꾸지 말 것. 새 함수명으로.

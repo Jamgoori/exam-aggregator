@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -12,10 +12,10 @@ import {
 
 // 비속어 목록의 정본은 여기(core) 하나다. 앱이 호출하는 Edge Function 은
 // supabase/functions/_shared/core.mjs(이 패키지의 esbuild 번들)로 같은 목록을 받고,
-// 예전 사본 _shared/profanity.ts 는 그 번들의 re-export 한 줄로 남아 있다(AGENTS.md 문구
-// 갱신 전까지). 여기서는 (1) 사본 파일에 목록이 다시 생기지 않았는지, (2) 커밋된 번들이
-// 지금 목록과 같은지 대조한다 — 번들을 안 돌리고 목록만 고치면 앱에서만 통과하는 구멍이 된다.
-test("Edge Function 사본의 목록이 core 와 같다", async () => {
+// 예전 사본 _shared/profanity.ts 는 삭제됐다(2026-09-15). 여기서는 (1) 사본 파일이 다시
+// 생기지 않았는지, (2) 커밋된 번들이 지금 목록과 같은지 대조한다 — 번들을 안 돌리고 목록만
+// 고치면 앱에서만 통과하는 구멍이 된다.
+test("Edge Function 번들의 목록이 core 와 같다", async () => {
   const sharedDir = join(
     dirname(fileURLToPath(import.meta.url)),
     "..",
@@ -25,12 +25,11 @@ test("Edge Function 사본의 목록이 core 와 같다", async () => {
     "functions",
     "_shared",
   );
-  const copy = readFileSync(join(sharedDir, "profanity.ts"), "utf8");
-  assert.ok(
-    /export \{[\s\S]*PROFANITY_WORDS[\s\S]*\} from "\.\/core\.mjs"/.test(copy),
-    "_shared/profanity.ts 는 core.mjs 의 re-export 여야 한다",
+  assert.equal(
+    existsSync(join(sharedDir, "profanity.ts")),
+    false,
+    "_shared/profanity.ts 사본을 다시 만들지 말 것 — Edge 는 core.mjs 만 import 한다",
   );
-  assert.equal(copy.includes("PROFANITY_WORDS = ["), false, "사본에 목록을 다시 쓰지 말 것");
 
   const bundle = (await import(pathToFileURL(join(sharedDir, "core.mjs")).href)) as {
     PROFANITY_WORDS: readonly string[];

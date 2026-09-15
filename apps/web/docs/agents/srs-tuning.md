@@ -54,9 +54,9 @@ npm test                                  # simulate.test.ts 포함
 
 ## 3. 바꾼다면
 
-- **양쪽을 함께 고친다**: `packages/core/src/srs.ts`(정본)와
-  `supabase/functions/_shared/srs.ts`(엣지 함수 사본). 한쪽만 고치면 웹과 앱의
-  복습일이 조용히 어긋난다.
+- **정본은 `packages/core/src/srs.ts` 하나**. 고친 뒤 `npm run bundle-edge -w @gongmoa/core`
+  로 `supabase/functions/_shared/core.mjs` 를 재생성해 같은 커밋에 넣는다(번들이 낡으면
+  웹과 앱의 복습일이 조용히 어긋난다 — `bundle-edge:check` 가 PR 을 막는다).
 - 기존 사용자의 스케줄은 마이그레이션하지 않는다. 상수 변경은 다음 채점부터
   반영되고, 이미 배정된 `srs_due_at`은 그대로 남는다.
 - `packages/core/src/srs.test.ts`에 근거를 케이스로 남긴다.
@@ -104,11 +104,9 @@ group by 1 order by 2 desc limit 30;
   회독형 프로필 시뮬레이션을 먼저 돌릴 것. 이 규칙들이 없으면 회독을 성실히 할수록
   복습 큐가 미래로 비워진다.
 
-## 번들 게이트 이후 — `_shared/srs.ts` 는 re-export 다
+## 번들 게이트 이후 — `_shared/srs.ts` 는 없다
 
-`supabase/functions/_shared/srs.ts` 는 이제 `_shared/core.mjs`(packages/core 의 esbuild
-번들, 생성물)를 re-export 하는 한 줄이다. 위 3절의 "양쪽을 함께 고친다"는
-**`packages/core/src/srs.ts` 를 고치고 `npm run bundle-edge -w @gongmoa/core` 를 돌려
-`core.mjs` 를 함께 커밋한다**로 바뀐다. `_shared/srs.ts` 에 상수를 다시 쓰지 말 것 —
-번들이 안 맞으면 `bundle-edge:check` 가 PR 을 막는다. 파일 자체를 지우는 것은 소유자 승인 후
-AGENTS.md 문구 수정과 같은 PR 에서만(`docs/agents/edge-core-bundle.md`).
+옛 Edge 사본 `supabase/functions/_shared/srs.ts` 는 2026-09-15 소유자 승인으로 삭제됐다.
+Edge Function 은 `_shared/core.mjs`(packages/core 의 esbuild 번들, 생성물)에서 `nextSrs` 등을
+import 한다. `_shared/` 에 SRS 상수나 사본 파일을 다시 만들지 말 것 — 절차는
+`docs/agents/edge-core-bundle.md`.

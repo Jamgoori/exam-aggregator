@@ -667,6 +667,35 @@ Phase 1a 가 끝나면 "쓸모 있는 설치 가능한 앱"(검색·CBT·채점�
 
 ---
 
+## 12-2. 소유자 결정 기록 (2026-09-15)
+
+§13 질문에 대한 답. 아래 결정은 본문보다 우선한다(본문 갱신은 해당 Phase 착수 때).
+
+| # | 결정 | 설계 반영 |
+|---|---|---|
+| 1 | **하단 탭 + 햄버거 드로어** 병행 | §4.4·§5 수정 필요: 하단 탭 4개(홈 `/` · 기출문제 `/papers` · 오답노트 `/mypage?tab=wrong-notes` · 마이페이지 `/mypage`)를 두고, 드로어에는 웹 `PRIMARY_NAV`/`ACCOUNT_NAV` 전체를 그대로 둔다. 탭은 `expo-router` 의 `Tabs`(native-tabs 는 SDK 58 안정화 후), 몰입 화면에서는 숨김. 웹과 갈라지는 유일한 크롬이며 탭에 있는 항목도 드로어에서 빠지지 않는다(웹과 같은 입구 유지) |
+| 2 | `_shared/srs.ts`·`review-pick.ts`·`profanity.ts` 삭제 **승인** | 같은 커밋에서 삭제 + AGENTS.md 문구 갱신 완료 |
+| 3 | `schema.sql` Phase 0 절 운영 적용 — 머지 전 필요 | 순서: 운영 DB 에 SQL 적용 → Edge 배포 → 앱. 웹은 SQL 없이도 동작하므로 웹 배포는 순서 무관 |
+| 4 | 분석 **넣는다** | Sentry + GA4 앱 스트림(`@react-native-firebase/analytics`). App Privacy·Data safety·`/privacy` 5항에 광고 식별자·기기 식별자 고지 |
+| 5 | 로그인 직후·앱 첫 화면 = **랜딩 `/`** | 웹과 동일 |
+| 6 | Apple 로그인·`.p8` — **보류** | 웹 Apple 버튼은 코드만 있고 대시보드 프로바이더는 켜지 않는다(버튼은 노출하지 않도록 Phase 1 에서 플래그 처리). iOS 빌드(1b)는 Apple 결정 후 |
+| 7 | **Android 먼저 완성 후 iOS** | 이미 1a(Android)/1b(iOS) 분리. 태블릿(iPad) 지원은 iOS 이후 별도 — `supportsTablet:false` 유지 |
+| 8 | 과목 배지 슬롯 0 — 설명 후 재결정 | 보류. 기본값: 앱도 웹과 동일하게 렌더(고치면 양쪽 동시) |
+| 9 | `review_preferences` RLS 쓰기 회수 | 보류(비개발자 결정 불필요). 기본값: 지금처럼 웹은 세션 클라이언트, 앱은 EF `review-prefs` 경유 |
+| 10 | Maestro 테스트 계정 | 보류. 기본값: 스테이징 프로젝트에만 이메일 로그인 활성(운영은 그대로) |
+| 11 | AI 진단 즉시 생성 폐기 | 보류. 기본값: 웹 Batches 로 통일(앱도 최대 1시간 대기) |
+| 12 | Storage 이미지 변환 가능 여부 | **소유자 확인 필요**: Supabase 대시보드 → Settings → Billing 의 플랜(Pro 이상이면 Image Transformation 사용 가능). 코드로는 알 수 없음 |
+| 13 | IAP 는 Phase 5, 그 전 구매 UI 없음 — **동의** | 유지. `expo-iap` 직접 검증 기본, Google 일회성 상품 기본 |
+| 14 | AdMob **Phase 5 로 미룸** | §12 Phase 4 의 광고 항목을 Phase 5 로 이동. `app-ads.txt`·ATT·UMP 도 함께 |
+| 15 | 원격 푸시 | 보류. 기본값: 도입하지 않음(로컬 20시 리마인더만 유지) |
+| 16 | UGC 신고·차단 **웹에도 넣는다** | `report_post`/`block_user` 를 웹 게시판·건의·채팅에도 적용(Phase 5) |
+| 17 | 탈퇴 시 **본인 글만 삭제, 타인 답글은 유지** | `board_posts`·`suggestions`·`chat_messages` 의 `on delete cascade` 를 버리고, 본인 글은 내용을 비워 "탈퇴한 회원의 글" 로 남기되 타인 댓글은 유지(댓글 익명화 정책과 동일 방향). `payments` 도 탈퇴 전 스냅샷(원장) 유지. 스키마 변경은 Phase 4(계정) 에서 |
+| 18 | Google 로그인 SDK Original vs Universal | 보류. 기본값: Original(무료) 유지, Play Services 제거 공지 시 전환 |
+| 19 | SDK 58 이행 | 보류. 기본값: 57 로 출시 후 58 정식 안정화 뒤 이행 |
+| 21 | **Phase 1 착수 보류** | 소유자 지시 전까지 앱 코드 작업 없음 |
+
+---
+
 ## 13. 리스크·미결 사항
 
 | 리스크 | 완화 |
