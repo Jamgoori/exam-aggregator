@@ -114,6 +114,14 @@ Android 빌드에는 영향 없다(버튼이 자동으로 숨겨진다).
 
 ## 5. Edge Functions 배포 (채점·섞어풀기·AI 진단 백엔드)
 
+**폰만 있을 때** — 저장소 Settings → Secrets and variables → Actions 에 `SUPABASE_ACCESS_TOKEN`
+(supabase.com → 계정 → Account → Access Tokens 에서 발급)과 `SUPABASE_PROJECT_ID`(대시보드 →
+Project Settings → General 의 Project ID)를 넣은 뒤, **Actions → "Edge Function 배포" → Run workflow**
+(함수 `all`)를 실행하면 아래 10개가 전부 올라간다. 끝나면 Summary 에 함수 목록이 남는다.
+코드가 바뀔 때마다 같은 버튼을 다시 누르면 된다.
+
+**PC 가 있을 때** — 아래 명령을 저장소 루트(`supabase/config.toml` 이 있는 곳)에서 실행한다.
+
 ```bash
 npm i -g supabase           # supabase CLI
 supabase login
@@ -128,6 +136,7 @@ supabase functions deploy explanations-get
 supabase functions deploy account-delete   # 회원 탈퇴 (웹·앱 공용, 스토어 심사 필수)
 supabase functions deploy review-history   # 지난 섞어풀기 결과 다시 보기
 supabase functions deploy comments-write   # 앱 댓글 작성·수정·삭제 (없으면 앱에서 댓글이 안 써진다)
+supabase functions deploy membership-get   # 멤버십 조회·체험 시작 (앱 재시작 Phase 0 신설)
 
 # AI 진단용 Claude 키 (함수 런타임 시크릿 — 앱 번들엔 안 들어감):
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...

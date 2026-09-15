@@ -1,0 +1,94 @@
+# Supabase Edge Function 배포 — GitHub 화면(폰 브라우저 포함)에서 직접 실행한다.
+# PC 에 supabase CLI 를 깔지 않아도 되게 만든 것. apps/mobile/SETUP.md 5절과 같은 일을 한다.
+#
+# 쓰기 전에 저장소 Settings → Secrets and variables → Actions 에 두 값을 넣어야 한다.
+#   SUPABASE_ACCESS_TOKEN   supabase.com → 오른쪽 위 계정 → Account → Access Tokens → Generate new token
+#   SUPABASE_PROJECT_ID     Supabase 대시보드 → Project Settings → General 의 "Project ID"(= project ref, 20자)
+#
+# ANTHROPIC_API_KEY 같은 함수 런타임 시크릿은 여기서 다루지 않는다(이미 supabase secrets 에 있음).
+# service_role 키는 Edge 런타임이 자동 주입하므로 아무 데도 적을 필요가 없다.
+name: Edge Function 배포
+
+on:
+  workflow_dispatch:
+    inputs:
+      function:
+        description: 배포할 함수 (all = 10개 전부)
+        type: choice
+        default: all
+        options:
+          - all
+          - cbt-start
+          - cbt-submit
+          - explanations-get
+          - membership-get
+          - review-create
+          - review-submit
+          - review-history
+          - comments-write
+          - account-delete
+          - ai-diagnose
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 필수 시크릿 확인
+        run: |
+          if [ -z "${{ secrets.SUPABASE_ACCESS_TOKEN }}" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN 시크릿이 없습니다. supabase.com → Account → Access Tokens 에서 발급해 저장소 시크릿에 넣어주세요."
+            exit 1
+          fi
+          if [ -z "${{ secrets.SUPABASE_PROJECT_ID }}" ]; then
+            echo "::error::SUPABASE_PROJECT_ID 시크릿이 없습니다. Supabase 대시보드 → Project Settings → General 의 Project ID 를 넣어주세요."
+            exit 1
+          fi
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # core 번들(_shared/core.mjs)이 커밋된 생성물과 같은지 먼저 확인한다 — 낡은 번들을
+      # 배포하면 웹과 앱의 채점 규칙이 조용히 어긋난다(apps/web/docs/agents/edge-core-bundle.md).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: 워크스페이스 설치
+        run: npm ci
+      - name: core 번들 신선도 확인
+        run: npm run bundle-edge:check -w @gongmoa/core
+
+      - name: 함수 배포
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.function }}" = "all" ]; then
+            FUNCS="cbt-start cbt-submit explanations-get membership-get review-create review-submit review-history comments-write account-delete ai-diagnose"
+          else
+            FUNCS="${{ inputs.function }}"
+          fi
+          for f in $FUNCS; do
+            echo "::group::deploy $f"
+            supabase functions deploy "$f" --project-ref "$PROJECT_ID"
+            echo "::endgroup::"
+          done
+
+      - name: 배포 결과
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          {
+            echo "## 배포된 Edge Function"
+            echo
+            echo '```'
+            supabase functions list --project-ref "$PROJECT_ID"
+            echo '```'
+            echo
+            echo "확인: Supabase 대시보드 → Edge Functions → Logs 에서 오류가 없는지, 웹에서 CBT 한 번 채점해 본다."
+          } >> "$GITHUB_STEP_SUMMARY"
