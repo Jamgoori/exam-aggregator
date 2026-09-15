@@ -70,7 +70,7 @@ export function ReportQuestionButton({
         type="button"
         onClick={() => setOpen(true)}
         aria-label={`${questionNumber}번 문항 오류 신고`}
-        className="flex items-center justify-center rounded-full p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 print:hidden dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-red-400"
+        className="flex shrink-0 items-center justify-center rounded-full p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-red-500 print:hidden dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-red-400"
       >
         <Flag size={14} />
       </button>
