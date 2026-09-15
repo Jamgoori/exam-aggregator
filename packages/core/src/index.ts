@@ -64,3 +64,9 @@ export * from "./diagnosis-progress";
 
 // CBT 최소 응시시간·답안 정제 — 클라이언트(솔버)와 서버 규칙이 같은 값을 쓴다
 export * from "./cbt-attempt";
+
+// Edge Function 계약(요청/응답 타입)과 호출기 — 앱(apps/mobile)이 Edge 를 부르는 유일한 경로.
+// contracts.ts 는 rules/* 를 `import type` 으로만 참조해 service_role 규칙 본문이 앱 번들에
+// 섞이지 않는다(server.ts 가 아니라 여기서 내보내는 이유). 응답은 추가만(add-only).
+export * from "./edge/contracts";
+export * from "./edge/invoke";
