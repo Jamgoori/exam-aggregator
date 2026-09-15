@@ -64,10 +64,15 @@ jobs:
           } >> "$GITHUB_ENV"
 
       # 계약 테스트는 Anthropic 을 부르지 않으므로 더미 값이면 된다.
+      # GONGMOA_TEST_HOOKS=1 은 Edge 가 x-gongmoa-test-clock / x-gongmoa-test-fuzz 헤더를 읽게
+      # 하는 스위치다(_shared/clients.ts#testOverrides) — 웹 어댑터와 같은 now·fuzz 를 넣어야
+      # 스냅샷이 결정적으로 비교된다. **로컬 serve 전용**: 프로덕션 `supabase secrets` 에 절대
+      # 넣지 말 것(클라이언트가 채점 시각을 지정하면 최소 응시시간·SRS 가 조작된다).
       - name: Edge 환경 파일
         run: |
           {
             echo "ANTHROPIC_API_KEY=contract-test-dummy"
+            echo "GONGMOA_TEST_HOOKS=1"
           } > supabase/.env.local
 
       - name: Edge Function 서빙 (백그라운드)
@@ -86,8 +91,8 @@ jobs:
           cat functions-serve.log
           exit 1
 
-      # TODO: `test:contract` 스크립트는 @gongmoa/core 에 아직 없다(Phase 0 에서 추가).
-      # 추가 전까지 이 단계는 실패한다 — 스크립트가 들어오면 이 주석을 지운다.
+      # packages/core/scripts/contract-tests.mjs — 픽스처 적재 → 케이스별 웹 어댑터/Edge 실행 →
+      # 결과 행 스냅샷 비교. 실패 시 diff 를 찍고 exit 1.
       - name: 계약 테스트
         run: npm run test:contract -w @gongmoa/core
 

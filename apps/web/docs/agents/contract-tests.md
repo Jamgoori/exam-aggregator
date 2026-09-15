@@ -1,7 +1,8 @@
 # 계약 테스트 (웹 어댑터 ↔ Edge Function 결과 동일성)
 
-관련 파일: `.github/workflows/contract-tests.yml` · `packages/core/src/rules/__fixtures__/*.sql` ·
-`packages/core` 의 `test:contract` 스크립트(도입 중) · `supabase/config.toml` · `supabase/seed.sql`
+관련 파일: `.github/workflows/contract-tests.yml` · `packages/core/scripts/contract-tests.mjs`
+(`npm run test:contract -w @gongmoa/core`) · `supabase/functions/_shared/clients.ts#testOverrides` ·
+`supabase/config.toml` · `supabase/seed.sql`
 설계 배경: `apps/mobile/docs/redesign-architecture.md` §6.6·§11 "계약 테스트".
 
 ## 무엇을 증명하나
@@ -39,6 +40,10 @@
 
 케이스 이름은 이 표의 번호·제목을 그대로 쓴다(스냅샷 파일명도).
 
+지금 `contract-tests.mjs` 에 들어 있는 것: #1 · #2 · #4 · #5+#6(`review` source 만) · #8(비로그인
+미리보기만) · #10 · #13+#15. 나머지(#3 재제출, #6 `mix`, #7 문항 수 다른 형제, #8 한도 순서, #9,
+#11 마일스톤, #12 닉네임 트리거, #14)는 아직 없다 — 추가할 때 이 줄을 갱신한다.
+
 ## 결정성 — `now` 와 `fuzz` 를 주입한다
 
 `recordQuestionResults` 는 `nextSrs(…, { fuzz })` 로 간격을 흔들고(`fuzzInterval`), `now` 로
@@ -47,12 +52,20 @@
 
 - core `rules/question-status.ts`(및 시각을 읽는 모든 규칙)는 `deps: { now, fuzz }` 를 받는다.
   기본값은 `new Date()` / `Math.random`.
-- 계약 테스트는 양쪽에 **같은 고정값**을 넣는다: `fuzz: () => 0.5`, `now: new Date("2026-01-15T00:00:00+09:00")`
-  같은 상수. 웹 어댑터는 함수 인자로 바로 넣는다. Edge 쪽은 HTTP 경계를 넘어야 하므로 테스트
-  전용 입력 경로가 필요한데(제안: 테스트 전용 헤더를 `functions serve` 의 `--env-file` 로 켠
-  환경변수가 있을 때만 읽음), 정확한 방식은 `test:contract` 를 넣는 PR 에서 정하고 이 문단을
-  갱신한다. 어떤 방식이든 **프로덕션 배포에서는 그 입력이 무시돼야 한다** — 클라이언트가 시각을
-  지정할 수 있으면 SRS 가 조작된다.
+- 계약 테스트는 양쪽에 **같은 고정값**을 넣는다: `fuzz: () => 0.5`, `now` 는 스크립트의 `CLOCK`
+  상수(+케이스별 오프셋). 웹 어댑터 경로는 규칙 함수의 `opts.now` / `opts.questionStatus.fuzz` 로
+  바로 넣는다.
+- **Edge 쪽 주입 경로**: 요청 헤더 `x-gongmoa-test-clock`(ISO 8601 → `now`)과
+  `x-gongmoa-test-fuzz`(0 이상 1 미만 → `fuzz = () => 값`). `supabase/functions/_shared/clients.ts` 의
+  `testOverrides(req)` 가 **환경변수 `GONGMOA_TEST_HOOKS=1` 일 때만** 헤더를 읽고, 아니면 빈 객체를
+  돌려준다. `cbt-start`·`cbt-submit`·`review-submit` 이 그 값을 규칙 opts 로 넘긴다. 워크플로가
+  `functions serve --env-file supabase/.env.local` 에 넣는 파일에만 이 변수가 있다 — **프로덕션
+  `supabase secrets` 에는 절대 넣지 말 것.** 클라이언트가 채점 시각을 지정할 수 있으면 최소
+  응시시간이 무력화되고 SRS 가 조작된다. 스크립트는 시작 전에 `cbt-start` 의 `startedAt` 이 보낸
+  시각과 같은지 확인해(`probeTestHooks`) 훅이 꺼져 있으면 그 이유로 바로 실패한다.
+- `CLOCK` 은 `FREE_UNTIL`(전면 무료 기간) **뒤**의 시각이다. 그 기간에는 출석이 닫혀 있어
+  (`isAttendanceOpen`) `attendance_days` 가 남지 않아 "출석 1회분" 단언을 못 한다. 단언은
+  `isAttendanceOpen(CLOCK)` 을 보고 자동으로 전환되므로 `FREE_UNTIL` 을 밀어도 깨지지 않는다.
 - 스냅샷이 비결정적으로 흔들리면 주입이 빠진 자리가 있는 것이다. `Math.random`·`Date.now()`·
   `new Date()` 를 규칙 안에서 직접 부르는 곳을 찾는다.
 
@@ -72,16 +85,22 @@ PR + 수동 실행.
 
 ## 케이스를 추가하는 법
 
-1. 픽스처: `packages/core/src/rules/__fixtures__/<case>.sql`. 사용자·문제지·정답·상태 행을
-   `on conflict do nothing` 으로 넣는다. 고정 UUID 를 쓴다(스냅샷에 id 가 들어간다).
-2. 입력: 케이스 파일에 `input`(요청 본문)과 `deps`(`now`, `fuzz`)를 상수로 둔다.
-3. 실행: 헬퍼 `runBoth(case)` 가 픽스처 적재 → 웹 어댑터 호출 → 행 스냅샷 → DB 초기화 → 픽스처
-   재적재 → Edge 호출 → 행 스냅샷을 돌려준다. 두 스냅샷을 `deepStrictEqual`.
-4. 스냅샷에서 비교하지 않을 열은 명시적으로 제외한다(`id` 가 서버 생성인 테이블의 `id`,
-   `created_at` 이 `now()` 기본값인 열). 제외 목록은 케이스마다 적지 말고 헬퍼의 상수 한 곳에.
+1. 픽스처: `contract-tests.mjs#ensureFixtures` 가 admin 클라이언트로 고정 UUID
+   (`00000000-0000-4000-8000-00000000c0xx` 대역)를 `ignoreDuplicates` upsert 로 넣고 끝에 지운다.
+   지금 있는 것: 과목·직렬 1개씩, 문제지 2장(dedup 형제, 정답 동일 `[1,2,3,4,5]`, voided `[5]`),
+   문항·이미지 5개씩, 해설 5개. 케이스가 더 필요한 행은 여기에 보탠다.
+2. 사용자: 웹 경로용·Edge 경로용 두 계정(`USERS.web`/`USERS.edge`)을 `auth.admin.createUser` 로
+   만들고 `signInWithPassword` 로 JWT 를 받는다. 케이스마다 두 사용자에게 같은 입력을 넣는다.
+3. 실행: 케이스 함수 하나가 웹 경로(`core.*` 규칙을 admin 으로 직접 호출) → Edge 경로(`edge()` 로
+   HTTP 호출) → `snapshot(userId)` 두 번 → `compareSnapshots`. 앞 케이스의 행이 필요 없으면
+   `resetUsers()` 로 시작한다.
+4. 비교하지 않을 열은 `SNAPSHOT` 상수 한 곳에 적는다(서버 생성 `id`·`user_id`·DB `now()` 기본값
+   시각). 주입한 시각으로 계산되는 열(`last_answered_at`·`srs_due_at`·`submitted_at` …)은 그대로
+   비교한다. 뽑기 순서가 무작위인 `review_session_items.position` 은 제외하고 (문제지, 문항)으로
+   정렬한다.
 5. 동시성 케이스는 `Promise.all` 로 두 요청을 같은 어댑터에 넣고 행 개수를 단언한다 — 양쪽 어댑터
-   각각에 대해.
-6. 위 표에 행을 추가하고, 설계서 §9 파리티 매트릭스에 "계약 테스트 #n" 을 적는다.
+   각각에 대해(#4 가 그 예).
+6. 위 표와 "지금 들어 있는 것" 줄을 갱신하고, 설계서 §9 파리티 매트릭스에 "계약 테스트 #n" 을 적는다.
 
 ## 금지선
 

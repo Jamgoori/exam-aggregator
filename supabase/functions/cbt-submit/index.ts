@@ -9,7 +9,7 @@
 //
 // 응답에 diagnosisProgress{attemptCount, wrongCount} 가 추가됐다(§6.7 #2, 추가 필드).
 import { corsHeaders, isUuid, json } from "../_shared/http.ts";
-import { coreAdmin, requireUser } from "../_shared/clients.ts";
+import { coreAdmin, requireUser, testOverrides } from "../_shared/clients.ts";
 // @ts-types="../_shared/core.d.ts"
 import { isCbtRuleError, submitCbtAttempt } from "../_shared/core.mjs";
 
@@ -30,7 +30,13 @@ Deno.serve(async (req) => {
   }
   if (!isUuid(paperId)) return json({ error: "잘못된 접근입니다." }, 400);
 
-  const result = await submitCbtAttempt(coreAdmin(), auth.userId, paperId, submitted);
+  // now·fuzz 는 계약 테스트 전용 주입(GONGMOA_TEST_HOOKS=1 일 때만 헤더를 읽는다). 평소엔
+  // 둘 다 undefined 라 규칙의 기본값(new Date()·Math.random)으로 돈다.
+  const test = testOverrides(req);
+  const result = await submitCbtAttempt(coreAdmin(), auth.userId, paperId, submitted, {
+    now: test.now,
+    questionStatus: test.fuzz ? { fuzz: test.fuzz } : undefined,
+  });
   if (isCbtRuleError(result)) return json({ error: result.error }, result.status);
 
   return json({
