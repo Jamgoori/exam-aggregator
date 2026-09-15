@@ -635,6 +635,38 @@ Phase 1a 가 끝나면 "쓸모 있는 설치 가능한 앱"(검색·CBT·채점�
 
 ---
 
+## 12-1. Phase 0 진행 상황 (2026-09-15, 브랜치 `claude/app-version-redesign-t5t8c5`)
+
+**들어간 것** — 전부 typecheck·테스트 통과(core 446, web 155, design-tokens 6, `bundle-edge --check` 최신).
+
+| 항목 | 상태 | 위치 |
+|---|---|---|
+| 디자인 토큰 정본 분리 | ✅ 웹 컴파일 CSS byte 동일 확인 | `packages/design-tokens/`(theme.css·gen·drift 테스트), `globals.css` 는 `@import` |
+| 배지 클래스·내비 항목·진단 진행 계산 | ✅ | `packages/core/src/{badge-classes,nav-items,diagnosis-progress}.ts`, 웹은 re-export |
+| `@gongmoa/core/server` + `rules/*` | ✅ CBT·문항 상태·출석·멤버십·해설 접근·상태 대상·복습 세션·복습 큐·섞어풀기·복습 설정 | `packages/core/src/server.ts`, `rules/`, `data/` |
+| Edge 번들 | ✅ esbuild → `_shared/core.mjs` + `core-types/*.d.ts`, CI 게이트 | `packages/core/scripts/bundle-edge.mjs` |
+| Edge 복사본 삭제 | ✅ `_shared/{cbt,status,status-targets,membership,attendance,explanations,media}.ts` 삭제, `http.ts` 신설 | `_shared/{srs,review-pick,profanity}.ts` 는 re-export 로 유지(§13 질문 9 승인 전) |
+| 파리티 수정 | ✅ mix source, media 페이지네이션, status-targets core 판, 30분 재사용 제거 + `request_id`, `cbt-submit diagnosisProgress`, `explanations-get remainingToday`, review-* 응답 확장 | `supabase/functions/*` |
+| 이중 제출 차단 | ✅ CBT 시작 행 delete…returning 선회수, 복습 세션 update…returning 선점 | `rules/cbt-attempt.ts`, `rules/review-session.ts` |
+| RPC·SQL | ✅ `paper_identity_signals`, `paper_explanation_counts`, `own_wrong_answers`, `review_sessions.request_id`+부분 유니크, `daily_limit` check | `supabase/schema.sql` 말미 "Phase 0" 절 — **운영 DB 미적용** |
+| EF `membership-get` | ✅ | `supabase/functions/membership-get/` |
+| Edge 계약 타입·`invokeEdge` | ✅ | `packages/core/src/edge/{contracts,invoke}.ts` |
+| 웹 변경 | ✅ geo-block 면제(/.well-known·/terms·/privacy·/app-ads.txt·/account/delete-request), Apple 로그인 버튼, `/api/app/config`, `/account/delete-request` | `apps/web` |
+| 계약 테스트 | ✅ 하네스 7케이스 + Actions 워크플로 | `packages/core/scripts/contract-tests.mjs`, `.github/workflows/contract-tests.yml` |
+| 로컬 개발·문서 | ✅ `supabase/config.toml`·`seed.sql`, `docs/dev-workflow.md`, `docs/agents/{edge-core-bundle,contract-tests,mobile-parity}.md`, `apps/mobile/AGENTS.md` | |
+
+**아직 안 된 것(이 환경에서 불가 또는 소유자 작업)**
+- 네이티브 스파이크(SDK 57 dev build, pdf 7·Skia·Kakao `aud`·google-signin 16·Uniwind Metro) — 실기기·EAS 필요.
+- Edge Function 의 Deno 타입검사·`functions serve` — Deno·Supabase CLI 없음. 번들 export 목록과 손으로 대조했다. **첫 `supabase functions serve` 에서 `@ts-types` 지시문·`deno.json` import map 동작을 확인할 것.**
+- `schema.sql` Phase 0 절의 운영 적용(RPC 3개·`request_id`·check) — 적용 전에는 앱의 `own_wrong_answers` 등이 없고, `review-create` 의 `requestId` 는 컬럼이 없어 insert 가 실패한다(웹은 `request_id` 를 보내지 않아 무관).
+- 계약 테스트의 실제 실행(Actions 에서 첫 실행 후 `supabase status -o env` 파싱·`-x` 서비스 이름 확인).
+- §11 "Phase 0 전" 콘솔 작업 전부, `EXPO_TOKEN` 재발급.
+- 문서 갱신 잔여: `docs/agents/{adsense,board-rich-text}.md` 의 앱 관련 문구, §9 매트릭스의 Phase 0 반영.
+
+**앱에 영향을 주는 Edge 동작 변화**(기존 앱 코드 기준): `review-create` 는 30분 재사용이 없어져 연타 시 새 세션이 생기므로 앱은 `requestId` 를 보내야 한다; 후보 규칙이 웹과 같아져(dedup 대표·삭제 표시 제외) 세션 내용이 달라진다; `review-submit` 이중 제출은 400 "이미 채점된 세션이에요."; `cbt-submit` 은 응답에 `diagnosisProgress`, `explanations-get` 은 `remainingToday`·`lockReason` 을 준다.
+
+---
+
 ## 13. 리스크·미결 사항
 
 | 리스크 | 완화 |
