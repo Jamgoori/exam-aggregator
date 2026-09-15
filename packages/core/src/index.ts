@@ -53,3 +53,8 @@ export * from "./wrong-notes";
 
 // 데이터 접근 (DI — SupabaseClient 주입)
 export * from "./data/subjects";
+
+// 웹·앱이 같은 문자열을 그리는 표시 데이터 (배지 클래스 맵·메뉴 항목·진단 진행률)
+export * from "./badge-classes";
+export * from "./nav-items";
+export * from "./diagnosis-progress";

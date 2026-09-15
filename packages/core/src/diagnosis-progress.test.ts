@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { computeDiagnosisProgress } from "./diagnosis-progress";
-import { DIAGNOSIS_MIN_ATTEMPTS, DIAGNOSIS_MIN_WRONG } from "./ai-diagnosis-thresholds";
+import {
+  computeDiagnosisProgress,
+  DIAGNOSIS_MIN_ATTEMPTS,
+  DIAGNOSIS_MIN_WRONG,
+} from "./diagnosis-progress";
 
 describe("computeDiagnosisProgress", () => {
   it("처음에는 응시 축으로 0/3 을 보여준다", () => {
