@@ -9,12 +9,18 @@
 
 ## 0. 코드 받기
 
+앱은 웹과 같은 저장소(`Jamgoori/exam-aggregator`)의 `apps/mobile` 에 있다(예전 별도
+저장소 `gongmoa_mobile` 은 쓰지 않는다).
+
 ```bash
-git clone https://github.com/Jamgoori/gongmoa_mobile
-cd gongmoa_mobile
-npm install
-npx expo install          # 네이티브 모듈 버전 정렬 (package.json 핀 대신 이걸로 맞춤)
+git clone https://github.com/Jamgoori/exam-aggregator
+cd exam-aggregator
+npm install               # 루트에서 — 워크스페이스 전체(웹·앱·core·design-tokens) 설치
+cd apps/mobile
+npx expo-doctor           # 21/21 이어야 한다. 아니면 `npx expo install --fix`
 ```
+
+폰만 있고 PC 가 없으면 이 절은 건너뛰고 6-A(GitHub Actions 빌드)로 간다.
 
 ---
 
