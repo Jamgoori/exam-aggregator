@@ -9,6 +9,7 @@
 //   .gt · .gte · .lt · .lte · .in · .order · .limit · .range · .maybeSingle · .single
 //   .insert(row|rows) · .upsert(row|rows, { onConflict }) · .update(values) · .delete()
 //   쓰기 뒤 .select(cols) 는 영향받은 행을 돌려준다(returning).
+//   insert 가 기본키/onConflict 로 겹치면 { error: { code: "23505" } } (PostgREST 와 같은 모양).
 //   .rpc(name, args) 는 생성자에 넘긴 핸들러가 처리한다.
 //   storage.from(...).getPublicUrl(...)
 //
@@ -248,6 +249,13 @@ class Query {
             };
       }
     } catch (e) {
+      // 유니크 충돌(insert 중복)은 PostgREST 처럼 { error: { code: "23505" } } 로 돌려준다 —
+      // rules/review-session.ts 의 requestId 멱등 경로가 이 코드를 보고 기존 세션을 찾는다.
+      const code = (e as { code?: string })?.code;
+      if (code) {
+        result = { data: null, error: { message: String((e as Error).message), code }, count: null };
+        return Promise.resolve(result).then(onfulfilled, onrejected);
+      }
       return Promise.reject(e).then(onfulfilled, onrejected);
     }
     return Promise.resolve(result).then(onfulfilled, onrejected);

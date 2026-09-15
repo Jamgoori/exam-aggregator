@@ -2944,3 +2944,30 @@ end $$;
 
 revoke all on function own_wrong_answers(jsonb) from public, anon;
 grant execute on function own_wrong_answers(jsonb) to authenticated;
+
+-- 복습 세션 생성 멱등 키(설계서 §6.6 "복습 세션 생성 연타", §6.7 #8). 앱은 세션 생성 요청마다
+-- 새 UUID 를 requestId 로 보내고 서버(core rules/review-session.ts)는 그대로 request_id 에 넣는다.
+-- 네트워크 재시도로 같은 요청이 두 번 오면 아래 부분 유니크 인덱스가 두 번째 insert 를
+-- 23505 로 거절하고, 서버는 (user_id, request_id) 로 기존 세션을 찾아 같은 응답을 돌려준다 —
+-- "최근 N 분" 창 없이 같은 requestId 는 언제나 같은 세션. Edge 아이솔레이트는 메모리를
+-- 공유하지 않으므로 select-then-insert 로는 동시 재시도를 못 막는다(판정은 DB 유니크로만).
+-- 웹은 request_id 를 넣지 않아(null) 인덱스에 안 걸린다 — 웹 동작 불변. Edge 의 예전
+-- "30분 안 미제출 세션 재사용"은 이 컬럼과 함께 제거됐다.
+alter table review_sessions add column if not exists request_id text;
+create unique index if not exists review_sessions_request_uidx
+  on review_sessions(user_id, request_id) where request_id is not null;
+
+-- 하루 복습 문항 수의 방어선(§6.7 #13). 서버(core rules/review-preferences.ts#setDailyLimit)가
+-- DAILY_LIMIT_OPTIONS(packages/core/src/review-queue.ts = 10/20/40/60)로 거르지만, 웹은 이
+-- 테이블을 사용자 세션(RLS insert/update own)으로 쓰므로 REST 로 직접 "하루 1문항"을 넣어
+-- 복습을 사실상 정지시킬 수 있다 — DB 에서 같은 목록으로 막는다. 목록을 바꿀 때는
+-- DAILY_LIMIT_OPTIONS 와 이 제약을 함께 고칠 것. (study_phase 의 check 는 위
+-- review_preferences_study_phase_check 에 이미 있다.)
+do $$
+begin
+  alter table review_preferences
+    add constraint review_preferences_daily_limit_check
+    check (daily_limit in (10, 20, 40, 60));
+exception
+  when duplicate_object then null;
+end $$;

@@ -9,7 +9,8 @@
 //
 // 구성:
 //   rules/*  — service_role 규칙. 웹 서버 액션과 Edge Function 은 이 함수들의 얇은 어댑터.
-//   data/*   — DI 리포지토리 중 서버 조회에 쓰이는 것(정답 신호·문항 이미지).
+//   data/*   — DI 리포지토리 중 서버 조회에 쓰이는 것(정답 신호·문항 이미지·오답노트 마크·
+//              정답·해설·메모·페이지네이션).
 //   그리고 Edge 번들이 index.ts 없이도 돌 수 있게 순수 규칙 일부를 다시 내보낸다
 //   (srs·review-pick·profanity·attendance·membership·paper-slug·format·dedup·댓글 상수).
 //   Edge 가 더 필요한 순수 모듈이 생기면 여기에 한 줄 추가하고 `npm run bundle-edge`.
@@ -22,11 +23,17 @@ export * from "./rules/explanation-access";
 export * from "./rules/explanations";
 export * from "./rules/cbt-attempt";
 export * from "./rules/status-targets";
+export * from "./rules/review-preferences";
+export * from "./rules/review-queue";
+export * from "./rules/review-session";
+export * from "./rules/mix-practice";
 
 // ── 서버 조회(DI) ──────────────────────────────────────────────────────────
 export * from "./data/dedup-signals";
 export * from "./data/question-media";
 export * from "./data/query-utils";
+export * from "./data/wrong-notes";
+export * from "./data/subjects";
 
 // ── Edge 번들이 함께 쓰는 순수 규칙(index.ts 의 부분집합) ────────────────
 export * from "./srs";

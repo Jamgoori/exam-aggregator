@@ -1,21 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { srsDayStart, srsDayIndex } from "@gongmoa/core";
-import { FakeSupabase, asSupabase, type Row } from "@/lib/test-support/fake-supabase";
+import { srsDayStart, srsDayIndex } from "../srs";
+import { FakeSupabase, asClient as asSupabase, type Row } from "../test-support/fake-supabase";
 import {
   collectDueCandidates,
   collectDueQueueItems,
   getDueReviewSummary,
-} from "@/lib/review-queue";
+} from "./review-queue";
 
-// 조회 계층 계약 테스트.
+// 조회 계층 계약 테스트(웹 apps/web/src/lib/review-queue.test.ts 에서 옮겼다).
 //
-// packages/core 의 테스트는 "이 후보 목록이면 이 큐"를 고정한다. 여기서 지키는 건
+// ../review-queue.test.ts 는 "이 후보 목록이면 이 큐"를 고정한다. 여기서 지키는 건
 // 그 앞 단계다 — 어떤 행이 후보가 되는가(정제 규칙)와, 배너·세션·예보가 같은 답을
 // 내는가. 실제로 사고가 났던 자리들이라 순수 함수 테스트만으로는 부족하다.
 //
-// 실행: npm run test (apps/web). tsconfig.test.json 이 server-only 를 빈 모듈로
-// 바꿔치기한다 — 진짜 server-only 는 import 되기만 해도 던지기 때문이다.
+// 규칙이 core 로 오면서 admin 팩토리가 필수 인자가 됐다(웹 어댑터가 기본값을 채운다).
+// 여기서는 같은 가짜를 admin 자리에도 끼운다 — question_explanations 조회와 승격 쓰기가
+// 그 팩토리를 거친다.
 
 const USER = "user-1";
 const NOW = new Date("2026-03-10T09:00:00+09:00");
@@ -115,7 +116,7 @@ test("이미지가 없는 문항은 큐에도 배너에도 안 잡힌다", async
     questions: [question("p-korean", 1), question("p-korean", 2, false)],
   });
 
-  const { candidates } = await collectDueCandidates(asSupabase(fake), USER, NOW);
+  const { candidates } = await collectDueCandidates(asSupabase(fake), USER, NOW, adminOf(fake));
   assert.deepEqual(
     candidates.map((c) => c.questionNumber),
     [1],
@@ -131,7 +132,7 @@ test("삭제 마크한 문항은 큐에서 빠진다", async () => {
     ],
   });
 
-  const { candidates } = await collectDueCandidates(asSupabase(fake), USER, NOW);
+  const { candidates } = await collectDueCandidates(asSupabase(fake), USER, NOW, adminOf(fake));
   assert.deepEqual(
     candidates.map((c) => c.questionNumber),
     [1],
@@ -146,7 +147,7 @@ test("보류한 과목은 큐에서도 예보에서도 빠진다", async () => {
     prefs: { user_id: USER, daily_limit: 20, paused_subject_ids: ["history"] },
   });
 
-  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW);
+  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW, adminOf(fake));
   assert.equal(summary.todayCount, 1);
   assert.equal(summary.forecast[0].count, 1);
   assert.ok(!summary.subjects.some((s) => s.subjectId === "history"));
@@ -166,7 +167,7 @@ test("leech로 접어둔 문항은 큐에서 빠지고 접힘 수로 센다", as
     questions: [question("p-korean", 1), question("p-korean", 2)],
   });
 
-  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW);
+  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW, adminOf(fake));
   assert.equal(summary.todayCount, 1);
   assert.equal(summary.suspendedTotal, 1);
 });
@@ -186,7 +187,7 @@ test("배너 숫자와 세션 문항 수가 같다", async () => {
   }
 
   const fake = db({ statuses, questions });
-  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW);
+  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW, adminOf(fake));
   const items = await collectDueQueueItems(asSupabase(fake), USER, NOW, () => asSupabase(fake));
 
   assert.equal(items.length, summary.todayCount);
@@ -199,7 +200,7 @@ test("배너를 보기만 하면 스케줄이 안 심긴다(승격 쓰기는 세
     questions: [question("p-korean", 1)],
   });
 
-  await getDueReviewSummary(asSupabase(fake), USER, NOW);
+  await getDueReviewSummary(asSupabase(fake), USER, NOW, adminOf(fake));
   assert.equal(fake.writes.length, 0, "배너 조회는 아무것도 쓰면 안 된다");
   assert.equal(fake.tables.user_question_status[0].srs_due_at, null);
 
@@ -208,7 +209,7 @@ test("배너를 보기만 하면 스케줄이 안 심긴다(승격 쓰기는 세
   assert.equal(fake.writes[0].table, "user_question_status");
   // 승격은 오늘자 due를 심는다. 간격·ease는 손대지 않는다(승격 시점부터 정상 출발).
   assert.ok(fake.tables.user_question_status[0].srs_due_at);
-  assert.equal(fake.writes[0].values.srs_interval_days, undefined);
+  assert.equal(fake.writes[0].values[0].srs_interval_days, undefined);
 });
 
 test("승격은 이미 스케줄이 있는 행을 덮어쓰지 않는다", async () => {
@@ -234,7 +235,7 @@ test("아직 due가 안 된 문항은 오늘 큐에 없지만 예보에는 남�
     questions: [question("p-korean", 1)],
   });
 
-  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW);
+  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW, adminOf(fake));
   assert.equal(summary.todayCount, 0);
   assert.equal(summary.forecast[2].count, 1);
   // 오늘 큐가 비면 "다음 복습이 며칠 뒤인지"를 알려줘야 한다(0인 날을 그냥 비워두면
@@ -251,7 +252,7 @@ test("오늘 안에 다시 볼 문항(재확인)은 따로 센다", async () => 
     questions: [question("p-korean", 1)],
   });
 
-  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW);
+  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW, adminOf(fake));
   assert.equal(summary.todayCount, 0);
   assert.equal(summary.relearnCount, 1);
 });
@@ -266,7 +267,7 @@ test("대기 풀은 하루 신규 몫까지만 승격되고 나머지는 숫자�
   }
 
   const fake = db({ statuses, questions });
-  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW);
+  const summary = await getDueReviewSummary(asSupabase(fake), USER, NOW, adminOf(fake));
 
   assert.equal(summary.newCount, 10);
   assert.equal(summary.todayCount, 10);

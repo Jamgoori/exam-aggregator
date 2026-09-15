@@ -10,21 +10,11 @@
 // 당시엔 어땠나" 한 줄)로 표시하고, 개정이 정답 자체를 흔드는 문항은
 // currentAnswerStatus/currentAnswerNote(문항 전체)와 상단 경고 배너로 알린다.
 // lawBasisDate는 이 해설이 참조한 "현행"의 기준 시점.
-export type QuestionExplanationContent = {
-  keywordTitle: string | null;
-  keywordExplanation: string | null;
-  choiceExplanations: {
-    choice: number;
-    text: string;
-    currentStatus: string | null; // "유효" | "개정됨" | "확인불가"
-    originalNote: string | null; // "개정됨"일 때 "출제 당시엔 어땠나" 한 줄
-  }[];
-  correctChoiceSummary: string | null;
-  lawAmendmentNote: string | null;
-  currentAnswerStatus: string | null; // "동일" | "정답변경" | "성립불가"
-  currentAnswerNote: string | null; // "정답변경"/"성립불가" 사유
-  lawBasisDate: string | null; // 참조한 "현행"의 기준 시점 (예: "2026-07")
-};
+// 타입 정본은 packages/core/src/rules/explanations.ts(QuestionExplanationContent) — 웹
+// 조회(lib/wrong-notes.ts)·Edge explanations-get·앱 해설 카드가 같은 모양을 쓴다. 여기서는
+// 기존 import 경로(@/components/explanation-body)를 위해 재노출한다.
+export type { QuestionExplanationContent } from "@gongmoa/core";
+import type { QuestionExplanationContent } from "@gongmoa/core";
 
 const CIRCLED_DIGITS = ["", "①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧"];
 

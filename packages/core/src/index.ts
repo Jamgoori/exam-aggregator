@@ -50,6 +50,9 @@ export * from "./study-phase";
 
 // 오답노트 집계 (표시는 각 앱, 판정 규칙은 여기 하나)
 export * from "./wrong-notes";
+// 문항 해설 화면 타입 — 웹 컴포넌트(explanation-body)·앱 해설 카드가 같은 모양을 그린다.
+// 정규화 함수 본문은 서버 진입점(server.ts → rules/explanations)에 있고 여기는 타입만.
+export type { NormalizedChoiceExplanation, QuestionExplanationContent } from "./rules/explanations";
 
 // 데이터 접근 (DI — SupabaseClient 주입)
 export * from "./data/subjects";

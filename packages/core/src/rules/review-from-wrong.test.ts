@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FakeSupabase, asSupabase } from "@/lib/test-support/fake-supabase";
-import { filterQuestionsAnsweredByUser } from "@/lib/review-session";
+import { FakeSupabase, asClient as asSupabase } from "../test-support/fake-supabase";
+import { filterQuestionsAnsweredByUser } from "./review-session";
 
 // "틀린 N문항만 다시 풀기"가 받는 목록은 클라이언트가 만든 값이다.
 //

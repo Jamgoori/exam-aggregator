@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FakeSupabase, asSupabase, type Row } from "@/lib/test-support/fake-supabase";
-import { resolveStatusTargets } from "@/lib/status-targets";
+import { FakeSupabase, asClient as asSupabase, type Row } from "../test-support/fake-supabase";
+import { resolveStatusTargets } from "./status-targets";
 
 // 대표(rep) 문제지 id → 실제 상태 행이 있는 문제지로 되짚기.
 //

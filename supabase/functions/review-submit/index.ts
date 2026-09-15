@@ -1,32 +1,25 @@
-// 섞어풀기 채점. 웹 submitReviewSessionForUser 포팅. 서버가 정답을 조회해 채점하고
-// review_session_items/sessions 를 갱신, user_question_status(source='review')에 반영.
-// 채점된 뷰(정답·출처 포함)를 돌려준다.
-import { corsHeaders, json } from "../_shared/http.ts";
+// 섞어풀기·복습 채점. 규칙 본문은 packages/core/src/rules/review-session.ts#
+// submitReviewSessionForUser(웹 actions.ts#submitReviewSession 과 같은 함수) — 세션 선점·
+// 정답 조회·채점·문항 상태(source = scope==="mix" ? "mix" : "review")·dedup 되짚기·출석까지
+// 전부 거기서 한다. 여기는 요청 파싱과 service_role 클라이언트 주입, 응답 직렬화만 한다.
+//
+// 세션은 채점 **전에** 선점된다(설계서 §6.6 "복습 제출 중복") — 웹+앱 동시 제출이나 앱
+// 타임아웃 재시도가 겹쳐도 한쪽만 채점된다. 나머지는 "이미 채점된 세션이에요."(400)를
+// 받는데, 앱은 그 오류를 받으면 review-history {sessionId} 로 채점 뷰를 가져온다.
+//
+// 응답(추가만): { score, total, items: [{ position, images, choiceCount, selectedChoice,
+// correctChoice, isCorrect, paperTitle, questionNumber, guessed, paperId }], sessionId, scope,
+// subjectSlug, subjectName, createdAt } — guessed·paperId·scope 이하가 §6.7 #9 로 추가된 필드.
+import { corsHeaders, isUuid, json } from "../_shared/http.ts";
 import { coreAdmin, requireUser } from "../_shared/clients.ts";
 // @ts-types="../_shared/core.d.ts"
-import {
-  attendanceQuestionCount,
-  fetchQuestionMedia,
-  recordAttendance,
-  recordQuestionResults,
-  resolveStatusTargets,
-  sanitizeSelectedChoice,
-  statusTargetKey,
-} from "../_shared/core.mjs";
-
-type ItemRow = {
-  id: string;
-  paper_id: string;
-  question_number: number;
-  position: number;
-};
+import { submitReviewSessionForUser, toReviewResultItems } from "../_shared/core.mjs";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   const auth = await requireUser(req);
   if ("error" in auth) return auth.error;
-  const userId = auth.userId;
 
   let sessionId = "";
   let answers: (number | null)[] = [];
@@ -37,160 +30,23 @@ Deno.serve(async (req) => {
   } catch {
     return json({ error: "잘못된 요청입니다." }, 400);
   }
-  if (!sessionId) return json({ error: "잘못된 접근입니다." }, 400);
+  if (!sessionId || !isUuid(sessionId)) return json({ error: "잘못된 접근입니다." }, 400);
 
   const admin = coreAdmin();
-
-  const { data: session } = await admin
-    .from("review_sessions")
-    .select("id, user_id, submitted_at, created_at, scope")
-    .eq("id", sessionId)
-    .maybeSingle();
-  if (!session || session.user_id !== userId) {
-    return json({ error: "세션을 찾을 수 없어요." }, 404);
-  }
-  if (session.submitted_at != null) return json({ error: "이미 채점된 세션이에요." }, 400);
-
-  const { data: itemRows } = await admin
-    .from("review_session_items")
-    .select("id, paper_id, question_number, position")
-    .eq("session_id", sessionId)
-    .order("position", { ascending: true });
-  const items = (itemRows ?? []) as ItemRow[];
-  if (items.length === 0) return json({ error: "세션에 문항이 없어요." }, 400);
-
-  const paperIds = [...new Set(items.map((i) => i.paper_id))];
-
-  // 정답·전항정답.
-  const answersByPaper = new Map<string, number[]>();
-  const voidedByPaper = new Map<string, Set<number>>();
-  {
-    const { data: ans } = await admin
-      .from("paper_answers")
-      .select("paper_id, answers, voided_questions")
-      .in("paper_id", paperIds);
-    for (const row of ans ?? []) {
-      answersByPaper.set(row.paper_id, (row.answers ?? []) as number[]);
-      voidedByPaper.set(row.paper_id, new Set((row.voided_questions ?? []) as number[]));
-    }
+  const result = await submitReviewSessionForUser(admin, admin, auth.userId, sessionId, answers);
+  if (result.error || !result.view) {
+    return json({ error: result.error ?? "채점에 실패했어요." }, result.status ?? 500);
   }
 
-  let score = 0;
-  const graded = items.map((it) => {
-    const selected = sanitizeSelectedChoice(answers[it.position]);
-    const correct = answersByPaper.get(it.paper_id)?.[it.question_number - 1];
-    const isCorrect =
-      voidedByPaper.get(it.paper_id)?.has(it.question_number) === true ||
-      (selected !== null && selected === correct);
-    if (isCorrect) score++;
-    return {
-      id: it.id,
-      session_id: sessionId,
-      paper_id: it.paper_id,
-      question_number: it.question_number,
-      position: it.position,
-      selected_choice: selected,
-      is_correct: isCorrect,
-    };
+  const view = result.view;
+  return json({
+    score: view.score ?? 0,
+    total: view.total,
+    items: toReviewResultItems(view),
+    sessionId: view.id,
+    scope: view.scope,
+    subjectSlug: view.subjectSlug,
+    subjectName: view.subjectName,
+    createdAt: view.createdAt,
   });
-
-  const { error: upErr } = await admin
-    .from("review_session_items")
-    .upsert(graded, { onConflict: "id" });
-  if (upErr) return json({ error: "채점 저장에 실패했어요." }, 500);
-
-  await admin
-    .from("review_sessions")
-    .update({ score, submitted_at: new Date().toISOString() })
-    .eq("id", sessionId);
-
-  // 극복 판정(문제지별). 실패해도 채점은 유효.
-  //
-  // 세션 문항의 paper_id 는 dedup 대표 id라, 중복 시험지를 응시한 사용자는 상태·복습
-  // 스케줄이 원본 id 쪽에 있다. 기록 대상을 실제 행이 있는 문제지로 되짚는다 — core
-  // rules/status-targets.ts(웹과 같은 대표 선정 + 정답 대조). admin 이라 paper_answers 도
-  // 읽을 수 있으므로 answersClient 로 같은 클라이언트를 준다.
-  let targets = new Map<string, string[]>();
-  try {
-    targets = await resolveStatusTargets(
-      admin,
-      userId,
-      graded.map((r) => ({ paperId: r.paper_id, questionNumber: r.question_number })),
-      { answersClient: admin },
-    );
-  } catch {
-    // 무시: 되짚기 실패해도 넘어온 id 로 기록한다(예전 동작).
-  }
-
-  const byPaper = new Map<string, { question_number: number; is_correct: boolean }[]>();
-  for (const r of graded) {
-    const paperIds =
-      targets.get(statusTargetKey(r.paper_id, r.question_number)) ?? [r.paper_id];
-    for (const paperId of paperIds) {
-      const list = byPaper.get(paperId) ?? [];
-      list.push({ question_number: r.question_number, is_correct: r.is_correct });
-      byPaper.set(paperId, list);
-    }
-  }
-  // 기출 섞어풀기(scope 'mix') 세션은 이력(srs_reviews.source)에서만 'mix' 로 구분된다 —
-  // 상태 갱신 규칙은 review 와 같다(웹 submitReviewSessionForUser 와 동일).
-  const source = session.scope === "mix" ? "mix" : "review";
-  try {
-    for (const [paperId, results] of byPaper) {
-      await recordQuestionResults(admin, userId, paperId, results, source);
-    }
-  } catch {
-    // 무시
-  }
-
-  // 출석 도장. byPaper 가 아니라 graded 로 센다 — 중복 시험지는 한 문항이 여러
-  // paper_id 로 되짚어져(byPaper) 같은 문항이 두 번 들어 있다. 그걸로 세면 실제로 푼
-  // 것보다 많은 문항을 푼 셈이 되어 출석 기준이 헐거워진다.
-  //
-  // 세는 것은 "채점된 문항"이 아니라 **답을 고른 문항**이고, 세션이 너무 빨리 끝났으면
-  // 아예 세지 않는다(attendanceQuestionCount). CBT 와 달리 이 경로에는 최소 응시시간이
-  // 없어서, review-create 로 세션을 만들자마자 빈 답안으로 제출하는 것만으로 도장이
-  // 찍혔다 — 그 도장은 grant_attendance_membership 을 통해 멤버십 일수로 환전된다.
-  // 경과 시간은 반드시 서버가 기록한 created_at 으로 잰다(클라이언트 값이 아니라).
-  try {
-    const elapsedSeconds =
-      (Date.now() - new Date(session.created_at as string).getTime()) / 1000;
-    await recordAttendance(
-      admin,
-      userId,
-      attendanceQuestionCount({
-        answeredCount: graded.filter((r) => r.selected_choice !== null).length,
-        elapsedSeconds,
-      }),
-    );
-  } catch {
-    // 무시: 출석 기록 실패가 채점을 막지 않는다.
-  }
-
-  // 결과 뷰: 이미지 + 정답/선택/제목/출처.
-  const media = await fetchQuestionMedia(admin, paperIds);
-  const titleByPaper = new Map<string, string>();
-  {
-    const { data: papers } = await admin
-      .from("exam_papers")
-      .select("id, title")
-      .in("id", paperIds);
-    for (const p of papers ?? []) titleByPaper.set(p.id, p.title);
-  }
-
-  const resultItems = graded.map((r) => {
-    const m = media.get(r.paper_id)?.get(r.question_number);
-    return {
-      position: r.position,
-      images: m?.images ?? [],
-      choiceCount: m?.choiceCount ?? 4,
-      selectedChoice: r.selected_choice,
-      correctChoice: answersByPaper.get(r.paper_id)?.[r.question_number - 1] ?? null,
-      isCorrect: r.is_correct,
-      paperTitle: titleByPaper.get(r.paper_id) ?? null,
-      questionNumber: r.question_number,
-    };
-  });
-
-  return json({ score, total: items.length, items: resultItems });
 });

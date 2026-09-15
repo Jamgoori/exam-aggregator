@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { embedOne, toMixSessionBriefs, type MixSessionRow } from "@/lib/mix-practice";
+import { embedOne, toMixSessionBriefs, type MixSessionRow } from "./mix-practice";
 
 // 2026-09-05 프로덕션 사고: /mix 가 로그인 사용자에게만 500 이었다(익명은 CDN 캐시본을
 // 받아 멀쩡해 보였다). 원인은 PostgREST 임베드가 배열로 와서 subjects.slug 가 조용히
