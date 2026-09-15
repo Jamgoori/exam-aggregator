@@ -11,6 +11,21 @@ const TRIGGER_MESSAGES = [
   "사용할 수 없는 닉네임이에요.",
 ];
 
+// 중복확인만(저장 없음) — 웹 mypage/edit nickname-field.tsx 의 "중복확인" 버튼(app/actions.ts
+// checkNicknameAvailable). 형식 오류는 던지고, 결과는 사용 가능 여부.
+export async function checkNicknameAvailable(raw: string): Promise<{ available: boolean; nickname: string }> {
+  const v = validateNickname(raw);
+  if (v.error !== null) throw new Error(v.error);
+
+  const { data: userData } = await supabase.auth.getUser();
+  const { data: taken, error: rpcError } = await supabase.rpc("is_nickname_taken", {
+    check_nickname: v.nickname,
+    exclude_user_id: userData.user?.id ?? null,
+  });
+  if (rpcError) throw new Error("닉네임 확인에 실패했어요.");
+  return { available: !taken, nickname: v.nickname };
+}
+
 export async function updateNickname(raw: string): Promise<void> {
   const v = validateNickname(raw);
   if (v.error) throw new Error(v.error);

@@ -12,10 +12,12 @@ export type TextVariant =
   | "xl"
   | "2xl"
   | "3xl"
+  | "4xl"
   | "10"
   | "11"
   | "13"
   | "15"
+  | "26"
   | "27";
 
 export type TextWeight = "normal" | "medium" | "semibold" | "bold" | "extrabold";
@@ -28,10 +30,14 @@ const VARIANT_CLASS: Record<TextVariant, string> = {
   xl: "text-xl",
   "2xl": "text-2xl",
   "3xl": "text-3xl",
+  // 홈 히어로 h1(웹 text-4xl leading-[1.15] = 36/41.4px).
+  "4xl": "text-4xl leading-[41px]",
   "10": "text-[10px] leading-[14px]",
   "11": "text-[11px] leading-4",
   "13": "text-[13px] leading-5",
   "15": "text-[15px] leading-[22px]",
+  // 진단 섹션·소개 h1(웹 text-[1.625rem]/text-[26px] leading-tight = 26/32.5px).
+  "26": "text-[26px] leading-8",
   "27": "text-[27px] leading-8",
 };
 

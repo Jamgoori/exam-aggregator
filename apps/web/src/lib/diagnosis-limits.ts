@@ -20,7 +20,9 @@ export const COACH_PER_SUBJECT = 7;
 // 15에서 10으로 내렸다. 극복법 한 덩이가 두 문장에서 "원인 + 문항별 근거 + 실행 계획 +
 // 체크리스트"로 커지면서 개념 하나당 입력·출력이 함께 늘었고, 15개를 꽉 채우면 한 번에
 // 1,000원대가 나갔다. 한 주에 10개도 실제로 다 잡기는 벅찬 양이다.
-export const COACH_MAX_TOTAL = 10;
+// 값 자체는 @gongmoa/core 의 data/home.ts(모바일 /diagnosis 소개 화면과 공유). 여기는 기존
+// import 경로를 지키는 re-export.
+export { COACH_MAX_TOTAL } from "@gongmoa/core";
 
 // 개념 선택 키. 같은 표기(keyword_title)라도 과목이 다르면 다른 개념이므로, 정본
 // 개념 id 가 있으면 그것을 쓰고 없을 때만 표기로 떨어진다 — diagnosis-live 의 오답 문항

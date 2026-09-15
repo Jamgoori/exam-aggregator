@@ -141,47 +141,18 @@ export type DiagnosisEligibility = {
   hint: string | null;
 };
 
-// KST 기준 오늘 날짜(YYYY-MM-DD). 해설 열람 제한 등 "일 1회" 규칙의 날짜 키.
-export function kstToday(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
-}
-
-// 진단 주기(일). 마지막으로 진단을 받은 날로부터 이만큼 지나야 다시 받을 수 있다.
-export const DIAGNOSIS_CYCLE_DAYS = 7;
-
-// 분석 창(일). 진단이 보는 것은 **최근 7일 동안 틀린 문제**뿐이다 — 그래프의 기본 기간도,
-// 극복법이 실제로 훑는 기간도 같은 7일이다.
-//
-// 예전에는 "지난 진단 이후, 최대 2주"로 사람마다 창의 길이가 달랐다. 그래서 화면이
-// 매번 "최근 며칠"인지를 계산해 라벨에 박아야 했고(진단 다음 날 들어오면 1일이 됐다),
-// 그래프 기간과 분석 기간이 어긋나 "그래프에 있는데 왜 극복법에서 빠졌지"가 생겼다.
-// 고정 7일이면 화면·프롬프트·안내 문구가 전부 같은 숫자를 말한다.
-export const DIAGNOSIS_WINDOW_DAYS = 7;
-
-// 진단 주기는 달력 주(월~일)가 아니라 **본인이 마지막으로 받은 날 기준 7일**이다.
-// 달력 주로 끊으면 금요일에 처음 받은 사람이 이틀 뒤 월요일에 또 받게 되고, 반대로
-// 월요일에 받은 사람은 6일을 기다린다 — 같은 "주 1회"인데 사람마다 실제 간격이 다르다.
-// diagnosis_date 에는 받은 날짜를 그대로 넣고(기존 unique 가 같은 날 중복만 막는다),
-// 잠금은 아래 조회가 "최근 7일 안에 행이 있는지"로 판정한다.
-function kstDaysAgo(days: number): string {
-  const d = new Date(`${kstToday()}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() - days);
-  return d.toISOString().slice(0, 10);
-}
-
-// 지금 주기의 시작 날짜(YYYY-MM-DD). "이 날짜 이후의 진단 행이 있으면 이번 주기는 이미
-// 썼다"가 잠금의 정의다. 조회(getWeeklyDiagnosis)와 관리자 초기화가 **같은 경계**를 써야
-// 한다 — 한쪽만 6일, 한쪽만 7일이면 초기화해도 잠금이 안 풀리는 행이 남는다.
-export function currentCycleStartDate(): string {
-  return kstDaysAgo(DIAGNOSIS_CYCLE_DAYS - 1);
-}
-
-// 주기가 풀리는 날(YYYY-MM-DD) — 마지막으로 받은 날 + 7일. 화면 안내용.
-export function nextDiagnosisDate(lastDate: string): string {
-  const d = new Date(`${lastDate}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + DIAGNOSIS_CYCLE_DAYS);
-  return d.toISOString().slice(0, 10);
-}
+// KST 오늘 날짜·진단 주기(7일)·분석 창(7일)·주기 경계 계산은 @gongmoa/core 의 data/home.ts 로
+// 단일화(모바일 /diagnosis 소개 화면과 공유). 여기는 기존 import 경로를 지키는 re-export 뿐 —
+// 주기 규칙의 설명은 core 쪽 주석을 볼 것. (배치 scripts/next-diagnosis.mjs 는 plain node 라
+// 같은 값을 복제해 두었다 — 바꿀 때 함께 고칠 것.)
+export {
+  DIAGNOSIS_CYCLE_DAYS,
+  DIAGNOSIS_WINDOW_DAYS,
+  currentCycleStartDate,
+  kstToday,
+  nextDiagnosisDate,
+} from "@gongmoa/core";
+import { currentCycleStartDate, kstToday, nextDiagnosisDate } from "@gongmoa/core";
 
 export async function getDiagnosisEligibility(
   supabase: Supabase,
