@@ -379,7 +379,7 @@ TanStack Query 키는 `['catalog', …]`, `['me', userId, …]`, `['edge', name,
 | 7 | `explanations-get`(변경) | EF | `lib/wrong-notes.ts#fetchExplanations`(`includeExplanations`), `lib/explanation-rate-limit.ts#resolveExplanationAccess` | `{paperId, context:"wrong-note", questionNumbers[]}` 모드 추가: 프리미엄 + 본인이 답한 문항만(**#3 과 같은 형제 paper_id 매핑**을 쓴다), 쿼터·로그 미기록, 그 외 `explanationLocked`; 기존 페이지 모드는 `lockReason` 그대로 + 응답에 **`remainingToday: number\|null` 추가**(웹 `ExplanationAccess.remainingToday`, `explanation-rate-limit.ts:28,90,106` — 없으면 #24 의 "오늘 남은 무료 해설 N개" 안내를 그릴 수 없다) | 2 |
 | 8 | `review-create`(변경) | EF | `actions.ts#createReviewSession/createReviewAll/createReviewFromPapers/createReviewFromWrong/createReviewFromConcept` | `scope:"subject"\|"all"`, `subjectSlug`, `onlyDue`(P, 24h 쿨다운), `includeResolved`, `paperIds[]`, `items[]`(서버가 `filterQuestionsAnsweredByUser`), `conceptId`(P), `strategy`, `requestId`; dedup 대표·`wrong_note_marks.deleted`·`subject_id` 반영; **30분 재사용 제거**; `requestId` 멱등은 `review_sessions.request_id text`(신설 SQL) + 부분 유니크 인덱스 `review_sessions_request_uidx(user_id, request_id) where request_id is not null` 로 `insert … on conflict do nothing returning id`, 0행이면 기존 세션 조회(§6.6; 60초 창 없음, 웹은 null); 응답에 `paperId/correctChoice` 없음 | 2 |
 | 9 | `review-submit`(변경) | EF | `submitReviewSessionForUser` | `source = scope==="mix" ? "mix" : "review"`; 응답에 `guessed, scope, subjectSlug, subjectName, paperId, paperTitle` | 0 |
-| 10 | `review-history`(변경) | EF | `getReviewSessionView`, `listMixSessions`, `listRecentMixSessions`, `getMixSessionWrongNote` | `{sessionId}` 가 **미제출 세션도** 반환(답 없이 `images, choiceCount, position`); `{scope, subjectSlug, limit}` 목록; `{sessionId, view:"mix-note"}` | 2 |
+| 10 | `review-history`(변경) | EF | `getReviewSessionView`, `listMixSessions`, `listRecentMixSessions`, `getMixSessionWrongNote`, `fetchLastWrongChoices` | `{sessionId}` 가 **미제출 세션도** 반환(답 없이 `images, choiceCount, position`); `{scope, subjectSlug, limit}` 목록(`scope:"mix"`+`subjectSlug` 면 항목에 `title·wrongCount·resolvedCount` 추가 — Phase 3); `{sessionId, view:"mix-note"}`; `{view:"last-choices", subjectSlug}` → `{choices:[{paperId, questionNumber, selectedChoice}]}`(상태 전용 오답의 마지막 선택, Phase 3) | 2 / 3(목록 확장·last-choices) |
 | 11 | `review-guessed`(신설, `review-submit` 계열 EF) | EF | `lib/review-session.ts:531#markReviewItemGuessed` | `{sessionId, position}` → core `rules/review-session.ts#markReviewItemGuessed` 를 그대로 호출(소유자·`submitted_at`·`is_correct` 검사, `srsGuessed(srsStateFromRow(status), now)` 로 due 계산 = `SRS_RELEARN_DELAY_HOURS` 3). **RPC 로 만들지 않는다** — `now()+interval '3 hours'` 를 SQL 리터럴로 두면 SRS 상수가 세 번째 장소에 생겨 §1 목표 4·AGENTS.md `srs.ts` 금지선이 확장되고(번들 CI 게이트는 SQL 을 검사하지 못함), authenticated 에 열린 유일한 `user_question_status` 쓰기 경로가 되어 "쓰기 정책 없음" 원칙에 예외가 생긴다. 단방향·멱등 | 3 |
 | 12 | `review-due`(신설) | EF | `lib/review-queue.ts#getDueReviewSummary/collectDueQueueItems/collectExtraQueueItems/getSessionSchedule`, `findUnfinishedDueSession`, `getReviewNudge` | `{action:"summary"\|"create"\|"extra"\|"schedule"\|"nudge", sessionId?}`; 전부 프리미엄; core `buildDueQueue` 번들 사용 | 3 |
 | 13 | `review-prefs`(신설) | EF | `lib/review-preferences.ts#setDailyLimit(:157)/setSubjectPaused(:447, 재분산)/spreadOverdueBacklog/restoreSuspendedQuestions/saveStudyPhase(:129)`, `wrong-notes/actions.ts:347-372` 의 `isPremium` 게이트 | `{action:"daily-limit"\|"pause"\|"diagnosis-pause"\|"study-phase"\|"spread"\|"restore", subjectId?, limit?, phase?}` — `review_preferences` 의 **모든 쓰기**(`daily_limit`, `paused_subject_ids` 토글+재분산, `diagnosis_paused_subject_ids`, `study_phase`)를 이 EF 가 맡고 앱은 이 테이블을 읽기만 한다(§6.2). 방어선으로 DB check `daily_limit in (10,20,40,60)` 과 `study_phase` check(신설 SQL) 추가. 웹의 RLS insert/update 정책(schema.sql:1804-1823) 회수 여부는 §13 질문 15 — 웹 서버 액션이 `getSessionUser()` 의 **세션 클라이언트(RLS)** 로 쓰고 있어(`review-preferences.ts:167 upsert`), 회수하려면 웹 어댑터도 admin 클라이언트로 바꿔야 한다 | 3 |
@@ -751,6 +751,56 @@ Phase 1a 는 실기기에서 확인됐다(소유자 확인). Phase 2 는 코드�
 
 **Phase 3 로 넘긴 것**: 섞어풀기 허브·재도전(EF `mix-create`), 오늘의 복습(EF `review-due`,
 찍었어요·복습 일정·홈 넛지), 믹스 기록 목록, 상태 전용 오답 합산.
+
+---
+
+## 12-5. Phase 3 진행 상황 (2026-09-16, 코드 완료 · 실기기 미검증)
+
+Phase 2 까지 머지된 상태에서 SRS·믹스를 붙였다. 전부 루트 `typecheck`/`lint`/`test`(core 503),
+`expo export --platform android`, `bundle-edge --check: 최신` 통과.
+
+| 영역 | 들어간 것 |
+|---|---|
+| 백엔드 | EF `review-due`(summary·create·extra·schedule·nudge) · `review-prefs`(get·daily-limit·pause·diagnosis-pause·study-phase·spread·restore) · `review-guessed` · `mix-create`(hub·overview·create·retry) 신설. `review-history` 에 `scope:"mix"`+`subjectSlug` 목록 확장과 `{view:"last-choices"}` 추가 |
+| 오늘의 복습 | 오답노트 탭 카드(요약·복습 시작·복습 더하기·7일 예보 접기), 복습 안내 시트(3단계 + FAQ 7), 복습 설정 시트(하루 문항 수·밀린 복습 정리·접어둔 문제 복구·과목 보류 스위치) |
+| 복습 유도 | 스크롤 FAB(`Screen`·`ScreenList` 공통, 400px 아래에서·오늘 몫 0이면 안 뜸), 홈 팝업 "오늘의 복습" 장 연결 |
+| 결과 화면 | "다음 복습 예약" 섹션(문항별 `오늘 다시`/`내일`/`N일 뒤` + 예보), 맞힌 문항의 "찍었어요"(단방향·멱등) |
+| 섞어풀기 | `/mix` 허브(급수 탭·최근 기록·과목 검색), `/subjects/[slug]/mix` 시작 화면(급수·연도·문항 수), 기록 카드 목록(과목 오답노트 + 시작 화면), 결과·기록 화면의 "틀린 N문항 다시 풀기" |
+| 오답노트 | 응시 없이 채점된 오답(섞어풀기·같은개념 기출) 합산 + 그때 고른 답 복원 |
+| core | `fetchLastWrongChoices` 를 `rules/review-session.ts` 로 신설하고 웹 `lib/wrong-notes.ts` 가 그것을 부르게 통일(규칙 한 벌), `buildMixPool` 에 `includeConcepts` 옵션 |
+
+**새 SQL 없음.** 스키마에 이미 다 있다 — 소유자가 할 일은 **Edge Function 재배포**뿐이다
+(Actions → "Edge Function 배포" 전체). 배포 전에는 새 화면이 오류를 그리지 않고 빈 상태로 남는다.
+
+**의도적으로 웹과 다르게 둔 것**
+
+- `/mix`·`/subjects/[slug]/mix` 가 **로그인을 요구한다.** 웹은 비로그인에게도 목록·패널을
+  보여주고 시작할 때 로그인으로 보낸다. 앱의 통로인 EF `mix-create` 는 내용상 공개 통계인
+  hub·overview 까지 `requireUser` 뒤에 있어, 게스트에게는 머리말·안내만 그리고 패널 자리에
+  로그인 안내를 둔다. 숫자를 지어내지 않는다. (열려면 `mix-create` 의 hub·overview 분기를
+  인증 앞으로 빼야 한다 — 다음 Phase 의 선택지.)
+- 카드 버튼이 **언제나 "복습 시작"** 이다. 웹은 두고 나온 세션이 있으면 "이어서 풀기"로 바뀌는데,
+  그 판정에 쓰는 미제출 세션 id 는 `review-due {action:"summary"}` 응답에 없다(생성 응답의
+  `resumed` 로만 온다). 눌렀을 때 서버가 그 세션을 돌려주므로 **동작은 같고**, 기기에 저장해 둔
+  답도 세션 id 로 붙는다. 라벨만 다르다.
+- 7일 예보가 접힌 채로 시작한다 — 웹의 좁은 화면(`sm:hidden`) 규칙 그대로다(§4.4).
+
+**하지 않은 것과 이유**
+
+- **`study-phase` 헤드라인(로드맵 §12 Phase 3 항목)은 만들지 않았다.** 웹에 소비처가 없다:
+  `apps/web/src/lib/study-phase.ts#getStudyPhase` 는 어느 화면에서도 호출되지 않는다(§2 의
+  "`study-phase` 미사용" 기록과 같다). 앱에만 헤드라인을 만들면 "웹과 같은 경험"이라는 §1 목표를
+  앱 쪽에서 깨는 것이라, 웹이 먼저 그 자리를 정할 때까지 미뤘다. EF `review-prefs` 의
+  `study-phase` 저장 분기와 core `detectStudyPhase` 는 그대로 있으므로, 웹이 헤드라인을 만들면
+  앱은 판정 입력 세 개(하루 상한·최근 오답 수·미극복 재고)를 모아 같은 순수 함수를 부르면 된다.
+- Edge 는 **타입만 검사했다**(이 환경에 Deno·Supabase CLI 없음). `review-history` 를 포함한 다섯
+  함수를 `tsc` 하네스로 오류 0 확인했고, 실행은 배포 후 확인이 필요하다.
+- 계약 테스트(웹 어댑터 ↔ Edge 결과 비교)는 Phase 3 백엔드가 넣은 3건(#18~#20) 그대로다.
+  `last-choices` 는 웹과 Edge 가 **같은 core 함수 한 개**를 부르므로 비교할 두 구현이 없고,
+  대신 규칙 자체에 단위 테스트를 더했다(가장 최근 채점만 남기기·남의 세션/다른 과목 제외).
+
+**다음 Phase 로 넘긴 것**: 아바타·알림·AI 진단 2화면·AdMob·유니버설 링크(Phase 4),
+게시판/건의/채팅·IAP·스토어 제출(Phase 5).
 
 ---
 
