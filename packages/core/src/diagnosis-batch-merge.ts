@@ -1,13 +1,17 @@
-import type { DiagnosisConceptCoaching } from "@/lib/ai-diagnosis";
-import { parseCoachingItems } from "@/lib/diagnosis-coach";
+import type { DiagnosisConceptCoaching } from "./diagnosis-report";
+import { parseCoachingItems } from "./diagnosis-coach";
 
 // 배치 경로의 "개념 1개 = 요청 1건" 규칙에서 순수 계산만 떼어 둔 것 — custom_id 를 만들고
 // 되읽는 것, 흩어져 돌아온 개념별 결과를 진단 하나의 극복법으로 합치는 것.
 //
-// diagnosis-batch.ts 에서 분리한 이유는 테스트다. 그 파일은 supabase admin 클라이언트와
-// Anthropic 클라이언트를 붙잡고 있어 node --test 에서 그대로 부르기 어렵고, 정작 사고가
+// rules/diagnosis-batch.ts 에서 분리한 이유는 테스트다. 그 파일은 supabase admin 클라이언트와
+// Anthropic 전송을 붙잡고 있어 node --test 에서 그대로 부르기 어렵고, 정작 사고가
 // 나는 자리는 여기다: custom_id 를 잘못 되읽으면 남의 진단에 극복법이 붙고, 합치기가
 // 어긋나면 개념 순서가 뒤바뀌거나 절반만 저장된다 — 그것도 제출 몇 분 뒤 수거 시점에.
+//
+// 웹 `lib/diagnosis-batch-merge.ts` 에서 core 로 옮겼다(설계서 §6.8). 이제 웹 크론과 Edge
+// `diagnosis-collect` 가 **같은 합치기**를 쓴다 — 한쪽만 고치면 경로에 따라 같은 배치
+// 결과가 다르게 저장되고, 그 사실은 수거 시점(제출 몇 시간 뒤)에야 드러난다.
 
 // 진단 하나에 실린 요청들의 custom_id. 진단 행 id 뒤에 개념 순번을 붙인다.
 //

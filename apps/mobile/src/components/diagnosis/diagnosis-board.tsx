@@ -9,6 +9,7 @@ import { BarChart3, Flame } from "lucide-react-native";
 import { Pressable, View } from "react-native";
 import { DiagnosisCoachingResults } from "./diagnosis-coaching";
 import { DiagnosisConceptPicker } from "./diagnosis-concept-picker";
+import { DiagnosisFailedCard, DiagnosisNotStartedCard } from "./diagnosis-failed";
 import { DiagnosisGeneratingCard, type DiagnosisGenerating } from "./diagnosis-generating";
 import { AppText } from "../app-text";
 import { hapticSelect } from "../../lib/haptics";
@@ -51,7 +52,14 @@ export function DiagnosisBoard({
   // 지금 배치가 도는 중이면 그 요청 시각과 개념 수(집계 응답). 앱은 `ai_diagnosis_batches` 를
   // 못 읽으므로 이 값이 없을 때는 요청 행으로 근사한다.
   generating,
+  // 수거(`diagnosis-collect`)가 방금 본 같은 값. 집계보다 신선하다 — 집계는 화면에 들어온 뒤
+  // 다시 받지 않기 때문에(60왕복) 이번 요청으로 나간 배치는 그쪽에 아직 없다.
+  batch,
   polling,
+  // 수거가 실패로 닫았을 때의 사유. 있으면 스피너 대신 실패 카드를 그린다.
+  failure,
+  // 요청 행은 있는데 배치가 아직 나가지 않았다(제출이 막혔다).
+  awaitingSubmit,
 }: {
   board: DiagnosisAggregateResponse;
   ranges: DiagnosisRangeChoice[];
@@ -64,7 +72,10 @@ export function DiagnosisBoard({
   cycle: DiagnosisCycleRow | null;
   cycleLoaded: boolean;
   generating: DiagnosisGenerating | null;
+  batch: DiagnosisGenerating | null;
   polling: boolean;
+  failure: string | null;
+  awaitingSubmit: boolean;
 }) {
   const shownGroups = subject
     ? board.bySubject.filter((g) => g.subjectSlug === subject)
@@ -77,21 +88,34 @@ export function DiagnosisBoard({
   const requestedThisCycle = cycleLoaded ? cycle != null : board.cycle.requestedThisCycle;
   const nextDate = cycle ? nextDiagnosisDate(cycle.date) : board.cycle.nextDate;
 
-  // 대기 카드에 실을 값. 배치 정보(generating)가 정확하지만 그건 크론이 요청을 집어 배치를
-  // 만든 뒤에야 생긴다 — 앱은 요청과 제출 사이가 최대 한 시간이라(diagnosis-generating.tsx
-  // 머리말) 그 사이를 요청 행으로 메운다. 둘 다 없으면 대기 중이 아니다.
-  const waiting: DiagnosisGenerating | null =
-    generating ??
-    (cycle?.status === "pending"
-      ? { requestedAt: cycle.requestedAt, conceptCount: cycle.conceptCount }
-      : null);
+  // 대기 카드를 그릴지 말지는 **요청 행 하나가 정한다.** 읽었는데 pending 이 아니면(리포트가
+  // 도착했거나 이번 주기 요청이 없다) 아래 값이 무엇이든 대기 자리를 그리지 않는다.
+  //
+  // 이 게이트가 없으면 수거가 리포트를 채운 그 순간 화면이 거짓말을 한다: 집계(`generating`)는
+  // 화면에 들어올 때 한 번만 받고 다시 받지 않으므로(60왕복), 대기 중에 들어온 화면에서는
+  // 리포트가 도착한 뒤에도 그 값이 그대로 남아 **다 된 극복법 위에 "만드는 중" 스피너**를
+  // 얹는다. 앱이 직접 수거하게 된 지금은 그게 예외가 아니라 보통 경로다.
+  // 요청 행을 아직 못 읽었을 때(cycleLoaded=false)만 예전처럼 집계 값으로 버틴다.
+  const cyclePending = cycleLoaded ? cycle?.status === "pending" : true;
 
-  // 선택창은 **이번 주기 요청 행이 없을 때만** 그린다. 서버(picker)는 웹과 같은 조건으로 판정
-  // 하는데(주기 미사용 ∧ 배치 없음 ∧ 최근 7일 오답 ∧ 자격), 웹은 버튼을 누른 그 자리에서
-  // 배치를 만들어 선택창이 즉시 닫히는 반면 앱은 크론이 집을 때까지 배치가 없어 선택창이 계속
-  // 열려 있게 된다 — 대기 카드 옆에 선택창이 남으면 같은 진단을 두 번 요청하게 된다.
-  // 웹이 이 자리에 남겨 둔 "pending 으로 실패한 요청 재시도"는 앱에 필요 없다: 제출은 크론이
-  // 매시간 다시 시도하고, 다시 눌러 봐야 고른 개념만 갈릴 뿐 제출을 앞당기지 못한다.
+  // 대기 카드에 실을 값. 신선한 순서로 고른다: 방금 수거가 본 배치 → 집계가 실어 준 배치 →
+  // 요청 행. 앱은 `ai_diagnosis_batches` 를 직접 못 읽으므로(정책 0개) 서버가 준 것만 쓰고,
+  // 제출 직전의 짧은 사이는 요청 행으로 메운다. 셋 다 없으면 대기 중이 아니다.
+  const waiting: DiagnosisGenerating | null = !cyclePending
+    ? null
+    : (batch ??
+      generating ??
+      (cycle?.status === "pending"
+        ? { requestedAt: cycle.requestedAt, conceptCount: cycle.conceptCount }
+        : null));
+
+  // 선택창은 **이번 주기 요청 행이 없을 때만** 그린다(서버 picker 의 조건 — 주기 미사용 ∧
+  // 배치 없음 ∧ 최근 7일 오답 ∧ 자격 — 위에 앱이 하나 더 얹는 것이다). 대기 카드 옆에 선택창이
+  // 남으면 같은 진단을 두 번 요청하게 된다. 웹이 이 자리에 남겨 둔 "pending 으로 실패한 요청
+  // 재시도"는 앱에서는 아래 실패·제출 전 카드의 "다시 시도" 버튼이 맡는다 — 고른 개념을 그대로
+  // 다시 내는 쪽이, 선택창을 열어 두고 무엇을 고쳐야 할지 모르게 두는 것보다 낫다.
+  // 예외는 하나다: 제출이 막힌 채로 요청이 끝났을 때는 요청 훅이 요청 행을 다시 읽지 않아
+  // (queries/diagnosis.ts) 여기가 계속 false 다 — 사유를 띄운 선택창이 그대로 남는다.
   const picker = requestedThisCycle ? null : board.picker;
 
   return (
@@ -166,7 +190,18 @@ export function DiagnosisBoard({
             맞춤 극복법
           </AppText>
         </View>
-        {waiting && <DiagnosisGeneratingCard generating={waiting} polling={polling} />}
+        {/* 대기 자리는 셋 중 하나다. 실패·제출 전을 스피너로 덮으면 영원히 오지 않는 것을
+            기다리는 화면이 된다(diagnosis-failed.tsx 머리말). 바깥 조건은 `waiting` 이고,
+            그 값은 위 `cyclePending` 을 지난 것이다 — 리포트가 도착한 뒤에는 지난 수거 응답도
+            낡은 집계 값도 이 자리를 그리지 못한다. */}
+        {waiting &&
+          (failure ? (
+            <DiagnosisFailedCard reason={failure} />
+          ) : awaitingSubmit ? (
+            <DiagnosisNotStartedCard />
+          ) : (
+            <DiagnosisGeneratingCard generating={waiting} polling={polling} />
+          ))}
         {picker && picker.length > 0 && (
           <DiagnosisConceptPicker concepts={picker} analysisDays={board.analysisDays} />
         )}

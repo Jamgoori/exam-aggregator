@@ -29,8 +29,10 @@ export type RequestDiagnosisResult = {
 //
 // 앞부분(프리미엄·자격·개념 상한·주기 1회·요청 행 insert)은 core 규칙
 // `requestDiagnosisForUser` 다 — Edge `diagnosis-request` 가 **같은 함수**를 부른다
-// (설계서 §6.7 #21). 두 벌이 되면 앱과 웹의 자격 판정이 갈린다. 배치 제출은 웹 전용이라
-// 여기 남는다(Anthropic 키는 Vercel 에만 있고, 앱·Edge 는 요청 행만 만들고 기다린다).
+// (설계서 §6.7 #21). 두 벌이 되면 앱과 웹의 자격 판정이 갈린다. 배치 제출도 마찬가지로
+// core 규칙 하나다(`submitPendingDiagnoses`) — Edge `diagnosis-request` 도 요청한 그 자리에서
+// 같은 함수를 부른다(키는 웹이 Vercel 환경변수, Edge 가 Supabase secret 으로 각자 꽂는다).
+// 같은 진단에 배치가 두 번 나가지 않게 막는 것은 그 규칙 안의 `batch_claimed_at` 선점이다.
 export async function requestDiagnosis(
   // 사용자가 체크한 개념들. 이 목록만 코칭한다(빈 배열이면 생성기가 알아서 고른다).
   // 서버가 다시 상한까지 자른다 — 화면을 우회한 호출이 그대로 요금이 되면 안 된다.

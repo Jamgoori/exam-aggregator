@@ -284,9 +284,12 @@ function RangeChip({
 // 새로 그리는 일은 끝나는 순간 딱 한 번 일어난다. 결과가 하나씩 붙지 않고 전부 함께
 // 나타나는 것도 그래서다.
 //
-// 간격이 10초인 이유: 배치가 개념별 요청으로 갈라진 뒤로는(lib/diagnosis-batch.ts)
+// 간격이 10초인 이유: 배치가 개념별 요청으로 갈라진 뒤로는(rules/diagnosis-batch.ts)
 // 전체가 몇 분 안에 끝나는 게 보통이라, 20초 간격이면 다 된 결과를 평균 10초씩 묵히는
-// 셈이었다. 한 번 묻는 비용은 DB 두 번 + 배치 상태 조회 하나뿐이다.
+// 셈이었다. 한 번 묻는 비용은 DB 두 번이고, Anthropic 왕복은 **서버가 정한 재확인 간격**
+// (core `DIAGNOSIS_RECHECK_SECONDS`)에 한 번만 붙는다 — 그보다 이르게 물으면 규칙이 배치
+// 행을 선점하지 못하고 DB 상태만 돌려준다. 그래서 여기를 더 줄여도 요금·레이트리밋은
+// 늘지 않지만, 더 빨리 알게 되지도 않는다(서버 값이 바닥이다). 앱도 같은 바닥을 쓴다.
 const POLL_MS = 10_000;
 
 function useCoachingReadyRefresh(requestedAt: string | null) {

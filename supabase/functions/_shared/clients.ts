@@ -1,7 +1,9 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { json } from "./http.ts";
 // @ts-types="./core.d.ts"
-import type { startTrialIfEligible } from "./core.mjs";
+import { createAnthropicBatchTransport, resolveDiagnosisModel } from "./core.mjs";
+// @ts-types="./core.d.ts"
+import type { DiagnosisBatchDeps, startTrialIfEligible } from "./core.mjs";
 
 // Edge 런타임이 자동 주입하는 환경변수. 서비스 롤 키는 함수 안에서만 쓰고 절대
 // 클라이언트로 나가지 않는다.
@@ -38,6 +40,34 @@ export type CoreClient = Parameters<typeof startTrialIfEligible>[0];
 
 export function coreAdmin(): CoreClient {
   return adminClient() as unknown as CoreClient;
+}
+
+// AI 약점 진단 배치(제출·수거)에 넘길 의존. 규칙은 core 한 벌이고
+// (packages/core/src/rules/diagnosis-batch.ts) 여기서는 **키와 모델만** 꽂는다.
+//
+// `ANTHROPIC_API_KEY` 는 Supabase secret 이다(옛 `ai-diagnose` 가 쓰던 그 값). 없으면
+// transport 가 null 이고 규칙은 제출·수거를 **하지 않는다** — 오류가 아니다. 소유자가
+// secret 을 아직 넣지 않았을 때 진단 요청 자체가 죽으면 안 되기 때문이다(요청 행은 남고
+// 시간당 웹 크론이 예전처럼 주워 간다).
+//
+// ⚠ **이 키와 웹의 `ANTHROPIC_DIAGNOSIS_API_KEY` 는 같은 워크스페이스여야 한다.** 변수
+// 이름은 일부러 다르지만(웹 쪽은 정답 추출 배치와 키를 섞지 않으려고 전용 이름을 쓴다 —
+// apps/web/.env.local.example), 배치는 **워크스페이스 단위**로 보인다. 워크스페이스가
+// 갈리면 Edge 가 낸 배치를 웹 크론이 조회할 때 404 가 나고, 404 는 "영영 없다"로 읽혀
+// **이미 요금을 낸 배치가 실패로 닫힌다**(그 반대도 같다). 한쪽에서만 진단이 안 나오는
+// 증상이면 여기를 먼저 볼 것.
+//
+// `ANTHROPIC_DIAGNOSIS_MODEL` 은 모델을 갈아 끼우는 탈출구다. **웹(Vercel 환경변수)에도
+// 같은 값을 넣을 것** — 한쪽에만 넣으면 같은 진단이 어느 경로로 제출됐느냐에 따라 다른
+// 모델로 만들어진다. 비어 있으면 core 기본값 하나뿐이다.
+//
+// ⚠ 키는 이 함수 밖으로 나가지 않는다. 응답·로그·오류 문구에 절대 싣지 말 것.
+export function diagnosisBatchDeps(): DiagnosisBatchDeps {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  return {
+    transport: apiKey ? createAnthropicBatchTransport({ apiKey }) : null,
+    model: resolveDiagnosisModel(Deno.env.get("ANTHROPIC_DIAGNOSIS_MODEL")),
+  };
 }
 
 // 공통: 로그인 사용자 확인. 없으면 401 응답을 반환한다(호출부에서 early return).

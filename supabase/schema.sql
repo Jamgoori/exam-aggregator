@@ -799,6 +799,9 @@ create table if not exists ai_diagnoses (
 -- 다시 집계한 상위 개념은 사용자가 체크한 것과 달라진다.
 alter table ai_diagnoses add column if not exists selected_concepts jsonb;
 
+-- `batch_claimed_at`(배치 제출 선점)은 이 파일 맨 끝 "Phase 4 2라운드" 절에 있다 —
+-- **운영 DB 에 아직 안 들어간 문장은 그 절에 모아 둔다**(적용 순서 §12-2 #3).
+
 create index if not exists ai_diagnoses_user_idx
   on ai_diagnoses(user_id, diagnosis_date desc);
 
@@ -838,7 +841,7 @@ create table if not exists ai_diagnosis_batches (
   -- Anthropic Message Batch id(msgbatch_...). 한 배치에 여러 사용자가 실린다.
   batch_id text not null,
   -- 이 진단이 배치 안에서 쓰는 custom_id 의 접두(진단 행 id). 요청은 개념 하나당 하나씩
-  -- 실리고 각 요청의 custom_id 는 `<이 값>_<개념 순번>` 이다(lib/diagnosis-batch-merge.ts).
+  -- 실리고 각 요청의 custom_id 는 `<이 값>_<개념 순번>` 이다(packages/core/src/diagnosis-batch-merge.ts).
   custom_id text not null,
   model text not null,
   context jsonb not null,
@@ -859,6 +862,8 @@ create index if not exists ai_diagnosis_batches_user_idx
 -- 제출이 "이 진단은 이미 배치에 실렸는가 / 몇 번 시도했는가"를 묻는다.
 create index if not exists ai_diagnosis_batches_diagnosis_idx
   on ai_diagnosis_batches(diagnosis_id);
+
+-- `last_checked_at`(수거 선점 + 재확인 간격)은 이 파일 맨 끝 "Phase 4 2라운드" 절에 있다.
 
 alter table ai_diagnosis_batches enable row level security;
 
@@ -3206,3 +3211,39 @@ end $$;
 
 revoke all on function delete_notification(uuid) from public, anon;
 grant execute on function delete_notification(uuid) to authenticated;
+
+-- ===== 모바일 앱 재시작 Phase 4 2라운드 — 진단 즉시 접수·수거 (2026-09-16) =====
+-- AI 약점 진단이 "요청한 그 순간 배치를 제출하고, 기다리는 동안 직접 수거"로 바뀌면서
+-- 필요해진 컬럼 두 개(설계서 §6.7 #21). 둘 다 **기록이 아니라 선점**이고, 규칙은
+-- packages/core/src/rules/diagnosis-batch.ts 한 벌이다(웹 서버 액션·웹 크론·Edge
+-- diagnosis-request/diagnosis-collect 가 그 함수를 부르는 어댑터).
+--
+-- ⚠ **이 두 문장을 먼저 적용하고 코드를 배포할 것.** 컬럼이 없으면 선점 update 가 통째로
+-- 실패하는데, 규칙은 선점 없이 제출하는 쪽으로 물러서지 않는다(그게 요금 두 배를 막는
+-- 유일한 장치다). 그래서 미적용 상태로 배포하면 **앱뿐 아니라 웹과 시간당 크론까지** 배치를
+-- 하나도 내지 못하고, 이미 떠 있는 배치도 수거하지 못한다. `add column if not exists` 라
+-- 여러 번 실행해도 안전하다(적용 순서 §12-2 #3: 운영 SQL → Edge 배포 → 앱).
+
+-- 1) 제출 선점. 요청 행 자체는 unique(user_id, diagnosis_date) 가 막지만 배치 제출은 그다음
+-- 단계라, 연타·재시도·"앱과 웹에서 동시에"가 겹치면 같은 진단에 배치가 두 번 나가고
+-- **그대로 요금이 두 배**가 된다. 제출 직전에 `update … set batch_claimed_at = now()
+-- where report is null and batch_claimed_at < cutoff returning id` 로 잡고, 잡은 요청만
+-- 제출한다(#claimForSubmit). 2분(SUBMIT_CLAIM_SECONDS)이 지나면 저절로 풀린다 — 제출 도중
+-- 죽은 프로세스가 진단을 영원히 묶어 두면 안 된다.
+-- 기본값 '-infinity' 는 "아직 아무도 제출을 시작하지 않았다"(null 이면 `lt` 비교가 참이
+-- 되지 않아 기존 행이 영영 선점되지 않는다 — not null + '-infinity' 여야 한다).
+alter table ai_diagnoses
+  add column if not exists batch_claimed_at timestamptz not null default '-infinity';
+
+-- 2) 이 배치를 마지막으로 Anthropic 에 확인한 시각. 한 컬럼이 두 가지 일을 한다
+-- (#claimForCollect):
+--   · **재확인 간격** — 앱이 결과를 기다리며 폴링하는 동안 그 폴링이 그대로 Anthropic
+--     호출이 되면 안 된다. 배치 상태 조회는 토큰 요금이 없지만 레이트리밋은 있고, 걸리면
+--     그 순간 모든 사용자의 수거가 함께 막힌다(core DIAGNOSIS_RECHECK_SECONDS).
+--   · **수거 선점** — 크론과 앱이 같은 행을 동시에 수거하면 리포트가 두 번 저장돼 덮이거나
+--     반쪽이 된다. `update … set last_checked_at = now() where status='pending' and
+--     last_checked_at < cutoff returning …` 한 문장이라 둘 중 하나만 행을 가져간다.
+-- 기본값이 '-infinity' 인 이유는 위와 같다: 새로 만든 배치도 기존 행도 **즉시** 한 번
+-- 확인할 수 있어야 한다(그래야 앱이 기다리는 동안 바로 수거된다).
+alter table ai_diagnosis_batches
+  add column if not exists last_checked_at timestamptz not null default '-infinity';

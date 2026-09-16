@@ -102,9 +102,11 @@ supabase functions deploy review-submit
 supabase functions deploy ai-diagnose
 supabase functions deploy explanations-get
 
-# AI 진단은 Claude 를 부르므로 키가 필요하다(함수 런타임 시크릿, 앱엔 안 들어감):
+# AI 진단은 Claude 를 부르므로 키가 필요하다(함수 런타임 시크릿, 앱엔 안 들어감).
+# ⚠ 웹의 ANTHROPIC_DIAGNOSIS_API_KEY 와 같은 워크스페이스여야 한다 — 두 경로가 서로의
+#    Message Batch 를 수거하고, 배치는 워크스페이스 단위로만 보인다(SETUP.md §6).
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-# 모델 바꾸려면(선택): supabase secrets set DIAGNOSIS_MODEL=claude-sonnet-5
+# 모델 바꾸려면(선택): supabase secrets set ANTHROPIC_DIAGNOSIS_MODEL=claude-sonnet-5
 ```
 
 `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` 는 Edge 런타임이

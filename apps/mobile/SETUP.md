@@ -139,8 +139,14 @@ supabase functions deploy comments-write   # 앱 댓글 작성·수정·삭제 (
 supabase functions deploy membership-get   # 멤버십 조회·체험 시작 (앱 재시작 Phase 0 신설)
 
 # AI 진단용 Claude 키 (함수 런타임 시크릿 — 앱 번들엔 안 들어감):
+# ⚠ 웹 Vercel 의 ANTHROPIC_DIAGNOSIS_API_KEY 와 **같은 워크스페이스**의 키여야 한다.
+#    앱 요청은 diagnosis-request 가 그 자리에서 Message Batch 를 내고 웹 크론이 그 배치까지
+#    수거하는데(그 반대도 같다), 배치는 워크스페이스 단위로만 보인다 — 갈리면 상대가 낸
+#    배치 조회가 404 가 되고 이미 요금을 낸 배치가 실패로 닫힌다.
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-# (선택) 모델 변경: supabase secrets set DIAGNOSIS_MODEL=claude-sonnet-5
+# (선택) 모델 변경: supabase secrets set ANTHROPIC_DIAGNOSIS_MODEL=claude-sonnet-5
+#        (웹 Vercel 의 같은 이름 변수와 같은 값으로 — 한쪽만 바꾸면 경로에 따라 모델이 갈린다.
+#         DIAGNOSIS_MODEL 은 폐기된 ai-diagnose 전용이라 새 경로는 읽지 않는다.)
 ```
 
 > `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` 는 Edge 런타임이
