@@ -7,10 +7,23 @@ import {
   type ReviewHistoryEntry,
   type ReviewSessionView,
 } from "../rules/review-session";
-import type { MixSessionWrongNote } from "../rules/mix-practice";
+import type {
+  MixHubIndex,
+  MixOverview,
+  MixSessionSummary,
+  MixSessionWrongNote,
+} from "../rules/mix-practice";
+import type { ReviewPrefs, ReviewSubjectOption } from "../rules/review-preferences";
+import type { DueReviewSummary } from "../rules/review-queue";
 import { FREE_MEMBERSHIP } from "../membership";
+import type { SessionSchedule } from "../review-queue";
 import {
   EDGE_NAMES,
+  isMixCreateHub,
+  isMixCreateSession,
+  isReviewDueSchedule,
+  isReviewDueSession,
+  isReviewDueSummary,
   isReviewHistoryList,
   type EdgeContracts,
   type EdgeErrorBody,
@@ -210,6 +223,157 @@ const historyMixNote = {
   mixNote,
 } satisfies EdgeResponse<"review-history">;
 
+// 목록 항목의 mix 추가 필드(§6.7 #14 / §12-4 "믹스 기록 목록") — 규칙 listMixSessions 의
+// MixSessionSummary 에서 세 값을 그대로 가져온다. scope:"mix" + subjectSlug 일 때만 실린다.
+const mixSummary: MixSessionSummary = {
+  id: "s1",
+  title: "9월 5일 섞어풀기 (2)",
+  createdAt: view.createdAt,
+  score: 8,
+  total: 10,
+  wrongCount: 2,
+  resolvedCount: 1,
+};
+const historyMixList = {
+  sessions: [
+    {
+      ...historyEntry,
+      title: mixSummary.title,
+      wrongCount: mixSummary.wrongCount,
+      resolvedCount: mixSummary.resolvedCount,
+    },
+  ],
+} satisfies EdgeResponse<"review-history">;
+
+// ── review-guessed (§6.7 #11) ───────────────────────────────────────────────
+({ sessionId: "s1", position: 3 }) satisfies EdgeRequest<"review-guessed">;
+({ ok: true }) satisfies EdgeResponse<"review-guessed">;
+
+// ── review-due (§6.7 #12) ───────────────────────────────────────────────────
+({ action: "summary" }) satisfies EdgeRequest<"review-due">;
+({ action: "create", requestId: "r1" }) satisfies EdgeRequest<"review-due">;
+({ action: "extra" }) satisfies EdgeRequest<"review-due">;
+({ action: "schedule", sessionId: "s1" }) satisfies EdgeRequest<"review-due">;
+({ action: "nudge" }) satisfies EdgeRequest<"review-due">;
+
+// 요약은 규칙 getDueReviewSummary 의 반환 그대로다 — DueReviewSummary 에 필드가 생기면
+// 여기서 함께 깨진다(웹 배너와 앱 카드가 같은 값을 그린다는 뜻).
+const dueSummary: DueReviewSummary = {
+  todayCount: 12,
+  deferredCount: 3,
+  newCount: 4,
+  pendingTotal: 40,
+  suspendedTotal: 1,
+  overdueTotal: 11,
+  relearnCount: 2,
+  dailyLimit: 20,
+  subjects: [{ subjectId: "sub1", name: "국어", count: 7 }],
+  forecast: [
+    { offset: 0, count: 12 },
+    { offset: 1, count: 5 },
+  ],
+  nextDueOffset: null,
+};
+const reviewDueSummary = dueSummary satisfies EdgeResponse<"review-due">;
+
+// 세션 응답은 review-create 와 같은 모양 + resumed.
+const reviewDueSession = {
+  sessionId: view.id,
+  total: view.total,
+  items: toReviewSolveItems(view),
+  scope: view.scope,
+  subjectSlug: view.subjectSlug,
+  subjectName: view.subjectName,
+  resumed: true,
+} satisfies EdgeResponse<"review-due">;
+
+const sessionSchedule: SessionSchedule = {
+  items: [{ position: 0, paperTitle: "2025 국가직 9급", questionNumber: 7, dueInDays: 3 }],
+  forecast: [{ offset: 0, count: 12 }],
+};
+const reviewDueSchedule = { schedule: sessionSchedule } satisfies EdgeResponse<"review-due">;
+const reviewDueNudge = {
+  todayCount: 12,
+  subjects: [{ name: "국어", count: 7 }],
+} satisfies EdgeResponse<"review-due">;
+
+// ── review-prefs (§6.7 #13) ─────────────────────────────────────────────────
+({}) satisfies EdgeRequest<"review-prefs">;
+({ action: "get" }) satisfies EdgeRequest<"review-prefs">;
+({ action: "daily-limit", limit: 40 }) satisfies EdgeRequest<"review-prefs">;
+({ action: "pause", subjectId: "sub1", paused: true }) satisfies EdgeRequest<"review-prefs">;
+({ action: "diagnosis-pause", subjectId: "sub1", paused: false }) satisfies EdgeRequest<"review-prefs">;
+({ action: "study-phase", phase: "settling" }) satisfies EdgeRequest<"review-prefs">;
+({ action: "spread" }) satisfies EdgeRequest<"review-prefs">;
+({ action: "restore" }) satisfies EdgeRequest<"review-prefs">;
+
+const subjectOption: ReviewSubjectOption = {
+  id: "sub1",
+  name: "국어",
+  paused: false,
+  scheduledCount: 12,
+  pendingCount: 40,
+};
+// Set 은 JSON 으로 나가지 않는다 — Edge 가 배열로 펴서 보낸다(규칙 ReviewPrefs 와 다른 점).
+const prefs: ReviewPrefs = { pausedSubjectIds: new Set(["sub2"]), dailyLimit: 20 };
+const reviewPrefsGet = {
+  premium: true,
+  dailyLimit: prefs.dailyLimit,
+  pausedSubjectIds: [...prefs.pausedSubjectIds],
+  diagnosisPausedSubjectIds: [],
+  studyPhase: "settling",
+  subjects: [subjectOption],
+} satisfies EdgeResponse<"review-prefs">;
+const reviewPrefsSpread = {
+  premium: true,
+  dailyLimit: 20,
+  pausedSubjectIds: [],
+  diagnosisPausedSubjectIds: [],
+  studyPhase: null,
+  spreadCount: 37,
+} satisfies EdgeResponse<"review-prefs">;
+
+// ── mix-create (§6.7 #14) ───────────────────────────────────────────────────
+({ action: "hub" }) satisfies EdgeRequest<"mix-create">;
+({ action: "overview", subjectSlug: "korean" }) satisfies EdgeRequest<"mix-create">;
+({
+  action: "create",
+  subjectSlug: "korean",
+  levels: ["9급"],
+  yearRange: { from: 2020, to: 2025 },
+  limit: 20,
+  requestId: "r1",
+}) satisfies EdgeRequest<"mix-create">;
+({ action: "retry", sessionId: "s1" }) satisfies EdgeRequest<"mix-create">;
+
+const mixHub: MixHubIndex = {
+  tiers: [{ key: "9급", approx: false, count: 1200 }],
+  subjects: [{ slug: "korean", name: "국어", count: 1200, byTier: { "9급": 1200 } }],
+  unit: "question",
+};
+const mixCreateHub = mixHub satisfies EdgeResponse<"mix-create">;
+const mixOverview: MixOverview = {
+  subject: { id: "sub1", slug: "korean", name: "국어", display_order: 1 },
+  questionCount: 1200,
+  paperCount: 60,
+  examTypeNames: ["국가직", "지방직"],
+  levelGroups: [{ key: "9급", count: 1200, approx: false }],
+  cells: [{ level: "9급", year: 2025, count: 40 }],
+  minYear: 2013,
+  maxYear: 2025,
+};
+const mixCreateOverview = mixOverview satisfies EdgeResponse<"mix-create">;
+const mixCreateSession = {
+  sessionId: view.id,
+  total: view.total,
+  items: toReviewSolveItems(view),
+  scope: "mix",
+  subjectSlug: "korean",
+  subjectName: "국어",
+  unseenCount: 18,
+  coveredAll: false,
+} satisfies EdgeResponse<"mix-create">;
+
 // ── comments-write / account-delete ─────────────────────────────────────────
 ({ action: "create", paperId: "p1", content: "…", parentId: null }) satisfies EdgeRequest<"comments-write">;
 ({ action: "update", commentId: "c1", content: "…" }) satisfies EdgeRequest<"comments-write">;
@@ -238,9 +402,50 @@ type _EveryEntry = { [N in EdgeName]: EdgeContracts[N] extends { request: unknow
 const _every: _EveryEntry[EdgeName] = true;
 void _every;
 
-test("EDGE_NAMES 는 배포된 함수 10개", () => {
-  assert.equal(EDGE_NAMES.length, 10);
+test("EDGE_NAMES 는 배포된 함수 14개", () => {
+  assert.equal(EDGE_NAMES.length, 14);
   assert.equal(new Set(EDGE_NAMES).size, EDGE_NAMES.length);
+});
+
+test("review-due 응답 판별이 네 액션을 겹치지 않게 가른다", () => {
+  assert.equal(isReviewDueSummary(reviewDueSummary), true);
+  assert.equal(isReviewDueSession(reviewDueSummary), false);
+  assert.equal(isReviewDueSession(reviewDueSession), true);
+  assert.equal(isReviewDueSchedule(reviewDueSchedule), true);
+  // 넛지는 셋 중 어디에도 걸리지 않는다(todayCount 는 요약과 겹치지만 forecast 가 없다).
+  for (const guard of [isReviewDueSummary, isReviewDueSession, isReviewDueSchedule]) {
+    assert.equal(guard(reviewDueNudge), false);
+  }
+});
+
+test("mix-create 응답 판별 — 허브·요약·세션", () => {
+  assert.equal(isMixCreateHub(mixCreateHub), true);
+  assert.equal(isMixCreateSession(mixCreateSession), true);
+  assert.equal(isMixCreateHub(mixCreateOverview), false);
+  assert.equal(isMixCreateSession(mixCreateOverview), false);
+});
+
+test("review-prefs 는 액션과 무관하게 같은 모양 — 쓰기도 갱신된 설정을 싣는다", () => {
+  for (const key of ["premium", "dailyLimit", "pausedSubjectIds", "diagnosisPausedSubjectIds", "studyPhase"]) {
+    assert.ok(key in reviewPrefsGet, `get 응답에 ${key} 가 없다`);
+    assert.ok(key in reviewPrefsSpread, `spread 응답에 ${key} 가 없다`);
+  }
+  // Set 은 그대로 직렬화되지 않는다 — 배열이어야 앱이 읽는다.
+  assert.deepEqual(reviewPrefsGet.pausedSubjectIds, ["sub2"]);
+  // 과목 목록은 get 에서만(쓰기 응답에는 없다 — 매 토글마다 전체 집계를 돌리지 않는다).
+  assert.equal("subjects" in reviewPrefsSpread, false);
+});
+
+test("mix 기록 목록은 기존 목록 항목의 상위집합이다(추가 필드)", () => {
+  assert.equal(isReviewHistoryList(historyMixList), true);
+  const [entry] = historyMixList.sessions;
+  for (const key of Object.keys(historyEntry)) {
+    assert.ok(key in entry, `mix 목록 항목에 기존 필드 ${key} 가 없다`);
+  }
+  assert.equal(entry.wrongCount, 2);
+  assert.equal(entry.resolvedCount, 1);
+  // 옛 응답(추가 필드 없음)도 그대로 계약을 만족한다 — 옛 앱이 깨지지 않는다.
+  assert.equal(isReviewHistoryList(historyList), true);
 });
 
 test("isReviewHistoryList 가 목록/상세를 가른다", () => {

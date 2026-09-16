@@ -10,7 +10,9 @@ import { QuestionImage } from "../question-image";
 import { themedIcon } from "../../theme/icons";
 import { handleEdgeError } from "../../lib/edge";
 import { clearReviewDraft } from "../../lib/review-draft";
+import { useCreateMixRetry } from "../../queries/mix";
 import { useCreateReviewFromWrong, type ReviewItem, type ReviewSessionDetail } from "../../queries/review";
+import { useMarkGuessed } from "../../queries/review-due";
 import { isMixSession } from "./review-solver";
 import { ReviewScheduleSection } from "./review-schedule-section";
 
@@ -31,6 +33,7 @@ export function ReviewResult({
   const insets = useSafeAreaInsets();
   const [error, setError] = useState<string | null>(null);
   const createReview = useCreateReviewFromWrong();
+  const createMixRetry = useCreateMixRetry();
 
   const mix = isMixSession(view);
   const correct = view.score ?? 0;
@@ -61,13 +64,18 @@ export function ReviewResult({
   // 채점이 끝났으니 붙잡지 않는다(active=false) — Android 뒤로가기만 여기서 받는다.
   useExitGuard(false, leave);
 
-  const pending = createReview.isPending;
+  const pending = createReview.isPending || createMixRetry.isPending;
 
   const retryWrong = useCallback(async () => {
     if (pending || wrongItems.length === 0) return;
     setError(null);
     try {
-      const sessionId = await createReview.mutateAsync(wrongItems);
+      // 섞어풀기는 **세션 id 만** 보낸다(EF mix-create {action:"retry"}) — 서버가 세션에서 틀린
+      // 문항을 직접 읽는다. 오답 다시 풀기는 세션 문항이 곧 내 오답노트 문항이라 웹과 같은
+      // items 통로(review-create)를 쓴다. 두 경로가 갈리는 이유는 아래 주석 참고.
+      const sessionId = mix
+        ? (await createMixRetry.mutateAsync(view.sessionId)).sessionId
+        : await createReview.mutateAsync(wrongItems);
       // 방금 끝난 결과 화면은 다시 볼 일이 없다(같은 주소로 언제든 열린다) — 쌓지 않고 바꾼다.
       router.replace(`/mypage/wrong-notes/${subjectSlug}/review/${sessionId}` as Href);
     } catch (e) {
@@ -79,7 +87,7 @@ export function ReviewResult({
     }
     // mutateAsync 는 안정 참조.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending, wrongItems, subjectSlug, view.sessionId]);
+  }, [pending, wrongItems, subjectSlug, view.sessionId, mix]);
 
   return (
     <ScrollView
@@ -146,23 +154,20 @@ export function ReviewResult({
         </Pressable>
       )}
 
-      {/* 틀린 문항만 다시 풀기 — mix 에서는 그리지 않는다(**Phase 3**, §12 Phase 3 "재도전",
-          §6.7 #14 EF `mix-create` {action:"retry"}). 섞어풀기 기록 화면
-          (wrong-notes/mix-session-view.tsx)도 같은 이유로 버튼이 없다 — 두 화면의 판단을 맞춰
-          둔다.
+      {/* 틀린 문항만 다시 풀기. **섞어풀기와 오답 복습이 서로 다른 통로를 쓴다**(웹과 같다).
 
-          근거: 복습 세션은 앱 통로가 EF review-create 의 items 분기뿐인데, 서버가
-          filterQuestionsAnsweredByUser 로 "내가 푼 적 있는 (문제지, 문항)"만 남기고 판정을
-          user_question_status 의 paper_id 로 한다. 섞어풀기 세션 문항은 **dedup 대표 문제지
-          id** 로 저장되고(rules/mix-practice.ts), 채점은 resolveStatusTargets
-          (rules/status-targets.ts)가 "그 사용자가 실제로 상태 행을 가진 문제지"로 되짚어
-          기록한다 — 직류만 다른 중복 시험지를 CBT 로 응시한 적이 있으면 상태 행은 원본 id 에
-          남고 대표 id 에는 안 생긴다. 그러면 items 로 되돌려 보낸 문항이 필터에 걸려 빠지고,
-          전부 빠지면 EF 가 400 "다시 풀 문항이 없어요." 로 떨어진다. 웹이 mix 에서만
-          createRetryFromMix({sessionId}) 를 쓰는 이유가 정확히 이것이다(웹 review-solver.tsx
-          retryWrong 주석). 오답 다시 풀기(mix 아님)는 세션 문항이 곧 내 오답노트 문항이라
-          필터를 그대로 통과하므로 웹과 같은 items 통로를 쓴다. */}
-      {!mix && wrongItems.length > 0 && (
+          복습 세션은 EF review-create 의 items 분기를 쓴다 — 세션 문항이 곧 내 오답노트 문항
+          이라 서버의 filterQuestionsAnsweredByUser("내가 푼 적 있는 (문제지, 문항)")를 그대로
+          통과한다.
+
+          섞어풀기는 그 필터를 통과하지 못한다: 세션 문항이 **dedup 대표 문제지 id** 로
+          저장되는데(rules/mix-practice.ts), 채점은 resolveStatusTargets 가 "그 사용자가 실제로
+          상태 행을 가진 문제지"로 되짚어 기록한다 — 직류만 다른 중복 시험지를 CBT 로 응시한
+          적이 있으면 상태 행은 원본 id 에 남고 대표 id 에는 안 생긴다. 그러면 items 로
+          되돌려 보낸 문항이 필터에 걸려 빠지고, 전부 빠지면 400 "다시 풀 문항이 없어요." 다.
+          그래서 섞어풀기는 세션 id 만 보내는 EF mix-create {action:"retry"} 를 쓴다(§6.7 #14,
+          Phase 3 에서 열렸다 — Phase 2 가 이 버튼을 미룬 이유가 이것이다). */}
+      {wrongItems.length > 0 && (
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ disabled: pending, busy: pending }}
@@ -200,14 +205,22 @@ export function ReviewResult({
 
       <View className="gap-4">
         {items.map((it) => (
-          <ResultCard key={it.position} item={it} mix={mix} />
+          <ResultCard key={it.position} item={it} mix={mix} sessionId={view.sessionId} />
         ))}
       </View>
     </ScrollView>
   );
 }
 
-function ResultCard({ item, mix }: { item: ReviewItem; mix: boolean }) {
+function ResultCard({
+  item,
+  mix,
+  sessionId,
+}: {
+  item: ReviewItem;
+  mix: boolean;
+  sessionId: string;
+}) {
   return (
     <View className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
       <View className="flex-row items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-4 py-2 dark:border-zinc-700 dark:bg-zinc-800/50">
@@ -268,10 +281,64 @@ function ResultCard({ item, mix }: { item: ReviewItem; mix: boolean }) {
             </AppText>
           </View>
         )}
-        {/* Phase 3: "찍었어요"(GuessedButton, 맞힌 문항에만·단방향) — EF review-guessed(§6.7 #11)가
-            아직 없어 아무것도 그리지 않는다. 눌러도 안 되는 버튼을 두면 "찍었다"가 기록된 줄 알고
-            넘어가 복습 간격이 실제와 달라진다. */}
+        {/* 맞힌 문항에만. 찍어서 맞은 걸 유지력으로 인정하면 정작 모르는 문항이 "아는 문제"로
+            분류돼 복습에서 빠져나간다. */}
+        {item.isCorrect && (
+          <GuessedButton sessionId={sessionId} position={item.position} initial={item.guessed} />
+        )}
       </View>
     </View>
+  );
+}
+
+// "찍었어요" 토글(웹 review-solver.tsx 의 GuessedButton 1:1). 한 번 누르면 되돌리지 않는다 —
+// 취소까지 두면 정답 화면에서 판단할 거리가 하나 더 늘고, 잘못 눌러도 손해가 "며칠 뒤에 한 번
+// 더 본다"뿐이다(EF review-guessed 도 단방향·멱등이다 — §6.6 "SRS").
+//
+// 누른 뒤 문구를 "표시했어요"로만 두는 건, 이 화면이 복습 세션과 섞어풀기 양쪽에 쓰이고 후자에는
+// 스케줄이 없는 문항이 섞여 있기 때문이다. 전부에 "곧 다시 나와요"를 약속하면 지키지 못한다.
+function GuessedButton({
+  sessionId,
+  position,
+  initial,
+}: {
+  sessionId: string;
+  position: number;
+  initial: boolean;
+}) {
+  const [marked, setMarked] = useState(initial);
+  const markGuessed = useMarkGuessed();
+
+  if (marked) {
+    return (
+      <View className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 dark:bg-amber-950/30">
+        <AppText variant="xs" weight="medium" className="text-amber-700 dark:text-amber-400">
+          찍은 문제로 표시했어요
+        </AppText>
+      </View>
+    );
+  }
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: markGuessed.isPending, busy: markGuessed.isPending }}
+      disabled={markGuessed.isPending}
+      onPress={() => {
+        if (markGuessed.isPending) return;
+        // 실패해도 되돌리지 않는다. 사용자가 할 수 있는 게 없고, 최악이 "간격이 그대로
+        // 유지된다"라 되돌리는 쪽이 더 혼란스럽다(웹과 같은 판단).
+        setMarked(true);
+        markGuessed.mutate({ sessionId, position });
+      }}
+      className={[
+        "ml-auto rounded-full border border-zinc-200 px-2.5 py-1 active:border-amber-300 active:bg-amber-50 dark:border-zinc-700 dark:active:border-amber-900 dark:active:bg-amber-950/30",
+        markGuessed.isPending ? "opacity-60" : "",
+      ].join(" ")}
+    >
+      <AppText variant="xs" weight="medium" className="text-zinc-500 dark:text-zinc-400">
+        찍었어요
+      </AppText>
+    </Pressable>
   );
 }

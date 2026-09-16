@@ -144,6 +144,7 @@ function MixSessionNoteBody({
       </View>
 
       <MixSessionView
+        sessionId={session.id}
         subjectSlug={slug}
         questions={questions}
         wrongCount={wrongCount}

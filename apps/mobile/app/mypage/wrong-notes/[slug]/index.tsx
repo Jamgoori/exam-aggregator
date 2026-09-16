@@ -27,6 +27,8 @@ import { openSubjectMix } from "../../../../src/lib/mix-href";
 import { useSetScreenParams } from "../../../../src/lib/screen-params";
 import { useAuth } from "../../../../src/providers/auth-provider";
 import { useSubjectBySlug } from "../../../../src/queries/catalog";
+import { MixSessionList } from "../../../../src/components/mix/mix-session-list";
+import { useMixSessions } from "../../../../src/queries/mix";
 import { useSubjectWrongNotePapers, useSubjectWrongNoteQuestions } from "../../../../src/queries/wrong-notes";
 import { themedIcon } from "../../../../src/theme/icons";
 
@@ -39,10 +41,10 @@ import { themedIcon } from "../../../../src/theme/icons";
 // 오답노트는 무료다 — 열람도, 메모·다시 볼 문제 정리도, 섞어풀기도. 멤버십은 해설 본문과 회독
 // 평균 비교에만 쓴다(§8.3).
 //
-// **섞어풀기 기록(MixSessionList) 섹션은 아직 없다**: 카드가 그리는 극복 진행률(wrongCount·
-// resolvedCount)이 EF review-history 목록 응답에 없어 세션마다 mix-note 상세를 받아야 한다 —
-// 설계서 §12 Phase 3 "믹스 기록". 기록 자체는 복습 결과 화면의 배너와 `…/mix/[sessionId]` 로
-// 열린다.
+// 섞어풀기 기록(MixSessionList)은 "시험지별" 뷰 위에 붙는다(웹과 같은 자리). 카드가 그리는 극복
+// 진행률(wrongCount·resolvedCount)은 Phase 3 에서 EF review-history 목록 응답이 `scope:"mix"` +
+// `subjectSlug` 일 때 함께 실어 주게 되면서 열렸다(§6.7 #10 · §12-5) — 그전에는 세션마다 mix-note
+// 상세를 받아야 해서 미뤄 두었다.
 const ShuffleIcon = themedIcon(Shuffle);
 
 type Params = { slug: string; view?: string };
@@ -238,8 +240,12 @@ function PapersView({
   selection: SubjectPaperSelection;
 }) {
   const totalWrong = papers.reduce((sum, p) => sum + p.unresolvedCount + p.resolvedCount, 0);
+  // 곁다리 조회다 — 실패해도 문제지 목록은 그대로 보여준다(웹도 이 목록만 따로 잡는다).
+  const mixSessions = useMixSessions(subjectSlug).data ?? [];
 
-  if (papers.length === 0) {
+  // 섞어풀기만 하고 CBT 응시가 없는 과목은 문제지 카드가 0인데 기록은 있다. 그때 빈 안내를
+  // 띄우면 바로 아래 기록 목록과 앞뒤가 안 맞는다(웹과 같은 분기).
+  if (papers.length === 0 && mixSessions.length === 0) {
     return (
       <AppText variant="sm" className="py-16 text-center text-zinc-500 dark:text-zinc-500" pretty>
         이 과목에서는 아직 틀린 문제가 없어요. CBT로 문제를 풀거나 위의 기출 섞어풀기를 하면 틀린 문제가 자동으로 이곳에
@@ -250,16 +256,35 @@ function PapersView({
 
   return (
     <View className="gap-3">
-      {totalWrong > 0 && !membershipLoading && (
+      {mixSessions.length > 0 && (
+        <View className="gap-3">
+          <View className="flex-row items-center justify-between">
+            <View className="flex-row items-center gap-1.5">
+              <ShuffleIcon size={14} colorClassName="text-blue-600 dark:text-blue-400" />
+              <AppText variant="sm" weight="semibold" className="text-zinc-700 dark:text-zinc-300">
+                섞어풀기 기록
+              </AppText>
+            </View>
+            <AppText variant="xs" className="text-zinc-400 dark:text-zinc-600">
+              {mixSessions.length}회
+            </AppText>
+          </View>
+          <MixSessionList subjectSlug={subjectSlug} sessions={mixSessions} />
+        </View>
+      )}
+
+      {papers.length > 0 && totalWrong > 0 && !membershipLoading && (
         <AppText variant="xs" className="text-zinc-400 dark:text-zinc-500" pretty>
           {premium
             ? "시험지를 눌러 회독 기록·해설을 보거나, 아래 버튼으로 바로 다시 풀 수 있어요."
             : "시험지를 눌러 회독 기록·틀린 문항을 보거나, 아래 버튼으로 바로 다시 풀 수 있어요."}
         </AppText>
       )}
+      {papers.length > 0 && (
       <SubjectPaperList
         subjectSlug={subjectSlug}
         selection={selection}
+        heading={mixSessions.length > 0 ? "시험지별" : undefined}
         papers={papers.map((p) => ({
           paperId: p.paper.id,
           title: p.paper.title,
@@ -272,6 +297,7 @@ function PapersView({
           resolved: p.resolvedCount,
         }))}
       />
+      )}
     </View>
   );
 }

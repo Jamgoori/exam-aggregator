@@ -165,3 +165,4 @@ export type SubmitReviewSessionResult = {
     view?: ReviewSessionView;
 };
 export declare function submitReviewSessionForUser(client: SupabaseClient, admin: SupabaseClient, userId: string, sessionId: string, answers: (number | null)[], opts?: SubmitReviewSessionOptions): Promise<SubmitReviewSessionResult>;
+export declare function fetchLastWrongChoices(admin: SupabaseClient, userId: string, subjectId: string): Promise<Map<string, number | null>>;

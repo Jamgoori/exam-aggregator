@@ -1,5 +1,6 @@
 import { examTypeFilledColor, levelColor, type ReviewHistoryMixNoteQuestion } from "@gongmoa/core";
-import { Shuffle } from "lucide-react-native";
+import { RotateCcw, Shuffle } from "lucide-react-native";
+import { router, type Href } from "expo-router";
 import { useMemo, useState } from "react";
 import { View } from "react-native";
 import { WrongNoteFilterChip } from "./filter-chip";
@@ -8,7 +9,9 @@ import { WrongNoteLegend, WrongNoteQuestionCard, type WrongNoteCardRow } from ".
 import { WrongNoteMarkActions, type WrongNoteDeletions } from "./wrong-note-mark-actions";
 import { AppText } from "../app-text";
 import { Button } from "../button";
+import { handleEdgeError } from "../../lib/edge";
 import { openSubjectMix } from "../../lib/mix-href";
+import { useCreateMixRetry } from "../../queries/mix";
 import { themedIcon } from "../../theme/icons";
 
 // "9월 5일 섞어풀기" 기록 화면 본문(웹 mix-session-view.tsx, 설계서 §4.5 #25). 기본은 그 세션에서
@@ -18,6 +21,7 @@ import { themedIcon } from "../../theme/icons";
 // 정답·해설은 EF review-history { view:"mix-note" } 응답에 이미 실려 온다(프리미엄이면 본문,
 // 아니면 explanationLocked) — 이 화면은 따로 묻지 않는다. 그 응답은 메모리 전용 쿼리다(§6.5).
 const ShuffleIcon = themedIcon(Shuffle);
+const RetryIcon = themedIcon(RotateCcw);
 
 type Filter = "wrong" | "all";
 
@@ -35,6 +39,7 @@ function toRow(q: ReviewHistoryMixNoteQuestion): WrongNoteCardRow {
 }
 
 export function MixSessionView({
+  sessionId,
   subjectSlug,
   questions,
   wrongCount,
@@ -44,6 +49,7 @@ export function MixSessionView({
   // (src/components/screen.tsx ScreenOverlay 머리말).
   deletions,
 }: {
+  sessionId: string;
   subjectSlug: string;
   questions: ReviewHistoryMixNoteQuestion[];
   wrongCount: number;
@@ -52,6 +58,8 @@ export function MixSessionView({
   deletions: WrongNoteDeletions<string>;
 }) {
   const [filter, setFilter] = useState<Filter>(wrongCount > 0 ? "wrong" : "all");
+  const [error, setError] = useState<string | null>(null);
+  const retry = useCreateMixRetry();
 
   // 다시 볼 문제 체크는 서버 왕복 없이 즉시 반영. 키는 `${paperId}#${qnum}`.
   const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(
@@ -64,34 +72,61 @@ export function MixSessionView({
     return filter === "wrong" ? list.filter((q) => !q.isCorrect) : list;
   }, [questions, deletedKeys, filter]);
 
+  async function retryWrong() {
+    if (retry.isPending || wrongCount === 0) return;
+    setError(null);
+    try {
+      const res = await retry.mutateAsync(sessionId);
+      router.push(`/mypage/wrong-notes/${subjectSlug}/review/${res.sessionId}` as Href);
+    } catch (e) {
+      const handled = await handleEdgeError(e, {
+        next: `/mypage/wrong-notes/${subjectSlug}/mix/${sessionId}`,
+      });
+      if (handled.redirected) return;
+      setError(handled.message || "다시 풀기를 시작하지 못했어요.");
+    }
+  }
+
   return (
     <View className="gap-4">
-      {/* 웹은 여기에 "틀린 {n}문항 다시 풀기"(createRetryFromMix({sessionId}))가 하나 더 있다.
-          앱은 **Phase 3** 로 남긴다(§12 Phase 3 "믹스 기록·재도전", §6.7 #14 EF `mix-create`
-          {action:"retry"}). 결과 화면(review/review-result.tsx)도 같은 이유로 mix 에서는 이
-          버튼을 그리지 않는다 — 두 화면의 판단을 맞춰 둔다.
-
-          EF review-create 의 items 분기로 대신할 수 없다: 그 분기는 서버가
-          filterQuestionsAnsweredByUser 로 "내가 푼 적 있는 (문제지, 문항)"만 남기고, 판정은
-          user_question_status 의 paper_id 로 한다. 그런데 섞어풀기 세션 문항
-          (review_session_items.paper_id)은 **dedup 대표 문제지 id** 이고(rules/mix-practice.ts
-          "출제 가능한 (대표 문제지, 문항)"), 채점은 resolveStatusTargets(rules/status-targets.ts)
-          가 "그 사용자가 실제로 상태 행을 가진 문제지"로 되짚어 기록한다. 직류만 다른 중복
-          시험지를 CBT 로 응시한 적이 있으면 상태 행은 원본 id 쪽에 남고 대표 id 에는 생기지
-          않으므로, 같은 문항을 items 로 돌려보내도 필터에 걸려 빠진다(전부 빠지면 EF 가 400
-          "다시 풀 문항이 없어요."). 웹이 mix 에서만 세션 id 통로를 쓰는 이유가 정확히 이것이다
-          (웹 review-solver.tsx retryWrong 주석). 서버가 소유자 확인 뒤 세션에서 직접 읽는
-          경로가 생기기 전까지는 버튼을 두지 않는다 — 웹과 문항 구성이 다른 재도전은
-          "다시 풀기"의 뜻을 바꾼다. */}
-      <Button
-        variant="tinted"
-        label="새로 섞어풀기"
-        icon={<ShuffleIcon size={16} colorClassName="text-blue-700 dark:text-blue-400" />}
-        accessibilityRole="link"
-        onPress={() => openSubjectMix(subjectSlug)}
-        className="w-full py-3"
-        textClassName="text-sm font-bold"
-      />
+      {/* "틀린 N문항 다시 풀기" — EF `mix-create {action:"retry"}`(§6.7 #14, Phase 3).
+          **세션 id 만 보낸다**: 서버가 소유자를 확인하고 세션에서 틀린 문항을 직접 읽는다.
+          EF review-create 의 items 분기로는 대신할 수 없다 — 그 분기는 서버가
+          filterQuestionsAnsweredByUser 로 "내가 푼 적 있는 (문제지, 문항)"만 남기고 판정을
+          user_question_status 의 paper_id 로 하는데, 섞어풀기 세션 문항은 **dedup 대표 문제지
+          id** 로 저장되고(rules/mix-practice.ts) 채점은 resolveStatusTargets 가 "그 사용자가
+          실제로 상태 행을 가진 문제지"로 되짚어 기록한다. 직류만 다른 중복 시험지를 CBT 로
+          응시한 적이 있으면 상태 행은 원본 id 에 남아, 같은 문항을 items 로 돌려보내도 필터에
+          걸려 빠진다(전부 빠지면 400 "다시 풀 문항이 없어요."). 결과 화면
+          (review/review-result.tsx)도 같은 통로를 쓴다 — 두 화면의 판단을 맞춰 둔다. */}
+      <View className="gap-2">
+        {wrongCount > 0 && (
+          <Button
+            variant="primary"
+            label={retry.isPending ? "준비 중..." : `틀린 ${wrongCount}문항 다시 풀기`}
+            icon={<RetryIcon size={16} colorClassName="text-white" />}
+            disabled={retry.isPending}
+            pending={retry.isPending}
+            onPress={() => void retryWrong()}
+            className="w-full py-3"
+            textClassName="text-sm font-bold"
+          />
+        )}
+        <Button
+          variant="tinted"
+          label="새로 섞어풀기"
+          icon={<ShuffleIcon size={16} colorClassName="text-blue-700 dark:text-blue-400" />}
+          accessibilityRole="link"
+          onPress={() => openSubjectMix(subjectSlug)}
+          className="w-full py-3"
+          textClassName="text-sm font-bold"
+        />
+      </View>
+      {error && (
+        <AppText variant="xs" className="-mt-2 text-center text-red-600 dark:text-red-400" pretty>
+          {error}
+        </AppText>
+      )}
 
       <View className="flex-row flex-wrap items-center gap-2">
         <WrongNoteFilterChip

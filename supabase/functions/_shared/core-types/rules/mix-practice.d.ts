@@ -27,7 +27,9 @@ export type MixPool = {
 };
 export type MixPoolLoader = (subjectId: string) => Promise<MixPool>;
 export declare const EMPTY_MIX_POOL: MixPool;
-export declare function buildMixPool(client: SupabaseClient, admin: SupabaseClient, subjectId: string): Promise<MixPool>;
+export declare function buildMixPool(client: SupabaseClient, admin: SupabaseClient, subjectId: string, opts?: {
+    includeConcepts?: boolean;
+}): Promise<MixPool>;
 export type MixHubTier = {
     key: string;
     approx: boolean;

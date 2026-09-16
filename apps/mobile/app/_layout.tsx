@@ -20,6 +20,7 @@ import { supabaseConfigError } from "../src/lib/supabase";
 import { checkForUpdate } from "../src/lib/updates";
 import { AuthProvider, useAuth } from "../src/providers/auth-provider";
 import { tokens, useIsDark, useThemePreference } from "../src/theme";
+import { ThemeTransitionOverlay } from "../src/theme/theme-transition";
 
 // 모듈 로드 시 한 번: 크래시 리포팅, onlineManager ← NetInfo, focusManager ← AppState.
 initSentry();
@@ -92,6 +93,8 @@ function QueryProviders({ children }: { children: React.ReactNode }) {
 
 function Gates() {
   const gate = useAppConfigGate();
+  // 반환값을 안 쓰지만 지우면 안 된다 — kv `theme` 를 읽어 적용하는 유일한 자리다(토글은
+  // `startThemeTransition` 으로 옮겨가며 이 훅을 더 이상 부르지 않는다).
   useThemePreference();
   const dark = useIsDark();
 
@@ -142,6 +145,12 @@ function Gates() {
         <Stack.Screen name="+not-found" />
       </Stack>
       <NavDrawer />
+      {/* 테마 전환 워시(§4.3). `Stack` **뒤**에 얹어야 화면 안이 아니라 헤더·탭바까지 한 장으로
+          덮인다(`NavDrawer` 는 RN Modal 이라 순서와 무관하게 이 판 위다 — theme-transition.tsx).
+          StatusBar 스타일은 그대로 둔다 — 판이 덮고 있는 동안 테마가 갈린다. 판 색이 새 배경색으로
+          옮겨가는 앞 140ms 동안은 아이콘이 판과 같은 색이라 잠깐 묻히지만, 그때 화면에는 판 말고
+          볼 것이 없다(아이콘이 배경과 함께 떠오르는 모양이 된다). */}
+      <ThemeTransitionOverlay />
     </>
   );
 }

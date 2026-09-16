@@ -901,6 +901,283 @@ async function caseReviewSubmitOnce() {
   compareSnapshots(webSnap, edgeSnap);
 }
 
+// (i) #18 review-guessed — 단방향·멱등, due 는 core 상수(SRS_RELEARN_DELAY_HOURS)만큼만 움직인다.
+// (e) 가 남긴 채점 결과(3번 정답·4번 오답, 둘 다 srs_due_at 있음)를 그대로 쓴다.
+//
+// 이 케이스가 지키는 것은 "SRS 상수의 정본이 packages/core/src/srs.ts 하나"라는 금지선이다 —
+// 이 기능을 RPC(`now() + interval '3 hours'`)로 만들면 SQL 에 세 번째 사본이 생기고 번들
+// 게이트(bundle-edge:check)는 SQL 을 검사하지 못한다(설계서 §6.7 #11).
+async function caseReviewGuessed() {
+  assert(created.web && created.edge, "(d)·(e) 케이스가 세션을 만들지 못했다");
+  const T_GUESS = at(2 * DAY + 60 * SECOND);
+
+  async function positionOf(sessionId, questionNumber) {
+    const items = must(
+      await admin
+        .from("review_session_items")
+        .select("position, question_number, is_correct")
+        .eq("session_id", sessionId),
+      "items",
+    );
+    const found = items.find((r) => r.question_number === questionNumber);
+    assert(found, `세션 ${sessionId} 에 ${questionNumber}번이 없다`);
+    return found;
+  }
+  async function statusOf(userId, questionNumber) {
+    const rows = must(
+      await admin
+        .from("user_question_status")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("question_number", questionNumber),
+      "status",
+    );
+    assert(rows.length === 1, `${questionNumber}번 상태 행이 ${rows.length}개다`);
+    return rows[0];
+  }
+
+  // 3번은 (e) 에서 맞힌 문항 = 찍었어요 대상. 4번은 틀린 문항 = 아무 일도 일어나면 안 된다.
+  const correct = { web: await positionOf(created.web, 3), edge: await positionOf(created.edge, 3) };
+  assert(correct.web.is_correct === true && correct.edge.is_correct === true, "3번이 정답이 아니다");
+  const wrongPos = {
+    web: await positionOf(created.web, 4),
+    edge: await positionOf(created.edge, 4),
+  };
+  const before = { web: await statusOf(USERS.web.id, 4), edge: await statusOf(USERS.edge.id, 4) };
+
+  await core.markReviewItemGuessed(admin, USERS.web.id, created.web, correct.web.position, T_GUESS);
+  const webFirst = await snapshot(USERS.web.id);
+  await core.markReviewItemGuessed(admin, USERS.web.id, created.web, correct.web.position, T_GUESS);
+  const webSecond = await snapshot(USERS.web.id);
+
+  const e1 = await edge(
+    "review-guessed",
+    { sessionId: created.edge, position: correct.edge.position },
+    { jwt: USERS.edge.jwt, now: T_GUESS },
+  );
+  assert(e1.status === 200, `review-guessed ${e1.status}: ${JSON.stringify(e1.body)}`);
+  assertEqual(e1.body, { ok: true }, "review-guessed 응답");
+  const edgeFirst = await snapshot(USERS.edge.id);
+  const e2 = await edge(
+    "review-guessed",
+    { sessionId: created.edge, position: correct.edge.position },
+    { jwt: USERS.edge.jwt, now: T_GUESS },
+  );
+  assert(e2.status === 200, `review-guessed 2회차 ${e2.status}`);
+  const edgeSecond = await snapshot(USERS.edge.id);
+
+  // 멱등: 두 번째 호출이 행을 하나도 바꾸지 않는다(updated_at 까지 포함해 원시 행으로 본다).
+  assertEqual(webSecond.user_question_status, webFirst.user_question_status, "web: 두 번째 호출이 상태를 바꿨다");
+  assertEqual(edgeSecond.user_question_status, edgeFirst.user_question_status, "edge: 두 번째 호출이 상태를 바꿨다");
+  assertEqual(webSecond.review_session_items, webFirst.review_session_items, "web: 두 번째 호출이 문항 행을 바꿨다");
+  assertEqual(edgeSecond.review_session_items, edgeFirst.review_session_items, "edge: 두 번째 호출이 문항 행을 바꿨다");
+
+  // due 는 정확히 core 상수만큼 뒤로. 상수가 SQL·Edge 로 복사되면 여기서 깨진다.
+  const expectedDue = core.srsRelearnDueAt(T_GUESS).toISOString();
+  assertEqual(
+    expectedDue,
+    new Date(T_GUESS.getTime() + core.SRS_RELEARN_DELAY_HOURS * 60 * 60 * 1000).toISOString(),
+    "srsRelearnDueAt 이 SRS_RELEARN_DELAY_HOURS 와 다르다",
+  );
+  for (const [label, userId] of [
+    ["web", USERS.web.id],
+    ["edge", USERS.edge.id],
+  ]) {
+    const guessed = await statusOf(userId, 3);
+    assertEqual(new Date(guessed.srs_due_at).toISOString(), expectedDue, `${label}: 3번 srs_due_at`);
+    // 점수·극복 판정은 그대로다 — 스케줄만 되돌린다.
+    assertEqual(guessed.last_is_correct, true, `${label}: 3번 last_is_correct 가 바뀌었다`);
+    assertEqual(guessed.srs_lapses, 0, `${label}: 3번 srs_lapses 가 늘었다`);
+  }
+
+  // 틀린 문항에 찍었어요를 눌러도 아무 일도 일어나지 않는다(이미 재확인으로 잡혀 있다).
+  const wrongWeb = await core.markReviewItemGuessed(admin, USERS.web.id, created.web, wrongPos.web.position, T_GUESS);
+  assertEqual(wrongWeb, {}, "web: 틀린 문항에 오류가 났다");
+  const wrongEdge = await edge(
+    "review-guessed",
+    { sessionId: created.edge, position: wrongPos.edge.position },
+    { jwt: USERS.edge.jwt, now: T_GUESS },
+  );
+  assertEqual(wrongEdge.status, 200, "edge: 틀린 문항 응답 상태");
+  for (const [label, userId, was] of [
+    ["web", USERS.web.id, before.web],
+    ["edge", USERS.edge.id, before.edge],
+  ]) {
+    const after = await statusOf(userId, 4);
+    assertEqual(after.srs_due_at, was.srs_due_at, `${label}: 틀린 문항의 srs_due_at 이 움직였다`);
+  }
+
+  // 남의 세션·없는 문항은 404(정답을 모르는 세션을 헤집을 수 없다).
+  const alien = await edge(
+    "review-guessed",
+    { sessionId: created.web, position: 0 },
+    { jwt: USERS.edge.jwt, now: T_GUESS },
+  );
+  assertEqual(alien.status, 404, "남의 세션에 찍었어요가 통했다");
+
+  compareSnapshots(await snapshot(USERS.web.id), await snapshot(USERS.edge.id));
+}
+
+// (j) #19 review-due {action:"summary"} — 웹 규칙을 직접 부른 결과와 Edge 응답이 **같은 JSON**.
+// 설계서 §12 Phase 3 종료 조건("웹과 앱에서 같은 날 같은 todayCount·forecast")이 이 케이스다.
+// 요약은 읽기 전용이라(승격은 세션 생성에서만 — §6.6 "SRS") 행 비교 대신 응답을 비교한다.
+async function caseReviewDueSummary() {
+  // (e) 의 채점으로 3·4번에 스케줄이 잡혀 있다. 그 예정일들이 지난 시각으로 물어야
+  // todayCount 가 0이 아니다(둘 다 T_SUBMIT = CLOCK+2일 기준으로 며칠 뒤에 배정된다).
+  const T_ASK = at(8 * DAY);
+
+  const webSummary = await core.getDueReviewSummary(admin, USERS.web.id, T_ASK, () => admin);
+  const res = await edge("review-due", { action: "summary" }, { jwt: USERS.edge.jwt, now: T_ASK });
+  assert(res.status === 200, `review-due summary ${res.status}: ${JSON.stringify(res.body)}`);
+
+  assertEqual(res.body, JSON.parse(JSON.stringify(webSummary)), "review-due summary 가 웹 규칙과 다르다");
+  assert(webSummary.todayCount > 0, `케이스 전제: T_ASK 에 복습할 문항이 있어야 한다(${webSummary.todayCount})`);
+  assert(Array.isArray(res.body.forecast) && res.body.forecast.length > 0, "forecast 가 비었다");
+
+  // 넛지는 같은 요약에서 두 값만 잘라 보낸다(웹 getReviewNudge 와 같은 값).
+  const nudge = await edge("review-due", { action: "nudge" }, { jwt: USERS.edge.jwt, now: T_ASK });
+  assert(nudge.status === 200, `review-due nudge ${nudge.status}`);
+  assertEqual(nudge.body.todayCount, webSummary.todayCount, "nudge todayCount");
+  assertEqual(
+    nudge.body.subjects,
+    webSummary.subjects.map((s) => ({ name: s.name, count: s.count })),
+    "nudge subjects",
+  );
+
+  // 읽기만 했으므로 승격(srs_due_at 심기)이 일어나지 않았다 — 배너를 본 것만으로 진도가
+  // 바뀌면 안 된다(§6.6 "SRS": 승격은 세션 생성 시에만).
+  compareSnapshots(await snapshot(USERS.web.id), await snapshot(USERS.edge.id));
+
+  // 정답·출처는 요약 어디에도 없다.
+  const leaks = findKeys(res.body, ["paperId", "correctChoice", "questionNumber", "paperTitle"]);
+  assert(leaks.length === 0, `review-due summary 응답에 출처가 실렸다: ${leaks.join(", ")}`);
+}
+
+// (k) #20 mix-create — 기출 섞어풀기 생성과 "틀린 문항만 다시 풀기"(retry)가 웹 규칙과 같은 행을
+// 남긴다. retry 는 Phase 2 가 일부러 남겨 둔 자리다(§12-4 "Phase 3 로 넘긴 것").
+//
+// 픽스처 과목의 출제 풀은 4문항(5번은 voided)이라 정원(clampMixLimit 의 하한)보다 작다 →
+// 양쪽 모두 4문항 전부를 뽑는다. 뽑는 순서만 무작위인데 스냅샷은 position 을 빼고 (문제지,
+// 문항)으로 정렬해 비교하므로 결정적이다.
+async function caseMixCreateAndRetry() {
+  await resetUsers();
+  const T_SUBMIT = at(120 * SECOND);
+
+  const getMixPool = (subjectId) => core.buildMixPool(admin, admin, subjectId);
+
+  // 시작 화면 요약: 개념 조회를 끈 풀(Edge overview 가 쓰는 것)이 웹 요약과 같은 값인지.
+  const subject = await core.getSubjectBySlug(admin, "contract-subject");
+  assert(subject, "픽스처 과목을 찾지 못했다");
+  const webOverview = core.toMixOverview(subject, await getMixPool(subject.id));
+  const ov = await edge("mix-create", { action: "overview", subjectSlug: "contract-subject" }, { jwt: USERS.edge.jwt });
+  assert(ov.status === 200, `mix-create overview ${ov.status}: ${JSON.stringify(ov.body)}`);
+  assertEqual(ov.body, JSON.parse(JSON.stringify(webOverview)), "mix-create overview 가 웹 요약과 다르다");
+
+  // ── 생성 ────────────────────────────────────────────────────────────────────
+  const wc = await core.createMixSessionForUser(
+    admin,
+    admin,
+    USERS.web.id,
+    { subjectSlug: "contract-subject", limit: 20 },
+    { getMixPool },
+  );
+  assert(wc.sessionId, `web mix create: ${wc.error}`);
+  const ec = await edge(
+    "mix-create",
+    { action: "create", subjectSlug: "contract-subject", limit: 20, requestId: randomUUID() },
+    { jwt: USERS.edge.jwt },
+  );
+  assert(ec.status === 200, `mix-create create ${ec.status}: ${JSON.stringify(ec.body)}`);
+  assertEqual(ec.body.total, QUESTION_COUNT - VOIDED.length, "mix 세션 문항 수(voided 제외)");
+  assertEqual(ec.body.unseenCount, ec.body.total, "unseenCount(처음 보는 문항)");
+  assertEqual(ec.body.coveredAll, true, "coveredAll(새 문항만으로 정원을 못 채웠다)");
+  assertEqual(ec.body.scope, "mix", "scope");
+  const leaks = findKeys(ec.body, ["paperId", "correctChoice", "paperTitle", "questionNumber"]);
+  assert(leaks.length === 0, `mix-create 응답에 정답·출처가 실렸다: ${leaks.join(", ")}`);
+
+  // ── 채점(3·4번을 틀린다) ────────────────────────────────────────────────────
+  const WRONG = [3, 4];
+  async function answersFor(sessionId) {
+    const items = must(
+      await admin
+        .from("review_session_items")
+        .select("position, question_number")
+        .eq("session_id", sessionId)
+        .order("position"),
+      "items",
+    );
+    const answers = [];
+    for (const it of items) {
+      answers[it.position] = WRONG.includes(it.question_number)
+        ? (ANSWERS[it.question_number - 1] % 5) + 1
+        : ANSWERS[it.question_number - 1];
+    }
+    return answers;
+  }
+  const ws = await web.reviewSubmit(wc.sessionId, await answersFor(wc.sessionId), T_SUBMIT);
+  assert(ws.view && !ws.error, `web mix submit: ${ws.error}`);
+  const es = await edgeUser.reviewSubmit(ec.body.sessionId, await answersFor(ec.body.sessionId), T_SUBMIT);
+  assert(es.status === 200, `edge mix submit ${es.status}: ${JSON.stringify(es.body)}`);
+
+  // 섞어풀기 채점은 상태 source 가 "mix" 다(계약 테스트 #6 의 mix 쪽).
+  for (const [label, userId] of [
+    ["web", USERS.web.id],
+    ["edge", USERS.edge.id],
+  ]) {
+    const rows = must(
+      await admin.from("user_question_status").select("question_number, source").eq("user_id", userId),
+      "status",
+    );
+    for (const r of rows) assertEqual(r.source, "mix", `${label}: ${r.question_number}번 source`);
+  }
+
+  // ── 기록 목록의 추가 필드(틀린 수·극복 수) ─────────────────────────────────
+  const webList = await core.listMixSessions(admin, admin, USERS.edge.id, subject.id, { getMixPool });
+  const list = await edge(
+    "review-history",
+    { scope: "mix", subjectSlug: "contract-subject" },
+    { jwt: USERS.edge.jwt },
+  );
+  assert(list.status === 200, `review-history mix 목록 ${list.status}: ${JSON.stringify(list.body)}`);
+  const entry = list.body.sessions.find((s) => s.sessionId === ec.body.sessionId);
+  assert(entry, "mix 기록 목록에 방금 만든 세션이 없다");
+  assertEqual(entry.wrongCount, WRONG.length, "목록의 wrongCount");
+  assertEqual(entry.resolvedCount, 0, "목록의 resolvedCount(아직 극복 전)");
+  assertEqual(entry.title, webList.find((s) => s.id === ec.body.sessionId)?.title, "목록 제목");
+
+  // ── 재도전 ──────────────────────────────────────────────────────────────────
+  const wr = await core.createRetryFromMixSession(admin, USERS.web.id, wc.sessionId);
+  assert(wr.sessionId, `web mix retry: ${wr.error}`);
+  const er = await edge(
+    "mix-create",
+    { action: "retry", sessionId: ec.body.sessionId, requestId: randomUUID() },
+    { jwt: USERS.edge.jwt },
+  );
+  assert(er.status === 200, `mix-create retry ${er.status}: ${JSON.stringify(er.body)}`);
+  assertEqual(er.body.total, WRONG.length, "재도전 세션은 틀린 문항만 담는다");
+
+  const webRetryItems = must(
+    await admin.from("review_session_items").select("question_number").eq("session_id", wr.sessionId),
+    "web retry items",
+  );
+  assertEqual(
+    webRetryItems.map((r) => r.question_number).sort(),
+    [...WRONG].sort(),
+    "web 재도전 문항",
+  );
+
+  // 남의 세션으로는 재도전할 수 없다(문항 목록을 서버가 세션에서 읽으므로 소유자 확인이 전부다).
+  const alien = await edge(
+    "mix-create",
+    { action: "retry", sessionId: wc.sessionId },
+    { jwt: USERS.edge.jwt },
+  );
+  assertEqual(alien.status, 400, "남의 mix 세션으로 재도전이 통했다");
+  assertEqual(alien.body.error, "세션을 찾을 수 없어요.", "남의 세션 거절 문구");
+
+  compareSnapshots(await snapshot(USERS.web.id), await snapshot(USERS.edge.id));
+}
+
 // ── 실행 ─────────────────────────────────────────────────────────────────────
 
 let setupFailed = false;
@@ -921,6 +1198,9 @@ if (!setupFailed) {
   await runCase("#1 CBT 제출 — voided 포함", caseCbtSubmit);
   await runCase("#13·#15 review-create 멱등·정답 미노출", caseReviewCreateIdempotent);
   await runCase("#5·#6 복습 제출 1회·source=review", caseReviewSubmitOnce);
+  await runCase("#18 review-guessed 멱등·SRS_RELEARN_DELAY_HOURS", caseReviewGuessed);
+  await runCase("#19 review-due summary — 웹 규칙과 같은 todayCount·forecast", caseReviewDueSummary);
+  await runCase("#20 mix-create 생성·재도전·기록 개수", caseMixCreateAndRetry);
   await runCase("#2 CBT 제출 — 90초 미만", caseCbtTooEarly);
   await runCase("#4 CBT 동시 제출 2건", caseCbtDoubleSubmit);
 }

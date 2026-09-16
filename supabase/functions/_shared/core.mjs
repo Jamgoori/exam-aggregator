@@ -581,6 +581,10 @@ var ALIASES_BY_STORED_NAME = (() => {
     Object.entries(collected).map(([stored, set]) => [stored, [...set]])
   );
 })();
+function getSubjectDisplayName(subjectName, examTypeName, level, track) {
+  if (!examTypeName) return subjectName;
+  return namesFor(examTypeName, level, track)?.[subjectName] ?? subjectName;
+}
 function applyExamTypeSubjectName(title) {
   const [, examTypeName, third] = title.trim().split(/\s+/);
   const level = /^\d+급$/.test(third ?? "") ? third : null;
@@ -2719,6 +2723,31 @@ async function submitReviewSessionForUser(client, admin, userId, sessionId, answ
   const view = await getReviewSessionView(client, admin, userId, sessionId);
   return { view: view ?? void 0 };
 }
+var LAST_CHOICE_BATCH = 1e3;
+async function fetchLastWrongChoices(admin, userId, subjectId) {
+  const out = /* @__PURE__ */ new Map();
+  const latest = /* @__PURE__ */ new Map();
+  let from = 0;
+  for (; ; ) {
+    const { data, error } = await admin.from("review_session_items").select(
+      "paper_id, question_number, selected_choice, review_sessions!inner(user_id, submitted_at), exam_papers!inner(subject_id)"
+    ).eq("review_sessions.user_id", userId).eq("exam_papers.subject_id", subjectId).eq("is_correct", false).order("paper_id", { ascending: true }).order("question_number", { ascending: true }).range(from, from + LAST_CHOICE_BATCH - 1);
+    if (error) break;
+    const rows = data ?? [];
+    for (const r of rows) {
+      const key = `${r.paper_id}#${r.question_number}`;
+      const at = r.review_sessions?.submitted_at ?? "";
+      const prev = latest.get(key);
+      if (prev === void 0 || at > prev) {
+        latest.set(key, at);
+        out.set(key, r.selected_choice);
+      }
+    }
+    if (rows.length < LAST_CHOICE_BATCH) break;
+    from += LAST_CHOICE_BATCH;
+  }
+  return out;
+}
 
 // src/exam-level-tier.ts
 var TIER_BY_EXAM_TYPE = {
@@ -2946,7 +2975,7 @@ async function fetchCanonicalConcepts(admin, questionIds) {
   for (const [qid, cid] of raw) out.set(qid, canonical(cid));
   return out;
 }
-async function buildMixPool(client, admin, subjectId) {
+async function buildMixPool(client, admin, subjectId, opts = {}) {
   const papers = await fetchAllPages(
     (from, to) => client.from("exam_papers").select(
       "id, subject_id, exam_type_id, year, round, level, track, title, created_at, exam_types(name)"
@@ -2987,7 +3016,7 @@ async function buildMixPool(client, admin, subjectId) {
       rowsById.set(r.id, r);
     }
   });
-  const conceptByQuestionId = await fetchCanonicalConcepts(admin, [...rowsById.keys()]);
+  const conceptByQuestionId = opts.includeConcepts === false ? /* @__PURE__ */ new Map() : await fetchCanonicalConcepts(admin, [...rowsById.keys()]);
   const yearByPaper = new Map(papers.map((p) => [p.id, p.year ?? null]));
   const candidates = [];
   const seen = /* @__PURE__ */ new Set();
@@ -3359,6 +3388,293 @@ async function createRetryFromMixSession(admin, userId, sessionId, opts = {}) {
   });
 }
 
+// src/levels.ts
+var LEVEL_ORDER = ["9급", "7급", "5급"];
+function compareLevels(a, b) {
+  const ai = LEVEL_ORDER.indexOf(a);
+  const bi = LEVEL_ORDER.indexOf(b);
+  if (ai === -1 && bi === -1) return a.localeCompare(b);
+  if (ai === -1) return 1;
+  if (bi === -1) return -1;
+  return ai - bi;
+}
+
+// src/paper-slug.ts
+function slugifyText(text) {
+  return text.normalize("NFC").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").toLowerCase();
+}
+function getPaperSlug(title, round, track) {
+  const bare = track ? title.replace(` (${track})`, "").replace(/\s{2,}/g, " ").trim() : title;
+  let slug = slugifyText(bare);
+  if (track) slug += `-${slugifyText(track)}`;
+  if (round > 1 && !bare.includes(`${round}차`) && !bare.includes(`${round}회`))
+    slug += `-${round}회`;
+  return slug;
+}
+function normalizePaperSlugParam(param) {
+  if (!param.includes("%")) return param;
+  try {
+    return decodeURIComponent(param);
+  } catch {
+    return param;
+  }
+}
+var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isPaperUuid(value) {
+  return UUID_RE.test(value);
+}
+
+// src/data/papers.ts
+function encodePapers(papers, subjects, examTypes) {
+  const subjectIdx = new Map(subjects.map((s, i) => [s.id, i]));
+  const examTypeIdx = new Map(examTypes.map((t, i) => [t.id, i]));
+  return papers.map((p) => [
+    p.id,
+    p.title,
+    p.level,
+    p.track,
+    p.year,
+    p.round,
+    subjectIdx.get(p.subject_id) ?? -1,
+    examTypeIdx.get(p.exam_type_id) ?? -1
+  ]);
+}
+function decodePapers({ subjects, examTypes, papers }) {
+  const subjectRefs = subjects.map((s) => ({ id: s.id, name: s.name, slug: s.slug }));
+  return papers.map(
+    ([id, title, level, track, year, round, sIdx, tIdx]) => ({
+      id,
+      title,
+      level,
+      track,
+      year,
+      round,
+      subject_id: subjects[sIdx]?.id ?? "",
+      exam_type_id: examTypes[tIdx]?.id ?? "",
+      subjects: subjectRefs[sIdx] ?? null,
+      exam_types: examTypes[tIdx] ?? null
+    })
+  );
+}
+function getExamTypeNames(papers) {
+  const set = /* @__PURE__ */ new Set();
+  for (const p of papers) {
+    if (p.exam_types?.name) set.add(p.exam_types.name);
+  }
+  return [...set];
+}
+function filterPapers(papers, {
+  level,
+  year,
+  examType,
+  matchedSubjectIds,
+  isSearching,
+  favOnly,
+  bookmarkedSubjectIds
+}) {
+  return papers.filter((p) => {
+    if (level && p.level !== level) return false;
+    if (year && p.year !== year) return false;
+    if (examType && p.exam_types?.name !== examType) return false;
+    if (isSearching && !matchedSubjectIds.includes(p.subject_id)) return false;
+    if (favOnly && !bookmarkedSubjectIds?.has(p.subject_id)) return false;
+    return true;
+  });
+}
+function groupSubjectName(paper) {
+  const name = paper.subjects?.name;
+  if (!name) return "기타";
+  return getSubjectDisplayName(name, paper.exam_types?.name, paper.level, paper.track);
+}
+function groupByYearAndSubject(papers) {
+  const sorted = [...papers].sort((a, b) => {
+    if (a.year !== b.year) return b.year - a.year;
+    return groupSubjectName(a).localeCompare(groupSubjectName(b), "ko");
+  });
+  const byYear = /* @__PURE__ */ new Map();
+  for (const paper of sorted) {
+    if (!byYear.has(paper.year)) byYear.set(paper.year, /* @__PURE__ */ new Map());
+    const bySubject = byYear.get(paper.year);
+    const subjectName = groupSubjectName(paper);
+    if (!bySubject.has(subjectName)) bySubject.set(subjectName, []);
+    bySubject.get(subjectName).push(paper);
+  }
+  return byYear;
+}
+var TYPICAL_EXAM_MONTH = {
+  소방: 3,
+  계리직: 3,
+  국가직: 4,
+  기상직: 4,
+  지방직: 6,
+  서울시: 6,
+  법원직: 6,
+  간호직: 6,
+  지역인재: 7,
+  경찰: 8,
+  해경: 8,
+  국회직: 9
+};
+async function fetchExamPaperRows(client) {
+  const { data: examTypeRows } = await client.from("exam_types").select("id, name");
+  const examTypes = examTypeRows ?? [];
+  const monthByExamTypeId = new Map(
+    examTypes.map((t) => [t.id, TYPICAL_EXAM_MONTH[t.name] ?? 0])
+  );
+  const rows = await fetchAllPages(
+    (from, to) => client.from("exam_papers").select("id, title, level, track, year, round, subject_id, exam_type_id").order("year", { ascending: false }).order("round", { ascending: false }).order("id", { ascending: true }).range(from, to),
+    "문제지 목록"
+  );
+  rows.sort((a, b) => {
+    if (a.year !== b.year) return b.year - a.year;
+    const am = monthByExamTypeId.get(a.exam_type_id) ?? 0;
+    const bm = monthByExamTypeId.get(b.exam_type_id) ?? 0;
+    if (am !== bm) return bm - am;
+    if (a.round !== b.round) return b.round - a.round;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  return { rows, examTypes };
+}
+var SIGNAL_RPC_LIMIT = 500;
+async function fetchPaperIdentitySignalsRpc(client, papers) {
+  const signals = /* @__PURE__ */ new Map();
+  const collidingIds = new Set(collidingPaperIds(papers));
+  if (collidingIds.size === 0) return signals;
+  const groups = /* @__PURE__ */ new Map();
+  for (const p of papers) {
+    if (!collidingIds.has(p.id)) continue;
+    const key = paperDedupKey(p);
+    const arr = groups.get(key);
+    if (arr) arr.push(p.id);
+    else groups.set(key, [p.id]);
+  }
+  const chunks = [];
+  let current = [];
+  for (const ids of groups.values()) {
+    if (current.length + ids.length > SIGNAL_RPC_LIMIT && current.length > 0) {
+      chunks.push(current);
+      current = [];
+    }
+    current.push(...ids);
+  }
+  if (current.length > 0) chunks.push(current);
+  await inParallel(chunks.map((ids, idx) => ({ ids, idx })), async ({ ids, idx }) => {
+    const { data, error } = await client.rpc("paper_identity_signals", { p_paper_ids: ids });
+    if (error) throw new Error(`중복 판정 신호 조회 실패: ${error.message}`);
+    for (const row of data ?? []) {
+      signals.set(row.paper_id, {
+        questionCount: row.question_count ?? 0,
+        answerSignature: row.answer_cluster == null ? null : `${idx}:${row.answer_cluster}`,
+        answerLength: row.answer_length
+      });
+    }
+  });
+  return signals;
+}
+async function fetchQuestionCountSignals(client, papers) {
+  const signals = /* @__PURE__ */ new Map();
+  const ids = collidingPaperIds(papers);
+  if (ids.length === 0) return signals;
+  for (const id of ids) signals.set(id, { questionCount: 0, answerSignature: null, answerLength: null });
+  await inParallel(chunk(ids, 20), async (batch) => {
+    const { data } = await client.from("questions").select("paper_id").in("paper_id", batch).range(0, 999);
+    for (const row of data ?? []) {
+      const s = signals.get(row.paper_id);
+      if (s) s.questionCount += 1;
+    }
+  });
+  return signals;
+}
+async function fetchCbtAvailability(client, paperIds) {
+  if (paperIds.length === 0) return /* @__PURE__ */ new Set();
+  const { data } = await client.rpc("has_cbt_answers_bulk", { target_paper_ids: paperIds });
+  return new Set((data ?? []).map((row) => row.paper_id));
+}
+async function fetchAllCbtAvailability(client) {
+  const rows = await fetchAllPages(
+    (from, to) => client.rpc("has_cbt_answers_all").range(from, to),
+    "CBT 가능 목록"
+  );
+  return new Set(rows.map((row) => row.paper_id));
+}
+async function fetchCatalog(client, signalsProvider) {
+  const [{ data: subjectRows }, { rows, examTypes }, cbtAvailability] = await Promise.all([
+    client.from("subjects").select("*").order("name"),
+    fetchExamPaperRows(client),
+    fetchAllCbtAvailability(client)
+  ]);
+  const subjects = subjectRows ?? [];
+  const slugMap = {};
+  for (const row of rows) slugMap[getPaperSlug(row.title, row.round, row.track)] = row.id;
+  const signals = await signalsProvider(client, rows);
+  const papers = collapseDuplicatePapers(rows, signals);
+  return {
+    subjects,
+    examTypes,
+    papers: encodePapers(papers, subjects, examTypes),
+    cbtMask: papers.map((p) => cbtAvailability.has(p.id) ? "1" : "0").join(""),
+    slugMap
+  };
+}
+function buildSubjectIndex(subjects, papers) {
+  const stats = /* @__PURE__ */ new Map();
+  for (const p of papers) {
+    let s = stats.get(p.subject_id);
+    if (!s) {
+      s = { count: 0, minYear: p.year, maxYear: p.year };
+      stats.set(p.subject_id, s);
+    }
+    s.count += 1;
+    if (p.year < s.minYear) s.minYear = p.year;
+    if (p.year > s.maxYear) s.maxYear = p.year;
+  }
+  const entries = subjects.flatMap((subject) => {
+    const s = stats.get(subject.id);
+    if (!s || s.count === 0) return [];
+    return [{ slug: subject.slug, name: subject.name, count: s.count, minYear: s.minYear, maxYear: s.maxYear }];
+  });
+  return { entries, totalCount: papers.length };
+}
+async function fetchSubjectFilters(client, subjectId) {
+  const [{ data: levelRows }, { data: examTypeRows }] = await Promise.all([
+    client.from("exam_papers").select("level").eq("subject_id", subjectId),
+    client.from("exam_papers").select("exam_type_id, exam_types(id, name, display_order)").eq("subject_id", subjectId)
+  ]);
+  const levels = [
+    ...new Set(
+      (levelRows ?? []).map((r) => r.level).filter((l) => !!l)
+    )
+  ].sort(compareLevels);
+  const examTypeById = /* @__PURE__ */ new Map();
+  for (const row of examTypeRows ?? []) {
+    const et = row.exam_types;
+    if (et) examTypeById.set(et.id, et);
+  }
+  const examTypes = [...examTypeById.values()].sort((a, b) => a.display_order - b.display_order);
+  return { levels, examTypes, hasAnyPaper: (levelRows ?? []).length > 0 };
+}
+async function fetchSubjectPapers(client, subjectId, filter, signalsProvider) {
+  const rows = await fetchAllPages(
+    (from, to) => {
+      let q = client.from("exam_papers").select("*, subjects(*), exam_types(*)").eq("subject_id", subjectId);
+      if (filter.level) q = q.eq("level", filter.level);
+      if (filter.examTypeIds && filter.examTypeIds.length > 0) q = q.in("exam_type_id", filter.examTypeIds);
+      return q.order("year", { ascending: false }).order("round", { ascending: false }).order("id", { ascending: true }).range(from, to);
+    },
+    "과목 문제지 목록"
+  );
+  const signals = await signalsProvider(client, rows);
+  return collapseDuplicatePapers(rows, signals);
+}
+async function fetchMyRoundCounts(client, userId) {
+  const counts = /* @__PURE__ */ new Map();
+  const { data } = await client.from("cbt_attempts").select("paper_id").eq("user_id", userId);
+  for (const row of data ?? []) {
+    counts.set(row.paper_id, (counts.get(row.paper_id) ?? 0) + 1);
+  }
+  return counts;
+}
+
 // src/profanity.ts
 var PROFANITY_WORDS = [
   // 한국어
@@ -3457,31 +3773,6 @@ function containsProfanity(text) {
 }
 function profanityError(text) {
   return containsProfanity(text) ? PROFANITY_ERROR : null;
-}
-
-// src/paper-slug.ts
-function slugifyText(text) {
-  return text.normalize("NFC").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").toLowerCase();
-}
-function getPaperSlug(title, round, track) {
-  const bare = track ? title.replace(` (${track})`, "").replace(/\s{2,}/g, " ").trim() : title;
-  let slug = slugifyText(bare);
-  if (track) slug += `-${slugifyText(track)}`;
-  if (round > 1 && !bare.includes(`${round}차`) && !bare.includes(`${round}회`))
-    slug += `-${round}회`;
-  return slug;
-}
-function normalizePaperSlugParam(param) {
-  if (!param.includes("%")) return param;
-  try {
-    return decodeURIComponent(param);
-  } catch {
-    return param;
-  }
-}
-var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isPaperUuid(value) {
-  return UUID_RE.test(value);
 }
 
 // src/comment-constraints.ts
@@ -3614,6 +3905,7 @@ export {
   authorNickname,
   buildMixHubIndex,
   buildMixPool,
+  buildSubjectIndex,
   chunk,
   collapseDuplicatePapers,
   collectAllReviewCandidates,
@@ -3635,18 +3927,31 @@ export {
   createReviewSessionForUser,
   createReviewSessionFromItems,
   daysInMonthKey,
+  decodePapers,
   embedOne,
+  encodePapers,
+  fetchAllCbtAvailability,
   fetchAllPages,
   fetchAnsweredQuestionNumbers,
+  fetchCatalog,
+  fetchCbtAvailability,
   fetchCorrectAnswers,
+  fetchExamPaperRows,
   fetchExplainedNumbers,
   fetchExplanations,
+  fetchLastWrongChoices,
   fetchMemos,
+  fetchMyRoundCounts,
   fetchPaperIdentitySignals,
+  fetchPaperIdentitySignalsRpc,
   fetchPlayableQuestionCounts,
+  fetchQuestionCountSignals,
   fetchQuestionKeys,
   fetchQuestionMedia,
+  fetchSubjectFilters,
+  fetchSubjectPapers,
   fetchWrongNoteMarks,
+  filterPapers,
   filterQuestionsAnsweredByUser,
   findProfanity,
   findUnfinishedDueSession,
@@ -3656,6 +3961,7 @@ export {
   fuzzInterval,
   getDiagnosisPausedSubjectIds,
   getDueReviewSummary,
+  getExamTypeNames,
   getExcludedDiagnosisSubjectSlugs,
   getMembership,
   getMixSessionWrongNote,
@@ -3667,6 +3973,7 @@ export {
   getSessionSchedule,
   getStoredStudyPhase,
   getSubjectBySlug,
+  groupByYearAndSubject,
   hasOwnPremiumPeriod,
   inParallel,
   isAdFreeMembership,

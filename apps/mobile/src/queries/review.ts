@@ -1,6 +1,6 @@
 import {
   isEdgeError,
-  isReviewHistoryList,
+  isReviewHistoryDetail,
   type ReviewHistoryDetailResponse,
   type ReviewItemRequestRef,
 } from "@gongmoa/core";
@@ -39,8 +39,8 @@ export function useReviewSession(sessionId: string, userId: string | null) {
     queryKey: reviewSessionKey(sessionId, userId),
     queryFn: async () => {
       const res = await callEdge("review-history", { sessionId, includeUnsubmitted: true });
-      // 계약상 { sessionId } 요청에 목록이 오지는 않는다 — 타입을 좁히기 위한 가드.
-      if (isReviewHistoryList(res)) throw new Error("세션을 찾을 수 없어요.");
+      // 계약상 { sessionId } 요청에 목록·마지막 선택이 오지는 않는다 — 타입을 좁히는 가드.
+      if (!isReviewHistoryDetail(res)) throw new Error("세션을 찾을 수 없어요.");
       return res;
     },
     enabled: sessionId.length > 0 && !!userId,
@@ -89,7 +89,7 @@ async function submitOrFetchGraded(
     // 이중 제출(다른 기기·연타)은 오류로 보여주지 않는다 — 채점 뷰를 가져와 결과를 그린다(§6.6).
     if (!isEdgeError(e) || e.message !== ALREADY_SUBMITTED_MESSAGE) throw e;
     const res = await callEdge("review-history", { sessionId });
-    if (isReviewHistoryList(res)) throw e;
+    if (!isReviewHistoryDetail(res)) throw e;
     return res;
   }
 }

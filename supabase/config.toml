@@ -128,10 +128,22 @@ import_map = "./functions/deno.json"
 [functions.membership-get]
 import_map = "./functions/deno.json"
 
+[functions.mix-create]
+import_map = "./functions/deno.json"
+
 [functions.review-create]
 import_map = "./functions/deno.json"
 
+[functions.review-due]
+import_map = "./functions/deno.json"
+
+[functions.review-guessed]
+import_map = "./functions/deno.json"
+
 [functions.review-history]
+import_map = "./functions/deno.json"
+
+[functions.review-prefs]
 import_map = "./functions/deno.json"
 
 [functions.review-submit]
