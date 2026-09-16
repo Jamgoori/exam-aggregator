@@ -97,8 +97,12 @@ export function useCbtState({
     resolveInitialCbtViewMode(defaultViewMode, hasQuestionImages),
   );
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  // 문제별 보기 필기(문항 인덱스 → 획). 전체보기 필기는 Phase 2.
+  // 문제별 보기 필기(문항 인덱스 → 획).
   const [singleStrokes, setSingleStrokes] = useState<Record<number, InkStroke[]>>({});
+  // 전체보기 필기(PDF 페이지 번호 → 획, 페이지 상자 기준 0~1 정규화 — full-view.tsx 좌표 모델).
+  const [pageStrokes, setPageStrokes] = useState<Record<number, InkStroke[]>>({});
+  // 전체보기에서 보고 있는 페이지. 필기가 페이지별이라 여기(모드 전환에도 유지)에 둔다.
+  const [fullPage, setFullPage] = useState(1);
   // 드래프트 확인이 끝났는지 — 끝나기 전엔 카운트다운을 돌리지 않는다(복원 경합 방지).
   const [restoreChecked, setRestoreChecked] = useState(false);
 
@@ -134,6 +138,7 @@ export function useCbtState({
             .map((_, i) => found.draft.answers[i] ?? null);
           setAnswers(restored);
           setSingleStrokes(found.draft.strokes ?? {});
+          setPageStrokes(found.draft.pageStrokes ?? {});
           resume(found.startedAt);
         }
       })
@@ -151,10 +156,14 @@ export function useCbtState({
   useEffect(() => {
     if (!startedAtIso || result) return;
     const t = setTimeout(() => {
-      void saveCbtDraft(paperId, startedAtIso, { answers, strokes: singleStrokes });
+      void saveCbtDraft(paperId, startedAtIso, {
+        answers,
+        strokes: singleStrokes,
+        pageStrokes,
+      });
     }, 400);
     return () => clearTimeout(t);
-  }, [paperId, startedAtIso, result, answers, singleStrokes]);
+  }, [paperId, startedAtIso, result, answers, singleStrokes, pageStrokes]);
 
   // 세트문제 묶기(core) — 이전/다음은 세트 단위.
   const questionGroups = useMemo(
@@ -195,22 +204,27 @@ export function useCbtState({
     });
   }, []);
 
-  // 필기: 현재 문항의 획 추가 / 현재 문항만 비우기(웹 clearCurrent).
+  // 필기: 현재 문항/페이지의 획 추가.
   const appendStroke = useCallback((questionIndex: number, stroke: InkStroke) => {
     setSingleStrokes((prev) => ({ ...prev, [questionIndex]: [...(prev[questionIndex] ?? []), stroke] }));
   }, []);
 
+  const appendPageStroke = useCallback((page: number, stroke: InkStroke) => {
+    setPageStrokes((prev) => ({ ...prev, [page]: [...(prev[page] ?? []), stroke] }));
+  }, []);
+
+  // "전체 지우기"(웹 clearCurrent)는 **현재 모드의 현재 항목만** — 문제별 보기는 현재 문항,
+  // 전체보기는 현재 PDF 페이지. 다른 페이지에 그려둔 필기는 그대로 남는다.
   const clearDrawing = useCallback(() => {
-    if (viewMode === "single") {
-      setSingleStrokes((prev) => {
-        if (!prev[currentQuestionIndex]) return prev;
-        const next = { ...prev };
-        delete next[currentQuestionIndex];
-        return next;
-      });
-    }
-    // 전체보기 필기는 Phase 2(분할 패널·PdfPenViewer 와 함께).
-  }, [viewMode, currentQuestionIndex]);
+    const drop = (key: number) => (prev: Record<number, InkStroke[]>) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    };
+    if (viewMode === "single") setSingleStrokes(drop(currentQuestionIndex));
+    else setPageStrokes(drop(fullPage));
+  }, [viewMode, currentQuestionIndex, fullPage]);
 
   // 전체보기(PDF)와 문제별 보기는 서로 다른 캔버스(좌표계)에 필기를 남기므로 오갈 때 경고 후
   // 해당 모드의 스트로크를 지운다(웹 switchViewMode, 문구 동일).
@@ -220,7 +234,13 @@ export function useCbtState({
       if (viewMode === "full" && mode === "single") {
         Alert.alert("문제별 보기로 바꾸면 전체보기에 그린 필기 내용이 모두 지워져요. 계속할까요?", undefined, [
           { text: "취소", style: "cancel" },
-          { text: "계속", onPress: () => setViewMode("single") },
+          {
+            text: "계속",
+            onPress: () => {
+              setPageStrokes({});
+              setViewMode("single");
+            },
+          },
         ]);
         return;
       }
@@ -231,8 +251,7 @@ export function useCbtState({
             text: "계속",
             onPress: () => {
               setSingleStrokes({});
-              // Phase 1a 전체보기는 보기 전용(펜 없음)이라 도구를 이동으로 되돌린다.
-              setTool("move");
+              // 전체보기에도 펜이 있으므로(Phase 2) 고른 도구는 그대로 둔다(웹과 같다).
               setViewMode("full");
             },
           },
@@ -294,6 +313,7 @@ export function useCbtState({
   const handleRetry = useCallback(() => {
     setAnswers(Array(totalQuestions).fill(null));
     setSingleStrokes({});
+    setPageStrokes({});
     setResult(null);
     setError(null);
     void clearCbtDrafts(paperId);
@@ -323,6 +343,8 @@ export function useCbtState({
     prevQuestionIndex,
     nextQuestionIndex,
     singleStrokes,
+    pageStrokes,
+    fullPage,
     timer,
     // 핸들러
     setTool,
@@ -331,8 +353,10 @@ export function useCbtState({
     setSavedDefaultViewMode,
     setOmrOpen,
     setCurrentQuestionIndex,
+    setFullPage,
     selectChoice,
     appendStroke,
+    appendPageStroke,
     clearDrawing,
     switchViewMode,
     handleSubmit,

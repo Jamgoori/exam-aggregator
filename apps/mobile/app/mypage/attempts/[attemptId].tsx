@@ -24,15 +24,17 @@ import { Skeleton } from "../../../src/components/skeleton";
 import { WrongNoteLegend, WrongNoteQuestionCard } from "../../../src/components/wrong-notes/wrong-note-question-card";
 import { paperCbtHref, paperHref } from "../../../src/lib/paper-href";
 import { useAttemptDetail, useOwnWrongAnswers } from "../../../src/queries/attempts";
+import { useWrongNoteExplanations } from "../../../src/queries/explanations";
 import { useAuth } from "../../../src/providers/auth-provider";
 
 // `/mypage/attempts/[attemptId]`(설계서 §5 행, 웹 app/mypage/attempts/[attemptId]/page.tsx 1:1) —
 // 내 시험 기록에서 회차 하나를 눌렀을 때 "그 회차에서 틀린 문제만" 모아보는 화면. 본인 응시만
 // (RLS). 정답은 RPC own_wrong_answers(메모리 전용). 웹처럼 틀린 문항만 그린다.
 //
-// 해설: 웹은 service_role 로 해설 본문(프리미엄)·유무(무료 잠금 자리)를 받지만, 앱용
-// `explanations-get context:"wrong-note"` 모드(설계서 §6.7 #7, Phase 2)는 아직 Edge 에 없다
-// (supabase/functions/explanations-get 에 context 분기 없음) — 그때까지는 해설 자리에 안내 한 줄만.
+// 해설: EF `explanations-get context:"wrong-note"`(설계서 §6.7 #7·§6.2 "해설(오답노트·응시 상세·
+// mix 기록 안)" 행). 웹이 service_role 로 하던 것과 같은 규칙 — 프리미엄이면 본문, 무료 회원에게는
+// 해설이 등록된 문항 번호만 와서 잠금 자리를 그린다. 쿼터는 차감되지 않는다(로그를 쓰지 않는 모드).
+// 본문·정답 모두 메모리 전용 캐시다(§6.5).
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 }
@@ -76,6 +78,9 @@ function AttemptBody({ detail, attemptId }: { detail: AttemptDetail; attemptId: 
     [paper, wrong],
   );
   const answers = useOwnWrongAnswers(items);
+  // 해설(프리미엄 본문 / 무료 잠금 자리). 서버가 "본인이 답한 문항"으로 한 번 더 좁힌다.
+  const wrongNumbers = useMemo(() => wrong.map((q) => q.questionNumber), [wrong]);
+  const { data: explanations } = useWrongNoteExplanations(paper?.id ?? null, wrongNumbers);
 
   const groups = useMemo(
     () =>
@@ -86,9 +91,11 @@ function AttemptBody({ detail, attemptId }: { detail: AttemptDetail; attemptId: 
           correctChoice: paper ? (answers.data?.[wrongAnswerKey(paper.id, q.questionNumber)] ?? null) : null,
           choiceCount: q.choiceCount,
           images: q.images,
+          explanation: explanations.byNumber.get(q.questionNumber) ?? null,
+          explanationLocked: explanations.locked.has(q.questionNumber),
         })),
       ),
-    [wrong, paper, answers.data],
+    [wrong, paper, answers.data, explanations],
   );
 
   const next = `/mypage/attempts/${attemptId}`;
@@ -177,15 +184,16 @@ function AttemptBody({ detail, attemptId }: { detail: AttemptDetail; attemptId: 
             <WrongNoteLegend />
           </View>
 
-          <View className="rounded-lg bg-zinc-50 px-3 py-2 dark:bg-zinc-800/50">
-            <AppText variant="xs" className="text-zinc-500 dark:text-zinc-500" pretty>
-              문항 해설은 다음 단계에서 열려요. 문제지 해설 페이지에서는 지금도 볼 수 있어요.
-            </AppText>
-          </View>
-
           <View className="gap-4">
             {groups.map((group) => (
-              <WrongNoteQuestionCard key={group.rows[0].questionNumber} rows={group.rows} images={group.images} explanationLockNext={next} />
+              <WrongNoteQuestionCard
+                key={group.rows[0].questionNumber}
+                rows={group.rows}
+                images={group.images}
+                explanationLockNext={next}
+                paperId={paper?.id}
+                reportContext="explanation"
+              />
             ))}
           </View>
           {!isPremium && (

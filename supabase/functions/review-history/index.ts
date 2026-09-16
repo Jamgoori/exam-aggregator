@@ -15,13 +15,19 @@
 //     → 아직 채점 전인 세션도 돌려준다(답·정답·출처 없이 images/choiceCount/position 만,
 //       score null, submitted false) — 앱이 다른 기기에서 만든 세션을 이어 풀 때 쓴다(§6.7 #10).
 //       옵션 없이 채점 전 세션을 물으면 예전대로 400.
-//
-// { sessionId, view: "mix-note" }(기출 섞어풀기 기록 페이지)는 Phase 2 — 아직 없다.
+//   { sessionId, view: "mix-note" }
+//     → 위 상세 응답 + `mixNote`(기출 섞어풀기 한 세션의 오답노트 — 웹
+//       /mypage/wrong-notes/[slug]/mix/[sessionId] 와 같은 값, 규칙 getMixSessionWrongNote).
+//       추가 필드라 옛 앱은 그대로 상세만 읽으면 된다. 채점 전 세션이면 예전대로 400,
+//       남의 세션이거나 섞어풀기(scope='mix')가 아니면 404.
 import { corsHeaders, isUuid, json } from "../_shared/http.ts";
 import { coreAdmin, requireUser } from "../_shared/clients.ts";
 // @ts-types="../_shared/core.d.ts"
 import {
+  buildMixPool,
+  getMixSessionWrongNote,
   getReviewSessionView,
+  isPremiumUserFor,
   listSubmittedReviewSessions,
   toReviewResultItems,
 } from "../_shared/core.mjs";
@@ -75,7 +81,7 @@ Deno.serve(async (req) => {
     return json({ error: "아직 채점하지 않은 세션이에요." }, 400);
   }
 
-  return json({
+  const detail = {
     score: view.submitted ? (view.score ?? 0) : null,
     total: view.total,
     items: toReviewResultItems(view),
@@ -85,5 +91,28 @@ Deno.serve(async (req) => {
     subjectName: view.subjectName,
     submitted: view.submitted,
     createdAt: view.createdAt,
-  });
+  };
+
+  // ── mix 기록 뷰 ───────────────────────────────────────────────────────────
+  // 해설 본문을 실을지는 오답노트와 같은 기준(멤버십)이다 — 웹 mix 기록 페이지도
+  // isPremium 을 그대로 includeExplanations 로 넘긴다. 쿼터·로그는 건드리지 않는다
+  // (오답노트 안의 해설이라 explanations-get 의 wrong-note 모드와 같은 규칙).
+  // getMixPool 은 웹에서 'use cache' 로 감싸는 무거운 조회인데 Edge 에는 캐시 계층이
+  // 없어 매 요청 다시 만든다(규칙이 캐시를 모르게 두려는 §6.2 의 선택 — 앞으로 생길
+  // mix-create 도 같은 방식이다).
+  if (body?.view === "mix-note") {
+    const note = await getMixSessionWrongNote(
+      admin,
+      admin,
+      userId,
+      sessionId,
+      await isPremiumUserFor(admin, auth),
+      { getMixPool: (subjectId: string) => buildMixPool(admin, admin, subjectId) },
+    );
+    // 남의 세션·채점 전·섞어풀기가 아닌 세션은 전부 null(규칙 안에서 확인).
+    if (!note) return json({ error: "세션을 찾을 수 없어요." }, 404);
+    return json({ ...detail, mixNote: note });
+  }
+
+  return json(detail);
 });

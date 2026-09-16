@@ -19,6 +19,7 @@
 import type { CbtSubmitSuccess } from "../rules/cbt-attempt";
 import type { ExplanationAccess } from "../rules/explanation-access";
 import type { QuestionExplanationContent } from "../rules/explanations";
+import type { MixSessionQuestion, MixSessionWrongNote } from "../rules/mix-practice";
 import type {
   ReviewHistoryEntry,
   ReviewResultItem,
@@ -63,8 +64,19 @@ export type CbtSubmitResponse = { success: true } & Omit<CbtSubmitSuccess, "diag
 
 // ── explanations-get ─────────────────────────────────────────────────────────
 
-// 비로그인도 부를 수 있다(미리보기 ANON_PREVIEW_CARDS 문항만).
-export type ExplanationsGetRequest = { paperId: string };
+// 비로그인도 부를 수 있다(미리보기 ANON_PREVIEW_CARDS 문항만) — 단 wrong-note 모드는 로그인 필수.
+export type ExplanationsGetRequest = {
+  paperId: string;
+  // 없으면 지금까지의 **해설 페이지 모드**(시간당 한도 → 무료 일일 몫 → 미리보기).
+  // "wrong-note" 는 오답노트·응시 상세·mix 기록 **안에서** 여는 해설(§6.7 #7):
+  // 프리미엄 + 본인이 답한 문항만 본문을 내주고, explanation_access_log·
+  // explanation_daily_views 를 쓰지 않는다(= 쿼터 미차감, 웹 오답노트와 같은 동작).
+  context?: "wrong-note";
+  // wrong-note 모드에서 해설을 물을 문항 번호(1~300, 최대 WRONG_NOTE_QUESTION_LIMIT).
+  // 서버가 "본인이 답한 문항"(형제 문제지 매핑 포함, RPC own_wrong_answers 와 같은 판정)으로
+  // 한 번 더 좁힌다. 페이지 모드에서는 무시된다.
+  questionNumbers?: number[];
+};
 export type ExplanationQuestion = {
   questionNumber: number;
   correctChoice: number | null;
@@ -82,8 +94,15 @@ export type ExplanationsGetResponse = {
   // null | "rate-limit" | "free-quota" — "잠시 후 다시"와 결제 유도를 가른다.
   lockReason: ExplanationAccess["reason"];
   // 무료 회원의 오늘 남은 무료 해설 문제지 수(이번 요청 반영). 유료·관리자·비로그인은 null.
-  // §6.7 #7 추가 필드.
+  // §6.7 #7 추가 필드. wrong-note 모드에서는 쿼터를 보지 않으므로 언제나 null.
   remainingToday: number | null;
+  // ── 아래 둘은 context:"wrong-note" 모드에서만 실린다(추가 필드, 페이지 모드는 undefined) ──
+  // true 면 "해설은 있지만 멤버십이 아니라 본문을 안 보냈다" — 앱은 잠금 자리를 그린다.
+  // 페이지 모드의 lockReason("rate-limit"/"free-quota")과 섞지 말 것: 이 모드는 시간당
+  // 한도도 무료 일일 몫도 판정하지 않으므로 lockReason 은 언제나 null 이다.
+  explanationLocked?: boolean;
+  // 잠긴 문항 번호(해설이 등록돼 있고 본인이 답한 문항). 프리미엄이면 빈 배열.
+  lockedQuestionNumbers?: number[];
 };
 
 // ── membership-get ───────────────────────────────────────────────────────────
@@ -160,16 +179,35 @@ export type ReviewHistoryDetailRequest = {
   sessionId: string;
   // true 면 채점 전 세션도 돌려준다(답·정답·출처 없이). 없이 채점 전 세션을 물으면 400.
   includeUnsubmitted?: boolean;
+  // "mix-note": 기출 섞어풀기 한 세션의 오답노트 화면(웹 /mypage/wrong-notes/[slug]/mix/
+  // [sessionId], §6.7 #10). 응답에 `mixNote` 가 **추가로** 실린다 — 기존 상세 필드
+  // (score·total·items…)는 그대로 있으므로 옛 앱·다른 화면은 그대로 컴파일·동작한다.
+  // 채점 전 세션이나 scope 이 "mix" 가 아닌 세션이면 404.
+  view?: "mix-note";
 };
 export type ReviewHistoryRequest = ReviewHistoryListRequest | ReviewHistoryDetailRequest;
 
 // 목록 항목 — 규칙의 ReviewHistoryEntry 와 같은 키(subjectSlug·createdAt 은 추가 필드).
 export type ReviewHistoryListEntry = ReviewHistoryEntry;
 export type ReviewHistoryListResponse = { sessions: ReviewHistoryListEntry[] };
+
+// mix 기록 뷰(§6.7 #10, view:"mix-note"). 규칙 getMixSessionWrongNote 의 반환을 그대로 싣는다
+// — 웹 /mypage/wrong-notes/[slug]/mix/[sessionId] 페이지가 받는 값과 같은 모양이라 앱 화면이
+// 웹과 같은 것을 그린다(문항별 출처 문제지 제목·급수·시행처, 정오, 메모·다시보기 표시,
+// 통합 상태 기준 wrongCount·resolved). 해설 본문은 프리미엄일 때만 채워지고, 그 외에는
+// explanationLocked=true 로 잠금 자리를 그린다(오답노트와 같은 규칙).
+//
+// **앱은 이 값을 디스크에 남기지 않는다**(correctChoice·해설 본문 — §6.5, apps/mobile/AGENTS.md
+// "정답·해설·멤버십을 디스크에 남기지 말 것"): 쿼리 meta.persist:false 대상.
+export type ReviewHistoryMixNoteQuestion = MixSessionQuestion;
+export type ReviewHistoryMixNote = MixSessionWrongNote;
+
 // 세션 상세 — review-submit 응답과 같은 모양 + submitted. 채점 전이면 score null.
 export type ReviewHistoryDetailResponse = Omit<ReviewSubmitResponse, "score"> & {
   score: number | null;
   submitted: boolean;
+  // view:"mix-note" 로 물었을 때만 실린다(추가 필드).
+  mixNote?: ReviewHistoryMixNote;
 };
 export type ReviewHistoryResponse = ReviewHistoryListResponse | ReviewHistoryDetailResponse;
 

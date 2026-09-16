@@ -1,16 +1,18 @@
-import type { QuestionExplanationContent } from "@gongmoa/core";
+import type { QuestionExplanationContent, QuestionReportContext } from "@gongmoa/core";
 import { useState } from "react";
 import { View } from "react-native";
 import { AppText } from "../app-text";
 import { ExplanationDisclosure } from "../explanations/explanation-disclosure";
 import { ExplanationLock } from "../explanations/explanation-lock";
 import { ImageZoomModal } from "../image-zoom-modal";
+import { ReportQuestionButton } from "../papers/report-question-button";
 import { QuestionImage } from "../question-image";
 
 // 오답노트 화면(회차별/과목별)이 공유하는 문제 카드(웹 wrong-note-question-card.tsx, 설계서 §4.5
 // #24). 훅 없는 순수 표시 컴포넌트 — 응시 상세(Phase 1a)·과목 오답노트(Phase 2)·mix 기록이 그대로
-// 쓴다. 세트 묶기는 core groupRowsBySharedImages(호출부). 문항 신고 버튼(ReportQuestionButton,
-// 웹 paperId prop)은 CBT 스트림 #22 에서 붙는다 — 여기서는 받지 않는다.
+// 쓴다. 세트 묶기는 core groupRowsBySharedImages(호출부). 문항 신고 버튼은 웹과 같이 `paperId`
+// 를 준 화면에서만 뜬다(웹 wrong-note-question-card.tsx reportButton()) — 단일 문항 카드는 번호
+// 헤더 우측, 세트문제는 답 줄마다.
 
 // 카드 하나에 들어가는 답 줄. 세트문제(공통지문)는 이미지 한 벌에 답 줄이 여러 개 붙는다.
 export type WrongNoteCardRow = {
@@ -117,6 +119,9 @@ export function WrongNoteQuestionCard({
   renderRowActions,
   // 해설 잠금 카드의 "멤버십 보러 가기"가 돌아올 곳(현재 화면 주소).
   explanationLockNext,
+  // 문항 오류 신고 버튼을 붙일 문제지 id. 이 값을 주는 화면에서만 신고 버튼이 뜬다(웹과 동일).
+  paperId,
+  reportContext = "explanation",
 }: {
   rows: WrongNoteCardRow[];
   images: string[];
@@ -124,12 +129,24 @@ export function WrongNoteQuestionCard({
   showSelection?: boolean;
   renderRowActions?: (questionNumber: number) => React.ReactNode;
   explanationLockNext?: string;
+  paperId?: string;
+  reportContext?: QuestionReportContext;
 }) {
   const [zoom, setZoom] = useState<{ uri: string; label: string } | null>(null);
   const firstNumber = rows[0]?.questionNumber;
   const lastNumber = rows[rows.length - 1]?.questionNumber;
   const numberLabel = firstNumber === lastNumber ? `${firstNumber}번` : `${firstNumber}~${lastNumber}번`;
-  const headerActions = rows.length === 1 && renderRowActions ? renderRowActions(rows[0].questionNumber) : null;
+
+  const reportButton = (questionNumber: number) =>
+    paperId ? <ReportQuestionButton paperId={paperId} questionNumber={questionNumber} context={reportContext} /> : null;
+
+  const headerActions =
+    rows.length === 1 && (renderRowActions || paperId) ? (
+      <View className="shrink-0 flex-row items-center gap-1">
+        {renderRowActions?.(rows[0].questionNumber)}
+        {reportButton(rows[0].questionNumber)}
+      </View>
+    ) : null;
 
   return (
     <View className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
@@ -160,7 +177,14 @@ export function WrongNoteQuestionCard({
             row={row}
             showNumberBadge={rows.length > 1}
             showSelection={showSelection}
-            actions={rows.length > 1 && renderRowActions ? renderRowActions(row.questionNumber) : undefined}
+            actions={
+              rows.length > 1 && (renderRowActions || paperId) ? (
+                <>
+                  {renderRowActions?.(row.questionNumber)}
+                  {reportButton(row.questionNumber)}
+                </>
+              ) : undefined
+            }
           />
         ))}
       </View>

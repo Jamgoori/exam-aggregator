@@ -141,7 +141,18 @@ function ExplanationsBody({ paper, data }: { paper: ExamPaper; data: Explanation
 
       <View className="gap-4">
         {groups.map((group) => (
-          <ExplanationCard key={group.rows[0].questionNumber} rows={group.rows} images={group.images} explanationsOpen showSelection={false} />
+          <ExplanationCard
+            key={group.rows[0].questionNumber}
+            rows={group.rows}
+            images={group.images}
+            explanationsOpen
+            showSelection={false}
+            // 문항 오류 신고는 웹과 같은 게이트 — 전체 열람 권한이 있을 때만 붙인다
+            // (explanations/page.tsx `paperId={hasFullAccess ? paper.id : undefined}`).
+            // 미리보기 2카드만 보는 비로그인·한도 초과 상태에서는 판단할 근거가 없다.
+            paperId={hasFullAccess ? paper.id : undefined}
+            reportContext="explanation"
+          />
         ))}
       </View>
 

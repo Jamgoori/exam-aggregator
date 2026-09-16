@@ -9,17 +9,18 @@ import { Alert, BackHandler } from "react-native";
 export const LEAVE_CONFIRM_MESSAGE =
   "지금 나가면 저장되지 않고 풀이 중인 내용이 모두 사라져요. 그래도 나갈까요?";
 
-export function useExitGuard(active: boolean, leave: () => void) {
+// message: 화면마다 다른 확인 문구(복습 솔버는 웹과 같은 "이어서 풀 수 있어요" 판).
+export function useExitGuard(active: boolean, leave: () => void, message: string = LEAVE_CONFIRM_MESSAGE) {
   const confirmLeave = useCallback(() => {
     if (!active) {
       leave();
       return;
     }
-    Alert.alert(LEAVE_CONFIRM_MESSAGE, undefined, [
+    Alert.alert(message, undefined, [
       { text: "취소", style: "cancel" },
       { text: "나가기", style: "destructive", onPress: leave },
     ]);
-  }, [active, leave]);
+  }, [active, leave, message]);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {

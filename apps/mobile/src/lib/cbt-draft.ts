@@ -12,8 +12,11 @@ import { supabase } from "./supabase";
 // 어떤 키로도 디스크에 두지 않는다(AGENTS.md 금지선).
 export type CbtDraft = {
   answers: (number | null)[];
-  // 문제별 보기 스트로크(문제 인덱스 → 획). 전체보기 필기는 Phase 2(분할 패널·펜과 함께).
+  // 문제별 보기 스트로크(문항 인덱스 → 획, 문항 상자 폭 기준 정규화).
   strokes: Record<number, InkStroke[]>;
+  // 전체보기 스트로크(PDF 페이지 번호 → 획, 페이지 상자 기준 0~1 정규화).
+  // **옵셔널이다** — 이 필드가 없던 빌드가 쓴 드래프트도 그대로 복원돼야 한다(추가만 하는 계약).
+  pageStrokes?: Record<number, InkStroke[]>;
   savedAt: string;
 };
 
@@ -27,6 +30,17 @@ export function normalizeStartedAt(startedAt: string): string {
 
 function draftKey(paperId: string, startedAt: string): KvKey {
   return `cbt-draft:${paperId}:${normalizeStartedAt(startedAt)}`;
+}
+
+// 저장돼 있던 필기 맵을 그대로 믿지 않는다 — 없거나(옛 빌드) 배열이 아닌 값은 버린다.
+function strokeMap(value: unknown): Record<number, InkStroke[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<number, InkStroke[]> = {};
+  for (const [key, strokes] of Object.entries(value as Record<string, unknown>)) {
+    const index = Number(key);
+    if (Number.isFinite(index) && Array.isArray(strokes)) out[index] = strokes as InkStroke[];
+  }
+  return out;
 }
 
 // 서버가 기록해 둔 시작 시각(있으면). RLS 가 본인 행만 보여주므로 user_id 조건은 서버가 건다.
@@ -54,7 +68,15 @@ export async function loadCbtDraft(
   const startedAt = normalizeStartedAt(serverStartedAt);
   const draft = await kvGetJson<CbtDraft>(draftKey(paperId, startedAt));
   if (!draft || !Array.isArray(draft.answers)) return null;
-  return { startedAt, draft: { ...draft, strokes: draft.strokes ?? {} } };
+  // 옛 드래프트(pageStrokes 없음)·손상된 값이 와도 복원이 깨지지 않게 두 필기 맵을 정규화한다.
+  return {
+    startedAt,
+    draft: {
+      ...draft,
+      strokes: strokeMap(draft.strokes),
+      pageStrokes: strokeMap(draft.pageStrokes),
+    },
+  };
 }
 
 export async function saveCbtDraft(

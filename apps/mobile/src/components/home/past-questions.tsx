@@ -1,4 +1,4 @@
-import type { ExamCombo, Subject } from "@gongmoa/core";
+import type { Subject } from "@gongmoa/core";
 import { router, type Href } from "expo-router";
 import { ArrowRight, ChevronRight } from "lucide-react-native";
 import { Pressable, View } from "react-native";
@@ -6,6 +6,7 @@ import { HomeSearchBox } from "./home-search-box";
 import { ExamComboCardsSkeleton } from "./home-skeletons";
 import { AppText } from "../app-text";
 import { QueryState } from "../query-state";
+import { examHref } from "../../lib/exam-index";
 import { useHomeLanding } from "../../queries/home";
 import { palette } from "../../theme";
 import { themedIcon } from "../../theme/icons";
@@ -17,9 +18,9 @@ import { themedIcon } from "../../theme/icons";
 // 색인(core buildExamIndex)에서 채우고, 색인에 없는 시험은 카드를 그리지 않는다.
 // 배지 색: 경찰은 제복의 청색, 소방은 적색. 나머지는 홈 팔레트(웹 FEATURED_EXAMS 그대로).
 //
-// 카드의 목적지: 웹은 시험 허브(/exams/[exam])인데 앱은 Phase 2 라 아직 없다 — 같은 시험만
-// 남긴 기출문제 목록(/papers?type=시행처&level=급수)으로 보낸다(PapersBrowser 가 두 필터를
-// 함께 적용한다). /exams 가 붙으면 examHref 로 바꾼다.
+// 카드의 목적지: 웹과 같은 시험 허브(/exams/[exam]) — Phase 2 에서 라우트가 생겨 examHref 로
+// 이었다. 연도 줄·연도별 전체 목록이 그쪽에 있어, 같은 필터의 /papers 로 보내던 때보다 한 번에
+// 닿는 곳이 넓다.
 const FEATURED_EXAMS: { slug: string; badge: string; color: string }[] = [
   { slug: "지방직-9급", badge: "9급", color: palette.brand },
   { slug: "국가직-9급", badge: "9급", color: palette.navy },
@@ -34,12 +35,6 @@ const ArrowIcon = themedIcon(ArrowRight);
 // 카탈로그 도착 전 검색창에 넘길 빈 목록(렌더마다 새 배열을 만들면 추천 useMemo 가 헛돈다).
 const EMPTY_SUBJECTS: Subject[] = [];
 const EMPTY_NAMES: string[] = [];
-
-function comboPapersHref(c: ExamCombo): Href {
-  const params: Record<string, string> = { type: c.examTypeName };
-  if (c.level) params.level = c.level;
-  return { pathname: "/papers", params } as Href;
-}
 
 export function PastQuestions() {
   const { query, data } = useHomeLanding();
@@ -86,7 +81,7 @@ export function PastQuestions() {
                   key={slug}
                   accessibilityRole="link"
                   accessibilityLabel={`${c.label} 기출문제 ${c.count.toLocaleString("ko-KR")}개`}
-                  onPress={() => router.push(comboPapersHref(c))}
+                  onPress={() => router.push(examHref(c.slug) as Href)}
                   className="flex-row items-center gap-4 rounded-xl border border-zinc-200 bg-white p-4 active:shadow-md dark:border-zinc-800 dark:bg-zinc-950"
                 >
                   <View

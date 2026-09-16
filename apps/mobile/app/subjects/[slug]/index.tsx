@@ -2,7 +2,7 @@ import type { ExamPaper, Subject } from "@gongmoa/core";
 import { router, useLocalSearchParams, type Href } from "expo-router";
 import { ChevronRight, Shuffle } from "lucide-react-native";
 import { useMemo } from "react";
-import { Alert, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import NotFoundScreen from "../../+not-found";
 import { AppText } from "../../../src/components/app-text";
 import { InlineAlert } from "../../../src/components/feedback";
@@ -13,6 +13,7 @@ import { SubjectBookmarkButton } from "../../../src/components/papers/subject-bo
 import { QueryState } from "../../../src/components/query-state";
 import { Screen } from "../../../src/components/screen";
 import { Skeleton } from "../../../src/components/skeleton";
+import { openSubjectMix } from "../../../src/lib/mix-href";
 import { useSetScreenParams } from "../../../src/lib/screen-params";
 import { useMyBookmarkedPaperIds } from "../../../src/queries/bookmarks";
 import { useCbtAvailability, useMyRoundCounts } from "../../../src/queries/papers";
@@ -22,7 +23,7 @@ import { themedIcon } from "../../../src/theme/icons";
 // `/subjects/[slug]?level&examTypes&page`(설계서 §5 행) — 웹 app/subjects/[slug]/page.tsx 1:1:
 // 크럼 → 제목 + 과목 즐겨찾기 → N건 → 섞어풀기 입구(필터 없을 때만) → 급수 탭 → 직렬 탭 →
 // 카드 목록(24/페이지, 중복 통합 후 메모리 페이지네이션) → Pagination. 기출 섞어풀기
-// (/subjects/[slug]/mix)는 Phase 2 라 지금은 Alert 로 안내한다.
+// (/subjects/[slug]/mix)는 Phase 3(§12 "믹스") 라 지금은 openSubjectMix(lib/mix-href.ts)가 안내한다.
 const PAGE_SIZE = 24;
 const ChevronIcon = themedIcon(ChevronRight);
 
@@ -118,7 +119,7 @@ function SubjectScreen({ subject, params }: { subject: Subject; params: Params }
       {deduped.length > 0 && noFilter && (
         <Pressable
           accessibilityRole="link"
-          onPress={() => Alert.alert("섞어풀기는 다음 단계에서 열려요")}
+          onPress={() => openSubjectMix(subject.slug)}
           className="flex-row items-center gap-3 rounded-2xl border border-blue-200 bg-blue-50/70 px-4 py-3.5 active:border-blue-300 active:bg-blue-100/70 dark:border-blue-900/50 dark:bg-blue-950/25 dark:active:bg-blue-950/40"
         >
           <View className="h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600">

@@ -30,7 +30,7 @@
 | 6 | 복습 제출 scope `mix` / `review` | `user_question_status.source` 가 각각 `mix`/`review` |
 | 7 | dedup 형제 문제지 상태 대상 | 문항 수가 **다른** 형제 포함 — `resolveStatusTargets` 결과 동일 |
 | 8 | 해설 접근 순서 | 시간당 40 → 프리미엄 → 일일 3 판정 순서 |
-| 9 | 해설 `context:"wrong-note"` | 쿼터·`explanation_access_log` 미차감, 형제 `paper_id` 매핑 |
+| 9 | 해설 `context:"wrong-note"` | 쿼터·`explanation_access_log`·`explanation_daily_views` 미차감, 형제 `paper_id` 매핑(대표 id 로 물어도 형제에 있는 상태 행을 찾는다), 안 푼 문항 미노출, 비프리미엄은 본문 0건 + `lockedQuestionNumbers` |
 | 10 | 체험 1회 | `start_trial_if_eligible` 두 번 → `memberships` 변화 1회, `trial_consumptions` 원장 |
 | 11 | 출석 임계·마일스톤 | 10문항·2초 임계, `attendance_grants` 멱등 |
 | 12 | 닉네임 트리거 | `auth.users` 메타 변경 → `profiles` 동기화·거절 |
@@ -41,8 +41,27 @@
 케이스 이름은 이 표의 번호·제목을 그대로 쓴다(스냅샷 파일명도).
 
 지금 `contract-tests.mjs` 에 들어 있는 것: #1 · #2 · #4 · #5+#6(`review` source 만) · #8(비로그인
-미리보기만) · #10 · #13+#15. 나머지(#3 재제출, #6 `mix`, #7 문항 수 다른 형제, #8 한도 순서, #9,
+미리보기만) · #9 · #10 · #13+#15. 나머지(#3 재제출, #6 `mix`, #7 문항 수 다른 형제, #8 한도 순서,
 #11 마일스톤, #12 닉네임 트리거, #14)는 아직 없다 — 추가할 때 이 줄을 갱신한다.
+
+**#9 의 제약**: `explanations-get` 은 `testOverrides`(테스트 시각 주입)를 읽지 않으므로 전면 무료
+기간(`FREE_UNTIL`) 동안에는 Edge 의 멤버십 판정이 언제나 프리미엄이다 — 케이스는 `membership-get`
+으로 Edge 의 판정을 먼저 읽어 **같은 `premium` 값**을 규칙에 넣어 비교하고, 잠금 분기(본문 0건 +
+`lockedQuestionNumbers`)는 규칙에 `premium:false` 를 직접 넣어 따로 고정한다. 이 함수에 시각 훅을
+새로 열지 말 것 — 해설 쿼터·시간당 한도가 클라이언트 조작 대상이 된다.
+
+앞으로 추가할 때 값어치가 큰 케이스(아직 없음):
+- **#9-b 페이지 모드 회귀**: 같은 문제지를 `context` 없이 부르면 예전대로 `explanation_access_log`
+  1행 + `explanation_daily_views` 1행이 남는다(= wrong-note 모드가 페이지 모드의 계량을 건드리지
+  않았다). 지금은 "wrong-note 는 0행"만 단언한다.
+- **#16 `review-history { sessionId, view:"mix-note" }`**(§6.7 #10): 기출 섞어풀기 세션을 만들고
+  채점한 뒤, 웹 `getMixSessionWrongNote` 와 Edge 응답의 `mixNote` 가 같은지(문항 순서·출처 문제지
+  제목·`wrongCount`/`resolved`·`explanationLocked`). 응답 JSON 비교라 스냅샷 표에는 행이 늘지
+  않지만, `mix` 픽스처(과목 풀 = 문제지 2장)가 필요하다.
+- **#17 `submit_question_report` RPC**(§6.7 #6): 같은 문항 두 번 → 두 번째는
+  "이미 신고한 문항이에요"; `p_context='cbt'` + `p_reason='wrong_answer'` → 거절; 21번째 신고 →
+  시간당 한도. 웹 서버 액션(`submitQuestionReport`)과 RPC 가 같은 행을 남기는지 비교한다
+  (`question_reports` 는 스냅샷 표에 없으므로 추가할 것).
 
 ## 결정성 — `now` 와 `fuzz` 를 주입한다
 

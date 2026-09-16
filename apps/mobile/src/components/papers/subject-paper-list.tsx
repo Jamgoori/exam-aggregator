@@ -1,11 +1,11 @@
 import { levelColor } from "@gongmoa/core";
 import { router, type Href } from "expo-router";
 import { Check, ChevronRight, RotateCcw, Shuffle } from "lucide-react-native";
-import { useState } from "react";
-import { Alert, Pressable, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useCallback, useMemo, useState } from "react";
+import { Pressable, View } from "react-native";
 import { AppText } from "../app-text";
 import { Button } from "../button";
+import { useCreateReviewSession } from "../../queries/wrong-notes";
 import { themedIcon } from "../../theme/icons";
 
 export type SubjectPaperItem = {
@@ -23,42 +23,89 @@ export type SubjectPaperItem = {
 // 과목 오답노트 "문제지별" 탭(웹 subject-paper-list.tsx, 설계서 §4.5 #25): 카드마다 "틀린 문제
 // 다시 풀기", 체크로 여러 시험지를 골라 하단 고정 선택 바에서 합쳐 풀기. 하단 바는
 // `bottom-4 z-30` 안의 `max-w-md rounded-2xl border p-2 shadow-lg` 카드 + safe-area.
-// 복습 세션 생성(review-create UI)은 Phase 2 — 지금은 Alert 로 안내하고 바 마크업만 유지한다.
+// 세션 생성은 EF review-create 의 paperIds 분기(웹 createReviewFromPapers)로, 성공하면
+// `…/review/[sessionId]` 로 간다.
+//
+// 선택 상태는 화면(app/mypage/wrong-notes/[slug]/index.tsx)이 `useSubjectPaperSelection` 으로
+// 들고 있고, 하단 바는 `Screen` 의 overlay 슬롯에서 그린다 — 본문 안에 두면 absolute 가
+// ScrollView 콘텐츠를 기준으로 잡혀 긴 목록에서 화면 밖으로 밀린다(screen.tsx ScreenOverlay).
 const ChevronIcon = themedIcon(ChevronRight);
-const PHASE2_MESSAGE = "섞어풀기는 다음 단계에서 열려요";
 
-export function SubjectPaperList({
-  subjectSlug,
-  papers,
-  // 같은 탭에 섞어풀기 기록 섹션이 함께 실릴 때만 "시험지별" 소제목을 붙인다.
-  heading,
-}: {
-  subjectSlug: string;
-  papers: SubjectPaperItem[];
-  heading?: string;
-}) {
-  const insets = useSafeAreaInsets();
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+export type SubjectPaperSelection = {
+  selected: ReadonlySet<string>;
+  toggle: (paperId: string) => void;
+  clear: () => void;
+  // marker 는 어느 버튼이 시작했는지(개별 시험지 id 또는 "multi") — 스피너 위치용.
+  launch: (paperIds: string[], marker: string) => void;
+  pending: boolean;
+  activePaper: string | null;
+  error: string | null;
+};
 
-  function toggle(paperId: string) {
+export function useSubjectPaperSelection(subjectSlug: string): SubjectPaperSelection {
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [error, setError] = useState<string | null>(null);
+  // 여러 시험지 중 어느 것을 눌러 시작했는지 표시(개별 버튼 스피너용). "multi" 는 합쳐 풀기.
+  const [activePaper, setActivePaper] = useState<string | null>(null);
+  const launchSession = useCreateReviewSession();
+  const pending = launchSession.isPending;
+
+  const toggle = useCallback((paperId: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(paperId)) next.delete(paperId);
       else next.add(paperId);
       return next;
     });
-  }
+  }, []);
 
-  // review-create 이식 전까지의 자리. paperIds 는 Phase 2 에서 createReviewFromPapers 로 간다.
-  function launch(_paperIds: string[]) {
-    Alert.alert(PHASE2_MESSAGE);
-  }
+  const clear = useCallback(() => setSelected(new Set()), []);
+
+  const launch = useCallback((paperIds: string[], marker: string) => {
+    if (pending) return;
+    setError(null);
+    setActivePaper(marker);
+    launchSession.mutate(
+      { paperIds },
+      {
+        onSuccess: (sessionId) => router.push(`/mypage/wrong-notes/${subjectSlug}/review/${sessionId}` as Href),
+        onError: (e) => {
+          setActivePaper(null);
+          setError(e instanceof Error ? e.message : "다시 풀기를 시작하지 못했어요.");
+        },
+      },
+    );
+    // launchSession.mutate 는 안정 참조.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, subjectSlug]);
+
+  return useMemo(
+    () => ({ selected, toggle, clear, launch, pending, activePaper, error }),
+    [selected, toggle, clear, launch, pending, activePaper, error],
+  );
+}
+
+export function SubjectPaperList({
+  subjectSlug,
+  papers,
+  // 같은 탭에 섞어풀기 기록 섹션이 함께 실릴 때만 "시험지별" 소제목을 붙인다.
+  heading,
+  selection,
+}: {
+  subjectSlug: string;
+  papers: SubjectPaperItem[];
+  heading?: string;
+  selection: SubjectPaperSelection;
+}) {
+  const { selected, toggle, launch, pending, activePaper, error } = selection;
 
   // 시험지가 2장 이상일 때만 "합쳐 풀기"가 의미 있어, 체크·안내를 그때만 노출한다.
   const multiSelectable = papers.length > 1;
 
   return (
     <View className={["gap-3", selected.size > 0 ? "pb-24" : ""].join(" ")}>
+      {/* 웹과 같은 순서: 소제목이 먼저, 오류 문구는 그 아래(웹 subject-paper-list.tsx:72-82).
+          오류가 위로 올라가면 소제목이 밀려 목록의 머리말이 바뀌어 보인다. */}
       {heading && (
         <View className="flex-row items-center justify-between">
           <AppText variant="sm" weight="semibold" className="text-zinc-700 dark:text-zinc-300">
@@ -66,6 +113,13 @@ export function SubjectPaperList({
           </AppText>
           <AppText variant="xs" className="text-zinc-400 dark:text-zinc-600">
             {papers.length}장
+          </AppText>
+        </View>
+      )}
+      {error && (
+        <View className="rounded-lg bg-red-50 px-3 py-2 dark:bg-red-950/20">
+          <AppText variant="xs" className="text-center text-red-600 dark:text-red-400" pretty>
+            {error}
           </AppText>
         </View>
       )}
@@ -166,9 +220,17 @@ export function SubjectPaperList({
             </View>
 
             <Button
-              label={cleared ? "틀렸던 문제 복습하기" : "틀린 문제 다시 풀기"}
+              label={
+                pending && activePaper === p.paperId
+                  ? "준비 중..."
+                  : cleared
+                    ? "틀렸던 문제 복습하기"
+                    : "틀린 문제 다시 풀기"
+              }
               icon={<RotateCcw size={15} color="#ffffff" />}
-              onPress={() => launch([p.paperId])}
+              pending={pending && activePaper === p.paperId}
+              disabled={pending}
+              onPress={() => launch([p.paperId], p.paperId)}
               className="rounded-lg py-2.5"
             />
           </View>
@@ -180,29 +242,37 @@ export function SubjectPaperList({
           여러 시험지를 체크하면 합쳐서 한 번에 풀 수 있어요
         </AppText>
       )}
+    </View>
+  );
+}
 
-      {/* 여러 시험지 선택 → 합쳐 풀기(하단 고정 선택 바, z-30 bottom-4 + safe-area). */}
-      {selected.size > 0 && (
-        <View pointerEvents="box-none" style={{ bottom: insets.bottom + 16 }} className="absolute inset-x-0 z-30 items-center px-4">
-          <View className="w-full max-w-md flex-row items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setSelected(new Set())}
-              className="shrink-0 rounded-lg px-3 py-2 active:bg-zinc-100 dark:active:bg-zinc-800"
-            >
-              <AppText variant="sm" weight="medium" className="text-zinc-500 dark:text-zinc-400">
-                해제
-              </AppText>
-            </Pressable>
-            <Button
-              label={`선택한 ${selected.size}개 시험지 합쳐 풀기`}
-              icon={<Shuffle size={15} color="#ffffff" />}
-              onPress={() => launch([...selected])}
-              className="flex-1 rounded-lg py-2.5"
-            />
-          </View>
-        </View>
-      )}
+// 여러 시험지 선택 → 합쳐 풀기(하단 고정 선택 바). 웹과 같은 `bottom-4 z-30` 안의
+// `max-w-md rounded-2xl border p-2 shadow-lg` 카드. safe-area·탭바 여백은 Screen 의 overlay
+// 슬롯이 잡아 주므로 여기서는 웹 클래스를 그대로 쓴다.
+export function SubjectPaperSelectionBar({ selection }: { selection: SubjectPaperSelection }) {
+  const { selected, clear, launch, pending, activePaper } = selection;
+  if (selected.size === 0) return null;
+  return (
+    <View pointerEvents="box-none" className="absolute inset-x-0 bottom-4 z-30 items-center px-4">
+      <View className="w-full max-w-md flex-row items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+        <Pressable
+          accessibilityRole="button"
+          onPress={clear}
+          className="shrink-0 rounded-lg px-3 py-2 active:bg-zinc-100 dark:active:bg-zinc-800"
+        >
+          <AppText variant="sm" weight="medium" className="text-zinc-500 dark:text-zinc-400">
+            해제
+          </AppText>
+        </Pressable>
+        <Button
+          label={pending && activePaper === "multi" ? "준비 중..." : `선택한 ${selected.size}개 시험지 합쳐 풀기`}
+          icon={<Shuffle size={15} color="#ffffff" />}
+          pending={pending && activePaper === "multi"}
+          disabled={pending}
+          onPress={() => launch([...selected], "multi")}
+          className="flex-1 rounded-lg py-2.5"
+        />
+      </View>
     </View>
   );
 }

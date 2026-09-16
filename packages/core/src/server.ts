@@ -21,6 +21,7 @@ export * from "./rules/membership-server";
 export * from "./rules/attendance-record";
 export * from "./rules/explanation-access";
 export * from "./rules/explanations";
+export * from "./rules/explanations-wrong-note";
 export * from "./rules/cbt-attempt";
 export * from "./rules/status-targets";
 export * from "./rules/review-preferences";

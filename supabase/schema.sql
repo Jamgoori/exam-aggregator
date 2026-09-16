@@ -2970,3 +2970,104 @@ begin
 exception
   when duplicate_object then null;
 end $$;
+
+-- ===== 모바일 앱 재시작 Phase 2 (2026-09-16) =====
+-- 문항 오류 신고를 앱에서도 접수할 수 있게 여는 security definer RPC 하나
+-- (apps/mobile/docs/redesign-architecture.md §6.2 "문항 신고" 행, §6.7 #6).
+-- question_reports 는 insert 가 anon/authenticated 에서 회수돼 있어(위 question_reports 절 주석)
+-- 지금은 웹 서버 액션(service_role)만 쓸 수 있다 — 앱에는 그 경로가 없다. 이 함수가 그 자리를
+-- 대신하면서, 서버 액션 안에만 있던 검증(컨텍스트·사유 조합·메시지 길이·시간당 20건)을
+-- 위 Phase 0 절과 같은 "SD 공통 규칙"으로 DB 안에서 되풀이한다.
+-- **운영 DB 미적용** — 적용 순서는 §12-2 #3(운영 SQL → Edge 배포 → 앱).
+
+-- 문항 오류 신고 접수. 웹 서버 액션 submitQuestionReport(apps/web/src/app/papers/actions.ts:367)의
+-- SQL 판 — 앱은 이 RPC 하나만 부른다(설계서 §6.2 "문항 신고" 행, §6.7 #6).
+--
+-- SD 공통 규칙(§6.7): (1) auth.uid() 가 null 이면 raise; (2) set search_path = public;
+-- (3) 모든 where 에 user_id = auth.uid() 명시(SD 라 RLS 가 적용되지 않는다 — 빠뜨리면 남의 신고
+-- 수를 세거나 시간당 한도가 무의미해진다); (4) 서버 액션의 인자 검증을 본문에서 반복;
+-- (5) revoke all from public, anon 후 grant execute to authenticated.
+--
+-- 검증은 웹과 같은 값이다: context 는 'explanation'|'cbt', 사유는 네 가지, **cbt 컨텍스트에서
+-- wrong_answer/wrong_explanation 은 거절**(응시 중에는 정답·해설을 보여주지 않으므로 근거가 될 수
+-- 없다 — 화면에서도 그 두 사유를 감춘다), 메시지는 앞뒤 공백을 걷어낸 뒤 500자로 자르고 빈 문자열은
+-- null, 시간당 20건. 중복(question_reports_open_unique)은 사용자에게 "이미 신고한 문항이에요"로
+-- 돌려준다 — 웹도 23505 를 같은 문구로 바꾼다.
+--
+-- 오류는 전부 raise exception 이라 PostgREST 가 400 + message 로 내려준다. 앱은 그 문구를 그대로
+-- 보여준다(문구가 곧 화면 문구 — 웹 submitQuestionReport 의 반환 문자열과 같게 유지할 것).
+create or replace function submit_question_report(
+  p_paper_id uuid,
+  p_question_number int,
+  p_context text,
+  p_reason text,
+  p_message text default null
+)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_message text;
+  v_recent int;
+begin
+  if v_uid is null then
+    raise exception '로그인 후 이용할 수 있어요.';
+  end if;
+
+  -- (4) 서버 액션의 인자 검증을 그대로 되풀이한다. 문항 번호 상한 300 은 테이블 제약
+  -- (question_reports_qnum_range)과 같은 값 — 제약에 맡기면 오류 문구가 SQL 메시지가 된다.
+  if p_paper_id is null or p_question_number is null
+     or p_question_number < 1 or p_question_number > 300 then
+    raise exception '잘못된 접근입니다.';
+  end if;
+  if p_context is null or p_context not in ('explanation', 'cbt') then
+    raise exception '잘못된 접근입니다.';
+  end if;
+  if p_reason is null
+     or p_reason not in ('wrong_answer', 'wrong_explanation', 'image_issue', 'other') then
+    raise exception '신고 사유를 선택해주세요.';
+  end if;
+  -- CBT 응시 중에는 아직 채점 전이라 정답·해설을 보여주지 않는다 → 그 둘을 근거로 하는 사유는
+  -- 화면에서도 안 보이고 서버도 같은 기준으로 거절한다(웹 actions.ts:396-401).
+  if p_context = 'cbt' and p_reason in ('wrong_answer', 'wrong_explanation') then
+    raise exception '잘못된 접근입니다.';
+  end if;
+  if not exists (select 1 from exam_papers p where p.id = p_paper_id) then
+    raise exception '잘못된 접근입니다.';
+  end if;
+
+  -- 웹과 같은 순서로 다듬는다: trim → 500자 자르기 → 빈 문자열이면 null.
+  -- (message 열에 char_length <= 500 check 가 있어 자르지 않으면 제약 위반이 된다.)
+  v_message := nullif(btrim(left(coalesce(p_message, ''), 500)), '');
+
+  -- (3) 시간당 한도. 반드시 user_id = auth.uid() 로 좁힌다 — SD 는 RLS 를 지나치므로 이 조건이
+  -- 빠지면 남의 신고까지 세어(= 전체 20건이면 아무도 신고할 수 없게) 되거나, 반대로 조건을
+  -- 잘못 쓰면 한도가 통째로 사라진다. 20 은 웹 REPORT_HOURLY_LIMIT 과 같은 값이다.
+  select count(*) into v_recent
+    from question_reports r
+   where r.user_id = v_uid
+     and r.created_at > now() - interval '1 hour';
+  if v_recent >= 20 then
+    raise exception '짧은 시간 동안 신고가 너무 많아요. 잠시 후 다시 시도해주세요.';
+  end if;
+
+  begin
+    insert into question_reports (user_id, paper_id, question_number, context, reason, message)
+    values (v_uid, p_paper_id, p_question_number, p_context, p_reason, v_message);
+  exception when unique_violation then
+    -- question_reports_open_unique(미해결 신고 1건) — 사용자 입장에서는 실패가 아니라 "이미 냈다".
+    raise exception '이미 신고한 문항이에요. 확인 후 반영할게요.';
+  end;
+end $$;
+
+revoke all on function submit_question_report(uuid, int, text, text, text) from public, anon;
+grant execute on function submit_question_report(uuid, int, text, text, text) to authenticated;
+
+-- 위 시간당 집계용. 기존 인덱스는 (paper_id, question_number)와 부분 인덱스(status='open')뿐이라
+-- "내 최근 1시간 신고 수"가 전체 스캔이 된다(웹 서버 액션의 같은 집계도 마찬가지였다).
+create index if not exists question_reports_user_recent_idx
+  on question_reports(user_id, created_at desc);

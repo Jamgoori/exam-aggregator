@@ -555,134 +555,6 @@ function toExplanationContent(row) {
   return empty ? null : content;
 }
 
-// src/cbt-attempt.ts
-var MIN_ATTEMPT_SECONDS = 90;
-function sanitizeSelectedChoice(value) {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 10 ? value : null;
-}
-
-// src/rules/cbt-attempt.ts
-function isCbtRuleError(r) {
-  return "error" in r;
-}
-async function startCbtAttempt(admin, userId, paperId, now = /* @__PURE__ */ new Date()) {
-  const startedAt = now.toISOString();
-  const { error } = await admin.from("cbt_attempt_starts").upsert(
-    { user_id: userId, paper_id: paperId, started_at: startedAt },
-    { onConflict: "user_id,paper_id" }
-  );
-  if (error) return { error: "시작 기록에 실패했어요.", status: 500 };
-  return { startedAt };
-}
-async function submitCbtAttempt(admin, userId, paperId, submitted, opts = {}) {
-  const now = opts.now ?? /* @__PURE__ */ new Date();
-  const { data: paperAnswers } = await admin.from("paper_answers").select("answers, voided_questions").eq("paper_id", paperId).maybeSingle();
-  if (!paperAnswers) return { error: "이 문제지는 CBT를 지원하지 않아요.", status: 400 };
-  const correctAnswers = paperAnswers.answers ?? [];
-  const voided = new Set(
-    paperAnswers.voided_questions ?? []
-  );
-  const totalQuestions = correctAnswers.length;
-  if (totalQuestions === 0) return { error: "이 문제지는 CBT를 지원하지 않아요.", status: 400 };
-  const { data: claimed, error: claimError } = await admin.from("cbt_attempt_starts").delete().eq("user_id", userId).eq("paper_id", paperId).select("started_at");
-  if (claimError) return { error: "채점에 실패했어요.", status: 500 };
-  const startRecord = (claimed ?? [])[0];
-  if (!startRecord) {
-    return { error: "새로고침 후 다시 시작해주세요.", status: 400 };
-  }
-  const restoreStart = async () => {
-    try {
-      await admin.from("cbt_attempt_starts").upsert(
-        { user_id: userId, paper_id: paperId, started_at: startRecord.started_at },
-        { onConflict: "user_id,paper_id" }
-      );
-    } catch {
-    }
-  };
-  const elapsedSeconds = (now.getTime() - new Date(startRecord.started_at).getTime()) / 1e3;
-  if (elapsedSeconds < MIN_ATTEMPT_SECONDS) {
-    await restoreStart();
-    const waitSeconds = Math.ceil(MIN_ATTEMPT_SECONDS - elapsedSeconds);
-    return {
-      error: `최소 ${formatDuration(MIN_ATTEMPT_SECONDS)}은 풀어야 채점할 수 있어요. ${waitSeconds}초 후에 다시 시도해주세요.`,
-      status: 400
-    };
-  }
-  const durationSeconds = Math.round(elapsedSeconds);
-  let score = 0;
-  const questionResults = [];
-  for (let i = 0; i < totalQuestions; i++) {
-    const questionNumber = i + 1;
-    const selected = sanitizeSelectedChoice(submitted[i]);
-    const isCorrect = voided.has(questionNumber) || selected === correctAnswers[i];
-    if (isCorrect) score++;
-    questionResults.push({
-      question_number: questionNumber,
-      selected_choice: selected,
-      is_correct: isCorrect
-    });
-  }
-  const { data: attempt, error: attemptError } = await admin.from("cbt_attempts").insert({
-    user_id: userId,
-    paper_id: paperId,
-    score,
-    total_questions: totalQuestions,
-    duration_seconds: durationSeconds
-  }).select("id").single();
-  if (attemptError || !attempt) {
-    await restoreStart();
-    return { error: "채점에 실패했어요.", status: 500 };
-  }
-  const attemptId = attempt.id;
-  const { error: answersError } = await admin.from("cbt_attempt_answers").insert(
-    questionResults.map((q) => ({ attempt_id: attemptId, ...q }))
-  );
-  if (answersError) {
-    await admin.from("cbt_attempts").delete().eq("id", attemptId);
-    await restoreStart();
-    return { error: "채점에 실패했어요.", status: 500 };
-  }
-  try {
-    await recordQuestionResults(admin, userId, paperId, questionResults, "cbt", {
-      now,
-      ...opts.questionStatus
-    });
-  } catch {
-  }
-  try {
-    await recordAttendance(
-      admin,
-      userId,
-      attendanceQuestionCount({
-        answeredCount: questionResults.filter((q) => q.selected_choice !== null).length,
-        elapsedSeconds: durationSeconds
-      }),
-      { now }
-    );
-  } catch {
-  }
-  let diagnosisProgress;
-  if (!opts.skipDiagnosisProgress) {
-    try {
-      const [{ count: attemptCount }, { count: wrongCount }] = await Promise.all([
-        admin.from("cbt_attempts").select("id", { count: "exact", head: true }).eq("user_id", userId),
-        admin.from("user_question_status").select("paper_id", { count: "exact", head: true }).eq("user_id", userId).gt("wrong_count", 0)
-      ]);
-      diagnosisProgress = { attemptCount: attemptCount ?? 0, wrongCount: wrongCount ?? 0 };
-    } catch {
-    }
-  }
-  return {
-    attemptId,
-    score,
-    totalQuestions,
-    durationSeconds,
-    voidedQuestions: [...voided],
-    questionResults,
-    diagnosisProgress
-  };
-}
-
 // src/subject-label.ts
 var SUBJECT_NAME_BY_EXAM_TYPE = {
   군무원: { 행정법총론: "행정법", 행정학개론: "행정학" },
@@ -857,8 +729,445 @@ async function fetchPaperIdentitySignals(client, paperIds, answers = null) {
   return signals;
 }
 
-// src/rules/status-targets.ts
+// src/data/query-utils.ts
+var QUERY_CONCURRENCY = 8;
+async function inParallel(items, run, limit = QUERY_CONCURRENCY) {
+  const out = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    for (let i = cursor++; i < items.length; i = cursor++) {
+      out[i] = await run(items[i]);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker())
+  );
+  return out;
+}
+var PAGE_BATCH_SIZE = 1e3;
+var PAGE_CONCURRENCY = 4;
+async function fetchAllPages(fetchRange, label) {
+  const all = [];
+  let start = 0;
+  while (true) {
+    const wave = await Promise.all(
+      Array.from({ length: PAGE_CONCURRENCY }, (_, i) => {
+        const from = start + i * PAGE_BATCH_SIZE;
+        return fetchRange(from, from + PAGE_BATCH_SIZE - 1);
+      })
+    );
+    for (const { data, error } of wave) {
+      if (error) throw new Error(`${label} 조회 실패: ${error.message}`);
+      const page = data ?? [];
+      all.push(...page);
+      if (page.length < PAGE_BATCH_SIZE) return all;
+    }
+    start += PAGE_CONCURRENCY * PAGE_BATCH_SIZE;
+  }
+}
+
+// src/data/question-media.ts
+var QUESTION_MEDIA_SELECT = "id, paper_id, question_number, choice_count, question_images(order_index, image_path)";
+var BATCH_SIZE = 1e3;
+async function fetchQuestionMedia(client, paperIds, wanted) {
+  const byPaper = /* @__PURE__ */ new Map();
+  function consume(rows) {
+    for (const row of rows) {
+      const images = [...row.question_images ?? []].sort((a, b) => a.order_index - b.order_index).map(
+        (img) => client.storage.from("exam-papers").getPublicUrl(img.image_path).data.publicUrl
+      );
+      const paperMap = byPaper.get(row.paper_id) ?? /* @__PURE__ */ new Map();
+      paperMap.set(row.question_number, {
+        choiceCount: row.choice_count,
+        images,
+        questionId: row.id
+      });
+      byPaper.set(row.paper_id, paperMap);
+    }
+  }
+  if (wanted) {
+    await inParallel(paperIds, async (paperId) => {
+      const numbers = [...wanted.get(paperId) ?? []];
+      if (numbers.length === 0) return;
+      const { data } = await client.from("questions").select(QUESTION_MEDIA_SELECT).eq("paper_id", paperId).in("question_number", numbers);
+      consume(data ?? []);
+    });
+    return byPaper;
+  }
+  await inParallel(chunk(paperIds, 10), async (ids) => {
+    let from = 0;
+    while (true) {
+      const { data } = await client.from("questions").select(QUESTION_MEDIA_SELECT).in("paper_id", ids).order("paper_id").order("question_number").range(from, from + BATCH_SIZE - 1);
+      if (!data || data.length === 0) break;
+      consume(data);
+      if (data.length < BATCH_SIZE) break;
+      from += BATCH_SIZE;
+    }
+  });
+  return byPaper;
+}
+
+// src/data/wrong-notes.ts
+var REVIEW_COOLDOWN_HOURS = 24;
+async function fetchWrongNoteMarks(client, userId, paperIds) {
+  const deleted = /* @__PURE__ */ new Set();
+  const pinned = /* @__PURE__ */ new Set();
+  if (paperIds && paperIds.length === 0) return { deleted, pinned };
+  const idChunks = paperIds ? chunk(paperIds, 200) : [null];
+  const failed = await inParallel(idChunks, async (ids) => {
+    let query = client.from("wrong_note_marks").select("paper_id, question_number, pinned, deleted").eq("user_id", userId);
+    if (ids) query = query.in("paper_id", ids);
+    const { data, error } = await query;
+    if (error) return true;
+    for (const r of data ?? []) {
+      const key = `${r.paper_id}#${r.question_number}`;
+      if (r.deleted) deleted.add(key);
+      if (r.pinned) pinned.add(key);
+    }
+    return false;
+  });
+  if (failed.some(Boolean)) return { deleted: /* @__PURE__ */ new Set(), pinned: /* @__PURE__ */ new Set() };
+  return { deleted, pinned };
+}
+async function fetchCorrectAnswers(admin, paperIds) {
+  const byPaper = /* @__PURE__ */ new Map();
+  await inParallel(chunk(paperIds, 200), async (ids) => {
+    const { data } = await admin.from("paper_answers").select("paper_id, answers").in("paper_id", ids);
+    for (const row of data ?? []) {
+      byPaper.set(row.paper_id, row.answers ?? []);
+    }
+  });
+  return byPaper;
+}
+async function fetchMemos(client, userId, paperIds) {
+  const out = /* @__PURE__ */ new Map();
+  if (paperIds.length === 0) return out;
+  await inParallel(chunk(paperIds, 200), async (ids) => {
+    const { data } = await client.from("question_memos").select("paper_id, question_number, memo").eq("user_id", userId).in("paper_id", ids);
+    for (const r of data ?? []) {
+      const memo = r.memo?.trim();
+      if (memo) out.set(`${r.paper_id}#${r.question_number}`, memo);
+    }
+  });
+  return out;
+}
+var EXPLANATION_SELECT = "question_id, keyword_title, keyword_explanation, choice_explanations, correct_choice_summary, law_amendment_note, current_answer_status, current_answer_note, law_basis_date";
+var QUESTION_ID_CHUNK = 200;
+var BATCH_SIZE2 = 1e3;
+async function fetchQuestionKeys(admin, paperIds, wanted) {
+  const byId = /* @__PURE__ */ new Map();
+  function consume(rows) {
+    for (const row of rows) {
+      byId.set(row.id, { paperId: row.paper_id, questionNumber: row.question_number });
+    }
+  }
+  if (wanted) {
+    await inParallel(paperIds, async (paperId) => {
+      const numbers = [...wanted.get(paperId) ?? []];
+      if (numbers.length === 0) return;
+      const { data, error } = await admin.from("questions").select("id, paper_id, question_number").eq("paper_id", paperId).in("question_number", numbers);
+      if (error) throw error;
+      consume(data ?? []);
+    });
+    return byId;
+  }
+  await inParallel(chunk(paperIds, 10), async (ids) => {
+    let from = 0;
+    while (true) {
+      const { data, error } = await admin.from("questions").select("id, paper_id, question_number").in("paper_id", ids).order("paper_id").order("question_number").range(from, from + BATCH_SIZE2 - 1);
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      consume(data);
+      if (data.length < BATCH_SIZE2) break;
+      from += BATCH_SIZE2;
+    }
+  });
+  return byId;
+}
+async function fetchExplanations(admin, paperIds, wanted, required = false) {
+  const byPaper = /* @__PURE__ */ new Map();
+  try {
+    const keys = await fetchQuestionKeys(admin, paperIds, wanted);
+    const questionIds = [...keys.keys()];
+    if (questionIds.length === 0) return byPaper;
+    await inParallel(chunk(questionIds, QUESTION_ID_CHUNK), async (ids) => {
+      const { data, error } = await admin.from("question_explanations").select(EXPLANATION_SELECT).in("question_id", ids);
+      if (error) throw error;
+      for (const row of data ?? []) {
+        const key = keys.get(row.question_id);
+        if (!key) continue;
+        const content = toExplanationContent(row);
+        if (!content) continue;
+        const paperMap = byPaper.get(key.paperId) ?? /* @__PURE__ */ new Map();
+        paperMap.set(key.questionNumber, content);
+        byPaper.set(key.paperId, paperMap);
+      }
+    });
+  } catch (e) {
+    console.error("fetchExplanations 실패", { paperIds, error: e });
+    if (required) throw e;
+    return /* @__PURE__ */ new Map();
+  }
+  return byPaper;
+}
+async function fetchExplainedNumbers(admin, paperIds, wanted) {
+  const byPaper = /* @__PURE__ */ new Map();
+  try {
+    const keys = await fetchQuestionKeys(admin, paperIds, wanted);
+    const questionIds = [...keys.keys()];
+    if (questionIds.length === 0) return byPaper;
+    await inParallel(chunk(questionIds, QUESTION_ID_CHUNK), async (ids) => {
+      const { data, error } = await admin.from("question_explanations").select("question_id").in("question_id", ids);
+      if (error) throw error;
+      for (const row of data ?? []) {
+        const key = keys.get(row.question_id);
+        if (!key) continue;
+        const set = byPaper.get(key.paperId) ?? /* @__PURE__ */ new Set();
+        set.add(key.questionNumber);
+        byPaper.set(key.paperId, set);
+      }
+    });
+  } catch (e) {
+    console.error("fetchExplainedNumbers 실패", { paperIds, error: e });
+    return /* @__PURE__ */ new Map();
+  }
+  return byPaper;
+}
+
+// src/rules/explanations-wrong-note.ts
+var WRONG_NOTE_QUESTION_LIMIT = 100;
 var DEDUP_SELECT = "id, subject_id, exam_type_id, year, round, level, track, title, created_at";
+async function fetchSiblingPaperIds(admin, paperId) {
+  const { data: baseRow } = await admin.from("exam_papers").select(DEDUP_SELECT).eq("id", paperId).maybeSingle();
+  const base = baseRow;
+  if (!base) return [paperId];
+  let query = admin.from("exam_papers").select(DEDUP_SELECT).eq("subject_id", base.subject_id).eq("exam_type_id", base.exam_type_id).eq("year", base.year).eq("round", base.round);
+  query = base.level == null ? query.is("level", null) : query.eq("level", base.level);
+  const { data: candidateRows } = await query;
+  const candidates = (candidateRows ?? []).filter(
+    (p) => paperDedupKey(p) === paperDedupKey(base)
+  );
+  const others = candidates.filter((p) => p.id !== paperId).map((p) => p.id);
+  if (others.length === 0) return [paperId];
+  const signals = await fetchPaperIdentitySignals(admin, [paperId, ...others], admin);
+  const baseSig = signals.get(paperId)?.answerSignature ?? null;
+  if (baseSig == null) return [paperId];
+  return [
+    paperId,
+    ...others.filter((id) => (signals.get(id)?.answerSignature ?? null) === baseSig)
+  ];
+}
+async function fetchAnsweredQuestionNumbers(admin, userId, input) {
+  const answered = /* @__PURE__ */ new Set();
+  const numbers = [...new Set(input.questionNumbers)];
+  if (numbers.length === 0) return answered;
+  const paperIds = await fetchSiblingPaperIds(admin, input.paperId);
+  const { data: statusRows } = await admin.from("user_question_status").select("question_number").eq("user_id", userId).in("paper_id", paperIds).in("question_number", numbers);
+  for (const r of statusRows ?? []) {
+    answered.add(r.question_number);
+  }
+  if (answered.size === numbers.length) return answered;
+  const { data: attemptRows } = await admin.from("cbt_attempts").select("id").eq("user_id", userId).in("paper_id", paperIds);
+  const attemptIds = (attemptRows ?? []).map((r) => r.id);
+  for (const ids of chunk(attemptIds, 100)) {
+    const { data } = await admin.from("cbt_attempt_answers").select("question_number").in("attempt_id", ids).in("question_number", numbers);
+    for (const r of data ?? []) {
+      answered.add(r.question_number);
+    }
+  }
+  return answered;
+}
+async function resolveWrongNoteExplanations(admin, input) {
+  const requested = [
+    ...new Set(
+      input.questionNumbers.filter((n) => Number.isInteger(n) && n >= 1 && n <= 300)
+    )
+  ].slice(0, WRONG_NOTE_QUESTION_LIMIT);
+  const empty = {
+    questions: [],
+    lockedQuestionNumbers: [],
+    locked: !input.premium,
+    totalCount: 0
+  };
+  if (requested.length === 0) return empty;
+  const answered = await fetchAnsweredQuestionNumbers(admin, input.userId, {
+    paperId: input.paperId,
+    questionNumbers: requested
+  });
+  const numbers = requested.filter((n) => answered.has(n)).sort((a, b) => a - b);
+  if (numbers.length === 0) return empty;
+  const wanted = /* @__PURE__ */ new Map([[input.paperId, new Set(numbers)]]);
+  if (!input.premium) {
+    const explained = await fetchExplainedNumbers(admin, [input.paperId], wanted);
+    const lockedQuestionNumbers = numbers.filter(
+      (n) => explained.get(input.paperId)?.has(n) ?? false
+    );
+    return {
+      questions: [],
+      lockedQuestionNumbers,
+      locked: true,
+      totalCount: lockedQuestionNumbers.length
+    };
+  }
+  const [mediaByPaper, answersByPaper, explanationsByPaper] = await Promise.all([
+    fetchQuestionMedia(admin, [input.paperId], wanted),
+    fetchCorrectAnswers(admin, [input.paperId]),
+    fetchExplanations(admin, [input.paperId], wanted)
+  ]);
+  const media = mediaByPaper.get(input.paperId) ?? /* @__PURE__ */ new Map();
+  const correctAnswers = answersByPaper.get(input.paperId) ?? [];
+  const explanations = explanationsByPaper.get(input.paperId) ?? /* @__PURE__ */ new Map();
+  const questions = [];
+  for (const questionNumber of numbers) {
+    const explanation = explanations.get(questionNumber);
+    if (!explanation) continue;
+    const m = media.get(questionNumber);
+    questions.push({
+      questionNumber,
+      correctChoice: correctAnswers[questionNumber - 1] ?? null,
+      choiceCount: m?.choiceCount ?? 4,
+      images: m?.images ?? [],
+      explanation
+    });
+  }
+  return {
+    questions,
+    lockedQuestionNumbers: [],
+    locked: false,
+    totalCount: questions.length
+  };
+}
+
+// src/cbt-attempt.ts
+var MIN_ATTEMPT_SECONDS = 90;
+function sanitizeSelectedChoice(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 10 ? value : null;
+}
+
+// src/rules/cbt-attempt.ts
+function isCbtRuleError(r) {
+  return "error" in r;
+}
+async function startCbtAttempt(admin, userId, paperId, now = /* @__PURE__ */ new Date()) {
+  const startedAt = now.toISOString();
+  const { error } = await admin.from("cbt_attempt_starts").upsert(
+    { user_id: userId, paper_id: paperId, started_at: startedAt },
+    { onConflict: "user_id,paper_id" }
+  );
+  if (error) return { error: "시작 기록에 실패했어요.", status: 500 };
+  return { startedAt };
+}
+async function submitCbtAttempt(admin, userId, paperId, submitted, opts = {}) {
+  const now = opts.now ?? /* @__PURE__ */ new Date();
+  const { data: paperAnswers } = await admin.from("paper_answers").select("answers, voided_questions").eq("paper_id", paperId).maybeSingle();
+  if (!paperAnswers) return { error: "이 문제지는 CBT를 지원하지 않아요.", status: 400 };
+  const correctAnswers = paperAnswers.answers ?? [];
+  const voided = new Set(
+    paperAnswers.voided_questions ?? []
+  );
+  const totalQuestions = correctAnswers.length;
+  if (totalQuestions === 0) return { error: "이 문제지는 CBT를 지원하지 않아요.", status: 400 };
+  const { data: claimed, error: claimError } = await admin.from("cbt_attempt_starts").delete().eq("user_id", userId).eq("paper_id", paperId).select("started_at");
+  if (claimError) return { error: "채점에 실패했어요.", status: 500 };
+  const startRecord = (claimed ?? [])[0];
+  if (!startRecord) {
+    return { error: "새로고침 후 다시 시작해주세요.", status: 400 };
+  }
+  const restoreStart = async () => {
+    try {
+      await admin.from("cbt_attempt_starts").upsert(
+        { user_id: userId, paper_id: paperId, started_at: startRecord.started_at },
+        { onConflict: "user_id,paper_id" }
+      );
+    } catch {
+    }
+  };
+  const elapsedSeconds = (now.getTime() - new Date(startRecord.started_at).getTime()) / 1e3;
+  if (elapsedSeconds < MIN_ATTEMPT_SECONDS) {
+    await restoreStart();
+    const waitSeconds = Math.ceil(MIN_ATTEMPT_SECONDS - elapsedSeconds);
+    return {
+      error: `최소 ${formatDuration(MIN_ATTEMPT_SECONDS)}은 풀어야 채점할 수 있어요. ${waitSeconds}초 후에 다시 시도해주세요.`,
+      status: 400
+    };
+  }
+  const durationSeconds = Math.round(elapsedSeconds);
+  let score = 0;
+  const questionResults = [];
+  for (let i = 0; i < totalQuestions; i++) {
+    const questionNumber = i + 1;
+    const selected = sanitizeSelectedChoice(submitted[i]);
+    const isCorrect = voided.has(questionNumber) || selected === correctAnswers[i];
+    if (isCorrect) score++;
+    questionResults.push({
+      question_number: questionNumber,
+      selected_choice: selected,
+      is_correct: isCorrect
+    });
+  }
+  const { data: attempt, error: attemptError } = await admin.from("cbt_attempts").insert({
+    user_id: userId,
+    paper_id: paperId,
+    score,
+    total_questions: totalQuestions,
+    duration_seconds: durationSeconds
+  }).select("id").single();
+  if (attemptError || !attempt) {
+    await restoreStart();
+    return { error: "채점에 실패했어요.", status: 500 };
+  }
+  const attemptId = attempt.id;
+  const { error: answersError } = await admin.from("cbt_attempt_answers").insert(
+    questionResults.map((q) => ({ attempt_id: attemptId, ...q }))
+  );
+  if (answersError) {
+    await admin.from("cbt_attempts").delete().eq("id", attemptId);
+    await restoreStart();
+    return { error: "채점에 실패했어요.", status: 500 };
+  }
+  try {
+    await recordQuestionResults(admin, userId, paperId, questionResults, "cbt", {
+      now,
+      ...opts.questionStatus
+    });
+  } catch {
+  }
+  try {
+    await recordAttendance(
+      admin,
+      userId,
+      attendanceQuestionCount({
+        answeredCount: questionResults.filter((q) => q.selected_choice !== null).length,
+        elapsedSeconds: durationSeconds
+      }),
+      { now }
+    );
+  } catch {
+  }
+  let diagnosisProgress;
+  if (!opts.skipDiagnosisProgress) {
+    try {
+      const [{ count: attemptCount }, { count: wrongCount }] = await Promise.all([
+        admin.from("cbt_attempts").select("id", { count: "exact", head: true }).eq("user_id", userId),
+        admin.from("user_question_status").select("paper_id", { count: "exact", head: true }).eq("user_id", userId).gt("wrong_count", 0)
+      ]);
+      diagnosisProgress = { attemptCount: attemptCount ?? 0, wrongCount: wrongCount ?? 0 };
+    } catch {
+    }
+  }
+  return {
+    attemptId,
+    score,
+    totalQuestions,
+    durationSeconds,
+    voidedQuestions: [...voided],
+    questionResults,
+    diagnosisProgress
+  };
+}
+
+// src/rules/status-targets.ts
+var DEDUP_SELECT2 = "id, subject_id, exam_type_id, year, round, level, track, title, created_at";
 function statusTargetKey(paperId, questionNumber) {
   return `${paperId}#${questionNumber}`;
 }
@@ -866,10 +1175,10 @@ async function resolveStatusTargets(client, userId, items, opts = {}) {
   const out = /* @__PURE__ */ new Map();
   const paperIds = [...new Set(items.map((i) => i.paperId))];
   if (paperIds.length === 0) return out;
-  const { data: baseRows } = await client.from("exam_papers").select(DEDUP_SELECT).in("id", paperIds);
+  const { data: baseRows } = await client.from("exam_papers").select(DEDUP_SELECT2).in("id", paperIds);
   const base = baseRows ?? [];
   if (base.length === 0) return out;
-  let siblingQuery = client.from("exam_papers").select(DEDUP_SELECT).in("subject_id", [...new Set(base.map((p) => p.subject_id))]).in("exam_type_id", [...new Set(base.map((p) => p.exam_type_id))]).in("year", [...new Set(base.map((p) => p.year))]).in("round", [...new Set(base.map((p) => p.round))]);
+  let siblingQuery = client.from("exam_papers").select(DEDUP_SELECT2).in("subject_id", [...new Set(base.map((p) => p.subject_id))]).in("exam_type_id", [...new Set(base.map((p) => p.exam_type_id))]).in("year", [...new Set(base.map((p) => p.year))]).in("round", [...new Set(base.map((p) => p.round))]);
   const levels = base.map((p) => p.level);
   if (levels.every((l) => l != null)) {
     siblingQuery = siblingQuery.in("level", [...new Set(levels)]);
@@ -1144,7 +1453,7 @@ function spreadResumeDueDates(count, now = /* @__PURE__ */ new Date(), opts = {}
 }
 
 // src/rules/review-preferences.ts
-var BATCH_SIZE = 1e3;
+var BATCH_SIZE3 = 1e3;
 var UPSERT_CHUNK = 500;
 async function getReviewPrefs(client, userId) {
   const { data } = await client.from("review_preferences").select("paused_subject_ids, daily_limit").eq("user_id", userId).maybeSingle();
@@ -1213,7 +1522,7 @@ async function getReviewSubjectOptions(client, userId) {
   const byPaper = /* @__PURE__ */ new Map();
   let from = 0;
   while (true) {
-    const { data } = await client.from("user_question_status").select("paper_id, srs_due_at").eq("user_id", userId).is("srs_suspended_at", null).gt("wrong_count", 0).range(from, from + BATCH_SIZE - 1);
+    const { data } = await client.from("user_question_status").select("paper_id, srs_due_at").eq("user_id", userId).is("srs_suspended_at", null).gt("wrong_count", 0).range(from, from + BATCH_SIZE3 - 1);
     if (!data || data.length === 0) break;
     for (const r of data) {
       const cur = byPaper.get(r.paper_id) ?? { scheduled: 0, pending: 0 };
@@ -1221,8 +1530,8 @@ async function getReviewSubjectOptions(client, userId) {
       else cur.pending++;
       byPaper.set(r.paper_id, cur);
     }
-    if (data.length < BATCH_SIZE) break;
-    from += BATCH_SIZE;
+    if (data.length < BATCH_SIZE3) break;
+    from += BATCH_SIZE3;
   }
   if (byPaper.size === 0) return [];
   const names = /* @__PURE__ */ new Map();
@@ -1259,11 +1568,11 @@ async function respreadResumedSubject(client, admin, userId, subjectId, now) {
   const rows = [];
   let from = 0;
   while (true) {
-    const { data } = await client.from("user_question_status").select("*").eq("user_id", userId).not("srs_due_at", "is", null).is("srs_suspended_at", null).lte("srs_due_at", nowIso).order("srs_due_at", { ascending: true }).range(from, from + BATCH_SIZE - 1);
+    const { data } = await client.from("user_question_status").select("*").eq("user_id", userId).not("srs_due_at", "is", null).is("srs_suspended_at", null).lte("srs_due_at", nowIso).order("srs_due_at", { ascending: true }).range(from, from + BATCH_SIZE3 - 1);
     if (!data || data.length === 0) break;
     rows.push(...data);
-    if (data.length < BATCH_SIZE) break;
-    from += BATCH_SIZE;
+    if (data.length < BATCH_SIZE3) break;
+    from += BATCH_SIZE3;
   }
   if (rows.length === 0) return;
   const paperIds = [...new Set(rows.map((r) => r.paper_id))];
@@ -1288,12 +1597,12 @@ async function spreadOverdueBacklog(client, admin, userId, now = /* @__PURE__ */
   const rows = [];
   let from = 0;
   while (true) {
-    const { data, error } = await client.from("user_question_status").select("*").eq("user_id", userId).not("srs_due_at", "is", null).is("srs_suspended_at", null).lte("srs_due_at", nowIso).order("srs_due_at", { ascending: true }).range(from, from + BATCH_SIZE - 1);
+    const { data, error } = await client.from("user_question_status").select("*").eq("user_id", userId).not("srs_due_at", "is", null).is("srs_suspended_at", null).lte("srs_due_at", nowIso).order("srs_due_at", { ascending: true }).range(from, from + BATCH_SIZE3 - 1);
     if (error) return { error: "밀린 복습을 정리하지 못했어요." };
     if (!data || data.length === 0) break;
     rows.push(...data);
-    if (data.length < BATCH_SIZE) break;
-    from += BATCH_SIZE;
+    if (data.length < BATCH_SIZE3) break;
+    from += BATCH_SIZE3;
   }
   if (rows.length === 0) return { spreadCount: 0 };
   const dueDates = spreadResumeDueDates(rows.length, now, {
@@ -1311,12 +1620,12 @@ async function restoreSuspendedQuestions(client, admin, userId, now = /* @__PURE
   const rows = [];
   let from = 0;
   while (true) {
-    const { data, error } = await client.from("user_question_status").select("*").eq("user_id", userId).not("srs_suspended_at", "is", null).order("srs_suspended_at", { ascending: true }).range(from, from + BATCH_SIZE - 1);
+    const { data, error } = await client.from("user_question_status").select("*").eq("user_id", userId).not("srs_suspended_at", "is", null).order("srs_suspended_at", { ascending: true }).range(from, from + BATCH_SIZE3 - 1);
     if (error) return { error: "접어둔 문제를 되살리지 못했어요." };
     if (!data || data.length === 0) break;
     rows.push(...data);
-    if (data.length < BATCH_SIZE) break;
-    from += BATCH_SIZE;
+    if (data.length < BATCH_SIZE3) break;
+    from += BATCH_SIZE3;
   }
   if (rows.length === 0) return { restoredCount: 0 };
   const dueDates = spreadResumeDueDates(rows.length, now, {
@@ -1406,211 +1715,6 @@ function conceptKeyOf(keywordTitle) {
     if (token.length >= 2) return token.toLowerCase();
   }
   return cleaned.toLowerCase();
-}
-
-// src/data/query-utils.ts
-var QUERY_CONCURRENCY = 8;
-async function inParallel(items, run, limit = QUERY_CONCURRENCY) {
-  const out = new Array(items.length);
-  let cursor = 0;
-  async function worker() {
-    for (let i = cursor++; i < items.length; i = cursor++) {
-      out[i] = await run(items[i]);
-    }
-  }
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, () => worker())
-  );
-  return out;
-}
-var PAGE_BATCH_SIZE = 1e3;
-var PAGE_CONCURRENCY = 4;
-async function fetchAllPages(fetchRange, label) {
-  const all = [];
-  let start = 0;
-  while (true) {
-    const wave = await Promise.all(
-      Array.from({ length: PAGE_CONCURRENCY }, (_, i) => {
-        const from = start + i * PAGE_BATCH_SIZE;
-        return fetchRange(from, from + PAGE_BATCH_SIZE - 1);
-      })
-    );
-    for (const { data, error } of wave) {
-      if (error) throw new Error(`${label} 조회 실패: ${error.message}`);
-      const page = data ?? [];
-      all.push(...page);
-      if (page.length < PAGE_BATCH_SIZE) return all;
-    }
-    start += PAGE_CONCURRENCY * PAGE_BATCH_SIZE;
-  }
-}
-
-// src/data/question-media.ts
-var QUESTION_MEDIA_SELECT = "id, paper_id, question_number, choice_count, question_images(order_index, image_path)";
-var BATCH_SIZE2 = 1e3;
-async function fetchQuestionMedia(client, paperIds, wanted) {
-  const byPaper = /* @__PURE__ */ new Map();
-  function consume(rows) {
-    for (const row of rows) {
-      const images = [...row.question_images ?? []].sort((a, b) => a.order_index - b.order_index).map(
-        (img) => client.storage.from("exam-papers").getPublicUrl(img.image_path).data.publicUrl
-      );
-      const paperMap = byPaper.get(row.paper_id) ?? /* @__PURE__ */ new Map();
-      paperMap.set(row.question_number, {
-        choiceCount: row.choice_count,
-        images,
-        questionId: row.id
-      });
-      byPaper.set(row.paper_id, paperMap);
-    }
-  }
-  if (wanted) {
-    await inParallel(paperIds, async (paperId) => {
-      const numbers = [...wanted.get(paperId) ?? []];
-      if (numbers.length === 0) return;
-      const { data } = await client.from("questions").select(QUESTION_MEDIA_SELECT).eq("paper_id", paperId).in("question_number", numbers);
-      consume(data ?? []);
-    });
-    return byPaper;
-  }
-  await inParallel(chunk(paperIds, 10), async (ids) => {
-    let from = 0;
-    while (true) {
-      const { data } = await client.from("questions").select(QUESTION_MEDIA_SELECT).in("paper_id", ids).order("paper_id").order("question_number").range(from, from + BATCH_SIZE2 - 1);
-      if (!data || data.length === 0) break;
-      consume(data);
-      if (data.length < BATCH_SIZE2) break;
-      from += BATCH_SIZE2;
-    }
-  });
-  return byPaper;
-}
-
-// src/data/wrong-notes.ts
-var REVIEW_COOLDOWN_HOURS = 24;
-async function fetchWrongNoteMarks(client, userId, paperIds) {
-  const deleted = /* @__PURE__ */ new Set();
-  const pinned = /* @__PURE__ */ new Set();
-  if (paperIds && paperIds.length === 0) return { deleted, pinned };
-  const idChunks = paperIds ? chunk(paperIds, 200) : [null];
-  const failed = await inParallel(idChunks, async (ids) => {
-    let query = client.from("wrong_note_marks").select("paper_id, question_number, pinned, deleted").eq("user_id", userId);
-    if (ids) query = query.in("paper_id", ids);
-    const { data, error } = await query;
-    if (error) return true;
-    for (const r of data ?? []) {
-      const key = `${r.paper_id}#${r.question_number}`;
-      if (r.deleted) deleted.add(key);
-      if (r.pinned) pinned.add(key);
-    }
-    return false;
-  });
-  if (failed.some(Boolean)) return { deleted: /* @__PURE__ */ new Set(), pinned: /* @__PURE__ */ new Set() };
-  return { deleted, pinned };
-}
-async function fetchCorrectAnswers(admin, paperIds) {
-  const byPaper = /* @__PURE__ */ new Map();
-  await inParallel(chunk(paperIds, 200), async (ids) => {
-    const { data } = await admin.from("paper_answers").select("paper_id, answers").in("paper_id", ids);
-    for (const row of data ?? []) {
-      byPaper.set(row.paper_id, row.answers ?? []);
-    }
-  });
-  return byPaper;
-}
-async function fetchMemos(client, userId, paperIds) {
-  const out = /* @__PURE__ */ new Map();
-  if (paperIds.length === 0) return out;
-  await inParallel(chunk(paperIds, 200), async (ids) => {
-    const { data } = await client.from("question_memos").select("paper_id, question_number, memo").eq("user_id", userId).in("paper_id", ids);
-    for (const r of data ?? []) {
-      const memo = r.memo?.trim();
-      if (memo) out.set(`${r.paper_id}#${r.question_number}`, memo);
-    }
-  });
-  return out;
-}
-var EXPLANATION_SELECT = "question_id, keyword_title, keyword_explanation, choice_explanations, correct_choice_summary, law_amendment_note, current_answer_status, current_answer_note, law_basis_date";
-var QUESTION_ID_CHUNK = 200;
-var BATCH_SIZE3 = 1e3;
-async function fetchQuestionKeys(admin, paperIds, wanted) {
-  const byId = /* @__PURE__ */ new Map();
-  function consume(rows) {
-    for (const row of rows) {
-      byId.set(row.id, { paperId: row.paper_id, questionNumber: row.question_number });
-    }
-  }
-  if (wanted) {
-    await inParallel(paperIds, async (paperId) => {
-      const numbers = [...wanted.get(paperId) ?? []];
-      if (numbers.length === 0) return;
-      const { data, error } = await admin.from("questions").select("id, paper_id, question_number").eq("paper_id", paperId).in("question_number", numbers);
-      if (error) throw error;
-      consume(data ?? []);
-    });
-    return byId;
-  }
-  await inParallel(chunk(paperIds, 10), async (ids) => {
-    let from = 0;
-    while (true) {
-      const { data, error } = await admin.from("questions").select("id, paper_id, question_number").in("paper_id", ids).order("paper_id").order("question_number").range(from, from + BATCH_SIZE3 - 1);
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-      consume(data);
-      if (data.length < BATCH_SIZE3) break;
-      from += BATCH_SIZE3;
-    }
-  });
-  return byId;
-}
-async function fetchExplanations(admin, paperIds, wanted, required = false) {
-  const byPaper = /* @__PURE__ */ new Map();
-  try {
-    const keys = await fetchQuestionKeys(admin, paperIds, wanted);
-    const questionIds = [...keys.keys()];
-    if (questionIds.length === 0) return byPaper;
-    await inParallel(chunk(questionIds, QUESTION_ID_CHUNK), async (ids) => {
-      const { data, error } = await admin.from("question_explanations").select(EXPLANATION_SELECT).in("question_id", ids);
-      if (error) throw error;
-      for (const row of data ?? []) {
-        const key = keys.get(row.question_id);
-        if (!key) continue;
-        const content = toExplanationContent(row);
-        if (!content) continue;
-        const paperMap = byPaper.get(key.paperId) ?? /* @__PURE__ */ new Map();
-        paperMap.set(key.questionNumber, content);
-        byPaper.set(key.paperId, paperMap);
-      }
-    });
-  } catch (e) {
-    console.error("fetchExplanations 실패", { paperIds, error: e });
-    if (required) throw e;
-    return /* @__PURE__ */ new Map();
-  }
-  return byPaper;
-}
-async function fetchExplainedNumbers(admin, paperIds, wanted) {
-  const byPaper = /* @__PURE__ */ new Map();
-  try {
-    const keys = await fetchQuestionKeys(admin, paperIds, wanted);
-    const questionIds = [...keys.keys()];
-    if (questionIds.length === 0) return byPaper;
-    await inParallel(chunk(questionIds, QUESTION_ID_CHUNK), async (ids) => {
-      const { data, error } = await admin.from("question_explanations").select("question_id").in("question_id", ids);
-      if (error) throw error;
-      for (const row of data ?? []) {
-        const key = keys.get(row.question_id);
-        if (!key) continue;
-        const set = byPaper.get(key.paperId) ?? /* @__PURE__ */ new Set();
-        set.add(key.questionNumber);
-        byPaper.set(key.paperId, set);
-      }
-    });
-  } catch (e) {
-    console.error("fetchExplainedNumbers 실패", { paperIds, error: e });
-    return /* @__PURE__ */ new Map();
-  }
-  return byPaper;
 }
 
 // src/rules/review-queue.ts
@@ -3500,6 +3604,7 @@ export {
   SRS_RELEARN_DELAY_HOURS,
   SRS_SECOND_INTERVAL_DAYS,
   TRIAL_DAYS,
+  WRONG_NOTE_QUESTION_LIMIT,
   attendanceDaysLeft,
   attendanceEarnedDays,
   attendanceMilestoneDates,
@@ -3532,6 +3637,7 @@ export {
   daysInMonthKey,
   embedOne,
   fetchAllPages,
+  fetchAnsweredQuestionNumbers,
   fetchCorrectAnswers,
   fetchExplainedNumbers,
   fetchExplanations,
@@ -3599,6 +3705,7 @@ export {
   representativePaperIds,
   resolveExplanationAccess,
   resolveStatusTargets,
+  resolveWrongNoteExplanations,
   restoreSuspendedQuestions,
   reviewPickTier,
   sanitizeSelectedChoice,

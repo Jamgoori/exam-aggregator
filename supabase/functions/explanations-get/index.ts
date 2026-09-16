@@ -15,6 +15,15 @@
 // 보여줘야 하기 때문이다. 둘을 섞으면 수집 시도에 결제를 권하거나, 정상 사용자에게
 // 결제하면 풀린다는 거짓말을 하게 된다. remainingToday(무료 회원의 오늘 남은 문제지 수,
 // 유료·관리자·비로그인은 null)는 추가 필드(설계서 §6.7 #7).
+//
+// ── context:"wrong-note" 모드(§6.7 #7, Phase 2) ──────────────────────────────
+// 오답노트·응시 상세·mix 기록 **안에서** 여는 해설. 위 페이지 모드와 규칙이 다르다:
+// 쿼터·시간당 한도를 판정하지 않고(로그 행도 남기지 않는다) 대신 "프리미엄 + 본인이 답한
+// 문항"으로만 본문을 내준다 — 웹 lib/wrong-notes.ts 가 admin 클라이언트로 해설을 조회하며
+// explanation_access_log·explanation_daily_views 를 한 줄도 쓰지 않는 것과 같은 동작이다.
+// 판정 본문은 core rules/explanations-wrong-note.ts(resolveWrongNoteExplanations) 하나이고
+// 여기서는 입력 파싱과 직렬화만 한다. 응답은 기존 필드 + explanationLocked·
+// lockedQuestionNumbers(추가 필드)이며 remainingToday·lockReason 은 null 로 둔다.
 import { corsHeaders, isUuid, json } from "../_shared/http.ts";
 import { coreAdmin, getOptionalUser } from "../_shared/clients.ts";
 // @ts-types="../_shared/core.d.ts"
@@ -24,6 +33,7 @@ import {
   fetchQuestionMedia,
   isPremiumUserFor,
   resolveExplanationAccess,
+  resolveWrongNoteExplanations,
   toExplanationContent,
   type ExplanationAccess,
   type ExplanationRow,
@@ -35,9 +45,15 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   let paperId = "";
+  let wrongNote = false;
+  let questionNumbers: number[] = [];
   try {
     const body = await req.json().catch(() => ({}));
     paperId = String(body?.paperId ?? "");
+    wrongNote = body?.context === "wrong-note";
+    questionNumbers = Array.isArray(body?.questionNumbers)
+      ? body.questionNumbers.map((n: unknown) => Number(n)).filter((n: number) => Number.isInteger(n))
+      : [];
   } catch {
     return json({ error: "잘못된 요청입니다." }, 400);
   }
@@ -46,6 +62,32 @@ Deno.serve(async (req) => {
   const admin = coreAdmin();
   const user = await getOptionalUser(req);
   const loggedIn = !!user;
+
+  // ── 오답노트 모드 ─────────────────────────────────────────────────────────
+  // 본인이 답한 문항만 대상이라 비로그인은 물을 것이 없다(미리보기도 주지 않는다 —
+  // 해설 페이지 모드가 그 역할을 한다).
+  if (wrongNote) {
+    if (!user) return json({ error: "로그인 후 이용할 수 있어요." }, 401);
+    const result = await resolveWrongNoteExplanations(admin, {
+      userId: user.userId,
+      paperId,
+      questionNumbers,
+      premium: await isPremiumUserFor(admin, user),
+    });
+    return json({
+      questions: result.questions,
+      totalCount: result.totalCount,
+      hiddenCount: result.totalCount - result.questions.length,
+      hasFullAccess: !result.locked,
+      loggedIn: true,
+      // 이 모드는 시간당 한도·무료 일일 몫을 판정하지 않는다(쿼터 미차감) — 잠금은
+      // explanationLocked 로만 알린다.
+      lockReason: null,
+      remainingToday: null,
+      explanationLocked: result.locked,
+      lockedQuestionNumbers: result.lockedQuestionNumbers,
+    });
+  }
 
   // 로그인 사용자만 한도 판정 대상이다 — 비로그인은 어차피 미리보기만 보이므로
   // 별도로 셀 필요가 없다. 순서(시간당 한도 → 무료 몫)는 규칙 쪽이 지킨다.

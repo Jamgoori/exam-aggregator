@@ -129,6 +129,9 @@ export function SingleQuestionView({
   error,
   zoom = 1,
   onPinchZoom,
+  caption,
+  emptyImagesText,
+  submitSlot,
 }: {
   questionIndex: number;
   // 세트문제는 화면 하나에 여러 문제가 같이 보이므로 답 선택 줄도 번호 수만큼(보통 1개).
@@ -149,6 +152,13 @@ export function SingleQuestionView({
   error?: string | null;
   zoom?: number;
   onPinchZoom?: (factor: number) => void;
+  // 문제 상자 아래 한 줄 캡션(복습 솔버의 "출처와 정답은 채점 후에 공개돼요.").
+  caption?: string;
+  // 이미지가 아직 없을 때 문구(복습 솔버는 웹과 같은 "이 문제의 이미지가 없어요.").
+  emptyImagesText?: string;
+  // 하단 이동줄 아래에 둘 제출 영역(복습 솔버의 큰 제출 버튼·"지금 채점" 링크). 주면 마지막
+  // 문항의 체크 아이콘 자리는 웹처럼 빈 칸(w-[38px])이 된다.
+  submitSlot?: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   const firstNumber = questions[0]?.number ?? questionIndex + 1;
@@ -245,17 +255,28 @@ export function SingleQuestionView({
     });
 
   // ── 필기(펜/지우개; 상자 위 Pan 이 포인터를 잡는다) ───────────────────────────
+  //
+  // 두 번째 손가락이 닿으면 `maxPointers(1)` 이 이 Pan 을 **취소**하고(RNGH PanGestureHandler:
+  // ACTION_POINTER_DOWN 에서 pointerCount > maxPointers 면 active 는 cancel, 아니면 fail),
+  // 핀치가 이어받는다. 이때 `simultaneousWithExternalGesture(pinch)` 가 꼭 필요하다 — 첫
+  // 손가락에 draw 가 활성화되는 순간 orchestrator 의 makeActive 가 "동시 실행으로 선언되지
+  // 않은" 핀치를 먼저 취소해 버려서, 나중에 draw 가 취소돼도 핀치가 살아나지 못한다.
+  // (세로 스크롤(Gesture.Native)·스와이프는 일부러 그대로 둔다 — 필기 중에는 멈춰야 한다.)
+  //
+  // (제스처 콜백에서 `state.fail()` 을 부르지 않는다: `runOnJS(true)` 라 콜백이 RN 런타임에서
+  //  도는데 Reanimated 4 의 setGestureState 는 워클릿 런타임이 아니면 경고만 찍고 돌아간다
+  //  (platformFunctions/setGestureState.ts) — 손가락이 닿을 때마다 콘솔 경고만 났다.)
   const draw = Gesture.Pan()
     .enabled(tool !== "move")
     .minDistance(0)
     .maxPointers(1)
     .runOnJS(true)
-    .onTouchesDown((e, state) => {
+    .simultaneousWithExternalGesture(pinch)
+    .onTouchesDown((e) => {
       // 두 번째 손가락이 닿는 순간부터 핀치로 취급하고, 진행 중이던 획은 버린다.
       if (e.numberOfTouches > 1) {
         liveStroke.value = null;
         setLive(null);
-        state.fail();
       }
     })
     .onBegin((e) => {
@@ -323,7 +344,7 @@ export function SingleQuestionView({
                   >
                     {images.length === 0 ? (
                       <AppText variant="sm" className="pt-24 text-center text-zinc-400 dark:text-zinc-600">
-                        아직 이 문제의 이미지가 등록되지 않았어요.
+                        {emptyImagesText ?? "아직 이 문제의 이미지가 등록되지 않았어요."}
                       </AppText>
                     ) : (
                       images.map((src, i) => (
@@ -348,6 +369,15 @@ export function SingleQuestionView({
                   </View>
                 </GestureDetector>
               </Animated.View>
+            )}
+            {caption && (
+              <AppText
+                variant="xs"
+                className="mt-3 w-full max-w-2xl self-center text-center text-zinc-400 dark:text-zinc-600"
+                pretty
+              >
+                {caption}
+              </AppText>
             )}
           </ScrollView>
         </GestureDetector>
@@ -423,7 +453,10 @@ export function SingleQuestionView({
           </View>
 
           {/* 마지막 문제에서는 "다음" 대신 제출 버튼. 채점이 끝난 뒤에는 비활성 다음 버튼. */}
-          {isLast && !submitted ? (
+          {isLast && !submitted && submitSlot ? (
+            // 복습 솔버: 제출은 아래 submitSlot 이 맡고 여기는 웹처럼 자리만 비운다.
+            <View className="w-[38px] shrink-0" />
+          ) : isLast && !submitted ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="제출하고 채점"
@@ -453,6 +486,7 @@ export function SingleQuestionView({
             </Pressable>
           )}
         </View>
+        {submitSlot}
       </View>
     </View>
   );
