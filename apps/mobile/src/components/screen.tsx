@@ -1,11 +1,21 @@
 import { Stack } from "expo-router";
 import { BottomTabBarHeightContext } from "expo-router/tabs";
-import { useContext } from "react";
-import { FlatList, RefreshControl, ScrollView, View, type FlatListProps, type ScrollViewProps } from "react-native";
+import { useCallback, useContext, useRef, useState } from "react";
+import {
+  FlatList,
+  RefreshControl,
+  ScrollView,
+  View,
+  type FlatListProps,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type ScrollViewProps,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppFooter } from "./app-footer";
 import { AppHeader } from "./app-header";
 import { OfflineBanner } from "./offline-banner";
+import { ReviewFab } from "./review/review-fab";
 import { useIsOnline } from "../lib/net";
 
 // 화면 셸(설계서 §3.5·§4.4). 배경은 토큰 `bg-background`(웹 --background: 라이트 #fff · 다크
@@ -31,6 +41,27 @@ const IMMERSIVE_OPTIONS = { gestureEnabled: false, fullScreenGestureEnabled: fal
 function useOverlayBottom(insetBottom: number): number {
   const tabBarHeight = useContext(BottomTabBarHeightContext);
   return tabBarHeight === undefined ? insetBottom : 0;
+}
+
+// 복습 FAB 이 뜨기 시작하는 스크롤 깊이(웹 review-fab.tsx SHOW_AFTER_PX 와 같은 값). 첫 화면에서
+// 바로 튀어나오면 본문을 읽기도 전에 방해가 된다.
+const FAB_SHOW_AFTER_PX = 400;
+
+// 리렌더는 경계를 넘을 때만 — 스크롤 프레임마다 setState 하면 긴 목록에서 초당 수십 번 다시
+// 그린다(Phase 2 검토에서 분할 바가 같은 이유로 걸렸다).
+function useScrolledPast(px: number) {
+  const [scrolled, setScrolled] = useState(false);
+  const last = useRef(false);
+  const onScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const next = e.nativeEvent.contentOffset.y > px;
+      if (next === last.current) return;
+      last.current = next;
+      setScrolled(next);
+    },
+    [px],
+  );
+  return { scrolled, onScroll };
 }
 
 function ScreenOverlay({ children, bottom }: { children: React.ReactNode; bottom: number }) {
@@ -76,6 +107,7 @@ export function Screen({
   const { insets, online, showHeader, showFooter, pad } = useShell(shell);
   const { immersive } = shell;
   const overlayBottom = useOverlayBottom(insets.bottom);
+  const { scrolled, onScroll } = useScrolledPast(FAB_SHOW_AFTER_PX);
   return (
     <View className={["flex-1 bg-background", className ?? ""].join(" ")} style={immersive ? { paddingTop: insets.top } : null}>
       {immersive && <Stack.Screen options={IMMERSIVE_OPTIONS} />}
@@ -86,6 +118,8 @@ export function Screen({
         <ScrollView
           className="flex-1"
           keyboardShouldPersistTaps="handled"
+          onScroll={onScroll}
+          scrollEventThrottle={64}
           refreshControl={
             onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} /> : undefined
           }
@@ -97,6 +131,9 @@ export function Screen({
           {showFooter && <AppFooter />}
         </ScrollView>
       )}
+      {/* 복습 FAB 은 overlay 슬롯보다 **먼저** 그린다 — 되돌리기 토스트·선택 바가 겹칠 때는
+          그쪽이 위에 있어야 한다(방금 한 동작을 취소하는 자리가 더 급하다). */}
+      {!immersive && <ScreenOverlay bottom={overlayBottom}><ReviewFab visible={scrolled} /></ScreenOverlay>}
       {overlay != null && <ScreenOverlay bottom={overlayBottom}>{overlay}</ScreenOverlay>}
     </View>
   );
@@ -111,7 +148,9 @@ export function ScreenList<T>({
   ListFooterComponent,
   ...props
 }: ShellProps & FlatListProps<T>) {
-  const { online, showHeader, showFooter, pad } = useShell(props);
+  const { insets, online, showHeader, showFooter, pad } = useShell(props);
+  const overlayBottom = useOverlayBottom(insets.bottom);
+  const { scrolled, onScroll } = useScrolledPast(FAB_SHOW_AFTER_PX);
   return (
     <View className={["flex-1 bg-background", className ?? ""].join(" ")}>
       {showHeader && <AppHeader />}
@@ -119,6 +158,8 @@ export function ScreenList<T>({
         {...props}
         className="flex-1"
         keyboardShouldPersistTaps="handled"
+        onScroll={onScroll}
+        scrollEventThrottle={64}
         contentContainerClassName={["w-full max-w-[640px] self-center", pad, contentClassName ?? ""].join(" ")}
         ListHeaderComponent={
           <>
@@ -134,6 +175,11 @@ export function ScreenList<T>({
         }
         refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} /> : undefined}
       />
+      {!props.immersive && (
+        <ScreenOverlay bottom={overlayBottom}>
+          <ReviewFab visible={scrolled} />
+        </ScreenOverlay>
+      )}
     </View>
   );
 }
