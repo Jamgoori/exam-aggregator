@@ -129,6 +129,9 @@ export function SingleQuestionView({
   error,
   zoom = 1,
   onPinchZoom,
+  caption,
+  emptyImagesText,
+  submitSlot,
 }: {
   questionIndex: number;
   // 세트문제는 화면 하나에 여러 문제가 같이 보이므로 답 선택 줄도 번호 수만큼(보통 1개).
@@ -149,6 +152,13 @@ export function SingleQuestionView({
   error?: string | null;
   zoom?: number;
   onPinchZoom?: (factor: number) => void;
+  // 문제 상자 아래 한 줄 캡션(복습 솔버의 "출처와 정답은 채점 후에 공개돼요.").
+  caption?: string;
+  // 이미지가 아직 없을 때 문구(복습 솔버는 웹과 같은 "이 문제의 이미지가 없어요.").
+  emptyImagesText?: string;
+  // 하단 이동줄 아래에 둘 제출 영역(복습 솔버의 큰 제출 버튼·"지금 채점" 링크). 주면 마지막
+  // 문항의 체크 아이콘 자리는 웹처럼 빈 칸(w-[38px])이 된다.
+  submitSlot?: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   const firstNumber = questions[0]?.number ?? questionIndex + 1;
@@ -323,7 +333,7 @@ export function SingleQuestionView({
                   >
                     {images.length === 0 ? (
                       <AppText variant="sm" className="pt-24 text-center text-zinc-400 dark:text-zinc-600">
-                        아직 이 문제의 이미지가 등록되지 않았어요.
+                        {emptyImagesText ?? "아직 이 문제의 이미지가 등록되지 않았어요."}
                       </AppText>
                     ) : (
                       images.map((src, i) => (
@@ -348,6 +358,15 @@ export function SingleQuestionView({
                   </View>
                 </GestureDetector>
               </Animated.View>
+            )}
+            {caption && (
+              <AppText
+                variant="xs"
+                className="mt-3 w-full max-w-2xl self-center text-center text-zinc-400 dark:text-zinc-600"
+                pretty
+              >
+                {caption}
+              </AppText>
             )}
           </ScrollView>
         </GestureDetector>
@@ -423,7 +442,10 @@ export function SingleQuestionView({
           </View>
 
           {/* 마지막 문제에서는 "다음" 대신 제출 버튼. 채점이 끝난 뒤에는 비활성 다음 버튼. */}
-          {isLast && !submitted ? (
+          {isLast && !submitted && submitSlot ? (
+            // 복습 솔버: 제출은 아래 submitSlot 이 맡고 여기는 웹처럼 자리만 비운다.
+            <View className="w-[38px] shrink-0" />
+          ) : isLast && !submitted ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="제출하고 채점"
@@ -453,6 +475,7 @@ export function SingleQuestionView({
             </Pressable>
           )}
         </View>
+        {submitSlot}
       </View>
     </View>
   );
