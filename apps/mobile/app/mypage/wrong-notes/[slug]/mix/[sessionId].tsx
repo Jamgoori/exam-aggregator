@@ -16,6 +16,7 @@ import {
 } from "../../../../../src/components/wrong-notes/wrong-note-mark-actions";
 import { useAuth } from "../../../../../src/providers/auth-provider";
 import { useMixSessionNote } from "../../../../../src/queries/wrong-notes";
+import { themedIcon } from "../../../../../src/theme/icons";
 
 // `/mypage/wrong-notes/[slug]/mix/[sessionId]`(설계서 §5 행, 웹 .../mix/[sessionId]/page.tsx 1:1) —
 // 기출 섞어풀기 한 세션의 오답노트("9월 5일 섞어풀기"). 과목 오답노트의 문제지 카드와 같은
@@ -25,6 +26,8 @@ import { useMixSessionNote } from "../../../../../src/queries/wrong-notes";
 // 데이터는 EF `review-history { sessionId, view: "mix-note" }` 하나(§6.7 #10) — review_sessions·
 // review_session_items 는 RLS 정책이 없어 클라이언트가 직접 못 읽는다. 정답·해설 본문이 실리므로
 // 메모리 전용 캐시다(queries/wrong-notes.ts useMixSessionNote).
+const ShuffleIcon = themedIcon(Shuffle);
+
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 }
@@ -75,7 +78,8 @@ function MixSessionNoteBody({
   note: ReviewHistoryMixNote;
   deletions: WrongNoteDeletions<string>;
 }) {
-  const { isPremium } = useAuth();
+  // 멤버십을 아직 모르는 동안에는 업셀을 그리지 않는다(프리미엄 회원에게 한 번 번쩍인다).
+  const { isPremium, membershipLoading } = useAuth();
   const { session, subject, questions, wrongCount, resolvedCount } = note;
   const pct = session.total > 0 ? Math.round((session.score / session.total) * 100) : 0;
   const when = new Date(session.createdAt).toLocaleString("ko-KR", {
@@ -110,14 +114,14 @@ function MixSessionNoteBody({
             </AppText>
           </View>
           <View className="flex-row items-center gap-1 rounded bg-blue-100 px-2 py-0.5 dark:bg-blue-950/40">
-            <Shuffle size={11} color="#1d4ed8" />
+            <ShuffleIcon size={11} colorClassName="text-blue-700 dark:text-blue-300" />
             <AppText variant="xs" weight="bold" allowFontScaling={false} className="text-blue-700 dark:text-blue-300">
               기출 섞어풀기
             </AppText>
           </View>
         </View>
 
-        <AppText variant="2xl" weight="semibold" className="leading-snug" pretty>
+        <AppText variant="2xl" weight="semibold" accessibilityRole="header" className="leading-snug" pretty>
           {session.title}
         </AppText>
         <AppText variant="xs" className="text-zinc-500 dark:text-zinc-500">
@@ -148,7 +152,7 @@ function MixSessionNoteBody({
         deletions={deletions}
       />
 
-      {!isPremium && wrongCount > 0 && (
+      {!membershipLoading && !isPremium && wrongCount > 0 && (
         <MembershipUpsell
           title="해설까지 보면서 복습하려면"
           description="멤버십은 문항별 해설을 볼 수 있고, 언제 다시 볼지 계산해주는 복습 일정까지 이어져요."

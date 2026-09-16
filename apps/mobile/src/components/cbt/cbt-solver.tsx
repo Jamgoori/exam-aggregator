@@ -4,6 +4,7 @@ import { ChevronLeft, Clock, Eraser, Hand, PanelRightClose, PenLine } from "luci
 import { useCallback } from "react";
 import { Pressable, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
 import { AppText } from "../app-text";
 import { ReportQuestionButton } from "../papers/report-question-button";
 import { Sheet } from "../sheet";
@@ -14,7 +15,7 @@ import { useExitGuard } from "./exit-guard";
 import { FullView } from "./full-view";
 import type { DrawTool } from "./ink-layer";
 import { OmrPanel } from "./omr-panel";
-import { useOmrSplit } from "./omr-split";
+import { OMR_DIVIDER_WIDTH, useOmrSplit } from "./omr-split";
 import { SingleQuestionView, useContentZoom } from "./single-question-view";
 import { useCbtState } from "./use-cbt-state";
 import { ViewModeTabs } from "./view-mode-tabs";
@@ -294,18 +295,22 @@ export function CbtSolver({
         {sideOmr && (
           <>
             <GestureDetector gesture={omrSplit.gesture}>
-              {/* 웹 구분선의 `active:bg-zinc-200` 은 미이식 — 제스처로 끄는 View 라 눌림 상태가 없다. */}
+              {/* 웹 구분선의 `active:bg-zinc-200` 은 미이식 — 제스처로 끄는 View 라 눌림 상태가 없다.
+                  잡는 폭은 OMR_DIVIDER_WIDTH(24), 보이는 선은 그 안의 2px 자국 하나(웹과 같다). */}
               <View
                 accessibilityRole="adjustable"
                 accessibilityLabel="시험지와 답안 입력 폭 조절"
                 accessibilityValue={{ min: 30, max: 70, now: Math.round(omrSplit.ratio * 100) }}
-                className="w-3 shrink-0 items-center justify-center bg-zinc-100 dark:bg-zinc-800"
+                style={{ width: OMR_DIVIDER_WIDTH }}
+                className="shrink-0 items-center justify-center bg-zinc-100 dark:bg-zinc-800"
               >
                 <View className="h-10 w-0.5 rounded-full bg-zinc-400 dark:bg-zinc-500" />
               </View>
             </GestureDetector>
-            <View
-              style={{ width: `${omrSplit.ratio * 100}%` }}
+            {/* 끄는 동안의 폭은 공유값 → useAnimatedStyle 로만 바뀐다(omr-split.ts 머리말):
+                React 상태로 두면 프레임마다 이 화면과 Skia 필기 캔버스가 통째로 다시 그려졌다. */}
+            <Animated.View
+              style={omrSplit.panelStyle}
               className="min-h-0 shrink-0 border-l border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
             >
               <View className="shrink-0 flex-row items-center justify-between gap-1 border-b border-zinc-100 px-2 py-1.5 dark:border-zinc-700">
@@ -342,7 +347,7 @@ export function CbtSolver({
                 error={s.error}
                 resultByQuestion={s.result ? s.resultByQuestion : null}
               />
-            </View>
+            </Animated.View>
           </>
         )}
       </View>

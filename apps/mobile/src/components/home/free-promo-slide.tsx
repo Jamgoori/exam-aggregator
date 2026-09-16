@@ -6,6 +6,7 @@ import { Pressable, View } from "react-native";
 import { markSeenThisSession, seenThisSession, type HomePopupControls, type HomePopupSource } from "./home-popup";
 import { AppText } from "../app-text";
 import { kvGet, kvSet } from "../../lib/kv";
+import { themedIcon } from "../../theme/icons";
 
 // 홈에 뜨는 "전면 무료" 이벤트 팝업 — 비회원 전용, 홈 팝업 슬라이드의 첫 장.
 // 웹 apps/web/src/components/free-promo-slide.tsx 이식.
@@ -22,6 +23,10 @@ import { kvGet, kvSet } from "../../lib/kv";
 // CTA 는 웹과 같이 `/signup` 을 가리킨다. 앱에도 가입 화면이 따로 있는 건 아니고(소셜 로그인
 // = 가입), `app/signup.tsx` 가 웹 app/signup/page.tsx 처럼 `/login` 으로 넘기는 리다이렉트다
 // (§5 `/signup` 행) — 웹과 같은 주소를 쓰면 딥링크·문구가 한 매핑으로 남는다.
+const BrainCircuitIcon = themedIcon(BrainCircuit);
+const NotebookPenIcon = themedIcon(NotebookPen);
+const FileCheck2Icon = themedIcon(FileCheck2);
+
 const HIDDEN_KEY = "free-promo-hidden-day-v1";
 const SHOWN_KEY = "free-promo-shown-v1";
 
@@ -85,19 +90,19 @@ function FreePromoBody() {
       {/* 무엇이 열리는지. 이벤트 문구만 있고 내용이 없으면 "무료로 뭘 준다는 거지"에서 멈춘다. */}
       <View className="gap-2 px-5 pt-4 pb-4">
         <Perk
-          icon={<BrainCircuit size={16} color="#7c3aed" />}
+          Icon={BrainCircuitIcon}
           tone="violet"
           title="AI 약점 진단"
           desc="내가 틀린 문항을 개념 단위로 모아 약한 곳과 극복법까지 짚어줘요."
         />
         <Perk
-          icon={<NotebookPen size={16} color="#2563eb" />}
+          Icon={NotebookPenIcon}
           tone="blue"
           title="오답노트 · 오늘의 복습"
           desc="틀린 문제를 잊을 때쯤 다시 꺼내줘요. 해설도 그 자리에서 바로."
         />
         <Perk
-          icon={<FileCheck2 size={16} color="#059669" />}
+          Icon={FileCheck2Icon}
           tone="emerald"
           title="2026년 최신 해설 배포 중"
           desc="올해 시험까지 문항별 해설을 계속 올리고 있어요."
@@ -108,20 +113,22 @@ function FreePromoBody() {
   );
 }
 
+// 웹 TONES 와 같은 표 — 배경과 **아이콘 색**이 한 쌍이고 둘 다 다크 변형을 가진다. 아이콘 색을
+// 고정 hex 로 두면 다크에서 어두운 칩 배경 위에 어두운 아이콘이 얹혀 사라진다.
 const TONES = {
-  violet: "bg-violet-50 dark:bg-violet-950/40",
-  blue: "bg-blue-50 dark:bg-blue-950/40",
-  emerald: "bg-emerald-50 dark:bg-emerald-950/40",
+  violet: { box: "bg-violet-50 dark:bg-violet-950/40", icon: "text-violet-600 dark:text-violet-300" },
+  blue: { box: "bg-blue-50 dark:bg-blue-950/40", icon: "text-blue-600 dark:text-blue-300" },
+  emerald: { box: "bg-emerald-50 dark:bg-emerald-950/40", icon: "text-emerald-600 dark:text-emerald-300" },
 } as const;
 
 function Perk({
-  icon,
+  Icon,
   tone,
   title,
   desc,
   badge,
 }: {
-  icon: React.ReactNode;
+  Icon: ReturnType<typeof themedIcon>;
   tone: keyof typeof TONES;
   title: string;
   desc: string;
@@ -129,8 +136,8 @@ function Perk({
 }) {
   return (
     <View className="flex-row gap-3 rounded-xl bg-zinc-50 px-3 py-2.5 dark:bg-zinc-800/50">
-      <View className={["mt-0.5 h-8 w-8 shrink-0 items-center justify-center rounded-lg", TONES[tone]].join(" ")}>
-        {icon}
+      <View className={["mt-0.5 h-8 w-8 shrink-0 items-center justify-center rounded-lg", TONES[tone].box].join(" ")}>
+        <Icon size={16} colorClassName={TONES[tone].icon} />
       </View>
       <View className="min-w-0 flex-1">
         <View className="flex-row items-center gap-1.5">

@@ -34,20 +34,19 @@ const PAGE_SIZE = 24;
 
 type Params = { exam: string; year?: string; page?: string };
 
-function decodeSlug(raw: string | string[] | undefined): string {
+// 슬러그는 한글이 섞여 있어 링크를 만들 때는 반드시 encodeURIComponent 한다(lib/exam-index.ts
+// examHref). 읽을 때는 **디코드하지 않는다** — expo-router 가 경로 파라미터를 이미
+// safelyDecodeURIComponent 로 풀어 넘겨준다(expo-router 57 fork/getStateFromPath.js). 여기서 한 번
+// 더 풀면 슬러그에 `%` 가 들어 있는 경우("…%20…" 같은 글자 그대로의 문자열)를 두 번 디코드해
+// 엉뚱한 값이 되고 404 로 떨어진다.
+function routeSlug(raw: string | string[] | undefined): string {
   const value = Array.isArray(raw) ? raw[0] : raw;
-  if (!value) return "";
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    // 잘못 인코딩된 딥링크. 원문 그대로 찾아보고 없으면 아래에서 404 로 떨어진다.
-    return value;
-  }
+  return value ?? "";
 }
 
 export default function ExamComboRoute() {
   const params = useLocalSearchParams<Params>();
-  const slug = decodeSlug(params.exam);
+  const slug = routeSlug(params.exam);
   const { query, combo } = useExamCombo(slug);
 
   if (combo === undefined) {

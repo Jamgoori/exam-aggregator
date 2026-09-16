@@ -1,5 +1,4 @@
 import { examTypeFilledColor, levelColor, type ReviewHistoryMixNoteQuestion } from "@gongmoa/core";
-import { router, type Href } from "expo-router";
 import { Shuffle } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import { View } from "react-native";
@@ -9,6 +8,8 @@ import { WrongNoteLegend, WrongNoteQuestionCard, type WrongNoteCardRow } from ".
 import { WrongNoteMarkActions, type WrongNoteDeletions } from "./wrong-note-mark-actions";
 import { AppText } from "../app-text";
 import { Button } from "../button";
+import { openSubjectMix } from "../../lib/mix-href";
+import { themedIcon } from "../../theme/icons";
 
 // "9월 5일 섞어풀기" 기록 화면 본문(웹 mix-session-view.tsx, 설계서 §4.5 #25). 기본은 그 세션에서
 // 틀린 문항만(오답노트답게), 칩으로 전체 문항까지 볼 수 있다. 문항 카드는 과목 오답노트와 같은
@@ -16,6 +17,8 @@ import { Button } from "../button";
 //
 // 정답·해설은 EF review-history { view:"mix-note" } 응답에 이미 실려 온다(프리미엄이면 본문,
 // 아니면 explanationLocked) — 이 화면은 따로 묻지 않는다. 그 응답은 메모리 전용 쿼리다(§6.5).
+const ShuffleIcon = themedIcon(Shuffle);
+
 type Filter = "wrong" | "all";
 
 function toRow(q: ReviewHistoryMixNoteQuestion): WrongNoteCardRow {
@@ -83,9 +86,9 @@ export function MixSessionView({
       <Button
         variant="tinted"
         label="새로 섞어풀기"
-        icon={<Shuffle size={16} color="#1d4ed8" />}
+        icon={<ShuffleIcon size={16} colorClassName="text-blue-700 dark:text-blue-400" />}
         accessibilityRole="link"
-        onPress={() => router.push(`/subjects/${subjectSlug}/mix` as Href)}
+        onPress={() => openSubjectMix(subjectSlug)}
         className="w-full py-3"
         textClassName="text-sm font-bold"
       />

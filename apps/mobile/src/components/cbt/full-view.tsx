@@ -283,17 +283,27 @@ export function FullView({
     });
 
   // ── 필기(상자 위 Pan 이 포인터를 잡는다 — 문제별 보기와 같은 규칙) ──────────────
+  //
+  // 두 번째 손가락이 닿으면 `maxPointers(1)` 이 이 Pan 을 **취소**하고(RNGH PanGestureHandler:
+  // ACTION_POINTER_DOWN 에서 pointerCount > maxPointers 면 active 는 cancel, 아니면 fail),
+  // 핀치가 이어받는다. 이때 `simultaneousWithExternalGesture(pinch)` 가 꼭 필요하다 — 첫
+  // 손가락에 draw 가 활성화되는 순간 orchestrator 의 makeActive 가 "동시 실행으로 선언되지
+  // 않은" 핀치를 먼저 취소해 버려서, 나중에 draw 가 취소돼도 핀치가 살아나지 못한다.
+  //
+  // (제스처 콜백에서 `state.fail()` 을 부르지 않는다: `runOnJS(true)` 라 콜백이 RN 런타임에서
+  //  도는데 Reanimated 4 의 setGestureState 는 워클릿 런타임이 아니면 경고만 찍고 돌아간다
+  //  (platformFunctions/setGestureState.ts) — 손가락이 닿을 때마다 콘솔 경고만 났다.)
   const draw = Gesture.Pan()
     .enabled(tool !== "move" && ready)
     .minDistance(0)
     .maxPointers(1)
     .runOnJS(true)
-    .onTouchesDown((e, state) => {
+    .simultaneousWithExternalGesture(pinch)
+    .onTouchesDown((e) => {
       // 두 번째 손가락이 닿는 순간부터 핀치로 취급하고, 진행 중이던 획은 버린다.
       if (e.numberOfTouches > 1) {
         liveStroke.value = null;
         setLive(null);
-        state.fail();
       }
     })
     .onBegin((e) => {

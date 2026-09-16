@@ -5,7 +5,6 @@ import { Hero } from "../../src/components/home/hero";
 import { HomePopupSlider } from "../../src/components/home/home-popup-slider";
 import { PastQuestions } from "../../src/components/home/past-questions";
 import { TopBanner } from "../../src/components/home/top-banner";
-import { loginHref } from "../../src/components/login-link";
 import { Screen } from "../../src/components/screen";
 import { useAuth } from "../../src/providers/auth-provider";
 import { useCatalog } from "../../src/queries/catalog";
@@ -26,12 +25,11 @@ export default function HomeScreen() {
 
   return (
     <Screen padded={false} refreshing={catalog.isRefetching} onRefresh={() => void catalog.refetch()}>
-      {/* 홈 팝업 슬라이드(§4.5 #30). 출석 광고가 가는 곳: 회원은 출석 현황, 비회원은 로그인
-          (웹은 /signup 인데 앱에는 가입 화면이 따로 없다 — 소셜 로그인이 곧 가입이다). */}
-      <HomePopupSlider
-        attendanceHref={userId ? "/mypage?tab=attendance" : loginHref("/mypage?tab=attendance")}
-        signedIn={!!userId}
-      />
+      {/* 홈 팝업 슬라이드(§4.5 #30). 출석 광고가 가는 곳: 회원은 출석 현황, 비회원은 **가입**
+          (웹 app/page.tsx 와 같은 `/signup`). 앱에 가입 화면이 따로 있는 건 아니고 app/signup.tsx
+          가 웹처럼 `/login` 으로 넘기는 리다이렉트지만(§5 `/signup` 행), 주소를 웹과 같게 두면
+          딥링크·문구가 한 매핑으로 남는다 — 전면 무료 팝업의 CTA 도 같은 `/signup` 을 쓴다. */}
+      <HomePopupSlider attendanceHref={userId ? "/mypage?tab=attendance" : "/signup"} signedIn={!!userId} />
       <TopBanner freeForAll={freeForAll} />
       <Hero />
       <PastQuestions />

@@ -185,9 +185,7 @@ export function SubjectWrongNoteQuestions({
   );
   const answers = useOwnWrongAnswers(answerItems);
 
-  // 필터를 통과한 목록. 해설 요청·카드가 모두 이 목록 기준이다 — 웹은 서버 렌더 한 번에
-  // 과목 전체 해설을 붙여 오지만 앱은 EF 한 요청 = 문제지 하나라, 화면에 실제로 그리는
-  // 문제지에만 묻는다(설계서 §6.2 "오답노트는 화면에 보이는 그룹만"과 같은 판단).
+  // 필터를 통과한 목록 — 카드가 이 목록 기준이다(해설 요청은 아래 explanationRequests 참고).
   const filtered = useMemo(() => {
     let list = visible;
     if (hideResolved) list = list.filter((q) => !q.resolved);
@@ -196,15 +194,20 @@ export function SubjectWrongNoteQuestions({
     return list;
   }, [visible, hideResolved, onlyRepeated, onlyPinned, pinnedKeys]);
 
+  // 해설 요청은 EF 한 번 = 문제지 하나라, **필터 전** 전체 목록으로 만든다. 필터·정렬·삭제는
+  // 화면에 무엇을 그릴지만 정하고 요청은 건드리지 않는다 — 걸러진 목록으로 만들면 체크 하나에
+  // 문제지마다 새 요청이 나갔다(쿼리 키도 이제 문제지 단위라 같은 문제지면 같은 키다).
+  // `questions` 는 이미 (문제지 제목, 번호) 순이라 기본 정렬의 화면 순서와 같고, 훅이 그
+  // 순서대로 조금씩 열어 위쪽 카드부터 채운다(queries/explanations.ts EXPLANATION_PAPER_BATCH).
   const explanationRequests = useMemo(() => {
     const byPaper = new Map<string, number[]>();
-    for (const q of filtered) {
-      const list = byPaper.get(q.paperId) ?? [];
-      list.push(q.questionNumber);
-      byPaper.set(q.paperId, list);
+    for (const q of questions) {
+      const list = byPaper.get(q.paperId);
+      if (list) list.push(q.questionNumber);
+      else byPaper.set(q.paperId, [q.questionNumber]);
     }
     return [...byPaper.entries()].map(([paperId, questionNumbers]) => ({ paperId, questionNumbers }));
-  }, [filtered]);
+  }, [questions]);
   const explanations = useWrongNoteExplanationsByPaper(explanationRequests);
 
   function toRow(q: SubjectWrongNoteQuestion): WrongNoteCardRow {
@@ -430,12 +433,20 @@ export function SubjectWrongNoteQuestions({
                     );
                   }}
                 />
-                <View className="divide-y divide-zinc-100 rounded-xl border border-zinc-100 dark:divide-zinc-700 dark:border-zinc-700/70">
-                  {card.source.map((q) => {
+                {/* 웹 divide-y — Uniwind 는 자식 선택자를 버리므로 두 번째 항목부터 border-t 로
+                    그린다(comments-section.tsx 와 같은 처리). */}
+                <View className="rounded-xl border border-zinc-100 dark:border-zinc-700/70">
+                  {card.source.map((q, rowIndex) => {
                     const key = qKey(q);
                     const checked = selected.has(key);
                     return (
-                      <View key={q.questionNumber} className="flex-row items-start gap-1">
+                      <View
+                        key={q.questionNumber}
+                        className={[
+                          "flex-row items-start gap-1",
+                          rowIndex > 0 ? "border-t border-zinc-100 dark:border-zinc-700" : "",
+                        ].join(" ")}
+                      >
                         <Pressable
                           accessibilityRole="checkbox"
                           accessibilityState={{ checked }}

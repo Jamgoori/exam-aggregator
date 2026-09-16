@@ -19,6 +19,7 @@ import { paperCbtHref } from "../../../../src/lib/paper-href";
 import { useAuth } from "../../../../src/providers/auth-provider";
 import { usePaperRoundComparisons } from "../../../../src/queries/papers";
 import { usePaperWrongNote, type PaperWrongNote } from "../../../../src/queries/wrong-notes";
+import { themedIcon } from "../../../../src/theme/icons";
 
 // `/mypage/wrong-notes/[slug]/[paperId]`(설계서 §5 행, 웹 .../[paperId]/page.tsx 1:1) — 문제지
 // 하나의 오답노트: 회독별 점수 기록(스트립)과 틀린 문제·해설을 한 화면에서 본다. 기본은 모든
@@ -27,6 +28,8 @@ import { usePaperWrongNote, type PaperWrongNote } from "../../../../src/queries/
 // 오답노트는 무료다(회차 기록·틀린 문항·정답 표시·정리·다시 풀기). 멤버십은 두 가지에만 쓴다:
 // 해설 본문(explanations-get context:"wrong-note")과 회독별 다른 회원 평균(§8.3) — 둘 다
 // 무료 회원에게는 잠금 자리가 대신 들어간다.
+const MonitorIcon = themedIcon(Monitor);
+
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 }
@@ -76,7 +79,10 @@ function PaperWrongNoteBody({
   note: PaperWrongNote;
   deletions: WrongNoteDeletions<number>;
 }) {
-  const { isPremium } = useAuth();
+  // membership-get 이 아직 안 돌아왔을 때 isPremium 은 false 다 — 그대로 그리면 프리미엄
+  // 회원이 화면을 열 때마다 잠금·업셀이 한 번 번쩍인다. 멤버십을 아는 순간까지는 그 자리를
+  // 비워 둔다(app/membership/index.tsx 와 같은 판단).
+  const { isPremium, membershipLoading } = useAuth();
   const { paper, rounds, questions, unresolvedCount } = note;
   const subject = paper.subjects;
   const self = `/mypage/wrong-notes/${slug}/${paper.id}`;
@@ -127,7 +133,7 @@ function PaperWrongNoteBody({
         </View>
 
         <View className="flex-row flex-wrap items-center justify-between gap-3">
-          <AppText variant="2xl" weight="semibold" className="min-w-0 flex-1 leading-snug" pretty>
+          <AppText variant="2xl" weight="semibold" accessibilityRole="header" className="min-w-0 flex-1 leading-snug" pretty>
             {applyExamTypeSubjectName(paper.title)}
           </AppText>
           <Pressable
@@ -136,7 +142,7 @@ function PaperWrongNoteBody({
             onPress={() => router.push(paperCbtHref(paper) as Href)}
             className="shrink-0 flex-row items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 active:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40"
           >
-            <Monitor size={12} color="#1d4ed8" />
+            <MonitorIcon size={12} colorClassName="text-blue-700 dark:text-blue-400" />
             <AppText variant="xs" weight="medium" className="text-blue-700 dark:text-blue-400">
               다시 풀기
             </AppText>
@@ -144,6 +150,9 @@ function PaperWrongNoteBody({
         </View>
       </View>
 
+      {/* premium 이 멤버십을 모르는 동안 프리미엄 쪽인 이유: 회독 평균 비교는 비교 데이터가
+          없으면 아무것도 그리지 않으므로(round-average-compare.tsx) 그 자리가 비어 있다가
+          채워질 뿐이고, false 로 두면 잠금 링크가 한 번 번쩍인 뒤 표로 바뀐다. */}
       <WrongNotePaperView
         paperId={paper.id}
         questions={questions}
@@ -151,11 +160,11 @@ function PaperWrongNoteBody({
         unresolvedCount={unresolvedCount}
         lockNext={self}
         roundComparisons={comparisons.data ?? []}
-        premium={isPremium}
+        premium={isPremium || membershipLoading}
         deletions={deletions}
       />
 
-      {!isPremium && (
+      {!membershipLoading && !isPremium && (
         <MembershipUpsell
           title="해설까지 보면서 복습하려면"
           description="멤버십은 문항별 해설과 회독별 다른 회원 평균 점수를 볼 수 있고, 언제 다시 볼지 계산해주는 복습 일정까지 이어져요."

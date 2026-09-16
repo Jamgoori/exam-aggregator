@@ -12,6 +12,8 @@ import { Pressable, View } from "react-native";
 import { markSeenThisSession, seenThisSession, type HomePopupControls, type HomePopupSource } from "./home-popup";
 import { AppText } from "../app-text";
 import { kvGet, kvSet } from "../../lib/kv";
+import { useIsDark } from "../../theme";
+import { themedIcon } from "../../theme/icons";
 
 // 홈에 들어왔을 때 뜨는 "아직 개발 중" 안내. 웹 apps/web/src/components/beta-notice-slide.tsx 이식.
 //
@@ -24,6 +26,17 @@ import { kvGet, kvSet } from "../../lib/kv";
 //   - 앱 실행(방문)당 한 번 — 메모리(웹 sessionStorage 파리티).
 //   - "다음부터 보지 않기" 를 누르면 영영 안 뜬다 — kv `beta-notice-hidden-v1` = "1"(영구).
 // 문구를 바꿔서 이미 끈 사람에게도 다시 알리고 싶으면 아래 키의 버전을 올린다.
+
+// 아이콘 색은 웹 클래스 그대로(다크 대응 포함). 고정 hex 로 두면 다크에서 어두운 판 위에
+// 어두운 아이콘이 얹혀 사라진다(설계서 §4.1 — 웹 dark: 변형과 1:1).
+const FileTextIcon = themedIcon(FileText);
+const ReportIcon = themedIcon(MessageSquareWarning);
+const SparklesIcon = themedIcon(Sparkles);
+const BookOpenIcon = themedIcon(BookOpen);
+const CalendarCheckIcon = themedIcon(CalendarCheck);
+// 에메랄드 판 안의 아이콘(웹은 부모 p/ul 의 text-emerald-900 dark:text-emerald-200 을 상속).
+const EMERALD_ICON = "text-emerald-900 dark:text-emerald-200";
+
 const HIDDEN_KEY = "beta-notice-hidden-v1";
 const SHOWN_KEY = "beta-notice-shown-v1";
 
@@ -47,11 +60,25 @@ export const betaNoticeSource: HomePopupSource = {
   },
 };
 
+// 머리말 그라데이션(웹 `from-blue-50/80 to-transparent dark:from-blue-950/30`).
+// LinearGradient 는 className 을 못 받으므로 테마별 색을 직접 고른다 — 라이트 고정으로 두면
+// 다크에서 `text-foreground` 제목(거의 흰색)이 밝은 blue-50 위에 얹혀 읽히지 않는다.
+const BETA_HEADER_GRADIENT = {
+  // blue-50 #eff6ff · 80% / blue-950 #172554 · 30%
+  light: ["rgba(239,246,255,0.8)", "rgba(239,246,255,0)"] as const,
+  dark: ["rgba(23,37,84,0.3)", "rgba(23,37,84,0)"] as const,
+};
+
 function BetaNoticeBody() {
+  const dark = useIsDark();
   return (
     <>
       {/* pr-12 — 판 오른쪽 위의 닫기(X)가 이 자리에 얹힌다. */}
-      <LinearGradient colors={["rgba(239,246,255,0.8)", "rgba(239,246,255,0)"]} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}>
+      <LinearGradient
+        colors={dark ? BETA_HEADER_GRADIENT.dark : BETA_HEADER_GRADIENT.light}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+      >
         <View className="flex-row items-center gap-3 border-b border-zinc-100 px-5 pt-4 pr-12 pb-4 dark:border-zinc-800">
           <View className="h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-600">
             <Hammer size={17} color="#ffffff" />
@@ -84,7 +111,7 @@ function BetaNoticeBody() {
             이 말이 없으면 찾던 시험지가 없을 때 그대로 나가고 다시 안 온다. */}
         <View className="mt-3 flex-row gap-2 rounded-xl bg-zinc-50 px-3 py-2.5 dark:bg-zinc-800/50">
           <View className="mt-1">
-            <FileText size={14} color="#3b82f6" />
+            <FileTextIcon size={14} colorClassName="text-blue-500 dark:text-blue-400" />
           </View>
           <AppText variant="13" className="min-w-0 flex-1 text-zinc-600 dark:text-zinc-300" pretty>
             <B>기출문제와 해설도 계속 올라오는 중</B>이에요. 지금 안 보이는 시험지나 해설도 차례로 채워지고 있으니 조금만 기다려 주세요.
@@ -96,7 +123,7 @@ function BetaNoticeBody() {
             이상한 걸 발견하면 문항 아래{" "}
           </AppText>
           <View className="flex-row items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 dark:bg-zinc-800">
-            <MessageSquareWarning size={11} color="#52525c" />
+            <ReportIcon size={11} colorClassName="text-zinc-600 dark:text-zinc-300" />
             <AppText variant="13" weight="semibold" className="text-zinc-600 dark:text-zinc-300">
               오류 신고
             </AppText>
@@ -110,7 +137,7 @@ function BetaNoticeBody() {
             잠긴 기능을 만나기 전에 이 문장을 봐야 의미가 있다. */}
         <View className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3.5 dark:border-emerald-900/60 dark:bg-emerald-950/25">
           <View className="flex-row items-center gap-1.5">
-            <Sparkles size={15} color="#059669" />
+            <SparklesIcon size={15} colorClassName={EMERALD_ICON} />
             <AppText variant="sm" weight="bold" className="min-w-0 flex-1 text-emerald-900 dark:text-emerald-200" pretty>
               멤버십 기능, 지금은 전부 무료예요
             </AppText>
@@ -130,9 +157,9 @@ function BetaNoticeBody() {
             )}
           </AppText>
           <View className="mt-2.5 gap-1.5">
-            <BetaPerk icon={<BookOpen size={13} color="#059669" />}>문제지 해설 제한 없이 보기</BetaPerk>
-            <BetaPerk icon={<CalendarCheck size={13} color="#059669" />}>오늘의 복습 — 잊을 때쯤 다시 풀기</BetaPerk>
-            <BetaPerk icon={<Sparkles size={13} color="#059669" />}>오답노트 안에서 바로 해설 보기</BetaPerk>
+            <BetaPerk icon={<BookOpenIcon size={13} colorClassName={EMERALD_ICON} />}>문제지 해설 제한 없이 보기</BetaPerk>
+            <BetaPerk icon={<CalendarCheckIcon size={13} colorClassName={EMERALD_ICON} />}>오늘의 복습 — 잊을 때쯤 다시 풀기</BetaPerk>
+            <BetaPerk icon={<SparklesIcon size={13} colorClassName={EMERALD_ICON} />}>오답노트 안에서 바로 해설 보기</BetaPerk>
           </View>
         </View>
       </View>

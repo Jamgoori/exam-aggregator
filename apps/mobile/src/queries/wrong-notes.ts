@@ -36,7 +36,8 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../providers/auth-provider";
 
 // 오답노트 집계(설계서 §6.2 오답노트 행 — RLS 직접, 30초, 퍼시스트). 키 접두 ['me', u, 'wrong-notes']
-// 는 채점 성공(queries/cbt.ts·queries/review.ts)과 아래 뮤테이션이 통째로 무효화한다.
+// 는 채점 성공(queries/cbt.ts·queries/review.ts)이 통째로 무효화한다(아래 뮤테이션은 아니다 —
+// "뮤테이션(메모·다시 볼 문제·삭제·복구)" 절 머리말).
 // 정답(RPC own_wrong_answers)은 queries/attempts.ts 의 메모리 전용 쿼리, 해설은 queries/explanations.ts
 // 의 wrong-note 모드 — 둘 다 여기 섞지 않는다(디스크 퍼시스트 금지선).
 //
@@ -283,9 +284,15 @@ async function fetchSubjectWrongNoteQuestions(
   const paperList = [...distinctPapers.values()];
 
   // 겹칠 수 있는 문제지가 있을 때만 정답 지문 신호를 묻는다(RPC paper_identity_signals).
+  //
+  // core fetchPaperIdentitySignalsRpc 는 RPC 실패를 던진다(형제인 fetchWrongRates 는 배지 없이
+  // 넘어간다) — 그대로 두면 RPC 가 아직 배포 안 됐거나 권한이 막힌 환경에서 "문제만 모아보기"
+  // 탭 전체가 오류 화면이 된다. 신호는 **중복 시험지 판정 정확도**에만 쓰이고 없으면
+  // representativePaperIds 가 메타데이터만으로 접는 폴백(signals?: 선택 인자)이 이미 있으므로,
+  // 부르는 쪽에서 undefined 로 떨어뜨린다(core 는 건드리지 않는다).
   const signals =
     collidingPaperIds(paperList).length > 0
-      ? await fetchPaperIdentitySignalsRpc(client, paperList)
+      ? await fetchPaperIdentitySignalsRpc(client, paperList).catch(() => undefined)
       : undefined;
   const { repByPaperId, finalGroupSizeByRepId } = representativePaperIds(paperList, signals);
   const repId = (paperId: string) => repByPaperId.get(paperId) ?? paperId;
@@ -516,6 +523,11 @@ export function usePaperWrongNote(paperId: string | null) {
 
 // EF review-history { sessionId, view: "mix-note" }(§6.7 #10). 정답·해설 본문이 실리므로
 // **메모리 전용**(meta.persist:false, gcTime 0 — §6.5, AGENTS.md 금지선).
+//
+// 이미 끝난 세션의 기록이라 화면을 열어 둔 동안에는 서버에서 바뀌지 않는다. 기본 정책
+// (staleTime 0 + 포커스·재접속 재조회)이면 앱을 잠깐 나갔다 오는 것만으로 서버가 buildMixPool
+// 을 다시 돌린다 — 복습 세션 화면(queries/review.ts useReviewSession)과 같은 이유로 막는다.
+// gcTime 0 이라 화면을 나가면 어차피 버려지므로 "다시 들어오면 새로 받는다"는 그대로다.
 export function useMixSessionNote(sessionId: string | null) {
   const { userId } = useAuth();
   return useQuery<ReviewHistoryMixNote>({
@@ -526,7 +538,9 @@ export function useMixSessionNote(sessionId: string | null) {
       return res.mixNote;
     },
     enabled: !!userId && !!sessionId,
-    staleTime: STALE.edge,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     gcTime: 0,
     meta: { persist: false },
   });
@@ -536,20 +550,32 @@ export function useMixSessionNote(sessionId: string | null) {
 //
 // 전부 RLS 직접 쓰기(웹 서버 액션 saveQuestionMemo·setQuestionPinned·deleteWrongNoteQuestion·
 // restoreWrongNoteQuestion 과 같은 upsert). 화면은 낙관적으로 먼저 바꾸고 실패하면 되돌린다
-// (설계서 §4.5 #19 "낙관적 업데이트(onMutate)"). 성공하면 오답노트 집계 키를 무효화한다.
+// (설계서 §4.5 #19 "낙관적 업데이트(onMutate)").
+//
+// **무효화는 화면이 스스로 못 고치는 값에만 건다.** 다시 볼 문제(pinned)·메모는 세 화면
+// (subject-wrong-note-questions.tsx `pinnedKeys`, wrong-note-paper-view.tsx `pinnedNumbers`,
+// mix-session-view.tsx `pinnedKeys`, memo-editor.tsx `memo`)이 전부 로컬 상태로 들고 즉시
+// 반영하므로, 여기서 `['me', u, 'wrong-notes']` 를 통째로 무효화하면 **열려 있는 화면의**
+// 10~20 왕복짜리 집계(fetchSubjectWrongNoteQuestions 등)만 다시 돌 뿐 화면은 한 픽셀도
+// 바뀌지 않는다(게다가 그 응답이 돌아와도 pinned/memo 는 마운트 때 한 번만 읽는 초기값이라
+// 무시된다). 그래서 핀·메모는 무효화하지 않는다.
+//
+// 삭제·복구는 다르다: 남은 오답 수(`unresolved-by-subject`)는 화면 밖(마이페이지 타일·오답노트
+// 탭·학습 리마인더 §7.1)에서 읽히고 로컬로 고칠 수 없다. 다만 목록 자체는 `deletedKeys` 가
+// 이미 감추고 `visibleUnresolved` 가 숫자까지 빼 두므로, 무거운 집계 키까지 건드리지 않고
+// **남은 오답 수 키 하나만** 무효화한다.
 
 const MEMO_MAX = 2000;
 
-function invalidateWrongNotes(queryClient: QueryClient, userId: string | null) {
+function invalidateUnresolvedCount(queryClient: QueryClient, userId: string | null) {
   if (!userId) return;
-  void queryClient.invalidateQueries({ queryKey: ["me", userId, "wrong-notes"] });
+  void queryClient.invalidateQueries({ queryKey: unresolvedBySubjectKey(userId) });
 }
 
 export type MarkTarget = { paperId: string; questionNumber: number };
 
 export function useSaveQuestionMemo() {
   const { userId } = useAuth();
-  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ paperId, questionNumber, memo }: MarkTarget & { memo: string }) => {
       const trimmed = memo.trim().slice(0, MEMO_MAX);
@@ -576,7 +602,6 @@ export function useSaveQuestionMemo() {
       if (error) throw new Error("메모 저장에 실패했어요.");
       return trimmed;
     },
-    onSuccess: () => invalidateWrongNotes(queryClient, userId),
   });
 }
 
@@ -596,11 +621,9 @@ async function upsertMark(userId: string, target: MarkTarget, patch: { pinned?: 
 
 export function useSetQuestionPinned() {
   const { userId } = useAuth();
-  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ pinned, ...target }: MarkTarget & { pinned: boolean }) =>
       upsertMark(userId!, target, { pinned }, "저장에 실패했어요."),
-    onSuccess: () => invalidateWrongNotes(queryClient, userId),
   });
 }
 
@@ -609,7 +632,7 @@ export function useDeleteWrongNoteQuestion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (target: MarkTarget) => upsertMark(userId!, target, { deleted: true }, "삭제에 실패했어요."),
-    onSuccess: () => invalidateWrongNotes(queryClient, userId),
+    onSuccess: () => invalidateUnresolvedCount(queryClient, userId),
   });
 }
 
@@ -618,7 +641,7 @@ export function useRestoreWrongNoteQuestion() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (target: MarkTarget) => upsertMark(userId!, target, { deleted: false }, "되돌리지 못했어요."),
-    onSuccess: () => invalidateWrongNotes(queryClient, userId),
+    onSuccess: () => invalidateUnresolvedCount(queryClient, userId),
   });
 }
 

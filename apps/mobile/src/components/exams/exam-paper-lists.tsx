@@ -73,7 +73,9 @@ function Disclosure({
 
 /** 연도별로 접어 놓은 전체 목록 (공무원 기출 — 연도가 목록을 가르는 축인 시험). */
 export function ExamAllYearsList({ combo, papers }: { combo: ExamCombo; papers: ExamComboPaper[] }) {
-  const [open, setOpen] = useState<number | null>(null);
+  // 웹은 연도마다 독립된 <details> 라 여러 해를 동시에 펼쳐 둘 수 있다(한 해를 펼치면 다른
+  // 해가 접히는 아코디언이 아니다) — 연도끼리 비교하려는 것이 이 목록의 용건이라 Set 으로 둔다.
+  const [open, setOpen] = useState<ReadonlySet<number>>(() => new Set());
   if (papers.length === 0) return null;
   const groups = groupPapersByYear(papers);
 
@@ -90,8 +92,14 @@ export function ExamAllYearsList({ combo, papers }: { combo: ExamCombo; papers: 
           <Disclosure
             key={group.year}
             label={`${group.year}년 ${combo.label} 기출문제 ${group.papers.length}건`}
-            open={open === group.year}
-            onToggle={() => setOpen((prev) => (prev === group.year ? null : group.year))}
+            open={open.has(group.year)}
+            onToggle={() =>
+              setOpen((prev) => {
+                const next = new Set(prev);
+                if (!next.delete(group.year)) next.add(group.year);
+                return next;
+              })
+            }
           >
             {group.papers.map((p) => (
               <PaperLinkRow key={p.id} paper={p} />

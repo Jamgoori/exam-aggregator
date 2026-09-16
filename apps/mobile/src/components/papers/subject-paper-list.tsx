@@ -104,13 +104,8 @@ export function SubjectPaperList({
 
   return (
     <View className={["gap-3", selected.size > 0 ? "pb-24" : ""].join(" ")}>
-      {error && (
-        <View className="rounded-lg bg-red-50 px-3 py-2 dark:bg-red-950/20">
-          <AppText variant="xs" className="text-center text-red-600 dark:text-red-400" pretty>
-            {error}
-          </AppText>
-        </View>
-      )}
+      {/* 웹과 같은 순서: 소제목이 먼저, 오류 문구는 그 아래(웹 subject-paper-list.tsx:72-82).
+          오류가 위로 올라가면 소제목이 밀려 목록의 머리말이 바뀌어 보인다. */}
       {heading && (
         <View className="flex-row items-center justify-between">
           <AppText variant="sm" weight="semibold" className="text-zinc-700 dark:text-zinc-300">
@@ -118,6 +113,13 @@ export function SubjectPaperList({
           </AppText>
           <AppText variant="xs" className="text-zinc-400 dark:text-zinc-600">
             {papers.length}장
+          </AppText>
+        </View>
+      )}
+      {error && (
+        <View className="rounded-lg bg-red-50 px-3 py-2 dark:bg-red-950/20">
+          <AppText variant="xs" className="text-center text-red-600 dark:text-red-400" pretty>
+            {error}
           </AppText>
         </View>
       )}

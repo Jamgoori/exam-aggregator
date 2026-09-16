@@ -1,5 +1,5 @@
 import type { ExplanationsGetResponse, QuestionExplanationContent } from "@gongmoa/core";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { callEdge } from "../lib/edge";
 import { useAuth } from "../providers/auth-provider";
@@ -70,12 +70,20 @@ function normalizeNumbers(questionNumbers: readonly number[]): number[] {
     .slice(0, WRONG_NOTE_EXPLANATION_LIMIT);
 }
 
-function wrongNoteOptions(userId: string | null, paperId: string, numbers: number[]) {
+// 키에 문항 번호를 넣지 않는다. 과목 오답노트는 필터·정렬·삭제가 목록을 계속 바꾸는데,
+// 번호를 키에 넣으면 그때마다 새 키가 되어(캐시는 gcTime 0 이라 바로 버려진다) 화면에 있는
+// 문제지 수만큼 EF 를 다시 부른다. 그래서 키는 (문제지, 사용자)로만 잡고, 요청 본문에는
+// **그 문제지의 문항 번호 전체**(지금 필터를 통과한 것뿐 아니라)를 보낸다 — 화면에서 무엇을
+// 걸러도 요청이 같아진다. 개수는 아래 WRONG_NOTE_EXPLANATION_LIMIT 로 자른다(서버와 같은 한도).
+const wrongNoteKey = (userId: string | null, paperId: string) =>
+  ["edge", "explanations-get", "wrong-note", paperId, userId ?? "anon"] as const;
+
+function wrongNoteOptions(userId: string | null, paperId: string, numbers: number[], enabled = true) {
   return {
-    queryKey: ["edge", "explanations-get", "wrong-note", paperId, numbers.join(","), userId ?? "anon"] as const,
+    queryKey: wrongNoteKey(userId, paperId),
     queryFn: async (): Promise<WrongNoteExplanationMap> =>
       toMap(await callEdge("explanations-get", { paperId, context: "wrong-note" as const, questionNumbers: numbers })),
-    enabled: !!userId && !!paperId && numbers.length > 0,
+    enabled: enabled && !!userId && !!paperId && numbers.length > 0,
     // 해설 본문은 세션 중에 바뀌지 않는 정적 내용이라 마운트 중에는 다시 묻지 않는다.
     // (쿼터는 차감되지 않으니 재조회가 "잠금"을 부르지는 않지만, 과목 모아보기는 문제지마다
     // 요청이 하나라 포커스 복귀마다 수십 번 부르게 된다 — 화면 진입 1회로 묶는다.)
@@ -99,8 +107,19 @@ export function useWrongNoteExplanations(paperId: string | null, questionNumbers
   return { query, data: query.data ?? EMPTY_EXPLANATIONS };
 }
 
-// 여러 문제지(과목 오답노트 "문제만 모아보기" — 카드마다 출처 문제지가 다르다). 문제지 하나가
-// 요청 하나라 화면에 실제로 그리는 문제지만 넘길 것.
+// 한 번에 열어 두는 문제지 요청 수. EF explanations-get 은 **문제지 하나가 요청 하나**라,
+// 응시가 쌓인 과목의 "문제만 모아보기"를 열면 문제지 수(20~30장)만큼의 호출이 한꺼번에 나간다.
+// §6.2 가 이미지 프리페치에 정한 "화면에 보이는 그룹만 · 동시 4"와 같은 생각으로, 목록 위에서부터
+// 이만큼씩만 열고 앞 묶음이 끝나면 다음 묶음을 연다(첫 화면에 보이는 카드가 먼저 채워진다).
+//
+// 목록이 평범한 ScrollView 라 FlatList 의 onViewableItemsChanged 를 쓸 수 없고, 웹의
+// ExplanationDisclosure 를 흉내내 "펼칠 때 부르기"로 바꿀 수도 없다 — 웹은 서버 렌더가 해설을
+// 이미 붙여 내려주므로 그 토글은 **그리기**만 미루지만, 앱은 받아 보기 전에는 그 문항에 해설이
+// 있는지조차 모른다(있을 때만 토글을 그린다). 그래서 "보이는 것부터, 조금씩"으로 구현한다.
+export const EXPLANATION_PAPER_BATCH = 4;
+
+// 여러 문제지(과목 오답노트 "문제만 모아보기" — 카드마다 출처 문제지가 다르다). 목록 순서
+// (= 화면에 그려지는 순서)대로 넘길 것.
 export function useWrongNoteExplanationsByPaper(
   requests: readonly { paperId: string; questionNumbers: number[] }[],
 ) {
@@ -109,9 +128,20 @@ export function useWrongNoteExplanationsByPaper(
     () => requests.map((r) => ({ paperId: r.paperId, numbers: normalizeNumbers(r.questionNumbers) })),
     [requests],
   );
+  // 몇 개까지 열어 둘지는 **상태 없이** 캐시에서 읽어 센다. 끝난 요청 + BATCH 가 창이고,
+  // 아래 useQueries 가 그 쿼리들을 구독하고 있어 하나가 끝날 때마다 이 컴포넌트가 다시 그려져
+  // 창이 저절로 넓어진다(useState+useEffect 로 밀어 올리면 렌더가 한 번 더 도는 것 말고는
+  // 같은 결과라, 읽기만 하는 쪽을 고른다).
+  const queryClient = useQueryClient();
+  const settledCount = normalized.reduce((n, r) => {
+    const status = queryClient.getQueryState(wrongNoteKey(userId, r.paperId))?.status;
+    return status === "success" || status === "error" ? n + 1 : n;
+  }, 0);
+  const open = settledCount + EXPLANATION_PAPER_BATCH;
   const results = useQueries({
-    queries: normalized.map((r) => wrongNoteOptions(userId, r.paperId, r.numbers)),
+    queries: normalized.map((r, i) => wrongNoteOptions(userId, r.paperId, r.numbers, i < open)),
   });
+
   // results 는 매 렌더 새 배열이라 의존성으로 쓸 수 없다 — 문제지와 마지막 갱신 시각의
   // 서명으로 메모한다(데이터가 실제로 바뀔 때만 새 Map).
   const signature = results.map((r, i) => `${normalized[i].paperId}:${r.dataUpdatedAt}`).join("|");

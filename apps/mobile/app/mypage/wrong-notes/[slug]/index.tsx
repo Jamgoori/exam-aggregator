@@ -23,10 +23,12 @@ import {
 } from "../../../../src/components/wrong-notes/subject-wrong-note-questions";
 import { useWrongNoteDeletions } from "../../../../src/components/wrong-notes/wrong-note-mark-actions";
 import { WrongNoteViewTabs, type WrongNoteViewKey } from "../../../../src/components/wrong-notes/wrong-note-view-tabs";
+import { openSubjectMix } from "../../../../src/lib/mix-href";
 import { useSetScreenParams } from "../../../../src/lib/screen-params";
 import { useAuth } from "../../../../src/providers/auth-provider";
 import { useSubjectBySlug } from "../../../../src/queries/catalog";
 import { useSubjectWrongNotePapers, useSubjectWrongNoteQuestions } from "../../../../src/queries/wrong-notes";
+import { themedIcon } from "../../../../src/theme/icons";
 
 // `/mypage/wrong-notes/[slug]?view=`(설계서 §5 행, 웹 app/mypage/wrong-notes/[slug]/page.tsx 1:1) —
 // 마이페이지 오답노트 탭에서 과목을 골랐을 때 나오는 화면. 기본 "시험지별"은 문제지 요약 카드
@@ -41,6 +43,8 @@ import { useSubjectWrongNotePapers, useSubjectWrongNoteQuestions } from "../../.
 // resolvedCount)이 EF review-history 목록 응답에 없어 세션마다 mix-note 상세를 받아야 한다 —
 // 설계서 §12 Phase 3 "믹스 기록". 기록 자체는 복습 결과 화면의 배너와 `…/mix/[sessionId]` 로
 // 열린다.
+const ShuffleIcon = themedIcon(Shuffle);
+
 type Params = { slug: string; view?: string };
 
 export default function SubjectWrongNoteRoute() {
@@ -100,7 +104,10 @@ function SubjectWrongNoteBody({
   view: WrongNoteViewKey;
   onChangeView: (view: WrongNoteViewKey) => void;
 }) {
-  const { isPremium } = useAuth();
+  // membership-get 이 아직 안 돌아왔을 때 isPremium 은 false 다 — 그대로 그리면 프리미엄
+  // 회원이 화면을 열 때마다 무료 회원용 문구가 한 번 번쩍인다(app/membership/index.tsx 와 같은
+  // 판단). 멤버십을 아는 순간까지 그 줄을 비워 둔다.
+  const { isPremium, membershipLoading } = useAuth();
   const papers = useSubjectWrongNotePapers(view === "papers" ? subject : null);
   const questions = useSubjectWrongNoteQuestions(view === "questions" ? subject : null);
   const active = view === "questions" ? questions : papers;
@@ -162,17 +169,17 @@ function SubjectWrongNoteBody({
         </View>
 
         <View className="flex-row flex-wrap items-center justify-between gap-3">
-          <AppText variant="2xl" weight="semibold" className="min-w-0 flex-1">
+          <AppText variant="2xl" weight="semibold" accessibilityRole="header" className="min-w-0 flex-1">
             {subject.name} 오답노트
           </AppText>
           {/* 이 과목 기출 전체에서 새 문제를 뽑는 기능이라 오답 유무와 무관하게 언제나 보인다. */}
           <Pressable
             accessibilityRole="link"
             accessibilityLabel="기출 섞어풀기"
-            onPress={() => router.push(`/subjects/${subject.slug}/mix` as Href)}
+            onPress={() => openSubjectMix(subject.slug)}
             className="shrink-0 flex-row items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 active:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40"
           >
-            <Shuffle size={12} color="#1d4ed8" />
+            <ShuffleIcon size={12} colorClassName="text-blue-700 dark:text-blue-400" />
             <AppText variant="xs" weight="medium" className="text-blue-700 dark:text-blue-400">
               기출 섞어풀기
             </AppText>
@@ -202,7 +209,13 @@ function SubjectWrongNoteBody({
         ) : (
           <QueryState query={papers} skeleton={<ListSkeleton />}>
             {(list) => (
-              <PapersView subjectSlug={subject.slug} papers={list} premium={isPremium} selection={paperSelection} />
+              <PapersView
+                subjectSlug={subject.slug}
+                papers={list}
+                premium={isPremium}
+                membershipLoading={membershipLoading}
+                selection={paperSelection}
+              />
             )}
           </QueryState>
         )}
@@ -215,11 +228,13 @@ function PapersView({
   subjectSlug,
   papers,
   premium,
+  membershipLoading,
   selection,
 }: {
   subjectSlug: string;
   papers: WrongNotePaperGroup[];
   premium: boolean;
+  membershipLoading: boolean;
   selection: SubjectPaperSelection;
 }) {
   const totalWrong = papers.reduce((sum, p) => sum + p.unresolvedCount + p.resolvedCount, 0);
@@ -235,7 +250,7 @@ function PapersView({
 
   return (
     <View className="gap-3">
-      {totalWrong > 0 && (
+      {totalWrong > 0 && !membershipLoading && (
         <AppText variant="xs" className="text-zinc-400 dark:text-zinc-500" pretty>
           {premium
             ? "시험지를 눌러 회독 기록·해설을 보거나, 아래 버튼으로 바로 다시 풀 수 있어요."
