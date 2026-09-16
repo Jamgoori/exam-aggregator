@@ -2,10 +2,11 @@ import { levelColor } from "@gongmoa/core";
 import { router, type Href } from "expo-router";
 import { Check, ChevronRight, RotateCcw, Shuffle } from "lucide-react-native";
 import { useState } from "react";
-import { Alert, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "../app-text";
 import { Button } from "../button";
+import { useCreateReviewSession } from "../../queries/wrong-notes";
 import { themedIcon } from "../../theme/icons";
 
 export type SubjectPaperItem = {
@@ -23,9 +24,9 @@ export type SubjectPaperItem = {
 // 과목 오답노트 "문제지별" 탭(웹 subject-paper-list.tsx, 설계서 §4.5 #25): 카드마다 "틀린 문제
 // 다시 풀기", 체크로 여러 시험지를 골라 하단 고정 선택 바에서 합쳐 풀기. 하단 바는
 // `bottom-4 z-30` 안의 `max-w-md rounded-2xl border p-2 shadow-lg` 카드 + safe-area.
-// 복습 세션 생성(review-create UI)은 Phase 2 — 지금은 Alert 로 안내하고 바 마크업만 유지한다.
+// 세션 생성은 EF review-create 의 paperIds 분기(웹 createReviewFromPapers)로, 성공하면
+// `…/review/[sessionId]` 로 간다.
 const ChevronIcon = themedIcon(ChevronRight);
-const PHASE2_MESSAGE = "섞어풀기는 다음 단계에서 열려요";
 
 export function SubjectPaperList({
   subjectSlug,
@@ -39,6 +40,11 @@ export function SubjectPaperList({
 }) {
   const insets = useSafeAreaInsets();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  // 여러 시험지 중 어느 것을 눌러 시작했는지 표시(개별 버튼 스피너용). "multi" 는 합쳐 풀기.
+  const [activePaper, setActivePaper] = useState<string | null>(null);
+  const launchSession = useCreateReviewSession();
+  const pending = launchSession.isPending;
 
   function toggle(paperId: string) {
     setSelected((prev) => {
@@ -49,9 +55,20 @@ export function SubjectPaperList({
     });
   }
 
-  // review-create 이식 전까지의 자리. paperIds 는 Phase 2 에서 createReviewFromPapers 로 간다.
-  function launch(_paperIds: string[]) {
-    Alert.alert(PHASE2_MESSAGE);
+  function launch(paperIds: string[], marker: string) {
+    if (pending) return;
+    setError(null);
+    setActivePaper(marker);
+    launchSession.mutate(
+      { paperIds },
+      {
+        onSuccess: (sessionId) => router.push(`/mypage/wrong-notes/${subjectSlug}/review/${sessionId}` as Href),
+        onError: (e) => {
+          setActivePaper(null);
+          setError(e instanceof Error ? e.message : "다시 풀기를 시작하지 못했어요.");
+        },
+      },
+    );
   }
 
   // 시험지가 2장 이상일 때만 "합쳐 풀기"가 의미 있어, 체크·안내를 그때만 노출한다.
@@ -59,6 +76,13 @@ export function SubjectPaperList({
 
   return (
     <View className={["gap-3", selected.size > 0 ? "pb-24" : ""].join(" ")}>
+      {error && (
+        <View className="rounded-lg bg-red-50 px-3 py-2 dark:bg-red-950/20">
+          <AppText variant="xs" className="text-center text-red-600 dark:text-red-400" pretty>
+            {error}
+          </AppText>
+        </View>
+      )}
       {heading && (
         <View className="flex-row items-center justify-between">
           <AppText variant="sm" weight="semibold" className="text-zinc-700 dark:text-zinc-300">
@@ -166,9 +190,17 @@ export function SubjectPaperList({
             </View>
 
             <Button
-              label={cleared ? "틀렸던 문제 복습하기" : "틀린 문제 다시 풀기"}
+              label={
+                pending && activePaper === p.paperId
+                  ? "준비 중..."
+                  : cleared
+                    ? "틀렸던 문제 복습하기"
+                    : "틀린 문제 다시 풀기"
+              }
               icon={<RotateCcw size={15} color="#ffffff" />}
-              onPress={() => launch([p.paperId])}
+              pending={pending && activePaper === p.paperId}
+              disabled={pending}
+              onPress={() => launch([p.paperId], p.paperId)}
               className="rounded-lg py-2.5"
             />
           </View>
@@ -195,9 +227,11 @@ export function SubjectPaperList({
               </AppText>
             </Pressable>
             <Button
-              label={`선택한 ${selected.size}개 시험지 합쳐 풀기`}
+              label={pending && activePaper === "multi" ? "준비 중..." : `선택한 ${selected.size}개 시험지 합쳐 풀기`}
               icon={<Shuffle size={15} color="#ffffff" />}
-              onPress={() => launch([...selected])}
+              pending={pending && activePaper === "multi"}
+              disabled={pending}
+              onPress={() => launch([...selected], "multi")}
               className="flex-1 rounded-lg py-2.5"
             />
           </View>
