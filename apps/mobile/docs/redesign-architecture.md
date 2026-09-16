@@ -812,6 +812,59 @@ Phase 2 까지 머지된 상태에서 SRS·믹스를 붙였다. 전부 루트 `t
 
 ---
 
+## 12-6. Phase 4 1라운드 진행 상황 (2026-09-16, 코드 완료 · 실기기 미검증)
+
+Phase 4(계정·알림·진단·광고·링크) 중 **코드만으로 끝나는 두 가지**를 먼저 넣었다. 나머지(아바타,
+AdMob, 유니버설 링크, 웹 `/privacy` 개정)는 소유자의 콘솔 작업·결정이 선행 조건이라 2라운드로 미룬다.
+루트 `typecheck`/`lint`/`test`(core 517 · web 155 · design-tokens 6), `bundle-edge --check: 최신`,
+`expo export --platform android` 통과. Edge 16개는 `tsc` 하네스로 타입만 검사(오류 0).
+
+| 영역 | 들어간 것 |
+|---|---|
+| 알림 | SD RPC 3종(`mark_notification_read`·`mark_all_notifications_read`·`delete_notification`), 헤더 종(배지 + 최근 8건 시트) + `/notifications` 목록 화면(읽음·모두 읽음·삭제) |
+| 진단 백엔드 | EF `diagnosis-request`(요청 행만 — 프리미엄·자격·개념 상한 10·주기 1회) · `diagnosis-aggregate`(보드가 그리는 무AI 집계). 판정은 core `rules/diagnosis-{request,aggregate}.ts` 한 벌이고 웹 서버 액션이 같은 함수를 부른다. 구 `ai-diagnose` 는 폐기 표시(옛 빌드 때문에 지우지 않는다) |
+| 진단 화면 | `/mypage/diagnosis` — 과목 탭·기간 칩·개념 막대그래프·개념 선택창(추천 미리 체크, 상한 10)·"만드는 중" 카드·극복법 카드(무너지는 지점/오답 근거/극복 계획/체크리스트/함정 + 틀린 문항 보기·같은 개념 기출 5문제) |
+| core | 알림 링크 판정·페이지 크기를 `notifications.ts` 로 단일화(웹·앱이 같은 함수), 진단 규칙·리포트 타입·코치 대상 선정 이동 |
+
+**운영 DB 에 적용할 SQL 1건** — `schema.sql` 맨 끝 "모바일 앱 재시작 Phase 4" 절(RPC 3개 +
+revoke/grant). `create or replace` 라 여러 번 실행해도 안전하다. 적용 전에는 알림의 읽음·삭제가
+실패하고 그 실패가 화면에 한 줄로 보인다(조회는 기존 select-own RLS 라 목록은 뜬다).
+
+**검토에서 잡은 것 중 가장 큰 것** — `.github/workflows/edge-deploy.yml` 의 함수 목록이 **10개에서
+멈춰 있었다.** Phase 3 의 네 개(`review-due`·`review-prefs`·`review-guessed`·`mix-create`)가 이미
+빠져 있어, 소유자가 "Edge Function 배포 → all" 을 눌러도 그 함수들은 **한 번도 배포되지 않았다.**
+16개 전부로 고쳤고, 손으로 적는 자리가 셋(`edge-deploy.yml` 2곳 + `config.toml`)이라는 것을 주석으로
+박아 두었다. 정본은 `contracts.ts` 의 `EDGE_NAMES` 다.
+
+**의도적으로 웹과 다르게 둔 것**
+
+- **대기 시간 문구가 "최대 두 시간"이다.** 웹은 "보통 5~10분"이라고 쓰는데, 웹은 버튼을 누른 그
+  자리에서 배치를 제출하고 페이지 폴링이 수거까지 한다. 앱 요청은 행만 만들고 **제출·수거를 모두
+  Vercel 크론이 시간당 한 번**(`vercel.json` `0 * * * *`) 하므로 최악이 *제출 대기 1시간 + 배치 +
+  수거 대기 1시간* 이다. 웹 문구를 그대로 옮기면 거짓말이 된다(§13 질문 9 의 "최대 1시간"은 제출
+  지연만 센 값이었다). **소유자 결정 대기** — (a) 이 문구 유지 (b) 크론을 10분 간격으로 (c) 수거
+  전용 경로 신설. (b) 가 가장 싸고, 정해지면 `diagnosis-generating.tsx` 의 `SLOW_AFTER_MIN` 과
+  문장 두 개만 함께 줄이면 된다.
+- **요청 행이 생기면 개념 선택창을 닫는다.** 웹은 그 자리에서 배치를 제출해 저절로 닫히지만, 앱은
+  크론이 집을 때까지 서버의 `generating` 이 null 이라 선택창이 대기 카드 옆에 계속 열려 있게 된다 —
+  같은 진단을 두 번 누르게 된다.
+- **개념 목록이 스크롤 상자가 아니라 접기다**(8줄 + "개념 N개 더 보기"). RN 에서 세로 ScrollView 를
+  화면 스크롤 안에 겹치면 제스처가 서로를 먹는다.
+- 알림 링크가 **아직 앱에 없는 화면**(게시판·건의 — Phase 5)을 가리키면 이동하지 않고 읽음 처리만
+  한다. 웹은 바로 이동한다. `+not-found` 로 떨어뜨리지 않으려는 것이고, 판정은 `next` 화이트리스트와
+  같은 매처(`src/lib/next-path.ts`)를 공유한다.
+
+**2라운드로 넘긴 것(선행 조건 있음)**
+
+| 항목 | 막고 있는 것 |
+|---|---|
+| 아바타(`avatar-upload` EF · `avatar_paths` RPC · `account-delete` 스토리지 정리) | 없음 — 순수 코드다. 2라운드 첫 항목 |
+| AdMob(ATT → UMP → init, 3배치, `app-ads.txt` 라우트) | AdMob 계정에 앱 등록 + 광고 단위 3개 ID. 새 네이티브 의존이라 **APK 재빌드 필수**. `/privacy` 개정본을 배포 7일 전 공지해야 한다(§12 Phase 4 행) |
+| 유니버설 링크(AASA/assetlinks + `app.json`) | Android = Play App Signing SHA-256, iOS = Apple Team ID(Phase 1b 미착수). 웹 `.well-known` 라우트와 geo-block 면제는 선행 없이 가능 |
+| 웹 `/privacy` 개정 | 광고 도입 시점 결정(시행일 상수) |
+
+---
+
 ## 13. 리스크·미결 사항
 
 | 리스크 | 완화 |

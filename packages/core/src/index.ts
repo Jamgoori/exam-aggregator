@@ -61,6 +61,10 @@ export * from "./data/subjects";
 export * from "./badge-classes";
 export * from "./nav-items";
 export * from "./diagnosis-progress";
+// AI 약점 진단 리포트 스키마·개념 선택·코칭 대상 선정(순수) — 앱은 ai_diagnoses.report 를
+// RLS 로 직접 읽어 이 타입으로 그린다(설계서 §6.7 #21). 리포트를 **만드는** 쪽은 웹 크론뿐.
+export * from "./diagnosis-report";
+export * from "./diagnosis-targets";
 
 // CBT 최소 응시시간·답안 정제 — 클라이언트(솔버)와 서버 규칙이 같은 값을 쓴다
 export * from "./cbt-attempt";

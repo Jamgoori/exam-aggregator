@@ -13,8 +13,8 @@ import { useAuth } from "../../src/providers/auth-provider";
 // 정의 · 지금 할 수 있는 행동 하나) → (로그인했는데 자격 미달이면 진행 바) → 3단계 → 결과
 // 예시(DiagnosisSampleReport) → 접어 둔 규칙·FAQ.
 //
-// 버튼의 목적지 /mypage/diagnosis(진단 대시보드)는 Phase 4 라 아직 +not-found 로 떨어진다 —
-// 대시보드가 붙으면 그대로 연결된다(문구·주소는 core diagnosisIntroCta).
+// 버튼의 목적지 /mypage/diagnosis(진단 대시보드)는 Phase 4 에서 붙었다(app/mypage/diagnosis.tsx) —
+// 문구·주소는 여기서 정하지 않고 core diagnosisIntroCta 가 정한다.
 export default function DiagnosisIntroScreen() {
   const { userId, isPremium } = useAuth();
   const intro = useDiagnosisIntro();

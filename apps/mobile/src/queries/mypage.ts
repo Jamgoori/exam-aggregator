@@ -53,7 +53,8 @@ export function useDiagnosisEligibility() {
   });
 }
 
-// 이번 주기 진단 유무(ready/pending/null). 리포트 본문은 받지 않는다.
+// 이번 주기 진단 유무(ready/pending/null). 리포트 본문은 받지 않는다 — 진단 대시보드가 쓰는
+// 요청 행·극복법 본문은 queries/diagnosis.ts 에 따로 있다(그쪽은 메모리 전용 캐시다).
 export function useWeeklyDiagnosisStatus() {
   const { userId } = useAuth();
   return useQuery<WeeklyDiagnosisStatus | null>({

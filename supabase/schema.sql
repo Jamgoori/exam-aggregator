@@ -816,9 +816,11 @@ create policy "select own diagnoses" on ai_diagnoses
 -- 행을 멤버십 확인 없이 집는다)가 유료 리포트를 채워 줬다. diagnosis_date 에 제약이
 -- 없어 날짜만 바꿔 대기열을 통째로 점유하는 것도 가능했다.
 --
--- 요청 행 생성도 report 작성과 마찬가지로 service_role 몫이다 — 웹은
--- lib/ai-diagnosis.ts 의 requestTodayDiagnosis, 앱은 Edge Function 이 멤버십을 확인한 뒤
--- 만든다. select 정책은 그대로 둔다(본인 리포트는 클라이언트가 직접 읽는다).
+-- 요청 행 생성도 report 작성과 마찬가지로 service_role 몫이다. 판정(프리미엄·자격·주기 1회)은
+-- packages/core/src/rules/diagnosis-request.ts#requestDiagnosisForUser 한 곳에 있고, 웹 서버
+-- 액션(app/mypage/actions.ts#requestDiagnosis)과 Edge Function(diagnosis-request)이 그 함수를
+-- 부르는 얇은 어댑터다. select 정책은 그대로 둔다(본인 리포트는 클라이언트가 직접 읽는다 —
+-- 앱은 이 정책으로 report 가 채워지길 폴링한다).
 drop policy if exists "insert own diagnosis request" on ai_diagnoses;
 revoke insert on ai_diagnoses from anon, authenticated;
 
@@ -2757,10 +2759,15 @@ create index if not exists notifications_unread_idx
 
 alter table notifications enable row level security;
 
--- 본인 것만 읽는다. 쓰기(만들기·읽음 처리·삭제)는 전부 서버 액션(service_role)이
--- 한다 — 읽음 처리까지 클라이언트에 열어주면 update 정책이 컬럼을 가리지 못해
--- 자기 알림의 link·title 을 REST 로 아무 값으로나 바꿔둘 수 있다(자기 화면에서만
--- 보이는 값이라 남에게 새지는 않지만, 열어둘 이유가 없다).
+-- 본인 것만 읽는다. 쓰기 정책은 두지 않는다 — 읽음 처리까지 클라이언트에 열어주면
+-- update 정책이 컬럼을 가리지 못해 자기 알림의 link·title 을 REST 로 아무 값으로나
+-- 바꿔둘 수 있다(자기 화면에서만 보이는 값이라 남에게 새지는 않지만, 열어둘 이유가 없다).
+--
+-- 만들기는 그 사건이 일어난 서버 액션(service_role)이 한다. 읽음 처리·삭제는 웹에서는
+-- 같은 서버 액션이, 앱에서는 파일 끝 "Phase 4" 절의 security definer 함수 세 개
+-- (mark_notification_read·mark_all_notifications_read·delete_notification)가 맡는다 —
+-- 앱에는 service_role 경로가 없어서다. 함수 본문이 "무엇을 바꿀 수 있는가"(read_at 을
+-- 지금 시각으로, 또는 행 삭제)를 정하므로 정책으로 열 때 못 막던 컬럼 조작이 없다.
 drop policy if exists "select own notifications" on notifications;
 create policy "select own notifications" on notifications
   for select to authenticated using (auth.uid() = user_id);
@@ -3071,3 +3078,131 @@ grant execute on function submit_question_report(uuid, int, text, text, text) to
 -- "내 최근 1시간 신고 수"가 전체 스캔이 된다(웹 서버 액션의 같은 집계도 마찬가지였다).
 create index if not exists question_reports_user_recent_idx
   on question_reports(user_id, created_at desc);
+
+-- ===== 모바일 앱 재시작 Phase 4 (2026-09-16) =====
+-- 알림 읽음 처리·삭제를 앱에서도 할 수 있게 여는 security definer RPC 세 개
+-- (apps/mobile/docs/redesign-architecture.md §6.7 #15).
+--
+-- notifications 에는 "본인 것만 select" 정책만 있고 update·delete 정책은 일부러 없다(위
+-- notifications 절 주석: 읽음 처리까지 클라이언트에 열면 update 정책이 **어느 컬럼을** 바꾸는지는
+-- 가리지 못해, 자기 알림의 link·title 을 REST 로 아무 값으로나 바꿔둘 수 있다). 웹은 서버 액션
+-- (service_role)으로 쓰지만 앱에는 그 경로가 없다 — 아래 세 함수가 그 자리를 대신하면서 정책이
+-- 못 하던 "무엇을 바꿀 수 있는가"를 함수 본문이 정한다(read_at 을 지금 시각으로 하거나, 행을
+-- 통째로 지우거나 — 그 둘뿐이다).
+--
+-- SD 공통 규칙(§6.7, 위 Phase 0·2 절과 같다): (1) auth.uid() 가 null 이면 raise;
+-- (2) set search_path = public; (3) 모든 where 에 user_id = auth.uid() 명시(SD 는 RLS 를
+-- 지나치므로 이 조건이 빠지면 id 만 알면 남의 알림을 읽음 처리·삭제할 수 있다);
+-- (4) 서버 액션의 인자 검증을 본문에서 되풀이; (5) revoke all from public, anon 후
+-- grant execute to authenticated.
+-- 오류 문구는 웹 서버 액션(apps/web/src/app/notifications/actions.ts)과 같은 문장을 쓴다 —
+-- PostgREST 가 message 를 그대로 내려주고 앱은 그 문장을 그대로 보여준다.
+-- **운영 DB 미적용** — 적용 순서는 §12-2 #3(운영 SQL → Edge 배포 → 앱).
+
+-- 알림 한 건 읽음 처리. 웹 markNotificationRead(actions.ts) 의 SQL 판.
+create or replace function mark_notification_read(p_id uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception '로그인이 필요해요.';
+  end if;
+  if p_id is null then
+    raise exception '잘못된 접근입니다.';
+  end if;
+
+  -- read_at is null 조건은 웹과 같다(actions.ts 의 .is("read_at", null)): 이미 읽은 알림을
+  -- 다시 눌러도 "처음 읽은 시각"이 밀리지 않는다. 0행이어도 오류가 아니다 — 목록에서 이미
+  -- 읽은 줄을 다시 누르는 것은 정상 동작이고, 앱은 결과를 기다리지 않고 이동한다.
+  update notifications
+     set read_at = now()
+   where id = p_id
+     and user_id = v_uid
+     and read_at is null;
+end $$;
+
+revoke all on function mark_notification_read(uuid) from public, anon;
+grant execute on function mark_notification_read(uuid) to authenticated;
+
+-- 안 읽은 알림 전부 읽음 처리 + 오래된 읽은 알림 정리.
+-- 웹 markAllNotificationsRead(actions.ts) 가 읽음 처리 뒤 pruneReadNotifications(lib/notifications.ts)
+-- 를 부르는 것과 같은 한 쌍이다. 알림은 계속 쌓이기만 하는 표라 어딘가 한 곳에서는 치워야
+-- 목록이 몇 년 치로 늘어나는데, 그 자리를 웹과 앱이 다르게 두면 한쪽으로만 들어오는 계정의
+-- 표가 안 줄어든다.
+create or replace function mark_all_notifications_read()
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception '로그인이 필요해요.';
+  end if;
+
+  update notifications
+     set read_at = now()
+   where user_id = v_uid
+     and read_at is null;
+
+  -- 정리 기준은 웹 pruneReadNotifications(keepDays = 60)와 같다: **읽은** 알림 중
+  -- created_at 이 60일보다 오래된 것. 안 읽은 알림은 몇 달이 지나도 사용자가 아직 못 본
+  -- 것이라 지우지 않는다 — 다른 경로로는 이 delete 가 불려도 안 읽은 행에 닿지 않는다.
+  -- 다만 **이 함수 안에서는** 바로 위 update 가 방금 전부 읽음으로 바꿨으므로, 60일 넘게
+  -- 안 읽고 둔 알림은 "모두 읽음"을 누른 그 순간 같이 사라진다. 웹도 정확히 같다
+  -- (markAllNotificationsRead 가 update 뒤에 pruneReadNotifications 를 부른다) — 사용자가
+  -- "다 읽었다"고 선언한 것들이라 파리티를 깨면서까지 남겨둘 이유가 없다.
+  --
+  -- 예외를 삼키는 이유: 웹에서는 prune 이 try/catch 안에 있어 실패해도 읽음 처리는 남는다.
+  -- plpgsql 에서 두 문장을 그냥 나열하면 한 트랜잭션이라 delete 가 실패할 때 update 까지
+  -- 되돌아가, 사용자는 "모두 읽음"을 눌렀는데 배지가 그대로인 화면을 본다. exception 블록은
+  -- 서브트랜잭션이라 delete 만 되돌리고 읽음 처리는 남긴다 — 정리 실패는 화면에 영향이 없다.
+  begin
+    delete from notifications
+     where user_id = v_uid
+       and read_at is not null
+       and created_at < now() - interval '60 days';
+  exception when others then
+    null;
+  end;
+end $$;
+
+revoke all on function mark_all_notifications_read() from public, anon;
+grant execute on function mark_all_notifications_read() to authenticated;
+
+-- 알림 한 건 삭제. 웹 deleteNotification(actions.ts) 의 SQL 판 — 목록(/notifications)에서
+-- 줄 오른쪽 X 로만 부른다(종에는 그 자리가 없다).
+create or replace function delete_notification(p_id uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception '로그인이 필요해요.';
+  end if;
+  if p_id is null then
+    raise exception '잘못된 접근입니다.';
+  end if;
+
+  -- 웹과 같이 읽음 여부를 가리지 않는다(안 읽은 알림도 지울 수 있다 — 지우는 건 사용자의 뜻).
+  delete from notifications
+   where id = p_id
+     and user_id = v_uid;
+end $$;
+
+revoke all on function delete_notification(uuid) from public, anon;
+grant execute on function delete_notification(uuid) to authenticated;

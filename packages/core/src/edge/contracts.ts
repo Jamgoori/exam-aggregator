@@ -26,6 +26,8 @@ import type {
   MixSessionSummary,
   MixSessionWrongNote,
 } from "../rules/mix-practice";
+import type { BoardConcept, BoardSubjectGroup } from "../rules/diagnosis-aggregate";
+import type { AiDiagnosisReport, DiagnosisConceptSelection } from "../diagnosis-report";
 import type { ReviewPrefs, ReviewSubjectOption } from "../rules/review-preferences";
 import type { DueReviewSummary } from "../rules/review-queue";
 import type {
@@ -456,28 +458,30 @@ export type CommentsWriteResponse = { ok: true };
 export type AccountDeleteRequest = Record<string, never>;
 export type AccountDeleteResponse = { ok: true };
 
-// ── ai-diagnose ──────────────────────────────────────────────────────────────
+// ── ai-diagnose (폐기 — diagnosis-request/diagnosis-aggregate 로 대체) ────────
+//
+// 앱이 쓰던 **동기** 진단 함수다(그 자리에서 Claude 를 부르고 리포트를 저장·반환).
+// 웹은 처음부터 요청 행만 만들고 Vercel 크론(Message Batches)이 채우는 구조라, 같은
+// `ai_diagnoses` 행을 두 파이프라인이 서로 다른 스키마로 잠갔다(§2 "이미 어긋난 규칙").
+// Phase 4 에서 아래 두 함수로 갈라졌다(§6.7 #21) — 새 코드는 그쪽을 쓴다.
+//
+// **계약은 지운다는 뜻이 아니다.** 스토어에 나가 있는 옛 빌드가 여전히 이 함수를 부르고,
+// 응답 계약은 "추가만"이라 삭제·의미 변경이 금지다(§6.6 "Edge 계약 버전"). 함수도 계약도
+// 그대로 둔 채 새 호출부만 만들지 않는다. 실제로 지우는 날 함께 고쳐야 할 곳은
+// supabase/functions/ai-diagnose 머리 주석에 적어 뒀다.
+//
+// 리포트 타입은 이제 core `diagnosis-report.ts` 한 곳이다(웹 생성기·앱 화면·이 계약이
+// 같은 JSON 을 본다). 예전에 여기 있던 3필드 판은 그 타입의 필수 필드와 같고, 선택 필드
+// (mission·insights·conceptCoaching·frequency·accuracyPct·scores)가 더해진 것뿐이다 —
+// ai-diagnose 가 만들지 않던 필드라 옛 응답도 그대로 이 타입을 만족한다.
+export type {
+  AiDiagnosisReport,
+  DiagnosisWeakConcept,
+  DiagnosisSubjectTrend,
+  DiagnosisConceptCoaching,
+  DiagnosisConceptSelection,
+} from "../diagnosis-report";
 
-// 리포트 스키마는 웹 lib/ai-diagnosis.ts AiDiagnosisReport 의 필수 부분(summary·weakConcepts·
-// subjectTrends)과 같다. 웹의 선택 필드(mission·insights·conceptCoaching)는 Edge 가 만들지
-// 않는다 — 필요해지면 optional 로 **추가**한다. Phase 4 에 diagnosis-request 로 대체 예정(§6.7 #21).
-export type DiagnosisWeakConcept = {
-  concept: string;
-  subject: string | null;
-  subjectSlug: string | null;
-  wrongCount: number | null;
-  resolvedCount: number | null;
-};
-export type DiagnosisSubjectTrend = {
-  subject: string;
-  trend: "up" | "down" | "flat";
-  note: string;
-};
-export type AiDiagnosisReport = {
-  summary: string;
-  weakConcepts: DiagnosisWeakConcept[];
-  subjectTrends: DiagnosisSubjectTrend[];
-};
 export type AiDiagnoseRequest = Record<string, never>;
 export type AiDiagnoseResponse = {
   report: AiDiagnosisReport;
@@ -485,6 +489,103 @@ export type AiDiagnoseResponse = {
   date: string;
   // 최근 7일 안의 리포트를 그대로 돌려줬으면 true.
   cached: boolean;
+};
+
+// ── diagnosis-request (§6.7 #21) ─────────────────────────────────────────────
+//
+// 진단 **요청 행만** 만든다. 리포트는 웹 크론 `/api/cron/diagnosis`(시간당, Batches)가
+// 채우므로 응답에 리포트가 없다 — 앱은 요청 뒤 `ai_diagnoses` 를 RLS 로 폴링한다
+// (select own, schema.sql:807-809). 웹 서버 액션 `requestDiagnosis` 와 **같은 core 규칙**
+// (rules/diagnosis-request.ts#requestDiagnosisForUser)을 부른다.
+//
+// 오류: 403 "AI 약점 진단은 멤버십 기능이에요." · 400 자격 미달 안내 · 500 요청 실패.
+export type DiagnosisRequestRequest = {
+  // 화면에서 체크한 개념들. 서버가 상한(COACH_MAX_TOTAL=10)까지 자른다 — 개념 하나가
+  // 곧 프롬프트 한 덩이이자 요금이라, 화면을 우회한 목록이 그대로 청구서가 되면 안 된다.
+  // 생략하면 생성기가 알아서 상위 개념을 고른다.
+  selectedConcepts?: DiagnosisConceptSelection[];
+};
+export type DiagnosisRequestResponse = {
+  // ready  — 이번 주기 리포트가 이미 있다(주기 잠금, 새로 만들지 않았다)
+  // pending— 요청 행이 있다. 크론이 채울 때까지 기다린다. 제출도 수거도 시간당 크론이라
+  //          최악은 두 시간이다(화면 문구도 그렇게 적는다 — diagnosis-generating.tsx)
+  status: "ready" | "pending";
+  // 요청 행의 KST 날짜(YYYY-MM-DD). 앱이 폴링 대상 행을 고르는 축.
+  date: string;
+  // 이 주기가 풀리는 날(date + 7일). "다음 진단은 N월 N일부터" 안내용.
+  nextDate: string;
+  // 실제로 저장된 개념 수(상한으로 잘린 뒤). 화면이 "N개 개념으로 만들어요"를 이 수로 말한다.
+  selectedCount: number;
+};
+
+// ── diagnosis-aggregate (§6.7 #21) ───────────────────────────────────────────
+//
+// 진단 대시보드(`/mypage/diagnosis`)가 그리는 **무AI 집계**. 웹 서버 컴포넌트가
+// `getDiagnosisAggregate` + `pickCoachTargets` + 주기 조회로 만들던 props 를 한 번의
+// 왕복으로 돌려준다(웹 page.tsx 가 하는 조회와 같은 순서·같은 규칙).
+//
+// **리포트 본문(conceptCoaching)은 여기 없다.** 앱이 `ai_diagnoses.report` 를 RLS 로 직접
+// 읽는다 — 진단 본문은 메모리 쿼리캐시에만 두는 값이라(앱 AGENTS.md 금지선) 계약에 실어
+// 두면 다른 응답에 섞여 디스크로 새기 쉽다. 정답·해설 본문은 이 응답에 절대 없다.
+//
+// 비용이 큰 조회다(계정 전체 응시 이력 → 기간 안 응답 → 문항·해설·개념 → 개념별 기출 수).
+// 화면 진입·기간 칩 전환에만 부르고 폴링에 쓰지 말 것 — Edge 에는 웹의 `'use cache'` 에
+// 해당하는 계층이 없다.
+
+// 막대그래프의 개념 한 줄(core rules/diagnosis-aggregate 의 BoardConcept — 집계에서 화면이
+// 쓰는 값만 남긴 것). 뺀 값과 그 이유는 그 파일의 "앱(Edge)용 투영" 절에 있다.
+export type DiagnosisBoardConcept = BoardConcept;
+export type DiagnosisBoardSubjectGroup = BoardSubjectGroup;
+
+export type DiagnosisAggregateRequest = {
+  // 그래프 기간(일). null 이면 전체 기간, 생략하면 7일(웹 기본 칩과 같다).
+  days?: number | null;
+  // 과목 필터. 웹 화면은 전 과목을 받아 클라이언트에서 거르므로 보통 생략한다.
+  subjectSlug?: string | null;
+};
+
+// 선택창(체크박스) 한 줄. 웹 DiagnosisPickerConcept 와 같은 값이다.
+export type DiagnosisPickerConcept = {
+  // 개념 선택 키(정본 id 우선, 없으면 "kw:표기"). 화면 체크 상태의 키.
+  key: string;
+  concept: string;
+  conceptId: string | null;
+  subject: string | null;
+  subjectSlug: string | null;
+  wrongCount: number;
+  accuracyPct: number | null;
+  scoreGainPct: number | null;
+  // 자동 선정(core pickCoachTargets)이 골랐을 개념. 처음에 체크된 상태로 뜬다.
+  recommended: boolean;
+};
+
+export type DiagnosisAggregateResponse = {
+  // 그래프가 실제로 그린 기간. widened=true 면 "선택한 기간에 푼 문제가 없어 넓혔다".
+  window: { days: number | null; widened: boolean };
+  // 과목 탭(응시한 과목 전체).
+  subjects: { name: string; slug: string }[];
+  // 개념 목록(wrongCount 내림차순, 최대 60개). 극복법 카드에 숫자를 붙일 때 쓰는 조회표.
+  concepts: DiagnosisBoardConcept[];
+  // 과목별 막대그래프 묶음(totalWrong 내림차순).
+  bySubject: DiagnosisBoardSubjectGroup[];
+  // 극복법이 훑는 기간(일, 항상 7). 그래프 기간과 다를 수 있어 선택창이 그대로 밝힌다.
+  analysisDays: number;
+  // 선택창에 뿌릴 개념. null 이면 지금은 만들 수 없는 상태(이미 받았거나·생성 중·
+  // 최근 7일 오답이 없거나·자격 미달) — 화면은 선택창을 그리지 않는다.
+  picker: DiagnosisPickerConcept[] | null;
+  // 이번 주기 상태. requestedThisCycle 이면 선택창 대신 "다음 진단은 nextDate 부터".
+  cycle: {
+    requestedThisCycle: boolean;
+    status: "ready" | "pending" | null;
+    // 이번 주기 요청 행의 날짜. 앱이 이 날짜로 report 를 폴링한다.
+    date: string | null;
+    nextDate: string | null;
+  };
+  // 지금 극복법이 만들어지는 중이면 그 요청 시각과 개념 수. null 이면 대기 중이 아니다.
+  // (`ai_diagnosis_batches` 는 service_role 전용이라 앱이 직접 못 읽는다 — 서버가 실어 준다.)
+  generating: { requestedAt: string; conceptCount: number } | null;
+  // 자격(오답 15 ∨ 응시 3). 빈 화면에서 "얼마나 남았는지" 진행 바를 그린다.
+  eligibility: { eligible: boolean; attemptCount: number; wrongCount: number };
 };
 
 // ── 맵 ──────────────────────────────────────────────────────────────────────
@@ -504,6 +605,8 @@ export type EdgeContracts = {
   "comments-write": { request: CommentsWriteRequest; response: CommentsWriteResponse };
   "account-delete": { request: AccountDeleteRequest; response: AccountDeleteResponse };
   "ai-diagnose": { request: AiDiagnoseRequest; response: AiDiagnoseResponse };
+  "diagnosis-request": { request: DiagnosisRequestRequest; response: DiagnosisRequestResponse };
+  "diagnosis-aggregate": { request: DiagnosisAggregateRequest; response: DiagnosisAggregateResponse };
 };
 
 export type EdgeName = keyof EdgeContracts;
@@ -526,4 +629,6 @@ export const EDGE_NAMES = [
   "comments-write",
   "account-delete",
   "ai-diagnose",
+  "diagnosis-request",
+  "diagnosis-aggregate",
 ] as const satisfies readonly EdgeName[];

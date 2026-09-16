@@ -1,79 +1,79 @@
 import "server-only";
 import { cacheLife } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  getDiagnosisAggregate as getDiagnosisAggregateRule,
+  type DiagnosisAggregate,
+} from "@gongmoa/core/server";
 
-// AI 약점 진단의 "결정적(무AI) 데이터층". 페이지 입장 즉시 그리는 과목별 개념 오답
-// 분포(막대그래프)와, 진단받기(온디맨드 API) 때 AI에 넣을 집계 입력을 같은 함수 하나로
-// 만든다. next-diagnosis.mjs(배치 스크립트)의 집계 로직을 서버 런타임으로 이식한 것 —
+// AI 약점 진단의 "결정적(무AI) 데이터층" — **웹 어댑터**와, 웹 생성기 전용 오답 문항 표본.
+//
+// 집계 본체(과목별 개념 오답 분포)는 packages/core/src/rules/diagnosis-aggregate.ts 로
+// 옮겼다(설계서 §6.7 #21·§6.8) — 웹 진단 페이지와 Edge `diagnosis-aggregate` 가 같은 함수를
+// 부른다. 집계가 두 벌이면 같은 계정의 막대그래프가 웹과 앱에서 다른 높이로 그려진다.
+// 이 파일에 남은 것은 두 가지다:
+//   1) 웹에만 있는 캐시 계층(`'use cache'`) — 규칙에 캐시를 넣지 않는다(§6.2: 런타임마다
+//      캐시가 달라 규칙이 그걸 알면 안 된다). Edge 에는 이 계층이 없다.
+//   2) `getWrongQuestionSamples` — 모델 프롬프트에 넣을 오답 문항 표본. **웹 생성기 전용**이고
+//      Edge·앱으로는 절대 나가지 않는다(발문·정답·선지 해설이 통째로 들어 있다).
+//
 // question_explanations/paper_answers는 service_role만 읽으므로 admin 클라이언트로 돈다.
 // 호출부는 반드시 본인(userId) 확인을 끝낸 뒤에만 부를 것.
 
 type Admin = ReturnType<typeof createAdminClient>;
 
-// 개념(keyword_title) 단위 오답 통계. corpusCount는 전체 기출에서 이 개념 문항이 몇 개
-// 있는지(같은개념 5문제 풀기 가능 여부 + 출제 빈도 산정의 근거). 화면은 이 배열을 과목별로
-// 묶어 막대그래프를 그린다.
-export type ConceptStat = {
-  concept: string;
-  // 정본 개념 id(있으면). 같은개념 기출 뽑기·코퍼스 집계는 이 축을 쓴다. 아직 정본이
-  // 안 붙은 문항은 null이고, 그때만 keyword_title 표기로 떨어진다.
-  conceptId: string | null;
-  // 지식형/기능형. 진단 문구가 갈린다("개념을 모른다" vs "이 유형에 약하다").
-  conceptKind: string | null;
-  subject: string | null;
-  subjectSlug: string | null;
-  // 이 창(기간) 안에서 틀린 문항 수(문항 단위 중복 제거).
-  wrongCount: number;
-  // 이 창 안에서 이 개념 문항을 푼 총 횟수와 그중 정답률(%). 표본이 없으면 null.
-  answeredCount: number;
-  accuracyPct: number | null;
-  // 전체 기출 코퍼스에서 같은 keyword_title 문항 수.
-  corpusCount: number;
-  // 이 개념을 전부 맞혔다면 그 과목 회차 점수가 몇 점 오르는지(%p). 계산은
-  // 이 개념 오답 수 ÷ 그 과목에서 이 기간에 푼 문항 수 × 100 — AI가 아니라 산수다.
-  // "몇 문항 틀렸다"만으로는 심각도가 안 잡혀서, 사용자가 아는 단위(점수)로 바꿔 준다.
-  // 그 개념을 **전부** 맞힌다는 가정의 상한이므로 화면에서 단독으로 크게 쓰지 말 것
-  // (회차당 몇 문항인지와 함께 보여준다).
-  scoreGainPct: number | null;
-};
+export type {
+  ConceptStat,
+  SubjectStat,
+  SubjectConceptGroup,
+  DiagnosisWindow,
+  DiagnosisAggregate,
+} from "@gongmoa/core/server";
 
-export type SubjectStat = {
-  // subjects.id. 진단 과목 선택(review_preferences.diagnosis_paused_subject_ids)이
-  // id 축이라 화면이 토글하려면 이 값이 필요하다.
-  id: string;
-  name: string;
-  slug: string;
-  attempts: number;
-  avgScorePct: number | null;
-  // 최근 최대 5회 정오율(오래된→최신). 추세용.
-  recentScores: number[];
-};
+export async function getDiagnosisAggregate(
+  userId: string,
+  opts: { days?: number | null; widen?: boolean; subjectSlug?: string | null } = {},
+): Promise<DiagnosisAggregate> {
+  // 캐시 키가 눈에 보이도록 옵션을 여기서 원시값으로 펴서 넘긴다. 기본값이 호출부마다
+  // 다르게 생략되면(`{days:7}` vs `{days:7, widen:undefined}`) 같은 질문이 다른 키가 돼
+  // 캐시가 놀게 된다.
+  return aggregateCached(
+    userId,
+    opts.days === undefined ? 7 : opts.days,
+    // widen=false 면 창을 절대 넓히지 않는다. AI 분석 경로가 이걸 쓴다 — 창이 곧
+    // 프롬프트 크기이자 요금이라, 빈 주에 조용히 90일치를 긁어 오면 안 된다.
+    opts.widen !== false,
+    opts.subjectSlug ?? null,
+  );
+}
 
-// 한 과목 안의 개념 오답 묶음(막대그래프 한 그룹).
-export type SubjectConceptGroup = {
-  subject: string;
-  subjectSlug: string | null;
-  // 이 과목에서 틀린 문항 총합(그래프 정렬·상단 요약용).
-  totalWrong: number;
-  concepts: ConceptStat[];
-};
+// 집계 + 캐시. 진단 화면에서 가장 느린 구간이 여기다(계정 전체 응시 이력 → 기간
+// 안의 응답 → 문항·해설·개념 → 개념별 기출 수). 페이지를 다시 열거나 기간 칩을 오갈
+// 때마다 같은 계산을 처음부터 다시 하고 있었다.
+//
+// **userId 가 첫 번째 인자인 것이 이 캐시의 안전장치다** — 캐시 키는 인자에서 나오므로,
+// 사용자 구분이 인자에 없으면 남의 오답 집계가 다른 사람에게 나간다. 인자를 줄이거나
+// 사용자 정보를 함수 밖(전역·요청 컨텍스트)에서 읽도록 바꾸지 말 것.
+//
+// 30초로 짧게 잡는다. 문제를 풀고 바로 진단으로 넘어오는 흐름이 흔해서, 방금 푼 것이
+// 한참 안 보이면 고장으로 읽힌다.
+async function aggregateCached(
+  userId: string,
+  requested: number | null,
+  widenAllowed: boolean,
+  subjectFilter: string | null,
+): Promise<DiagnosisAggregate> {
+  "use cache";
+  cacheLife({ revalidate: 30, expire: 300 });
 
-// 집계 기간. days=null 이면 전체 기간.
-export type DiagnosisWindow = {
-  days: number | null;
-  // 요청한 기간에 푼 문제가 없어 자동으로 넓힌 경우 true(화면이 그 사실을 알린다).
-  widened: boolean;
-};
+  return getDiagnosisAggregateRule(createAdminClient(), userId, {
+    days: requested,
+    widen: widenAllowed,
+    subjectSlug: subjectFilter,
+  });
+}
 
-export type DiagnosisAggregate = {
-  window: DiagnosisWindow;
-  totals: { attempts: number; wrongQuestions: number; conceptsWithKeyword: number };
-  subjects: SubjectStat[];
-  // wrongCount 내림차순, 최대 30개.
-  concepts: ConceptStat[];
-  // 과목별로 묶은 개념 오답(막대그래프용). totalWrong 내림차순.
-  bySubject: SubjectConceptGroup[];
-};
+// ── 아래는 웹 생성기 전용(모델 프롬프트 입력) ───────────────────────────────
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -106,447 +106,6 @@ async function fetchAll<T>(
 }
 
 const questionKey = (pid: string, n: number) => `${pid}#${n}`;
-
-// days 전부터 지금까지의 ISO 시각. days=null 이면 제한 없음(전체 기간).
-function sinceIso(days: number | null): string | null {
-  if (days == null) return null;
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString();
-}
-
-// 기간 안에 사용자가 푼 문항별 정오 집계. CBT 제출과 섞어풀기·복습 세션을 모두 센다
-// (사용자에겐 둘 다 "푼 것"이고, 한쪽만 세면 복습으로만 공부한 주가 빈칸이 된다).
-// 같은 문항을 여러 번 풀었으면 total 이 늘고, 그중 틀린 횟수가 wrong 이다.
-async function collectAnswerEvents(
-  admin: Admin,
-  userId: string,
-  days: number | null,
-): Promise<Map<string, { paperId: string; questionNumber: number; wrong: number; total: number }>> {
-  const since = sinceIso(days);
-  const out = new Map<string, { paperId: string; questionNumber: number; wrong: number; total: number }>();
-
-  const bump = (paperId: string, questionNumber: number, isCorrect: boolean | null) => {
-    const k = questionKey(paperId, questionNumber);
-    const e = out.get(k) ?? { paperId, questionNumber, wrong: 0, total: 0 };
-    e.total++;
-    if (isCorrect === false) e.wrong++;
-    out.set(k, e);
-  };
-
-  // CBT: 제출(attempt) → 문항별 응답.
-  const attemptRows = await fetchAll<{ id: string; paper_id: string }>(
-    admin,
-    "cbt_attempts",
-    "id, paper_id",
-    (q) => (since ? q.eq("user_id", userId).gte("created_at", since) : q.eq("user_id", userId)),
-  );
-  const attemptPaperId = new Map(attemptRows.map((a) => [a.id, a.paper_id]));
-  for (const ids of chunk([...attemptPaperId.keys()], 100)) {
-    if (ids.length === 0) continue;
-    const rows = await fetchAll<{
-      attempt_id: string;
-      question_number: number;
-      selected_choice: number | null;
-      is_correct: boolean | null;
-    }>(
-      admin,
-      "cbt_attempt_answers",
-      "attempt_id, question_number, selected_choice, is_correct",
-      (q) => q.in("attempt_id", ids),
-    );
-    for (const r of rows) {
-      // 안 푼(미선택) 문항은 "틀렸다"가 아니라 "안 풀었다"이므로 세지 않는다.
-      if (r.selected_choice == null) continue;
-      const paperId = attemptPaperId.get(r.attempt_id);
-      if (paperId) bump(paperId, r.question_number, r.is_correct);
-    }
-  }
-
-  // 섞어풀기·복습: 채점을 마친(submitted) 세션만.
-  const sessionRows = await fetchAll<{ id: string }>(
-    admin,
-    "review_sessions",
-    "id",
-    (q) => {
-      const base = q.eq("user_id", userId).not("submitted_at", "is", null);
-      return since ? base.gte("created_at", since) : base;
-    },
-  );
-  for (const ids of chunk(sessionRows.map((s) => s.id), 100)) {
-    if (ids.length === 0) continue;
-    const rows = await fetchAll<{
-      paper_id: string;
-      question_number: number;
-      selected_choice: number | null;
-      is_correct: boolean | null;
-    }>(
-      admin,
-      "review_session_items",
-      "paper_id, question_number, selected_choice, is_correct",
-      (q) => q.in("session_id", ids),
-    );
-    for (const r of rows) {
-      if (r.selected_choice == null) continue;
-      bump(r.paper_id, r.question_number, r.is_correct);
-    }
-  }
-
-  return out;
-}
-
-// 자동 확장 사다리. 요청한 기간에 푼 문제가 없으면 다음 칸으로 넓힌다 — 며칠 쉰
-// 사용자에게 빈 그래프를 보여주는 것보다 "언제 것"인지 밝히고 보여주는 편이 낫다.
-const WIDEN_LADDER: (number | null)[] = [7, 30, 90, null];
-
-// 사용자가 이 기간에 "무엇을 틀렸는지"를 개념별로 집계한다(무AI).
-//
-// 누적 상태(user_question_status)가 아니라 **응시 이벤트**를 읽는다. 목표가 "지난
-// 일주일 동안 어떤 개념 위주로 틀렸나"라서 시점이 필요한데, 누적 상태에는 마지막
-// 응답 시각 하나뿐이라 기간을 자를 수 없다. CBT 제출(cbt_attempt_answers)과
-// 섞어풀기·복습(review_session_items)을 모두 센다 — 사용자에겐 둘 다 "푼 것"이다.
-export async function getDiagnosisAggregate(
-  userId: string,
-  // subjectSlug 를 주면 그 과목만 집계한다. 개념 상위 N개를 자르기 **전에** 걸러야
-  // 한다 — 전체에서 자른 뒤 거르면 개념이 잘게 쪼개진 과목이 통째로 사라진다.
-  // (화면의 과목 탭은 더 이상 이 인자를 쓰지 않고 클라이언트에서 거른다.)
-  opts: { days?: number | null; widen?: boolean; subjectSlug?: string | null } = {},
-): Promise<DiagnosisAggregate> {
-  // 캐시 키가 눈에 보이도록 옵션을 여기서 원시값으로 펴서 넘긴다. 기본값이 호출부마다
-  // 다르게 생략되면(`{days:7}` vs `{days:7, widen:undefined}`) 같은 질문이 다른 키가 돼
-  // 캐시가 놀게 된다.
-  return aggregateCached(
-    userId,
-    opts.days === undefined ? 7 : opts.days,
-    // widen=false 면 창을 절대 넓히지 않는다. AI 분석 경로가 이걸 쓴다 — 창이 곧
-    // 프롬프트 크기이자 요금이라, 빈 주에 조용히 90일치를 긁어 오면 안 된다.
-    opts.widen !== false,
-    opts.subjectSlug ?? null,
-  );
-}
-
-// 집계 본체 + 캐시. 진단 화면에서 가장 느린 구간이 여기다(계정 전체 응시 이력 → 기간
-// 안의 응답 → 문항·해설·개념 → 개념별 기출 수). 페이지를 다시 열거나 기간 칩을 오갈
-// 때마다 같은 계산을 처음부터 다시 하고 있었다.
-//
-// **userId 가 첫 번째 인자인 것이 이 캐시의 안전장치다** — 캐시 키는 인자에서 나오므로,
-// 사용자 구분이 인자에 없으면 남의 오답 집계가 다른 사람에게 나간다. 인자를 줄이거나
-// 사용자 정보를 함수 밖(전역·요청 컨텍스트)에서 읽도록 바꾸지 말 것.
-//
-// 30초로 짧게 잡는다. 문제를 풀고 바로 진단으로 넘어오는 흐름이 흔해서, 방금 푼 것이
-// 한참 안 보이면 고장으로 읽힌다.
-async function aggregateCached(
-  userId: string,
-  requested: number | null,
-  widenAllowed: boolean,
-  subjectFilter: string | null,
-): Promise<DiagnosisAggregate> {
-  "use cache";
-  cacheLife({ revalidate: 30, expire: 300 });
-
-  const admin = createAdminClient();
-
-  // 1) 응시 이력(과목 포함) — 과목별 정오율·추세.
-  const attempts = await fetchAll<{
-    id: string;
-    paper_id: string;
-    score: number | null;
-    total_questions: number | null;
-    exam_papers: { subject_id: string; subjects: { name: string; slug: string } | null } | null;
-  }>(
-    admin,
-    "cbt_attempts",
-    "id, paper_id, score, total_questions, exam_papers!inner(subject_id, subjects(name, slug))",
-    (q) => q.eq("user_id", userId).order("created_at", { ascending: true }),
-  );
-
-  const bySubjectMap = new Map<
-    string,
-    {
-      id: string;
-      name: string;
-      slug: string;
-      attempts: number;
-      scoreSum: number;
-      totalSum: number;
-      recentPct: number[];
-    }
-  >();
-  for (const a of attempts) {
-    const subj = a.exam_papers?.subjects;
-    if (!subj) continue;
-    const entry =
-      bySubjectMap.get(subj.slug) ??
-      {
-        id: a.exam_papers?.subject_id ?? "",
-        name: subj.name,
-        slug: subj.slug,
-        attempts: 0,
-        scoreSum: 0,
-        totalSum: 0,
-        recentPct: [],
-      };
-    entry.attempts++;
-    entry.scoreSum += a.score ?? 0;
-    entry.totalSum += a.total_questions ?? 0;
-    if ((a.total_questions ?? 0) > 0) {
-      entry.recentPct.push(Math.round(((a.score ?? 0) / (a.total_questions as number)) * 100));
-    }
-    bySubjectMap.set(subj.slug, entry);
-  }
-  const subjects: SubjectStat[] = [...bySubjectMap.values()].map((e) => ({
-    id: e.id,
-    name: e.name,
-    slug: e.slug,
-    attempts: e.attempts,
-    avgScorePct: e.totalSum > 0 ? Math.round((e.scoreSum / e.totalSum) * 100) : null,
-    recentScores: e.recentPct.slice(-5),
-  }));
-
-  // 2) 기간 안의 응시 이벤트 → 문항별 정오. CBT와 섞어풀기를 합쳐 센다.
-  //    사다리를 따라 넓히며 "틀린 문항이 하나라도 나오는" 첫 창을 쓴다.
-  // 요청한 창부터 시작해, 그보다 넓은 칸만 사다리로 이어 붙인다(요청이 9일이면
-  // 9 → 30 → 90 → 전체). 화면에서만 넓히고, 분석 경로는 widen:false 로 첫 칸에 묶인다.
-  const ladder: (number | null)[] = !widenAllowed
-    ? [requested]
-    : [requested, ...WIDEN_LADDER.filter((d) => d === null || (requested !== null && d > requested))];
-
-  type QuestionStat = { paperId: string; questionNumber: number; wrong: number; total: number };
-  let statsByQuestion = new Map<string, QuestionStat>();
-  let usedDays: number | null = requested;
-  let widened = false;
-
-  for (const days of ladder) {
-    statsByQuestion = await collectAnswerEvents(admin, userId, days);
-    const anyWrong = [...statsByQuestion.values()].some((s) => s.wrong > 0);
-    if (anyWrong) {
-      usedDays = days;
-      widened = days !== requested;
-      break;
-    }
-    usedDays = days;
-    widened = days !== requested;
-  }
-
-  // 막대그래프에 세는 "틀린 문항"은 이 기간에 한 번이라도 틀린 것만이다.
-  const statusRows = [...statsByQuestion.values()]
-    .filter((s) => s.wrong > 0)
-    .map((s) => ({ paper_id: s.paperId, question_number: s.questionNumber }));
-  // 정답률은 그 개념 문항을 **푼 것 전체**로 낸다. 예전엔 위의 오답 문항만 순회해서
-  // 분모와 분자가 같은 집합이었고, 한 문항을 한 번씩만 푼 사용자(대부분)는 모든 개념이
-  // 정답률 0%로 표시됐다 — 66문항 중 13개 틀린 개념도 0%였다. 맞힌 문항이 분모에
-  // 들어가야 "이 개념 몇 문항 중 몇 개 틀렸나"가 되고, 그래야 오답 수가 같은 두 개념
-  // 중 무엇이 더 급한지 판단할 수 있다.
-  const answeredRows = [...statsByQuestion.values()];
-  const answerStats = statsByQuestion;
-
-  // 3) (paper, 문항) → questions.id → keyword_title, paper → subject.
-  const paperIds = [...new Set(answeredRows.map((r) => r.paperId))];
-  const questionIdByKey = new Map<string, string>();
-  const paperSubject = new Map<string, { name: string; slug: string } | null>();
-  for (const ids of chunk(paperIds, 100)) {
-    if (ids.length === 0) continue;
-    const qrows = await fetchAll<{ id: string; paper_id: string; question_number: number }>(
-      admin,
-      "questions",
-      "id, paper_id, question_number",
-      (q) => q.in("paper_id", ids),
-    );
-    for (const r of qrows) questionIdByKey.set(questionKey(r.paper_id, r.question_number), r.id);
-
-    const prows = await fetchAll<{
-      id: string;
-      subject_id: string;
-      subjects: { name: string; slug: string } | null;
-    }>(
-      admin,
-      "exam_papers",
-      "id, subject_id, subjects(name, slug)",
-      (q) => q.in("id", ids),
-    );
-    for (const p of prows) {
-      paperSubject.set(p.id, p.subjects ? { name: p.subjects.name, slug: p.subjects.slug } : null);
-    }
-  }
-
-  // 개념 조회. 진단 축은 정본 개념(concept_id)이다 — keyword_title은 해설 배치가
-  // 문항마다 자유롭게 쓴 문자열이라 사실상 문항 1:1이고(코퍼스 기준 개념당 1.02문항),
-  // 그 축으로 집계하면 막대가 전부 높이 1이 되어 "어디가 약한지"가 보이지 않는다.
-  // 정본이 아직 안 붙은 문항만 keyword_title 표기로 남긴다(문서 규칙: 미매칭을 "기타"로
-  // 뭉치지 말 것).
-  const questionIds = [...questionIdByKey.values()];
-  const conceptRefByQuestionId = new Map<string, { conceptId: string | null; title: string }>();
-  const conceptIdsSeen = new Set<string>();
-  for (const ids of chunk(questionIds, 100)) {
-    if (ids.length === 0) continue;
-    const rows = await fetchAll<{
-      question_id: string;
-      keyword_title: string | null;
-      concept_id: string | null;
-    }>(
-      admin,
-      "question_explanations",
-      "question_id, keyword_title, concept_id",
-      (q) => q.in("question_id", ids),
-    );
-    for (const r of rows) {
-      const title = (r.keyword_title ?? "").trim();
-      if (!r.concept_id && !title) continue;
-      if (r.concept_id) conceptIdsSeen.add(r.concept_id);
-      conceptRefByQuestionId.set(r.question_id, { conceptId: r.concept_id, title });
-    }
-  }
-
-  // 정본 개념의 이름·유형. 합쳐진 개념(merged_into)은 합쳐진 쪽 이름으로 보여준다.
-  const conceptMeta = new Map<string, { name: string; kind: string | null }>();
-  for (const ids of chunk([...conceptIdsSeen], 100)) {
-    if (ids.length === 0) continue;
-    const rows = await fetchAll<{ id: string; name: string; kind: string | null }>(
-      admin,
-      "concepts",
-      "id, name, kind",
-      (q) => q.in("id", ids),
-    );
-    for (const r of rows) conceptMeta.set(r.id, { name: r.name, kind: r.kind });
-  }
-
-  // 4) 개념 × 과목 집계.
-  const conceptMap = new Map<
-    string,
-    {
-      concept: string;
-      conceptId: string | null;
-      conceptKind: string | null;
-      subject: string | null;
-      subjectSlug: string | null;
-      wrongCount: number;
-      correctSum: number;
-      answerSum: number;
-    }
-  >();
-  // 예상 점수의 분모: 이 기간에 그 과목에서 푼 문항 수(개념이 안 붙은 문항도 포함해야
-  // 실제 회차 점수 환산이 된다). 과목 필터와 무관하게 원래 과목 기준으로 센다.
-  const answeredBySubject = new Map<string, number>();
-  for (const r of answeredRows) {
-    const slug = paperSubject.get(r.paperId)?.slug;
-    if (slug) answeredBySubject.set(slug, (answeredBySubject.get(slug) ?? 0) + 1);
-  }
-
-  for (const r of answeredRows) {
-    const qid = questionIdByKey.get(questionKey(r.paperId, r.questionNumber));
-    if (!qid) continue;
-    const ref = conceptRefByQuestionId.get(qid);
-    if (!ref) continue;
-    const meta = ref.conceptId ? conceptMeta.get(ref.conceptId) : undefined;
-    // 정본이 있으면 정본 이름으로, 없으면 해설이 쓴 표기 그대로.
-    const concept = meta?.name ?? ref.title;
-    if (!concept) continue;
-    const subj = paperSubject.get(r.paperId);
-    if (subjectFilter && subj?.slug !== subjectFilter) continue;
-    const key = `${ref.conceptId ?? `kw:${ref.title}`}###${subj?.slug ?? ""}`;
-    const entry =
-      conceptMap.get(key) ??
-      {
-        concept,
-        conceptId: ref.conceptId,
-        conceptKind: meta?.kind ?? null,
-        subject: subj?.name ?? null,
-        subjectSlug: subj?.slug ?? null,
-        wrongCount: 0,
-        correctSum: 0,
-        answerSum: 0,
-      };
-    // 이 기간에 틀린 문항 1개 = 1. 같은 문항을 두 번 틀려도 문항 수로는 1이다
-    // ("이 개념 문제 5개를 틀렸다"가 사람이 읽기 쉬운 단위). 맞히기만 한 문항은
-    // 여기서 세지 않고 아래 정답률 분모에만 들어간다.
-    if (r.wrong > 0) entry.wrongCount++;
-    const st = answerStats.get(questionKey(r.paperId, r.questionNumber));
-    if (st) {
-      entry.correctSum += st.total - st.wrong;
-      entry.answerSum += st.total;
-    }
-    conceptMap.set(key, entry);
-  }
-
-  const conceptsRaw = [...conceptMap.values()]
-    // 이 기간에 한 번도 안 틀린 개념은 그래프에 세우지 않는다 — 분모 역할만 한 것이다.
-    .filter((e) => e.wrongCount > 0)
-    .map((e) => ({
-      concept: e.concept,
-      conceptId: e.conceptId,
-      conceptKind: e.conceptKind,
-      subject: e.subject,
-      subjectSlug: e.subjectSlug,
-      wrongCount: e.wrongCount,
-      answeredCount: e.answerSum,
-      accuracyPct: e.answerSum > 0 ? Math.round((e.correctSum / e.answerSum) * 100) : null,
-      scoreGainPct: (() => {
-        const denom = e.subjectSlug ? (answeredBySubject.get(e.subjectSlug) ?? 0) : 0;
-        if (denom <= 0) return null;
-        return Math.round((e.wrongCount / denom) * 1000) / 10;
-      })(),
-    }))
-    .sort((a, b) => b.wrongCount - a.wrongCount || a.concept.localeCompare(b.concept))
-    // 전체 상위 N개. 코칭 대상을 과목당 7개까지 고르므로(diagnosis-generate.ts) 이 컷이
-    // 30이면 문항을 많이 푼 과목이 30자리를 다 가져가 다른 과목의 7번째가 사라진다.
-    // 화면은 어차피 과목당 6개만 그리고(BARS_PER_SUBJECT) 이 배열은 AI 프롬프트에
-    // 들어가지 않으므로, 과목 수 × 7을 넉넉히 덮는 값으로 둔다.
-    .slice(0, 60);
-
-  // 5) 각 개념의 전체 기출 corpus 문항 수. 같은개념 5문제 풀기 가능 여부 판단에 그대로 쓰고,
-  // 화면 뱃지(출제 빈도)에도 쓴다. 정본 개념은 concept_id로 센다(평균 15문항). 정본이
-  // 없는 것만 keyword_title로 세는데, 그 축은 문항 1:1이라 거의 항상 1이 나온다 —
-  // 그래서 "기출이 적어 풀기를 만들 수 없어요"가 뜨면 개념이 아직 미분류라는 뜻이다.
-  const corpusCount = new Map<string, number>();
-  const countKeyOf = (c: { conceptId: string | null; concept: string }) =>
-    c.conceptId ?? `kw:${c.concept}`;
-  const uniqueTargets = new Map<string, { conceptId: string | null; concept: string }>();
-  for (const c of conceptsRaw) uniqueTargets.set(countKeyOf(c), c);
-  // 개념 수가 최대 30개라 순차면 왕복이 쌓인다 — 병렬로 센다.
-  await Promise.all(
-    [...uniqueTargets.entries()].map(async ([k, c]) => {
-      const q = admin.from("question_explanations").select("question_id", { count: "exact", head: true });
-      const { count } = await (c.conceptId
-        ? q.eq("concept_id", c.conceptId)
-        : q.eq("keyword_title", c.concept));
-      corpusCount.set(k, count ?? 0);
-    }),
-  );
-
-  const concepts: ConceptStat[] = conceptsRaw.map((c) => ({
-    ...c,
-    corpusCount: corpusCount.get(countKeyOf(c)) ?? 0,
-  }));
-
-  // 6) 과목별 묶음(막대그래프). 과목명 없는 개념은 "기타"로 접지 않고 subject=null 그룹.
-  const groupMap = new Map<string, SubjectConceptGroup>();
-  for (const c of concepts) {
-    const key = c.subjectSlug ?? "__none__";
-    const g =
-      groupMap.get(key) ??
-      { subject: c.subject ?? "기타", subjectSlug: c.subjectSlug, totalWrong: 0, concepts: [] };
-    g.totalWrong += c.wrongCount;
-    g.concepts.push(c);
-    groupMap.set(key, g);
-  }
-  const bySubject = [...groupMap.values()]
-    .map((g) => ({ ...g, concepts: g.concepts.sort((a, b) => b.wrongCount - a.wrongCount) }))
-    .sort((a, b) => b.totalWrong - a.totalWrong);
-
-  return {
-    window: { days: usedDays, widened },
-    totals: {
-      attempts: attempts.length,
-      wrongQuestions: subjectFilter
-        ? statusRows.filter((r) => paperSubject.get(r.paper_id)?.slug === subjectFilter).length
-        : statusRows.length,
-      conceptsWithKeyword: [...conceptMap.values()].filter((e) => e.wrongCount > 0).length,
-    },
-    subjects,
-    concepts,
-    bySubject,
-  };
-}
 
 // ── 오답 문항 표본(AI 코칭 입력용) ───────────────────────────────────────────
 // 개념 이름과 숫자만으로는 "어떤 유형에서 무너지는지"를 말할 수 없다(모델이 문제를

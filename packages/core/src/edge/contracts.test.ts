@@ -394,6 +394,73 @@ const mixCreateSession = {
   cached: false,
 }) satisfies EdgeResponse<"ai-diagnose">;
 
+// ── diagnosis-request / diagnosis-aggregate (§6.7 #21) ──────────────────────
+({}) satisfies EdgeRequest<"diagnosis-request">;
+({ selectedConcepts: [{ conceptId: null, concept: "행정행위" }] }) satisfies EdgeRequest<"diagnosis-request">;
+({
+  status: "pending",
+  date: "2026-09-16",
+  nextDate: "2026-09-23",
+  selectedCount: 3,
+}) satisfies EdgeResponse<"diagnosis-request">;
+
+({}) satisfies EdgeRequest<"diagnosis-aggregate">;
+({ days: null }) satisfies EdgeRequest<"diagnosis-aggregate">;
+({
+  window: { days: 7, widened: false },
+  subjects: [{ name: "행정법", slug: "admin-law" }],
+  concepts: [
+    {
+      concept: "행정행위",
+      conceptId: "c1",
+      subject: "행정법",
+      subjectSlug: "admin-law",
+      wrongCount: 3,
+      accuracyPct: 40,
+      scoreGainPct: 7.5,
+      corpusCount: 12,
+    },
+  ],
+  bySubject: [
+    {
+      subject: "행정법",
+      subjectSlug: "admin-law",
+      totalWrong: 3,
+      concepts: [
+        {
+          concept: "행정행위",
+          conceptId: "c1",
+          subject: "행정법",
+          subjectSlug: "admin-law",
+          wrongCount: 3,
+          accuracyPct: 40,
+          scoreGainPct: 7.5,
+          corpusCount: 12,
+        },
+      ],
+    },
+  ],
+  analysisDays: 7,
+  picker: [
+    {
+      key: "c1",
+      concept: "행정행위",
+      conceptId: "c1",
+      subject: "행정법",
+      subjectSlug: "admin-law",
+      wrongCount: 3,
+      accuracyPct: 40,
+      scoreGainPct: 7.5,
+      recommended: true,
+    },
+  ],
+  cycle: { requestedThisCycle: false, status: null, date: null, nextDate: null },
+  generating: null,
+  eligibility: { eligible: true, attemptCount: 3, wrongCount: 12 },
+}) satisfies EdgeResponse<"diagnosis-aggregate">;
+
+// 리포트 본문은 이 두 응답에 없다 — 앱이 ai_diagnoses.report 를 RLS 로 직접 읽는다(§6.7 #21).
+
 // ── 오류 본문 ───────────────────────────────────────────────────────────────
 ({ error: "로그인 후 이용할 수 있어요." }) satisfies EdgeErrorBody;
 
@@ -402,8 +469,8 @@ type _EveryEntry = { [N in EdgeName]: EdgeContracts[N] extends { request: unknow
 const _every: _EveryEntry[EdgeName] = true;
 void _every;
 
-test("EDGE_NAMES 는 배포된 함수 14개", () => {
-  assert.equal(EDGE_NAMES.length, 14);
+test("EDGE_NAMES 는 배포된 함수 16개", () => {
+  assert.equal(EDGE_NAMES.length, 16);
   assert.equal(new Set(EDGE_NAMES).size, EDGE_NAMES.length);
 });
 

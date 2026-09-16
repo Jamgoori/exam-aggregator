@@ -3,6 +3,7 @@ import { GraduationCap, Menu } from "lucide-react-native";
 import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "./app-text";
+import { NotificationBell } from "./notifications/notification-bell";
 import { Skeleton } from "./skeleton";
 import { ThemeToggle } from "./theme-toggle";
 import { openDrawer } from "../lib/drawer-store";
@@ -11,7 +12,8 @@ import { themedIcon } from "../theme/icons";
 
 // 사이트 공통 헤더 = 메뉴바(웹 site-header.tsx, 설계서 §4.4). 높이 65(64 + 테두리 1).
 // 모든 화면에서 동일("메뉴는 한 곳") — 스택 뒤로가기는 헤더에 넣지 않고 페이지 안 크럼 +
-// 시스템 제스처로. 알림 종(NotificationBell)은 Phase 4 — 자리만 비워 둔다.
+// 시스템 제스처로. 알림 종(NotificationBell)은 Phase 4 에서 들어왔다(웹과 같은 자리 — 테마
+// 토글 왼쪽).
 const MenuIcon = themedIcon(Menu);
 
 export const HEADER_HEIGHT = 65;
@@ -43,7 +45,9 @@ export function AppHeader() {
         </Pressable>
 
         <View className="ml-auto flex-row items-center gap-1.5">
-          {/* NotificationBell 자리(로그인 시, Phase 4) */}
+          {/* 알림 종 — 로그인 사용자에게만 그린다(비로그인이면 컴포넌트가 null 을 돌려주고
+              60초 폴링도 돌지 않는다). 웹도 헤더에서 로그인 사용자에게만 종을 붙인다. */}
+          <NotificationBell />
           <ThemeToggle />
           {loading ? (
             // 인증 확정 전. 실제로 들어올 햄버거 버튼과 같은 크기라 헤더가 출렁이지 않는다.

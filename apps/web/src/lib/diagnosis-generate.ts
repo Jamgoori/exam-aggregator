@@ -7,15 +7,11 @@ import {
   parseCoachingItems,
   type CoachInput,
 } from "@/lib/diagnosis-coach";
-import {
-  COACH_MAX_TOTAL,
-  COACH_PER_SUBJECT,
-  conceptSelectionKey,
-} from "@/lib/diagnosis-limits";
+import { conceptSelectionKey } from "@/lib/diagnosis-limits";
+import { pickCoachTargets } from "@gongmoa/core";
 import {
   getDiagnosisAggregate,
   getWrongQuestionSamples,
-  type ConceptStat,
   type DiagnosisAggregate,
 } from "@/lib/diagnosis-live";
 import { DIAGNOSIS_WINDOW_DAYS } from "@/lib/ai-diagnosis";
@@ -94,68 +90,11 @@ function toSubjectTrends(agg: DiagnosisAggregate): DiagnosisSubjectTrend[] {
     });
 }
 
-// 코칭 대상 개념을 고른다. 과목 안에서는 많이 틀린 순, 동률이면 정답률이 낮은 쪽을
-// 먼저 — 같은 3문항이라도 "5문항 중 3개"가 "20문항 중 3개"보다 급하다.
-//
-// 과목당 COACH_PER_SUBJECT 개까지 뽑되 전체가 COACH_MAX_TOTAL 을 넘지 않게, 순위별로
-// 돌아가며(1위끼리 → 2위끼리 → …) 채운다. 과목 순서대로 7개씩 채우면 상한에 걸릴 때
-// 뒤쪽 과목이 통째로 빠지는데, 그러면 "내 과목은 아예 안 봐주네"가 된다.
-//
-// excludedSubjectSlugs 는 사용자가 진단에서 뺀 과목이다. 빼는 만큼 남은 과목이 상한을
-// 더 깊게 쓴다.
-//
-// selected 가 있으면(화면에서 개념을 직접 체크한 경우) 아래 자동 선정은 건너뛰고 고른
-// 개념만 남긴다 — 사용자가 정한 것을 우리가 "더 시급한 것"으로 바꿔치면 체크박스가
-// 장식이 된다. 상한(COACH_MAX_TOTAL)은 요금 상한이라 그때도 그대로 적용된다.
-export function pickCoachTargets(
-  agg: DiagnosisAggregate,
-  excludedSubjectSlugs: Set<string>,
-  selected: DiagnosisConceptSelection[] | null = null,
-) {
-  if (selected && selected.length > 0) return pickSelectedConcepts(agg, selected);
-
-  const bySubject = new Map<string, ConceptStat[]>();
-  for (const c of agg.concepts) {
-    const slug = c.subjectSlug ?? "";
-    if (slug && excludedSubjectSlugs.has(slug)) continue;
-    const list = bySubject.get(slug) ?? [];
-    if (list.length >= COACH_PER_SUBJECT) continue;
-    list.push(c);
-    bySubject.set(slug, list);
-  }
-  // 과목 순서는 그 과목에서 틀린 문항이 많은 쪽부터 — 상한에 걸려 잘리는 자리는
-  // 오답이 적은 과목의 하위 개념이어야 한다.
-  const groups = [...bySubject.values()].sort(
-    (a, b) =>
-      b.reduce((n, c) => n + c.wrongCount, 0) - a.reduce((n, c) => n + c.wrongCount, 0),
-  );
-  for (const g of groups) {
-    g.sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101));
-  }
-
-  const picked: ConceptStat[] = [];
-  for (let rank = 0; rank < COACH_PER_SUBJECT && picked.length < COACH_MAX_TOTAL; rank++) {
-    for (const g of groups) {
-      if (picked.length >= COACH_MAX_TOTAL) break;
-      if (g[rank]) picked.push(g[rank]);
-    }
-  }
-  return picked;
-}
-
-// 사용자가 고른 개념만 추린다. 순서는 집계 순서(많이 틀린 순)를 그대로 따르고,
-// 이 기간에 오답이 없어 집계에 없는 개념은 조용히 빠진다 — 표본 문항이 없으면 모델이
-// 일반론밖에 못 내므로 요금만 나간다.
-function pickSelectedConcepts(agg: DiagnosisAggregate, selected: DiagnosisConceptSelection[]) {
-  const wanted = new Set(selected.map(conceptSelectionKey));
-  const picked: ConceptStat[] = [];
-  for (const c of agg.concepts) {
-    if (!wanted.has(conceptSelectionKey(c))) continue;
-    picked.push(c);
-    if (picked.length >= COACH_MAX_TOTAL) break;
-  }
-  return picked;
-}
+// 코칭 대상 개념 선정(pickCoachTargets)은 core diagnosis-targets.ts 가 정본이다 —
+// 웹 생성기(여기)·웹 진단 페이지의 "추천" 체크·Edge `diagnosis-aggregate` 의 선택창이
+// 같은 개념을 골라야 하기 때문이다(한 벌 더 쓰면 같은 계정이 웹과 앱에서 다른 추천을
+// 받는다). 기존 import 경로는 그대로 살린다.
+export { pickCoachTargets } from "@gongmoa/core";
 
 // 담백한 요약 한 줄(무AI). 가장 시급한 개념과 안정권 과목을 데이터로만 짚는다.
 function buildSummary(agg: DiagnosisAggregate): string {

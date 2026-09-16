@@ -1,6 +1,8 @@
 // AI 약점 진단의 콜드 스타트 문턱. 데이터가 빈약하면 진단이 뻔해져 신뢰를 깎으므로,
 // 둘 중 하나를 넘겨야 진단을 열어준다(웹 lib/ai-diagnosis.ts getDiagnosisEligibility).
-// Edge Function(ai-diagnose)에도 같은 값이 복제돼 있으니 바꿀 때 함께 고칠 것.
+// 서버 판정(rules/diagnosis-request 의 요청 게이트, data/mypage 의 fetchDiagnosisEligibility)도
+// 이 값을 쓴다. 폐기된 Edge `ai-diagnose` 안에만 사본이 남아 있는데, 그건 옛 앱 빌드가 받는
+// 판정을 바꾸지 않으려고 일부러 둔 것이라 여기와 함께 고치지 않는다(그 파일 머리말).
 export const DIAGNOSIS_MIN_WRONG = 15;
 export const DIAGNOSIS_MIN_ATTEMPTS = 3;
 

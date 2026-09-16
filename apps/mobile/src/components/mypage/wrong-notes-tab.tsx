@@ -235,8 +235,8 @@ function MixPracticeEntry({ subjects }: { subjects: { slug: string; name: string
 }
 
 // 오답노트 탭 안의 AI 약점 진단 진입점(웹 DiagnosisEntryLink:930). 모든 회원에게 보인다 —
-// 멤버십이 없는 사람이 눌러도 진단 페이지가 멤버십 안내를 대신 띄운다. `/mypage/diagnosis` 는
-// Phase 4(§5) — 아직 없으면 +not-found.
+// 멤버십이 없는 사람이 눌러도 진단 대시보드(`app/mypage/diagnosis.tsx`, Phase 4)가 멤버십
+// 안내를 대신 띄운다.
 function DiagnosisEntryLink() {
   return (
     <Pressable
