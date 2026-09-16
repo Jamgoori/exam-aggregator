@@ -1,8 +1,9 @@
 import { formatDuration, type CbtViewMode } from "@gongmoa/core";
 import { router, type Href } from "expo-router";
-import { ChevronLeft, Clock, Eraser, Hand, PenLine } from "lucide-react-native";
+import { ChevronLeft, Clock, Eraser, Hand, PanelRightClose, PenLine } from "lucide-react-native";
 import { useCallback } from "react";
 import { Pressable, View } from "react-native";
+import { GestureDetector } from "react-native-gesture-handler";
 import { AppText } from "../app-text";
 import { Sheet } from "../sheet";
 import { themedIcon } from "../../theme/icons";
@@ -12,6 +13,7 @@ import { useExitGuard } from "./exit-guard";
 import { FullView } from "./full-view";
 import type { DrawTool } from "./ink-layer";
 import { OmrPanel } from "./omr-panel";
+import { useOmrSplit } from "./omr-split";
 import { SingleQuestionView, useContentZoom } from "./single-question-view";
 import { useCbtState } from "./use-cbt-state";
 import { ViewModeTabs } from "./view-mode-tabs";
@@ -24,9 +26,12 @@ const ClockIcon = themedIcon(Clock);
 const HandIcon = themedIcon(Hand);
 const PenIcon = themedIcon(PenLine);
 const EraserIcon = themedIcon(Eraser);
+const PanelCloseIcon = themedIcon(PanelRightClose);
 // 이미지가 없는 문항에 렌더마다 새 [] 를 주면 SingleQuestionView 의 useImageAspectRatios 가 타이머
 // 틱마다 "문항이 바뀌었다"고 보고 실측 비율을 버린다 — 모듈 상수 하나로.
 const EMPTY_IMAGES: string[] = [];
+// 같은 이유로 "이 페이지엔 획이 없다"도 모듈 상수 하나로(렌더마다 새 [] 를 주면 InkLayer 가 매번 다시 그린다).
+const EMPTY_STROKES: never[] = [];
 
 function ToolButton({
   tool,
@@ -84,6 +89,11 @@ export function CbtSolver({
   const s = useCbtState({ paperId, userId, totalQuestions, questionImages, defaultViewMode });
   const { zoom, zoomIn, zoomOut, handlePinchZoom, setZoom } = useContentZoom();
   const { timer } = s;
+  // 분할 비율은 솔버가 들고 있어 전체보기 ↔ 문제별 보기를 오가도 유지된다(kv 저장은 끌기 끝에).
+  const omrSplit = useOmrSplit();
+  // 전체 모드 = 좌우 분할, 문제별 모드 = 바텀시트(웹 sideOmr/sheetOmr, 설계서 §4.5 #22).
+  const sideOmr = s.omrOpen && s.viewMode === "full";
+  const sheetOmr = s.omrOpen && s.viewMode !== "full";
 
   const leave = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -139,20 +149,18 @@ export function CbtSolver({
                 </AppText>
               )}
             </View>
-            {/* Phase 1a 전체보기는 보기 전용이라 도구 그룹은 문제별 보기에서만(Phase 2 에 펜 복귀). */}
-            {s.viewMode === "single" && (
-              <View className="flex-row items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">
-                <ToolButton tool="move" active={s.tool === "move"} label="화면 이동" onPress={s.setTool}>
-                  <HandIcon size={18} colorClassName={toolColor(s.tool === "move")} />
-                </ToolButton>
-                <ToolButton tool="pen" active={s.tool === "pen"} label="펜" onPress={s.setTool}>
-                  <PenIcon size={18} colorClassName={toolColor(s.tool === "pen")} />
-                </ToolButton>
-                <ToolButton tool="eraser" active={s.tool === "eraser"} label="지우개" onPress={s.setTool}>
-                  <EraserIcon size={18} colorClassName={toolColor(s.tool === "eraser")} />
-                </ToolButton>
-              </View>
-            )}
+            {/* 도구 그룹은 두 모드 공통(웹과 같다) — 전체보기도 Phase 2 부터 펜·지우개가 있다. */}
+            <View className="flex-row items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">
+              <ToolButton tool="move" active={s.tool === "move"} label="화면 이동" onPress={s.setTool}>
+                <HandIcon size={18} colorClassName={toolColor(s.tool === "move")} />
+              </ToolButton>
+              <ToolButton tool="pen" active={s.tool === "pen"} label="펜" onPress={s.setTool}>
+                <PenIcon size={18} colorClassName={toolColor(s.tool === "pen")} />
+              </ToolButton>
+              <ToolButton tool="eraser" active={s.tool === "eraser"} label="지우개" onPress={s.setTool}>
+                <EraserIcon size={18} colorClassName={toolColor(s.tool === "eraser")} />
+              </ToolButton>
+            </View>
             <Pressable
               accessibilityRole="button"
               accessibilityState={{ expanded: s.omrOpen }}
@@ -230,42 +238,114 @@ export function CbtSolver({
         />
       </View>
 
-      <View className="min-h-0 flex-1">
-        {s.viewMode === "full" ? (
-          <FullView fileUrl={fileUrl} zoom={zoom} onZoomChange={setZoom} onZoomIn={zoomIn} onZoomOut={zoomOut} />
-        ) : (
-          <SingleQuestionView
-            questionIndex={s.currentQuestionIndex}
-            questions={s.currentGroupNumbers.map((number) => ({
-              number,
-              // 문제별 뷰만 문항별 선지 수(패널은 문제지 단위).
-              choiceCount: questionChoiceCounts[number] ?? choiceCount,
-              selected: s.answers[number - 1] ?? null,
-              onSelect: (choice: number) => s.selectChoice(number - 1, choice),
-              questionResult: s.result ? (s.resultByQuestion.get(number) ?? null) : null,
-            }))}
-            images={questionImages[s.currentQuestionIndex + 1] ?? EMPTY_IMAGES}
-            prevIndex={s.prevQuestionIndex}
-            nextIndex={s.nextQuestionIndex}
-            onNavigate={s.setCurrentQuestionIndex}
-            tool={s.tool}
-            penColor={s.penColor}
-            penWidth={s.penWidth}
-            strokes={s.singleStrokes[s.currentQuestionIndex] ?? []}
-            onStrokeEnd={s.appendStroke}
-            onSubmit={s.handleSubmit}
-            submitting={s.submitting}
-            submitted={!!s.result}
-            error={s.error}
-            zoom={zoom}
-            onPinchZoom={handlePinchZoom}
-          />
+      {/* 전체보기에서 OMR 을 시험지 위에 덮지 않고 좌우로 쪼갠다 — 시험지를 보면서 표기할 수
+          있어야 하기 때문. 가운데 구분선을 끌면 폭이 바뀌고 그 폭은 기기에 저장된다. */}
+      <View className="min-h-0 flex-1 flex-row" onLayout={omrSplit.onContainerLayout}>
+        <View className="min-h-0 min-w-0 flex-1">
+          {s.viewMode === "full" ? (
+            <FullView
+              fileUrl={fileUrl}
+              zoom={zoom}
+              onZoomChange={setZoom}
+              onZoomIn={zoomIn}
+              onZoomOut={zoomOut}
+              tool={s.tool}
+              penColor={s.penColor}
+              penWidth={s.penWidth}
+              page={s.fullPage}
+              onPageChange={s.setFullPage}
+              strokes={s.pageStrokes[s.fullPage] ?? EMPTY_STROKES}
+              onStrokeEnd={s.appendPageStroke}
+            />
+          ) : (
+            <SingleQuestionView
+              questionIndex={s.currentQuestionIndex}
+              questions={s.currentGroupNumbers.map((number) => ({
+                number,
+                // 문제별 뷰만 문항별 선지 수(패널은 문제지 단위).
+                choiceCount: questionChoiceCounts[number] ?? choiceCount,
+                selected: s.answers[number - 1] ?? null,
+                onSelect: (choice: number) => s.selectChoice(number - 1, choice),
+                questionResult: s.result ? (s.resultByQuestion.get(number) ?? null) : null,
+              }))}
+              images={questionImages[s.currentQuestionIndex + 1] ?? EMPTY_IMAGES}
+              prevIndex={s.prevQuestionIndex}
+              nextIndex={s.nextQuestionIndex}
+              onNavigate={s.setCurrentQuestionIndex}
+              tool={s.tool}
+              penColor={s.penColor}
+              penWidth={s.penWidth}
+              strokes={s.singleStrokes[s.currentQuestionIndex] ?? []}
+              onStrokeEnd={s.appendStroke}
+              onSubmit={s.handleSubmit}
+              submitting={s.submitting}
+              submitted={!!s.result}
+              error={s.error}
+              zoom={zoom}
+              onPinchZoom={handlePinchZoom}
+            />
+          )}
+        </View>
+
+        {sideOmr && (
+          <>
+            <GestureDetector gesture={omrSplit.gesture}>
+              {/* 웹 구분선의 `active:bg-zinc-200` 은 미이식 — 제스처로 끄는 View 라 눌림 상태가 없다. */}
+              <View
+                accessibilityRole="adjustable"
+                accessibilityLabel="시험지와 답안 입력 폭 조절"
+                accessibilityValue={{ min: 30, max: 70, now: Math.round(omrSplit.ratio * 100) }}
+                className="w-3 shrink-0 items-center justify-center bg-zinc-100 dark:bg-zinc-800"
+              >
+                <View className="h-10 w-0.5 rounded-full bg-zinc-400 dark:bg-zinc-500" />
+              </View>
+            </GestureDetector>
+            <View
+              style={{ width: `${omrSplit.ratio * 100}%` }}
+              className="min-h-0 shrink-0 border-l border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+            >
+              <View className="shrink-0 flex-row items-center justify-between gap-1 border-b border-zinc-100 px-2 py-1.5 dark:border-zinc-700">
+                <AppText
+                  variant="xs"
+                  weight="semibold"
+                  className="min-w-0 flex-1 text-zinc-700 dark:text-zinc-300"
+                  numberOfLines={1}
+                >
+                  답안 입력
+                </AppText>
+                {/* 웹과 같이 패널을 접으면 OMR 이 닫힌다(setOmrOpen(false)) — 전체보기에서 "답안 입력"
+                    을 다시 누르면 시트가 아니라 이 분할 패널이 돌아온다(설계서 §4.5 #22 "전체 모드
+                    OMR = 좌우 분할"). 바텀시트는 문제별 보기의 OMR 로 그대로 남아 있다. */}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="답안 입력 닫기"
+                  onPress={() => s.setOmrOpen(false)}
+                  className="shrink-0 rounded-lg p-1 active:bg-zinc-100 dark:active:bg-zinc-800"
+                >
+                  <PanelCloseIcon size={16} colorClassName="text-zinc-500 dark:text-zinc-500" />
+                </Pressable>
+              </View>
+              <OmrPanel
+                className="min-h-0 flex-1"
+                compact
+                totalQuestions={totalQuestions}
+                choiceCount={choiceCount}
+                answers={s.answers}
+                answeredCount={s.answeredCount}
+                onSelect={s.selectChoice}
+                onSubmit={s.handleSubmit}
+                submitting={s.submitting}
+                error={s.error}
+                resultByQuestion={s.result ? s.resultByQuestion : null}
+              />
+            </View>
+          </>
         )}
       </View>
 
-      {/* OMR 시트(문제별·전체보기 공통, Phase 1a). rounded-t-2xl, max 65%, overlay black/40, 웹 헤더
-          `px-4 py-2` text-sm font-semibold "답안 입력" + X 18, 그랩 핸들 없음. */}
-      <Sheet visible={s.omrOpen} onClose={() => s.setOmrOpen(false)} rounded="2xl" maxHeight="65%" title="답안 입력" compactHeader showHandle={false}>
+      {/* OMR 시트는 문제별 보기 전용(전체보기는 위 좌우 분할). rounded-t-2xl, max 65%,
+          overlay black/40, 웹 헤더 `px-4 py-2` text-sm font-semibold "답안 입력" + X 18, 핸들 없음. */}
+      <Sheet visible={sheetOmr} onClose={() => s.setOmrOpen(false)} rounded="2xl" maxHeight="65%" title="답안 입력" compactHeader showHandle={false}>
         <OmrPanel
           totalQuestions={totalQuestions}
           choiceCount={choiceCount}

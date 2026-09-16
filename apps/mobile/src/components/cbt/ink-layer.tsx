@@ -33,10 +33,10 @@ function mid(a: InkPoint, b: InkPoint): InkPoint {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
-export function buildStrokePath(points: InkPoint[], scale: number): SkPath {
+export function buildStrokePath(points: InkPoint[], scaleX: number, scaleY: number = scaleX): SkPath {
   const path = Skia.Path.Make();
   if (points.length < 2) return path;
-  const pts = points.map((p) => ({ x: p.x * scale, y: p.y * scale }));
+  const pts = points.map((p) => ({ x: p.x * scaleX, y: p.y * scaleY }));
   path.moveTo(pts[0].x, pts[0].y);
   path.lineTo(pts[1].x, pts[1].y);
   if (pts.length > 2) {
@@ -50,25 +50,32 @@ export function buildStrokePath(points: InkPoint[], scale: number): SkPath {
   return path;
 }
 
-// 화면 픽셀 → 비율(콘텐츠 폭 기준). 굵기도 같은 기준으로 저장한다.
-export function toNormalizedPoint(x: number, y: number, contentWidth: number): InkPoint {
-  const w = contentWidth || 1;
-  return { x: x / w, y: y / w };
+// 화면 픽셀 → 비율. 기본은 가로·세로 모두 **콘텐츠 폭** 기준(문제별 보기·웹과 같은 규칙, y 는
+// 1 을 넘을 수 있다). contentHeight 를 주면 세로는 그 높이 기준이라 x·y 가 모두 0~1 이 된다
+// (전체보기 PDF 페이지: 상자 크기가 페이지 종횡비로 고정돼 있어 되돌릴 때 왜곡이 없다).
+export function toNormalizedPoint(
+  x: number,
+  y: number,
+  contentWidth: number,
+  contentHeight: number = contentWidth,
+): InkPoint {
+  return { x: x / (contentWidth || 1), y: y / (contentHeight || 1) };
 }
 
 export function normalizedWidth(tool: Exclude<DrawTool, "move">, penWidth: number, contentWidth: number) {
   return (tool === "eraser" ? ERASER_LINE_WIDTH : penWidth) / (contentWidth || 1);
 }
 
-function StrokePath({ stroke, scale }: { stroke: InkStroke; scale: number }) {
-  const path = useMemo(() => buildStrokePath(stroke.points, scale), [stroke.points, scale]);
+function StrokePath({ stroke, scaleX, scaleY }: { stroke: InkStroke; scaleX: number; scaleY: number }) {
+  const path = useMemo(() => buildStrokePath(stroke.points, scaleX, scaleY), [stroke.points, scaleX, scaleY]);
   if (stroke.points.length < 2) return null;
   return (
     <Path
       path={path}
       color={stroke.erase ? "#000000" : stroke.color}
       style="stroke"
-      strokeWidth={stroke.width * scale}
+      // 굵기는 언제나 가로 배율 기준(세로만 늘어난 타원 펜이 되지 않게).
+      strokeWidth={stroke.width * scaleX}
       strokeCap="round"
       strokeJoin="round"
       blendMode={stroke.erase ? "clear" : "srcOver"}
@@ -79,25 +86,30 @@ function StrokePath({ stroke, scale }: { stroke: InkStroke; scale: number }) {
 export function InkLayer({
   width,
   height,
+  scaleY,
   strokes,
   live,
 }: {
   // 콘텐츠 상자 크기(px). 비율 좌표에 width 를 곱해 그린다.
   width: number;
   height: number;
+  // 세로 좌표에 곱할 배율. 기본값은 width(문제별 보기·웹 규칙). 전체보기처럼 y 를 높이로
+  // 정규화해 저장한 레이어는 height 를 넘긴다 — toNormalizedPoint 의 contentHeight 와 한 쌍.
+  scaleY?: number;
   strokes: InkStroke[];
   // 지금 긋고 있는 획(손을 떼면 strokes 로 확정).
   live: InkStroke | null;
 }) {
   if (width <= 0 || height <= 0) return null;
+  const yScale = scaleY ?? width;
   return (
     <Canvas style={{ position: "absolute", left: 0, top: 0, width, height }} pointerEvents="none">
       {/* layer: 지우개의 clear 가 이 그룹(투명 배경) 안에서만 적용된다. */}
       <Group layer>
         {strokes.map((s, i) => (
-          <StrokePath key={i} stroke={s} scale={width} />
+          <StrokePath key={i} stroke={s} scaleX={width} scaleY={yScale} />
         ))}
-        {live && <StrokePath stroke={live} scale={width} />}
+        {live && <StrokePath stroke={live} scaleX={width} scaleY={yScale} />}
       </Group>
     </Canvas>
   );
