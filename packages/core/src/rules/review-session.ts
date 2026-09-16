@@ -1262,3 +1262,65 @@ export async function submitReviewSessionForUser(
   const view = await getReviewSessionView(client, admin, userId, sessionId);
   return { view: view ?? undefined };
 }
+
+// ── 상태 전용 오답의 "마지막에 고른 답" (설계서 §9 "상태 전용 오답(mix) 합산·마지막 선택") ──
+//
+// CBT 응시 없이 채점된 오답(기출 섞어풀기·같은개념 기출)은 `cbt_attempts` 에 없고 통합 상태
+// (`user_question_status`)에만 있다. 오답노트는 그 문항도 목록에 보태는데, "그때 내가 고른 답"은
+// 응시 답안이 아니라 **세션 기록**(`review_session_items`)에 있다. 그 테이블은 RLS 정책이 0개라
+// service_role 로만 읽을 수 있어(웹 서버 액션 / Edge `review-history {view:"last-choices"}`),
+// 앱이 직접 셀 수 없는 유일한 조각이다.
+//
+// 과목 단위로 한 번에 읽는다 — 호출부가 (문제지, 문항) 키 목록을 보내는 방식은 목록이 수백
+// 개가 되면 요청 본문이 그만큼 커지고, Edge 로 열면 클라이언트가 조회 범위를 지정하는 자리가
+// 된다. 과목 하나로 좁히면 두 호출부가 같은 한 줄을 쓴다.
+//
+// 키는 `${paper_id}#${question_number}` 다. 섞어풀기 세션의 문항은 **dedup 대표 문제지 id** 로
+// 저장되므로(rules/mix-practice.ts) 호출부가 대표 id 로 찾으면 그대로 맞는다.
+const LAST_CHOICE_BATCH = 1000;
+
+export async function fetchLastWrongChoices(
+  admin: SupabaseClient,
+  userId: string,
+  subjectId: string,
+): Promise<Map<string, number | null>> {
+  const out = new Map<string, number | null>();
+  // 같은 (문제지, 문항)을 여러 번 틀렸으면 **가장 최근 채점**의 답만 남긴다.
+  const latest = new Map<string, string>();
+  type Row = {
+    paper_id: string;
+    question_number: number;
+    selected_choice: number | null;
+    review_sessions: { user_id: string; submitted_at: string | null } | null;
+  };
+
+  let from = 0;
+  for (;;) {
+    const { data, error } = await admin
+      .from("review_session_items")
+      .select(
+        "paper_id, question_number, selected_choice, review_sessions!inner(user_id, submitted_at), exam_papers!inner(subject_id)",
+      )
+      .eq("review_sessions.user_id", userId)
+      .eq("exam_papers.subject_id", subjectId)
+      .eq("is_correct", false)
+      // range 로 이어받을 때 페이지 경계가 흔들리지 않게 키 순으로 고정한다.
+      .order("paper_id", { ascending: true })
+      .order("question_number", { ascending: true })
+      .range(from, from + LAST_CHOICE_BATCH - 1);
+    if (error) break;
+    const rows = (data ?? []) as unknown as Row[];
+    for (const r of rows) {
+      const key = `${r.paper_id}#${r.question_number}`;
+      const at = r.review_sessions?.submitted_at ?? "";
+      const prev = latest.get(key);
+      if (prev === undefined || at > prev) {
+        latest.set(key, at);
+        out.set(key, r.selected_choice);
+      }
+    }
+    if (rows.length < LAST_CHOICE_BATCH) break;
+    from += LAST_CHOICE_BATCH;
+  }
+  return out;
+}

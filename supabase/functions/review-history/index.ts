@@ -4,7 +4,7 @@
 // 규칙 본문은 packages/core/src/rules/review-session.ts(getReviewSessionView — 웹 결과
 // 화면과 같은 함수, listSubmittedReviewSessions).
 //
-// 두 가지 응답:
+// 네 가지 응답:
 //   body 없음 / { scope?, subjectSlug?, limit? }
 //     → 내 기록 목록(채점 완료분만): { sessions: [{ sessionId, scope, subjectName, total, score,
 //       submittedAt, subjectSlug, createdAt }] } (subjectSlug·createdAt 은 추가 필드)
@@ -25,11 +25,20 @@
 //       /mypage/wrong-notes/[slug]/mix/[sessionId] 와 같은 값, 규칙 getMixSessionWrongNote).
 //       추가 필드라 옛 앱은 그대로 상세만 읽으면 된다. 채점 전 세션이면 예전대로 400,
 //       남의 세션이거나 섞어풀기(scope='mix')가 아니면 404.
+//   { view: "last-choices", subjectSlug }
+//     → 그 과목에서 **내가 마지막으로 틀렸을 때 고른 답**:
+//       { choices: [{ paperId, questionNumber, selectedChoice }] }. 정답은 실리지 않는다 —
+//       내가 골랐던 답이라 이미 내 것이다. 앱 오답노트가 "응시 없이 채점된 오답"(기출
+//       섞어풀기·같은개념 기출)을 목록에 보탤 때 쓴다: 그 문항은 user_question_status 에만
+//       있어 앱이 목록에는 넣을 수 있지만, 고른 답은 review_session_items(정책 0개)에 있어
+//       못 읽는다(§9 "상태 전용 오답(mix) 합산·마지막 선택"). 규칙은 웹 오답노트와 같은
+//       함수(fetchLastWrongChoices). 없는 과목이면 빈 배열이다.
 import { corsHeaders, isUuid, json } from "../_shared/http.ts";
 import { coreAdmin, requireUser } from "../_shared/clients.ts";
 // @ts-types="../_shared/core.d.ts"
 import {
   buildMixPool,
+  fetchLastWrongChoices,
   getMixSessionWrongNote,
   getReviewSessionView,
   getSubjectBySlug,
@@ -52,6 +61,35 @@ Deno.serve(async (req) => {
   const sessionId = typeof body?.sessionId === "string" ? body.sessionId : "";
 
   const admin = coreAdmin();
+
+  // ── 마지막에 고른 답(상태 전용 오답 합산) ────────────────────────────────
+  // sessionId 와 무관한 조회라 목록 분기보다 **먼저** 갈라낸다.
+  if (body?.view === "last-choices") {
+    const slug = typeof body?.subjectSlug === "string" ? body.subjectSlug.trim() : "";
+    if (!slug) return json({ error: "잘못된 접근입니다." }, 400);
+    try {
+      const subject = await getSubjectBySlug(admin, slug);
+      // 없는 과목은 404 가 아니라 빈 배열이다 — 호출부(오답노트)는 이 값이 없어도 목록을
+      // 그려야 하고, 여기서 화면을 떨어뜨릴 이유가 없다.
+      if (!subject) return json({ choices: [] });
+      const map = await fetchLastWrongChoices(admin, userId, subject.id);
+      const choices: { paperId: string; questionNumber: number; selectedChoice: number | null }[] =
+        [];
+      for (const [key, selectedChoice] of map) {
+        const sep = key.lastIndexOf("#");
+        if (sep <= 0) continue;
+        choices.push({
+          paperId: key.slice(0, sep),
+          questionNumber: Number(key.slice(sep + 1)),
+          selectedChoice,
+        });
+      }
+      return json({ choices });
+    } catch {
+      // 곁다리 값이라 실패해도 화면은 목록을 그린다 — 200 + 빈 배열로 떨어뜨린다.
+      return json({ choices: [] });
+    }
+  }
 
   // ── 목록 ──────────────────────────────────────────────────────────────────
   if (!sessionId) {

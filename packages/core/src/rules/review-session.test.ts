@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { FakeSupabase, asClient, type Row } from "../test-support/fake-supabase";
 import {
   createReviewSessionFromItems,
+  fetchLastWrongChoices,
   submitReviewSessionForUser,
   toReviewSolveItems,
   getReviewSessionView,
@@ -275,4 +276,94 @@ test("풀이용 응답(review-create)에는 paperId·correctChoice·출처가 �
     assert.ok(!("paperTitle" in it));
     assert.ok(!("questionNumber" in it));
   }
+});
+
+// ── 상태 전용 오답의 "마지막에 고른 답"(fetchLastWrongChoices, 설계서 §9) ──────────
+//
+// 응시 없이 채점된 오답(기출 섞어풀기)의 "그때 내가 고른 답"은 review_session_items 에만 있다.
+// 여기서 지키는 것 둘:
+//   · 같은 (문제지, 문항)을 여러 번 틀렸으면 **가장 최근 채점**의 답만 남는다.
+//   · 맞힌 문항·남의 세션·다른 과목은 섞이지 않는다.
+//
+// 가짜 클라이언트는 select 문자열을 해석하지 않으므로(test-support/fake-supabase.ts 머리말)
+// 임베드 필터(`review_sessions!inner(...)` + `.eq("review_sessions.user_id", …)`)는 행에 같은
+// 이름의 평평한 키를 함께 넣어 흉내 낸다 — 실제 PostgREST 는 조인으로 같은 결과를 낸다.
+function lastChoiceItem(opts: {
+  paperId: string;
+  questionNumber: number;
+  selectedChoice: number | null;
+  isCorrect: boolean;
+  userId: string;
+  subjectId: string;
+  submittedAt: string;
+}): Row {
+  return {
+    paper_id: opts.paperId,
+    question_number: opts.questionNumber,
+    selected_choice: opts.selectedChoice,
+    is_correct: opts.isCorrect,
+    review_sessions: { user_id: opts.userId, submitted_at: opts.submittedAt },
+    "review_sessions.user_id": opts.userId,
+    "exam_papers.subject_id": opts.subjectId,
+  };
+}
+
+test("마지막에 고른 답: 가장 최근 채점만 남고, 맞힌 문항·남의 세션·다른 과목은 빠진다", async () => {
+  const SUBJECT = "korean";
+  const db = new FakeSupabase({
+    review_session_items: [
+      // 같은 (문제지, 문항)을 두 번 틀렸다 — 나중 채점(2027-03-02)의 답 4가 남아야 한다.
+      lastChoiceItem({
+        paperId: "p1",
+        questionNumber: 7,
+        selectedChoice: 2,
+        isCorrect: false,
+        userId: USER,
+        subjectId: SUBJECT,
+        submittedAt: "2027-03-01T00:00:00Z",
+      }),
+      lastChoiceItem({
+        paperId: "p1",
+        questionNumber: 7,
+        selectedChoice: 4,
+        isCorrect: false,
+        userId: USER,
+        subjectId: SUBJECT,
+        submittedAt: "2027-03-02T00:00:00Z",
+      }),
+      // 맞힌 문항은 오답노트에 들어가지 않는다.
+      lastChoiceItem({
+        paperId: "p1",
+        questionNumber: 8,
+        selectedChoice: 1,
+        isCorrect: true,
+        userId: USER,
+        subjectId: SUBJECT,
+        submittedAt: "2027-03-02T00:00:00Z",
+      }),
+      // 남의 세션.
+      lastChoiceItem({
+        paperId: "p1",
+        questionNumber: 9,
+        selectedChoice: 3,
+        isCorrect: false,
+        userId: "user-2",
+        subjectId: SUBJECT,
+        submittedAt: "2027-03-02T00:00:00Z",
+      }),
+      // 다른 과목.
+      lastChoiceItem({
+        paperId: "p9",
+        questionNumber: 1,
+        selectedChoice: 3,
+        isCorrect: false,
+        userId: USER,
+        subjectId: "history",
+        submittedAt: "2027-03-02T00:00:00Z",
+      }),
+    ],
+  });
+
+  const out = await fetchLastWrongChoices(asClient(db), USER, SUBJECT);
+  assert.deepEqual([...out.entries()], [["p1#7", 4]]);
 });

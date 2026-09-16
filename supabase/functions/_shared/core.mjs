@@ -2723,6 +2723,31 @@ async function submitReviewSessionForUser(client, admin, userId, sessionId, answ
   const view = await getReviewSessionView(client, admin, userId, sessionId);
   return { view: view ?? void 0 };
 }
+var LAST_CHOICE_BATCH = 1e3;
+async function fetchLastWrongChoices(admin, userId, subjectId) {
+  const out = /* @__PURE__ */ new Map();
+  const latest = /* @__PURE__ */ new Map();
+  let from = 0;
+  for (; ; ) {
+    const { data, error } = await admin.from("review_session_items").select(
+      "paper_id, question_number, selected_choice, review_sessions!inner(user_id, submitted_at), exam_papers!inner(subject_id)"
+    ).eq("review_sessions.user_id", userId).eq("exam_papers.subject_id", subjectId).eq("is_correct", false).order("paper_id", { ascending: true }).order("question_number", { ascending: true }).range(from, from + LAST_CHOICE_BATCH - 1);
+    if (error) break;
+    const rows = data ?? [];
+    for (const r of rows) {
+      const key = `${r.paper_id}#${r.question_number}`;
+      const at = r.review_sessions?.submitted_at ?? "";
+      const prev = latest.get(key);
+      if (prev === void 0 || at > prev) {
+        latest.set(key, at);
+        out.set(key, r.selected_choice);
+      }
+    }
+    if (rows.length < LAST_CHOICE_BATCH) break;
+    from += LAST_CHOICE_BATCH;
+  }
+  return out;
+}
 
 // src/exam-level-tier.ts
 var TIER_BY_EXAM_TYPE = {
@@ -3914,6 +3939,7 @@ export {
   fetchExamPaperRows,
   fetchExplainedNumbers,
   fetchExplanations,
+  fetchLastWrongChoices,
   fetchMemos,
   fetchMyRoundCounts,
   fetchPaperIdentitySignals,

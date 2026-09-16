@@ -195,7 +195,18 @@ export type ReviewHistoryDetailRequest = {
   // 채점 전 세션이나 scope 이 "mix" 가 아닌 세션이면 404.
   view?: "mix-note";
 };
-export type ReviewHistoryRequest = ReviewHistoryListRequest | ReviewHistoryDetailRequest;
+// 상태 전용 오답의 "마지막에 고른 답"(§9 "상태 전용 오답(mix) 합산·마지막 선택").
+// 응시 없이 채점된 오답(기출 섞어풀기·같은개념 기출)은 `user_question_status` 에만 있어 앱이
+// 목록에 보탤 수는 있지만, 그때 고른 답은 `review_session_items` 에 있고 그 테이블은 RLS 정책이
+// 0개라 앱이 못 읽는다. 과목 하나 분량을 한 번에 받아 `${paperId}#${questionNumber}` 로 찾는다.
+export type ReviewHistoryLastChoicesRequest = {
+  view: "last-choices";
+  subjectSlug: string;
+};
+export type ReviewHistoryRequest =
+  | ReviewHistoryListRequest
+  | ReviewHistoryDetailRequest
+  | ReviewHistoryLastChoicesRequest;
 
 // 목록 항목 — 규칙의 ReviewHistoryEntry 와 같은 키(subjectSlug·createdAt 은 추가 필드).
 //
@@ -227,11 +238,32 @@ export type ReviewHistoryDetailResponse = Omit<ReviewSubmitResponse, "score"> & 
   // view:"mix-note" 로 물었을 때만 실린다(추가 필드).
   mixNote?: ReviewHistoryMixNote;
 };
-export type ReviewHistoryResponse = ReviewHistoryListResponse | ReviewHistoryDetailResponse;
+// view:"last-choices" 응답. 정답은 실리지 않는다 — **내가 골랐던 답**뿐이라 이미 내 것이다.
+// 없는 과목이면 빈 배열(오류가 아니다 — 그 과목에 세션 기록이 없을 뿐이다).
+export type ReviewHistoryLastChoicesResponse = {
+  choices: { paperId: string; questionNumber: number; selectedChoice: number | null }[];
+};
 
-// 응답 판별 — 목록이면 sessions, 상세면 sessionId.
+export type ReviewHistoryResponse =
+  | ReviewHistoryListResponse
+  | ReviewHistoryDetailResponse
+  | ReviewHistoryLastChoicesResponse;
+
+// 응답 판별 — 목록이면 sessions, 상세면 sessionId, 마지막 선택이면 choices.
 export function isReviewHistoryList(r: ReviewHistoryResponse): r is ReviewHistoryListResponse {
   return "sessions" in r;
+}
+export function isReviewHistoryLastChoices(
+  r: ReviewHistoryResponse,
+): r is ReviewHistoryLastChoicesResponse {
+  return "choices" in r;
+}
+// 세션 상세만 남기는 좁히기. `{ sessionId }` 로 물었으면 상세가 오지만, 계약 타입은 함수 이름
+// 단위라 세 응답이 한 유니온에 있다 — 호출부가 매번 두 번 걸러내지 않게 여기 하나로 둔다.
+export function isReviewHistoryDetail(
+  r: ReviewHistoryResponse,
+): r is ReviewHistoryDetailResponse {
+  return "sessionId" in r;
 }
 
 // ── review-guessed (§6.7 #11) ────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import {
   fetchCorrectAnswers as fetchCorrectAnswersData,
   fetchExplainedNumbers as fetchExplainedNumbersData,
   fetchExplanations as fetchExplanationsData,
+  fetchLastWrongChoices,
   fetchMemos,
   fetchQuestionKeys,
   fetchQuestionMedia,
@@ -462,45 +463,16 @@ async function fetchSubjectStatusWrongs(
   return out;
 }
 
-// 섞어풀기·복습 세션에서 마지막으로 틀렸을 때 고른 답. review_session_items 는 RLS
-// 정책이 없어 service_role 로 읽고, 세션의 user_id 로 본인 것만 좁힌다.
-async function fetchLastReviewChoices(
+// 섞어풀기·복습 세션에서 마지막으로 틀렸을 때 고른 답. 조회 본문은 @gongmoa/core 의
+// rules/review-session.ts#fetchLastWrongChoices 로 옮겼다 — Edge `review-history
+// {view:"last-choices"}` 가 앱에 같은 값을 주고, 규칙이 두 벌로 갈리지 않게 한다.
+// review_session_items 는 RLS 정책이 없어 service_role 로 읽고, 세션의 user_id 로 본인 것만
+// 좁힌다. 키는 `${paperId}#${questionNumber}`.
+function fetchLastReviewChoices(
   userId: string,
-  keys: { repId: string; questionNumber: number }[],
+  subjectId: string,
 ): Promise<Map<string, number | null>> {
-  const out = new Map<string, number | null>();
-  if (keys.length === 0) return out;
-  const admin = createAdminClient();
-  const wanted = new Set(keys.map((k) => `${k.repId}#${k.questionNumber}`));
-  const paperIds = [...new Set(keys.map((k) => k.repId))];
-  type Row = {
-    paper_id: string;
-    question_number: number;
-    selected_choice: number | null;
-    review_sessions: { user_id: string; submitted_at: string | null } | null;
-  };
-  const latest = new Map<string, string>();
-  await inParallel(chunk(paperIds, 100), async (ids) => {
-    const { data } = await admin
-      .from("review_session_items")
-      .select(
-        "paper_id, question_number, selected_choice, review_sessions!inner(user_id, submitted_at)",
-      )
-      .eq("review_sessions.user_id", userId)
-      .eq("is_correct", false)
-      .in("paper_id", ids);
-    for (const r of (data ?? []) as unknown as Row[]) {
-      const key = `${r.paper_id}#${r.question_number}`;
-      if (!wanted.has(key)) continue;
-      const at = r.review_sessions?.submitted_at ?? "";
-      const prev = latest.get(key);
-      if (prev === undefined || at > prev) {
-        latest.set(key, at);
-        out.set(key, r.selected_choice);
-      }
-    }
-  });
-  return out;
+  return fetchLastWrongChoices(createAdminClient(), userId, subjectId);
 }
 
 // includeExplanations=false 면 해설 본문을 조회하지 않고 "해설이 있는 문항"만 표시해
@@ -655,7 +627,7 @@ export async function getSubjectWrongNoteQuestions(
     extraKeys.push({ repId: rep, questionNumber: r.questionNumber });
   }
   if (extraKeys.length > 0) {
-    const chosen = await fetchLastReviewChoices(userId, extraKeys);
+    const chosen = await fetchLastReviewChoices(userId, subject.id);
     for (const k of extraKeys) {
       const agg = byRepQ.get(`${k.repId}#${k.questionNumber}`);
       const choice = chosen.get(`${k.repId}#${k.questionNumber}`);
