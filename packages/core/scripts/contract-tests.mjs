@@ -581,6 +581,89 @@ async function caseExplanationsAnonymous() {
   }
 }
 
+// (h) #9 해설 `context:"wrong-note"` — 쿼터·explanation_access_log 미차감, 형제 paper_id 매핑,
+// 비프리미엄 잠금(§6.7 #7). 웹에는 이 모드의 어댑터가 따로 없다 — 웹 오답노트(lib/wrong-notes.ts)가
+// admin 클라이언트로 같은 조회를 하고 로그를 남기지 않으므로, 여기서 "웹 경로"는 규칙
+// (resolveWrongNoteExplanations) 직접 호출이고 Edge 와 **같은 판정·같은 문항**이 나오는지를 본다.
+async function caseExplanationsWrongNote() {
+  await resetUsers();
+
+  // 사전 조건: 두 사용자 모두 **형제** 문제지(FX.sibling)에만 상태 행이 있다. 요청은 대표
+  // 문제지(FX.paper, 해설이 붙어 있는 쪽)로 한다 — 형제 매핑이 빠지면 결과가 0건이 된다.
+  const answered = [1, 2];
+  const asked = [1, 2, 3];
+  for (const user of Object.values(USERS)) {
+    must(
+      await admin.from("user_question_status").insert(
+        answered.map((n) => ({
+          user_id: user.id,
+          paper_id: FX.sibling,
+          question_number: n,
+          last_is_correct: false,
+          source: "cbt",
+        })),
+      ),
+      "wrong-note 사전 상태 행",
+    );
+  }
+
+  // Edge 의 멤버십 판정을 그대로 읽어 같은 값을 규칙에 넣는다 — 전면 무료 기간(FREE_UNTIL)에는
+  // 모두 프리미엄이라 잠금 분기를 Edge 로 강제할 수 없다(explanations-get 은 테스트 훅으로 시각을
+  // 받지 않는다). 잠금 자체는 아래에서 규칙에 premium:false 를 넣어 따로 고정한다.
+  const me = await edge("membership-get", {}, { jwt: USERS.edge.jwt });
+  assert(me.status === 200, `membership-get ${me.status}: ${JSON.stringify(me.body)}`);
+  const premium = me.body.isPremium === true;
+
+  const webOut = await core.resolveWrongNoteExplanations(admin, {
+    userId: USERS.web.id,
+    paperId: FX.paper,
+    questionNumbers: asked,
+    premium,
+  });
+  const res = await edge(
+    "explanations-get",
+    { paperId: FX.paper, context: "wrong-note", questionNumbers: asked },
+    { jwt: USERS.edge.jwt },
+  );
+  assert(res.status === 200, `explanations-get(wrong-note) ${res.status}: ${JSON.stringify(res.body)}`);
+  const b = res.body;
+
+  assertEqual(b.loggedIn, true, "loggedIn");
+  assertEqual(b.lockReason, null, "lockReason(이 모드는 시간당 한도·무료 몫을 판정하지 않는다)");
+  assertEqual(b.remainingToday, null, "remainingToday(쿼터를 보지 않는다)");
+  assertEqual(b.explanationLocked, !premium, "explanationLocked");
+  assertEqual(
+    b.questions.map((q) => q.questionNumber),
+    webOut.questions.map((q) => q.questionNumber),
+    "웹 규칙과 Edge 의 해설 문항이 다르다",
+  );
+  assertEqual(b.lockedQuestionNumbers, webOut.lockedQuestionNumbers, "잠금 문항 번호가 다르다");
+  assertEqual(
+    premium ? b.questions.map((q) => q.questionNumber) : b.lockedQuestionNumbers,
+    answered,
+    "형제 문제지 상태 행으로 '본인이 답한 문항'을 찾지 못했다(형제 매핑 누락) 또는 안 푼 3번이 샜다",
+  );
+
+  // 이 모드의 핵심: 열람 로그도 일일 몫도 **한 줄도** 남지 않는다(웹 오답노트와 같은 동작).
+  for (const user of Object.values(USERS)) {
+    for (const table of ["explanation_access_log", "explanation_daily_views"]) {
+      const rows = must(await admin.from(table).select("*").eq("user_id", user.id), table);
+      assert(rows.length === 0, `${table} 에 wrong-note 모드 행이 남았다(${rows.length}) — 쿼터가 깎인다`);
+    }
+  }
+
+  // 비프리미엄 잠금: 본문이 서버를 떠나지 않고 잠금 문항 번호만 나간다.
+  const locked = await core.resolveWrongNoteExplanations(admin, {
+    userId: USERS.web.id,
+    paperId: FX.paper,
+    questionNumbers: asked,
+    premium: false,
+  });
+  assertEqual(locked.locked, true, "비프리미엄 locked");
+  assertEqual(locked.questions, [], "비프리미엄에게 해설 본문이 나갔다");
+  assertEqual(locked.lockedQuestionNumbers, answered, "비프리미엄 잠금 문항 번호");
+}
+
 // (a) #1 CBT 시작 → 제출(voided 포함). 응답 본문과 결과 행을 모두 비교한다.
 async function caseCbtSubmit() {
   await resetUsers();
@@ -834,6 +917,7 @@ try {
 if (!setupFailed) {
   await runCase("#10 체험 1회 (membership-get)", caseTrialOnce);
   await runCase("#8 해설 비로그인 미리보기 (explanations-get)", caseExplanationsAnonymous);
+  await runCase("#9 해설 context:\"wrong-note\" — 쿼터 미차감·형제 매핑·잠금", caseExplanationsWrongNote);
   await runCase("#1 CBT 제출 — voided 포함", caseCbtSubmit);
   await runCase("#13·#15 review-create 멱등·정답 미노출", caseReviewCreateIdempotent);
   await runCase("#5·#6 복습 제출 1회·source=review", caseReviewSubmitOnce);

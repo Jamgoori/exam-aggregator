@@ -101,3 +101,5 @@ export * from "./data/attendance";
 export * from "./data/mypage";
 export * from "./data/wrong-answers";
 export * from "./membership-faq";
+// 문항 오류 신고(RPC submit_question_report, DI) — 앱 신고 버튼이 부르는 유일한 경로(설계서 §6.7 #6).
+export * from "./data/reports";

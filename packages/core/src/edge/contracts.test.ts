@@ -7,6 +7,7 @@ import {
   type ReviewHistoryEntry,
   type ReviewSessionView,
 } from "../rules/review-session";
+import type { MixSessionWrongNote } from "../rules/mix-practice";
 import { FREE_MEMBERSHIP } from "../membership";
 import {
   EDGE_NAMES,
@@ -79,6 +80,21 @@ const cbtSubmitResponse = {
   lockReason: "free-quota",
   remainingToday: 0,
 }) satisfies EdgeResponse<"explanations-get">;
+
+// context:"wrong-note" 모드(§6.7 #7) — 요청은 optional 필드 추가, 응답은 explanationLocked·
+// lockedQuestionNumbers 추가. 쿼터를 보지 않는 모드라 lockReason·remainingToday 는 언제나 null.
+({ paperId: "p1", context: "wrong-note", questionNumbers: [3, 7] }) satisfies EdgeRequest<"explanations-get">;
+const wrongNoteExplanations = {
+  questions: [],
+  totalCount: 2,
+  hiddenCount: 2,
+  hasFullAccess: false,
+  loggedIn: true,
+  lockReason: null,
+  remainingToday: null,
+  explanationLocked: true,
+  lockedQuestionNumbers: [3, 7],
+} satisfies EdgeResponse<"explanations-get">;
 
 // ── membership-get ──────────────────────────────────────────────────────────
 ({}) satisfies EdgeRequest<"membership-get">;
@@ -157,6 +173,43 @@ const historyDetail = {
   submitted: false,
 } satisfies EdgeResponse<"review-history">;
 
+// view:"mix-note"(§6.7 #10) — 요청은 optional 필드 추가, 응답은 상세 그대로 + mixNote.
+// mixNote 는 규칙 getMixSessionWrongNote 의 반환(MixSessionWrongNote)을 그대로 실은 것이라,
+// 규칙 쪽 타입이 바뀌면 여기서 함께 깨진다(웹 mix 기록 페이지와 앱이 같은 값을 그린다).
+({ sessionId: "s1", view: "mix-note" }) satisfies EdgeRequest<"review-history">;
+const mixNote: MixSessionWrongNote = {
+  session: { id: "s1", title: "9월 5일 섞어풀기", createdAt: view.createdAt, score: 1, total: 2 },
+  subject: { id: "sub1", slug: "korean", name: "국어", display_order: 1 },
+  questions: [
+    {
+      position: 0,
+      paperId: "p1",
+      paperTitle: "2025 국가직 9급",
+      paperLevel: "9급",
+      examTypeName: "국가직",
+      questionNumber: 7,
+      selectedChoice: 3,
+      correctChoice: 2,
+      isCorrect: false,
+      choiceCount: 4,
+      images: ["https://example/q7.png"],
+      explanation: null,
+      explanationLocked: true,
+      memo: "행정행위 개념 다시",
+      pinned: true,
+      wrongCount: 2,
+      resolved: false,
+    },
+  ],
+  wrongCount: 1,
+  resolvedCount: 0,
+};
+const historyMixNote = {
+  ...reviewSubmitResponse,
+  submitted: true,
+  mixNote,
+} satisfies EdgeResponse<"review-history">;
+
 // ── comments-write / account-delete ─────────────────────────────────────────
 ({ action: "create", paperId: "p1", content: "…", parentId: null }) satisfies EdgeRequest<"comments-write">;
 ({ action: "update", commentId: "c1", content: "…" }) satisfies EdgeRequest<"comments-write">;
@@ -193,6 +246,23 @@ test("EDGE_NAMES 는 배포된 함수 10개", () => {
 test("isReviewHistoryList 가 목록/상세를 가른다", () => {
   assert.equal(isReviewHistoryList(historyList), true);
   assert.equal(isReviewHistoryList(historyDetail), false);
+});
+
+test("wrong-note 모드 표본은 쿼터 필드를 null 로 둔다", () => {
+  assert.equal(wrongNoteExplanations.lockReason, null);
+  assert.equal(wrongNoteExplanations.remainingToday, null);
+  assert.equal(wrongNoteExplanations.explanationLocked, true);
+  assert.equal(wrongNoteExplanations.questions.length, 0, "잠긴 문항의 본문은 응답에 없다");
+});
+
+test("mix-note 표본은 상세 응답의 상위집합이다(추가 필드)", () => {
+  assert.equal(isReviewHistoryList(historyMixNote), false);
+  assert.equal(historyMixNote.sessionId, historyDetail.sessionId);
+  assert.equal(historyMixNote.mixNote.questions[0].explanationLocked, true);
+  // 상세 필드가 그대로 있어야 옛 앱이 같은 응답을 읽을 수 있다.
+  for (const key of Object.keys(historyDetail)) {
+    assert.ok(key in historyMixNote, `mix-note 응답에 상세 필드 ${key} 가 없다`);
+  }
 });
 
 test("cbt-submit 직렬화 표본은 diagnosisProgress 를 null 로 떨어뜨린다", () => {

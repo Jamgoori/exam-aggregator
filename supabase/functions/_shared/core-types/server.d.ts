@@ -3,6 +3,7 @@ export * from "./rules/membership-server.d.ts";
 export * from "./rules/attendance-record.d.ts";
 export * from "./rules/explanation-access.d.ts";
 export * from "./rules/explanations.d.ts";
+export * from "./rules/explanations-wrong-note.d.ts";
 export * from "./rules/cbt-attempt.d.ts";
 export * from "./rules/status-targets.d.ts";
 export * from "./rules/review-preferences.d.ts";
