@@ -10,6 +10,10 @@ import { QueryState } from "../../../../../src/components/query-state";
 import { Screen } from "../../../../../src/components/screen";
 import { Skeleton } from "../../../../../src/components/skeleton";
 import { MixSessionView } from "../../../../../src/components/wrong-notes/mix-session-view";
+import {
+  useWrongNoteDeletions,
+  type WrongNoteDeletions,
+} from "../../../../../src/components/wrong-notes/wrong-note-mark-actions";
 import { useAuth } from "../../../../../src/providers/auth-provider";
 import { useMixSessionNote } from "../../../../../src/queries/wrong-notes";
 
@@ -39,21 +43,38 @@ export default function MixSessionNoteRoute() {
 
 function MixSessionNoteScreen({ slug, sessionId }: { slug: string; sessionId: string }) {
   const query = useMixSessionNote(sessionId);
+  // 삭제 되돌리기 토스트는 뷰포트에 고정돼야 해서 Screen 의 overlay 슬롯으로 올린다
+  // (src/components/screen.tsx ScreenOverlay 머리말) — 그 상태를 화면이 들고 본문에는 값으로
+  // 내려 준다. 훅 순서를 지키려고 조기 반환보다 먼저 부른다.
+  const deletions = useWrongNoteDeletions<string>();
   // 남의 세션·채점 전·섞어풀기가 아닌 세션은 EF 가 404 로 잘라 준다(웹 notFound).
   if (query.isError && isEdgeError(query.error) && query.error.status === 404) return <NotFoundScreen />;
   const mismatched = query.isSuccess && query.data.subject.slug !== slug;
   if (mismatched) return <NotFoundScreen />;
 
   return (
-    <Screen contentClassName="gap-6" refreshing={query.isRefetching} onRefresh={() => void query.refetch()}>
+    <Screen
+      contentClassName="gap-6"
+      overlay={deletions.toast()}
+      refreshing={query.isRefetching}
+      onRefresh={() => void query.refetch()}
+    >
       <QueryState query={query} skeleton={<MixSkeleton />}>
-        {(note) => <MixSessionNoteBody slug={slug} note={note} />}
+        {(note) => <MixSessionNoteBody slug={slug} note={note} deletions={deletions} />}
       </QueryState>
     </Screen>
   );
 }
 
-function MixSessionNoteBody({ slug, note }: { slug: string; note: ReviewHistoryMixNote }) {
+function MixSessionNoteBody({
+  slug,
+  note,
+  deletions,
+}: {
+  slug: string;
+  note: ReviewHistoryMixNote;
+  deletions: WrongNoteDeletions<string>;
+}) {
   const { isPremium } = useAuth();
   const { session, subject, questions, wrongCount, resolvedCount } = note;
   const pct = session.total > 0 ? Math.round((session.score / session.total) * 100) : 0;
@@ -124,6 +145,7 @@ function MixSessionNoteBody({ slug, note }: { slug: string; note: ReviewHistoryM
         wrongCount={wrongCount}
         resolvedCount={resolvedCount}
         lockNext={self}
+        deletions={deletions}
       />
 
       {!isPremium && wrongCount > 0 && (

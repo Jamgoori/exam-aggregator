@@ -7,11 +7,21 @@ import NotFoundScreen from "../../../+not-found";
 import { AppText } from "../../../../src/components/app-text";
 import { InlineAlert } from "../../../../src/components/feedback";
 import { LoginRequiredScreen, useRequireLogin } from "../../../../src/components/mypage/require-login";
-import { SubjectPaperList } from "../../../../src/components/papers/subject-paper-list";
+import {
+  SubjectPaperList,
+  SubjectPaperSelectionBar,
+  useSubjectPaperSelection,
+  type SubjectPaperSelection,
+} from "../../../../src/components/papers/subject-paper-list";
 import { QueryState } from "../../../../src/components/query-state";
 import { Screen } from "../../../../src/components/screen";
 import { Skeleton } from "../../../../src/components/skeleton";
-import { SubjectWrongNoteQuestions } from "../../../../src/components/wrong-notes/subject-wrong-note-questions";
+import {
+  SubjectWrongNoteQuestions,
+  SubjectWrongNoteSelectionBar,
+  useSubjectWrongNoteSelection,
+} from "../../../../src/components/wrong-notes/subject-wrong-note-questions";
+import { useWrongNoteDeletions } from "../../../../src/components/wrong-notes/wrong-note-mark-actions";
 import { WrongNoteViewTabs, type WrongNoteViewKey } from "../../../../src/components/wrong-notes/wrong-note-view-tabs";
 import { useSetScreenParams } from "../../../../src/lib/screen-params";
 import { useAuth } from "../../../../src/providers/auth-provider";
@@ -95,6 +105,24 @@ function SubjectWrongNoteBody({
   const questions = useSubjectWrongNoteQuestions(view === "questions" ? subject : null);
   const active = view === "questions" ? questions : papers;
 
+  // 하단 고정 선택 바와 되돌리기 토스트는 본문(ScrollView 콘텐츠)이 아니라 Screen 의 overlay
+  // 슬롯에 그려야 뷰포트에 붙는다(src/components/screen.tsx ScreenOverlay 머리말). 그래서 그
+  // 상태를 여기(화면)에서 들고 목록 컴포넌트에는 값으로 내려 준다.
+  const paperSelection = useSubjectPaperSelection(subject.slug);
+  const questionSelection = useSubjectWrongNoteSelection(subject.slug);
+  const deletions = useWrongNoteDeletions<string>();
+
+  const overlay =
+    view === "questions" ? (
+      <>
+        <SubjectWrongNoteSelectionBar selection={questionSelection} />
+        {/* 선택 바가 떠 있으면 토스트를 그 위로 올린다(웹 bottomClass 와 같은 4.5rem). */}
+        {deletions.toast({ bottomClassName: questionSelection.selected.size > 0 ? "bottom-[4.5rem]" : "bottom-4" })}
+      </>
+    ) : (
+      <SubjectPaperSelectionBar selection={paperSelection} />
+    );
+
   const summary = useMemo(() => {
     if (view === "questions") {
       const note = questions.data;
@@ -112,7 +140,7 @@ function SubjectWrongNoteBody({
   const color = subjectColor(subject.slug);
 
   return (
-    <Screen contentClassName="gap-5" refreshing={active.isRefetching} onRefresh={() => void active.refetch()}>
+    <Screen contentClassName="gap-5" overlay={overlay} refreshing={active.isRefetching} onRefresh={() => void active.refetch()}>
       <View className="gap-3">
         <Pressable
           accessibilityRole="link"
@@ -161,17 +189,21 @@ function SubjectWrongNoteBody({
           <QueryState query={questions} skeleton={<ListSkeleton />}>
             {(note) => (
               <SubjectWrongNoteQuestions
-                // 탭·과목이 바뀌면 필터·선택 상태를 새로 시작한다(웹은 페이지 이동이라 자연히 초기화).
+                // 과목이 바뀌면 필터 상태를 새로 시작한다(웹은 페이지 이동이라 자연히 초기화).
                 key={subject.slug}
                 questions={note.questions}
                 unresolvedCount={note.unresolvedCount}
                 subjectSlug={subject.slug}
+                selection={questionSelection}
+                deletions={deletions}
               />
             )}
           </QueryState>
         ) : (
           <QueryState query={papers} skeleton={<ListSkeleton />}>
-            {(list) => <PapersView subjectSlug={subject.slug} papers={list} premium={isPremium} />}
+            {(list) => (
+              <PapersView subjectSlug={subject.slug} papers={list} premium={isPremium} selection={paperSelection} />
+            )}
           </QueryState>
         )}
       </View>
@@ -183,10 +215,12 @@ function PapersView({
   subjectSlug,
   papers,
   premium,
+  selection,
 }: {
   subjectSlug: string;
   papers: WrongNotePaperGroup[];
   premium: boolean;
+  selection: SubjectPaperSelection;
 }) {
   const totalWrong = papers.reduce((sum, p) => sum + p.unresolvedCount + p.resolvedCount, 0);
 
@@ -210,6 +244,7 @@ function PapersView({
       )}
       <SubjectPaperList
         subjectSlug={subjectSlug}
+        selection={selection}
         papers={papers.map((p) => ({
           paperId: p.paper.id,
           title: p.paper.title,

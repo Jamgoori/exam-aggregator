@@ -8,10 +8,9 @@ import { router, type Href } from "expo-router";
 import { Check, Shuffle } from "lucide-react-native";
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { WrongNoteFilterChip } from "./filter-chip";
 import { WrongNoteLegend, WrongNoteQuestionCard, type WrongNoteCardRow } from "./wrong-note-question-card";
-import { WrongNoteMarkActions, WrongNoteUndoToast } from "./wrong-note-mark-actions";
+import { WrongNoteMarkActions, type WrongNoteDeletions } from "./wrong-note-mark-actions";
 import { MemoEditor } from "./memo-editor";
 import { AppText } from "../app-text";
 import { Button } from "../button";
@@ -46,16 +45,112 @@ type Card = {
 
 const qKey = (q: { paperId: string; questionNumber: number }) => `${q.paperId}#${q.questionNumber}`;
 
+// 문항 선택 → "선택한 N개 다시 풀기" 상태. 하단 바가 뷰포트에 고정돼야 해서(screen.tsx
+// ScreenOverlay 머리말) 상태는 화면이 들고 바는 `Screen` 의 overlay 슬롯에서 그린다 —
+// 체크박스는 본문 목록에 있으므로 같은 객체를 목록에도 내려 준다.
+export type SubjectWrongNoteSelection = {
+  selected: ReadonlySet<string>;
+  toggle: (paperId: string, questionNumber: number) => void;
+  clear: () => void;
+  start: () => void;
+  pending: boolean;
+  error: string | null;
+};
+
+export function useSubjectWrongNoteSelection(subjectSlug: string): SubjectWrongNoteSelection {
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [error, setError] = useState<string | null>(null);
+  const launch = useCreateReviewSession();
+
+  const toggle = useCallback((paperId: string, questionNumber: number) => {
+    const key = `${paperId}#${questionNumber}`;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const clear = useCallback(() => setSelected(new Set()), []);
+
+  const start = useCallback(() => {
+    if (launch.isPending || selected.size === 0) return;
+    setError(null);
+    const items = [...selected].map((k) => {
+      const idx = k.lastIndexOf("#");
+      return { paperId: k.slice(0, idx), questionNumber: Number(k.slice(idx + 1)) };
+    });
+    launch.mutate(
+      { items },
+      {
+        onSuccess: (sessionId) => router.push(`/mypage/wrong-notes/${subjectSlug}/review/${sessionId}` as Href),
+        onError: (e) => setError(e instanceof Error ? e.message : "다시 풀기를 시작하지 못했어요."),
+      },
+    );
+    // launch.mutate 는 안정 참조.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [launch.isPending, selected, subjectSlug]);
+
+  return useMemo(
+    () => ({ selected, toggle, clear, start, pending: launch.isPending, error }),
+    [selected, toggle, clear, start, launch.isPending, error],
+  );
+}
+
+// 문항을 고르면 뜨는 하단 바(웹과 같은 `bottom-4 z-30` + `max-w-md rounded-2xl border p-2
+// shadow-lg`), 그 위 `bottom-20` 에 오류 한 줄. safe-area·탭바 여백은 Screen 의 overlay 슬롯이
+// 잡아 주므로 여기서는 웹 클래스를 그대로 쓴다.
+export function SubjectWrongNoteSelectionBar({ selection }: { selection: SubjectWrongNoteSelection }) {
+  const { selected, clear, start, pending, error } = selection;
+  return (
+    <>
+      {selected.size > 0 && (
+        <View pointerEvents="box-none" className="absolute inset-x-0 bottom-4 z-30 items-center px-4">
+          <View className="w-full max-w-md flex-row items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+            <Pressable
+              accessibilityRole="button"
+              onPress={clear}
+              className="shrink-0 rounded-lg px-3 py-2 active:bg-zinc-100 dark:active:bg-zinc-800"
+            >
+              <AppText variant="sm" weight="medium" className="text-zinc-500 dark:text-zinc-400">
+                해제
+              </AppText>
+            </Pressable>
+            <Button
+              label={pending ? "준비 중..." : `선택한 ${selected.size}개 다시 풀기`}
+              icon={<Shuffle size={15} color="#ffffff" />}
+              pending={pending}
+              onPress={start}
+              className="flex-1 rounded-lg py-2.5"
+            />
+          </View>
+        </View>
+      )}
+      {error && (
+        <View pointerEvents="none" className="absolute inset-x-0 bottom-20 z-30 items-center px-4">
+          <AppText variant="xs" className="text-center text-red-600 dark:text-red-400">
+            {error}
+          </AppText>
+        </View>
+      )}
+    </>
+  );
+}
+
 export function SubjectWrongNoteQuestions({
   questions,
   unresolvedCount,
   subjectSlug,
+  selection,
+  deletions,
 }: {
   questions: SubjectWrongNoteQuestion[];
   unresolvedCount: number;
   subjectSlug: string;
+  selection: SubjectWrongNoteSelection;
+  deletions: WrongNoteDeletions<string>;
 }) {
-  const insets = useSafeAreaInsets();
   const [hideResolved, setHideResolved] = useState(false);
   const [onlyRepeated, setOnlyRepeated] = useState(false);
   const [onlyPinned, setOnlyPinned] = useState(false);
@@ -65,20 +160,15 @@ export function SubjectWrongNoteQuestions({
   // 섞어풀기가 후보를 뽑는 방식. 기본은 층 정원제(2번 이상 틀림 > 최근 오답 > 나머지).
   const [strategy, setStrategy] = useState<ReviewPickStrategy>("weighted");
 
-  // 다시보기 체크·완전 삭제는 서버 왕복 없이 즉시 반영한다. 키는 `${paperId}#${qnum}`.
+  // 다시보기 체크는 서버 왕복 없이 즉시 반영한다. 키는 `${paperId}#${qnum}`.
   const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(
     () => new Set(questions.filter((q) => q.pinned).map(qKey)),
   );
-  const [deletedKeys, setDeletedKeys] = useState<Set<string>>(new Set());
-  const [lastDeleted, setLastDeleted] = useState<{ key: string; paperId: string; questionNumber: number } | null>(null);
-
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [selError, setSelError] = useState<string | null>(null);
-  // UndoToast 의 8초 타이머는 onDismiss 참조가 바뀌면 다시 걸린다 — 안정 참조로 둔다.
-  const dismissUndo = useCallback(() => setLastDeleted(null), []);
+  // 완전 삭제·되돌리기는 화면이 들고 있다(토스트가 overlay 슬롯으로 가야 해서).
+  const { deletedKeys, markDeleted, unmarkDeleted } = deletions;
+  const { selected, toggle: toggleSelect } = selection;
 
   const shuffle = useCreateReviewSession();
-  const selLaunch = useCreateReviewSession();
 
   // 삭제된 문항을 뺀 "지금 화면의 전체 목록". 카운트·필터·섞어풀기 후보가 전부 이 목록 기준이라
   // 삭제가 숫자에도 바로 반영된다.
@@ -133,34 +223,8 @@ export function SubjectWrongNoteQuestions({
     };
   }
 
-  function toggleSelect(paperId: string, questionNumber: number) {
-    const key = `${paperId}#${questionNumber}`;
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
   function goToSession(sessionId: string) {
     router.push(`/mypage/wrong-notes/${subjectSlug}/review/${sessionId}` as Href);
-  }
-
-  function startSelected() {
-    if (selLaunch.isPending || selected.size === 0) return;
-    setSelError(null);
-    const items = [...selected].map((k) => {
-      const idx = k.lastIndexOf("#");
-      return { paperId: k.slice(0, idx), questionNumber: Number(k.slice(idx + 1)) };
-    });
-    selLaunch.mutate(
-      { items },
-      {
-        onSuccess: goToSession,
-        onError: (e) => setSelError(e instanceof Error ? e.message : "다시 풀기를 시작하지 못했어요."),
-      },
-    );
   }
 
   // 이미지가 있어 실제로 풀 수 있는 미극복 오답만 섞어풀기 대상이 된다(서버도 같은 기준).
@@ -360,18 +424,8 @@ export function SubjectWrongNoteQuestions({
                         questionNumber={questionNumber}
                         pinned={pinnedKeys.has(key)}
                         onPinnedChange={(p) => markPinned(key, p)}
-                        onDeleted={() => {
-                          setDeletedKeys((prev) => new Set(prev).add(key));
-                          setLastDeleted({ key, paperId: card.paperId, questionNumber });
-                        }}
-                        onDeleteFailed={() => {
-                          setDeletedKeys((prev) => {
-                            const next = new Set(prev);
-                            next.delete(key);
-                            return next;
-                          });
-                          setLastDeleted((cur) => (cur?.key === key ? null : cur));
-                        }}
+                        onDeleted={() => markDeleted(key, card.paperId, questionNumber)}
+                        onDeleteFailed={() => unmarkDeleted(key)}
                       />
                     );
                   }}
@@ -420,53 +474,8 @@ export function SubjectWrongNoteQuestions({
         </>
       )}
 
-      {/* 문항을 고르면 뜨는 하단 바: 선택한 것(극복 포함)만 섞어풀기(z-30 bottom-4 + safe-area). */}
-      {selected.size > 0 && (
-        <View pointerEvents="box-none" style={{ bottom: insets.bottom + 16 }} className="absolute inset-x-0 z-30 items-center px-4">
-          <View className="w-full max-w-md flex-row items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setSelected(new Set())}
-              className="shrink-0 rounded-lg px-3 py-2 active:bg-zinc-100 dark:active:bg-zinc-800"
-            >
-              <AppText variant="sm" weight="medium" className="text-zinc-500 dark:text-zinc-400">
-                해제
-              </AppText>
-            </Pressable>
-            <Button
-              label={selLaunch.isPending ? "준비 중..." : `선택한 ${selected.size}개 다시 풀기`}
-              icon={<Shuffle size={15} color="#ffffff" />}
-              pending={selLaunch.isPending}
-              onPress={startSelected}
-              className="flex-1 rounded-lg py-2.5"
-            />
-          </View>
-        </View>
-      )}
-      {selError && (
-        <View pointerEvents="none" style={{ bottom: insets.bottom + 80 }} className="absolute inset-x-0 z-30 items-center px-4">
-          <AppText variant="xs" className="text-center text-red-600 dark:text-red-400">
-            {selError}
-          </AppText>
-        </View>
-      )}
-
-      {lastDeleted && (
-        <WrongNoteUndoToast
-          key={lastDeleted.key}
-          paperId={lastDeleted.paperId}
-          questionNumber={lastDeleted.questionNumber}
-          onRestored={() => {
-            setDeletedKeys((prev) => {
-              const next = new Set(prev);
-              next.delete(lastDeleted.key);
-              return next;
-            });
-            setLastDeleted(null);
-          }}
-          onDismiss={dismissUndo}
-        />
-      )}
+      {/* 하단 선택 바(SubjectWrongNoteSelectionBar)·되돌리기 토스트는 화면이 Screen 의 overlay
+          슬롯에 그린다 — 여기(ScrollView 콘텐츠) 안에 두면 긴 목록에서 화면 밖으로 밀린다. */}
 
       {/* 웹 <select> 자리 — 앱은 목록 모달(설계서 §4.5 #27 "연도 select → Sheet 목록"). */}
       <CenterModal visible={sortOpen} onClose={() => setSortOpen(false)} size="md">

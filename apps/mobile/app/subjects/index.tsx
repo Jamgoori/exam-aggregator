@@ -1,4 +1,4 @@
-import { CONSONANTS, initialConsonant, type ExamCombo, type SubjectIndexEntry } from "@gongmoa/core";
+import { CONSONANTS, initialConsonant, type SubjectIndexEntry } from "@gongmoa/core";
 import { router, type Href } from "expo-router";
 import { useMemo } from "react";
 import { Pressable, View } from "react-native";
@@ -6,19 +6,13 @@ import { AppText } from "../../src/components/app-text";
 import { QueryState } from "../../src/components/query-state";
 import { Screen } from "../../src/components/screen";
 import { Skeleton } from "../../src/components/skeleton";
+import { examHref } from "../../src/lib/exam-index";
 import { useSubjectIndex } from "../../src/queries/catalog";
 import { useHomeLanding } from "../../src/queries/home";
 
 // `/subjects`(설계서 §5 행) — 웹 app/subjects/page.tsx 1:1: "← 홈으로" → "과목별 기출문제" → ㄱㄴㄷ
 // 묶음 목록(묶음 안 가나다순, 영문·숫자 시작은 맨 뒤 "기타") → "시험으로 찾기" 콤보 칩(시행처+급수,
 // exam-index combos) + 전체보기 링크. 웹에 없는 초성 탭 스트립·즐겨찾는 과목 섹션은 두지 않는다.
-// 콤보 칩은 /exams/[slug] 가 Phase 2 까지 없어 홈 시험 카드처럼 같은 필터의 /papers 로 보낸다.
-
-function comboPapersHref(c: ExamCombo): Href {
-  const params: Record<string, string> = { type: c.examTypeName };
-  if (c.level) params.level = c.level;
-  return { pathname: "/papers", params } as Href;
-}
 
 // ㄱㄴㄷ 묶음 안에서는 가나다순, 묶음 자체는 CONSONANTS 순서를 그대로 따른다.
 function groupByConsonant(entries: SubjectIndexEntry[]) {
@@ -105,7 +99,7 @@ export default function SubjectsIndexScreen() {
                   <Pressable
                     key={combo.slug}
                     accessibilityRole="link"
-                    onPress={() => router.push(comboPapersHref(combo))}
+                    onPress={() => router.push(examHref(combo.slug) as Href)}
                     className="rounded-full border border-zinc-200 px-4 py-1.5 active:border-blue-300 active:bg-blue-50 dark:border-zinc-700 dark:active:border-blue-800 dark:active:bg-blue-950/40"
                   >
                     <AppText variant="sm" weight="medium" className="text-zinc-600 dark:text-zinc-400">

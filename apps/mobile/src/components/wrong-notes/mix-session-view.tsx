@@ -1,15 +1,14 @@
 import { examTypeFilledColor, levelColor, type ReviewHistoryMixNoteQuestion } from "@gongmoa/core";
 import { router, type Href } from "expo-router";
-import { RotateCcw, Shuffle } from "lucide-react-native";
-import { useCallback, useMemo, useState } from "react";
+import { Shuffle } from "lucide-react-native";
+import { useMemo, useState } from "react";
 import { View } from "react-native";
 import { WrongNoteFilterChip } from "./filter-chip";
 import { MemoEditor } from "./memo-editor";
 import { WrongNoteLegend, WrongNoteQuestionCard, type WrongNoteCardRow } from "./wrong-note-question-card";
-import { WrongNoteMarkActions, WrongNoteUndoToast } from "./wrong-note-mark-actions";
+import { WrongNoteMarkActions, type WrongNoteDeletions } from "./wrong-note-mark-actions";
 import { AppText } from "../app-text";
 import { Button } from "../button";
-import { useCreateReviewSession } from "../../queries/wrong-notes";
 
 // "9월 5일 섞어풀기" 기록 화면 본문(웹 mix-session-view.tsx, 설계서 §4.5 #25). 기본은 그 세션에서
 // 틀린 문항만(오답노트답게), 칩으로 전체 문항까지 볼 수 있다. 문항 카드는 과목 오답노트와 같은
@@ -38,80 +37,58 @@ export function MixSessionView({
   wrongCount,
   resolvedCount,
   lockNext,
+  // 삭제·되돌리기 상태는 화면이 들고 있다 — 토스트가 Screen 의 overlay 슬롯으로 가야 해서다
+  // (src/components/screen.tsx ScreenOverlay 머리말).
+  deletions,
 }: {
   subjectSlug: string;
   questions: ReviewHistoryMixNoteQuestion[];
   wrongCount: number;
   resolvedCount: number;
   lockNext: string;
+  deletions: WrongNoteDeletions<string>;
 }) {
   const [filter, setFilter] = useState<Filter>(wrongCount > 0 ? "wrong" : "all");
-  const [error, setError] = useState<string | null>(null);
-  const retry = useCreateReviewSession();
 
-  // 다시 볼 문제 체크·완전 삭제는 서버 왕복 없이 즉시 반영. 키는 `${paperId}#${qnum}`.
+  // 다시 볼 문제 체크는 서버 왕복 없이 즉시 반영. 키는 `${paperId}#${qnum}`.
   const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(
     () => new Set(questions.filter((q) => q.pinned).map((q) => `${q.paperId}#${q.questionNumber}`)),
   );
-  const [deletedKeys, setDeletedKeys] = useState<Set<string>>(new Set());
-  const [lastDeleted, setLastDeleted] = useState<{ key: string; paperId: string; questionNumber: number } | null>(null);
-  // UndoToast 의 8초 타이머는 onDismiss 참조가 바뀌면 다시 걸린다 — 안정 참조로 둔다.
-  const dismissUndo = useCallback(() => setLastDeleted(null), []);
+  const { deletedKeys, markDeleted, unmarkDeleted } = deletions;
 
   const visible = useMemo(() => {
     const list = questions.filter((q) => !deletedKeys.has(`${q.paperId}#${q.questionNumber}`));
     return filter === "wrong" ? list.filter((q) => !q.isCorrect) : list;
   }, [questions, deletedKeys, filter]);
 
-  // 웹은 서버 액션 createRetryFromMix({sessionId}) 로 세션에서 틀린 문항을 서버가 직접 읽는다.
-  // 앱에는 그 통로(EF mix-create {action:"retry"})가 아직 없어 EF review-create 의 items 분기를
-  // 쓴다 — 여기서 넘기는 (paperId, questionNumber) 는 review_session_items 행 그대로이고
-  // (getMixSessionWrongNote 가 그 행에서 만든다), 섞어풀기 채점이 같은 키로
-  // user_question_status 를 쓰므로 서버의 filterQuestionsAnsweredByUser 를 전부 통과한다 =
-  // createRetryFromMixSession 과 같은 문항 구성·같은 순서(position).
-  function retryWrong() {
-    if (retry.isPending || wrongCount === 0) return;
-    setError(null);
-    const items = questions
-      .filter((q) => !q.isCorrect)
-      .sort((a, b) => a.position - b.position)
-      .map((q) => ({ paperId: q.paperId, questionNumber: q.questionNumber }));
-    retry.mutate(
-      { items },
-      {
-        onSuccess: (sessionId) => router.push(`/mypage/wrong-notes/${subjectSlug}/review/${sessionId}` as Href),
-        onError: (e) => setError(e instanceof Error ? e.message : "다시 풀기를 시작하지 못했어요."),
-      },
-    );
-  }
-
   return (
     <View className="gap-4">
-      <View className="gap-2">
-        {wrongCount > 0 && (
-          <Button
-            label={retry.isPending ? "준비 중..." : `틀린 ${wrongCount}문항 다시 풀기`}
-            icon={<RotateCcw size={16} color="#ffffff" />}
-            pending={retry.isPending}
-            onPress={retryWrong}
-            className="w-full py-3"
-          />
-        )}
-        <Button
-          variant="tinted"
-          label="새로 섞어풀기"
-          icon={<Shuffle size={16} color="#1d4ed8" />}
-          accessibilityRole="link"
-          onPress={() => router.push(`/subjects/${subjectSlug}/mix` as Href)}
-          className="w-full py-3"
-          textClassName="text-sm font-bold"
-        />
-      </View>
-      {error && (
-        <AppText variant="xs" className="-mt-2 text-center text-red-600 dark:text-red-400" pretty>
-          {error}
-        </AppText>
-      )}
+      {/* 웹은 여기에 "틀린 {n}문항 다시 풀기"(createRetryFromMix({sessionId}))가 하나 더 있다.
+          앱은 **Phase 3** 로 남긴다(§12 Phase 3 "믹스 기록·재도전", §6.7 #14 EF `mix-create`
+          {action:"retry"}). 결과 화면(review/review-result.tsx)도 같은 이유로 mix 에서는 이
+          버튼을 그리지 않는다 — 두 화면의 판단을 맞춰 둔다.
+
+          EF review-create 의 items 분기로 대신할 수 없다: 그 분기는 서버가
+          filterQuestionsAnsweredByUser 로 "내가 푼 적 있는 (문제지, 문항)"만 남기고, 판정은
+          user_question_status 의 paper_id 로 한다. 그런데 섞어풀기 세션 문항
+          (review_session_items.paper_id)은 **dedup 대표 문제지 id** 이고(rules/mix-practice.ts
+          "출제 가능한 (대표 문제지, 문항)"), 채점은 resolveStatusTargets(rules/status-targets.ts)
+          가 "그 사용자가 실제로 상태 행을 가진 문제지"로 되짚어 기록한다. 직류만 다른 중복
+          시험지를 CBT 로 응시한 적이 있으면 상태 행은 원본 id 쪽에 남고 대표 id 에는 생기지
+          않으므로, 같은 문항을 items 로 돌려보내도 필터에 걸려 빠진다(전부 빠지면 EF 가 400
+          "다시 풀 문항이 없어요."). 웹이 mix 에서만 세션 id 통로를 쓰는 이유가 정확히 이것이다
+          (웹 review-solver.tsx retryWrong 주석). 서버가 소유자 확인 뒤 세션에서 직접 읽는
+          경로가 생기기 전까지는 버튼을 두지 않는다 — 웹과 문항 구성이 다른 재도전은
+          "다시 풀기"의 뜻을 바꾼다. */}
+      <Button
+        variant="tinted"
+        label="새로 섞어풀기"
+        icon={<Shuffle size={16} color="#1d4ed8" />}
+        accessibilityRole="link"
+        onPress={() => router.push(`/subjects/${subjectSlug}/mix` as Href)}
+        className="w-full py-3"
+        textClassName="text-sm font-bold"
+      />
 
       <View className="flex-row flex-wrap items-center gap-2">
         <WrongNoteFilterChip
@@ -197,18 +174,8 @@ export function MixSessionView({
                                   return next;
                                 })
                               }
-                              onDeleted={() => {
-                                setDeletedKeys((prev) => new Set(prev).add(key));
-                                setLastDeleted({ key, paperId: q.paperId, questionNumber });
-                              }}
-                              onDeleteFailed={() => {
-                                setDeletedKeys((prev) => {
-                                  const next = new Set(prev);
-                                  next.delete(key);
-                                  return next;
-                                });
-                                setLastDeleted((cur) => (cur?.key === key ? null : cur));
-                              }}
+                              onDeleted={() => markDeleted(key, q.paperId, questionNumber)}
+                              onDeleteFailed={() => unmarkDeleted(key)}
                             />
                           )
                     }
@@ -225,22 +192,7 @@ export function MixSessionView({
         </>
       )}
 
-      {lastDeleted && (
-        <WrongNoteUndoToast
-          key={lastDeleted.key}
-          paperId={lastDeleted.paperId}
-          questionNumber={lastDeleted.questionNumber}
-          onRestored={() => {
-            setDeletedKeys((prev) => {
-              const next = new Set(prev);
-              next.delete(lastDeleted.key);
-              return next;
-            });
-            setLastDeleted(null);
-          }}
-          onDismiss={dismissUndo}
-        />
-      )}
+      {/* 되돌리기 토스트는 화면이 Screen 의 overlay 슬롯에 그린다(deletions.toast()). */}
     </View>
   );
 }

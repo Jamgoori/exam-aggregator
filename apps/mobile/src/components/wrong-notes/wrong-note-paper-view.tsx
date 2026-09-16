@@ -5,10 +5,10 @@ import {
   type PaperRoundComparison,
 } from "@gongmoa/core";
 import { Check } from "lucide-react-native";
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 import { WrongNoteLegend, WrongNoteQuestionCard } from "./wrong-note-question-card";
-import { WrongNoteMarkActions, WrongNoteUndoToast } from "./wrong-note-mark-actions";
+import { WrongNoteMarkActions, type WrongNoteDeletions } from "./wrong-note-mark-actions";
 import { AppText } from "../app-text";
 import { RoundAverageCompare } from "../papers/round-average-compare";
 import { useOwnWrongAnswers } from "../../queries/attempts";
@@ -42,6 +42,9 @@ export function WrongNotePaperView({
   // 무엇이 잠겼는지 알리는 한 줄이 대신 들어간다.
   roundComparisons,
   premium,
+  // 삭제·되돌리기 상태는 화면이 들고 있다 — 토스트가 Screen 의 overlay 슬롯으로 가야 해서다
+  // (src/components/screen.tsx ScreenOverlay 머리말).
+  deletions,
 }: {
   paperId: string;
   questions: PaperWrongNoteQuestion[];
@@ -50,6 +53,7 @@ export function WrongNotePaperView({
   lockNext: string;
   roundComparisons: PaperRoundComparison[];
   premium: boolean;
+  deletions: WrongNoteDeletions<number>;
 }) {
   const [view, setView] = useState<ViewKey>("all");
   // "극복한 문제 숨기기" 필터는 통합 보기에서만 의미가 있다.
@@ -58,10 +62,7 @@ export function WrongNotePaperView({
   const [pinnedNumbers, setPinnedNumbers] = useState<Set<number>>(
     () => new Set(questions.filter((q) => q.pinned).map((q) => q.questionNumber)),
   );
-  const [deletedNumbers, setDeletedNumbers] = useState<Set<number>>(new Set());
-  const [lastDeleted, setLastDeleted] = useState<number | null>(null);
-  // UndoToast 의 8초 타이머는 onDismiss 참조가 바뀌면 다시 걸린다 — 안정 참조로 둔다.
-  const dismissUndo = useCallback(() => setLastDeleted(null), []);
+  const { deletedKeys: deletedNumbers, markDeleted, unmarkDeleted } = deletions;
 
   const visibleQuestions = useMemo(
     () => questions.filter((q) => !deletedNumbers.has(q.questionNumber)),
@@ -240,18 +241,8 @@ export function WrongNotePaperView({
                         return next;
                       })
                     }
-                    onDeleted={() => {
-                      setDeletedNumbers((prev) => new Set(prev).add(questionNumber));
-                      setLastDeleted(questionNumber);
-                    }}
-                    onDeleteFailed={() => {
-                      setDeletedNumbers((prev) => {
-                        const next = new Set(prev);
-                        next.delete(questionNumber);
-                        return next;
-                      });
-                      setLastDeleted((cur) => (cur === questionNumber ? null : cur));
-                    }}
+                    onDeleted={() => markDeleted(questionNumber, paperId, questionNumber)}
+                    onDeleteFailed={() => unmarkDeleted(questionNumber)}
                   />
                 )}
               />
@@ -260,22 +251,7 @@ export function WrongNotePaperView({
         </>
       )}
 
-      {lastDeleted != null && (
-        <WrongNoteUndoToast
-          key={lastDeleted}
-          paperId={paperId}
-          questionNumber={lastDeleted}
-          onRestored={() => {
-            setDeletedNumbers((prev) => {
-              const next = new Set(prev);
-              next.delete(lastDeleted);
-              return next;
-            });
-            setLastDeleted(null);
-          }}
-          onDismiss={dismissUndo}
-        />
-      )}
+      {/* 되돌리기 토스트는 화면이 Screen 의 overlay 슬롯에 그린다(deletions.toast()). */}
     </View>
   );
 }

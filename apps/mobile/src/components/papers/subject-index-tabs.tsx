@@ -1,10 +1,11 @@
-import { CONSONANTS, initialConsonant, type Subject } from "@gongmoa/core";
+import { comboSlug, CONSONANTS, initialConsonant, type Subject } from "@gongmoa/core";
 import { router, type Href } from "expo-router";
 import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { SubjectBookmarkButton } from "./subject-bookmark-button";
 import { AppText } from "../app-text";
 import { CenterModal } from "../sheet";
+import { examHref } from "../../lib/exam-index";
 
 // 과목 초성 색인(웹 subject-index-tabs.tsx, 설계서 §4.5 #4 ConsonantTabs): 맨 앞 한능검 알약
 // 탭(`h-8 px-3 rounded-full border`, kheHref 로 곧장 이동) + 초성 원형 14개(`h-8 w-8`, 가로
@@ -12,17 +13,18 @@ import { CenterModal } from "../sheet";
 // 제목 `'ㄱ' 과목`, "닫기")에 해당 초성 과목 2열 그리드 + SubjectBookmarkButton(sm).
 // 활성 상태·"전체" 항목 없음.
 
-// 한국사능력검정시험 — 웹 lib/korean-history-exam.ts 와 동일(Phase 2 에 core 로 통일).
+// 한국사능력검정시험 — 웹 lib/korean-history-exam.ts 와 동일(나중에 core 로 통일할 것).
 // 공무원 "한국사" 과목과 섞지 않는다: 전용 과목 행은 초성 목록에서 빼고 전용 탭 하나로 들어간다.
 export const KHE_SUBJECT_SLUG = "korean-history-exam";
 export const KHE_EXAM_TYPE_NAME = "한능검";
 export const KHE_LEVEL = "심화";
 export const KHE_TAB_LABEL = "한능검";
 
-/** 한능검 탭이 가는 곳. 웹은 시험 허브(/exams/한능검-심화)지만 /exams 는 Phase 2 까지 라우트가 없어
- *  홈 시험 카드(home/past-questions.tsx)처럼 같은 필터의 문제지 목록으로 보낸다. */
+/** 한능검 탭이 가는 곳 = 시험 허브(`/exams/한능검-심화`). 웹 kheHref() 와 같은 주소 규칙
+ *  (comboSlug "시행처-급수" + examHref 의 encodeURIComponent)이고, 값은 위 상수에서 조립해
+ *  어긋나지 않게 한다. Phase 2 에서 `/exams/[exam]` 라우트가 생겨 웹과 같은 곳으로 간다. */
 export function kheHref(): Href {
-  return { pathname: "/papers", params: { type: KHE_EXAM_TYPE_NAME, level: KHE_LEVEL } } as Href;
+  return examHref(comboSlug(KHE_EXAM_TYPE_NAME, KHE_LEVEL)) as Href;
 }
 
 /** 과목 초성 목록에서 한능검 전용 과목을 뺀다. */

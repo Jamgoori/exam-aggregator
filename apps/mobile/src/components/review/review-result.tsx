@@ -126,7 +126,7 @@ export function ReviewResult({
 
       {/* 기출 섞어풀기는 채점과 동시에 오답노트에 날짜 이름으로 남는다. 결과 화면에는 해설이
           없으므로 틀린 문제를 해설과 같이 보려면 그 기록으로 가야 한다는 걸 여기서 알린다.
-          (기록 화면 `…/mix/[sessionId]` 자체는 Phase 3 — 그때 이 링크가 살아난다.) */}
+          기록 화면 `…/mix/[sessionId]` 은 Phase 2 에서 붙었다(MixSessionView). */}
       {mix && (
         <Pressable
           accessibilityRole="link"
@@ -146,10 +146,22 @@ export function ReviewResult({
         </Pressable>
       )}
 
-      {/* 틀린 문항만 다시 풀기. mix 는 웹이 createRetryFromMix({sessionId}) 를 쓰는데(세션에서
-          틀린 문항을 서버가 직접 읽는다), 앱 통로인 EF mix-create {action:"retry"} 가 아직 없다
-          → Phase 3. items 로 대신 부르면 filterQuestionsAnsweredByUser 가 형제 문제지에 상태가
-          기록된 문항을 걸러내 웹과 다른 문항 구성이 나올 수 있어 버튼을 그리지 않는다. */}
+      {/* 틀린 문항만 다시 풀기 — mix 에서는 그리지 않는다(**Phase 3**, §12 Phase 3 "재도전",
+          §6.7 #14 EF `mix-create` {action:"retry"}). 섞어풀기 기록 화면
+          (wrong-notes/mix-session-view.tsx)도 같은 이유로 버튼이 없다 — 두 화면의 판단을 맞춰
+          둔다.
+
+          근거: 복습 세션은 앱 통로가 EF review-create 의 items 분기뿐인데, 서버가
+          filterQuestionsAnsweredByUser 로 "내가 푼 적 있는 (문제지, 문항)"만 남기고 판정을
+          user_question_status 의 paper_id 로 한다. 섞어풀기 세션 문항은 **dedup 대표 문제지
+          id** 로 저장되고(rules/mix-practice.ts), 채점은 resolveStatusTargets
+          (rules/status-targets.ts)가 "그 사용자가 실제로 상태 행을 가진 문제지"로 되짚어
+          기록한다 — 직류만 다른 중복 시험지를 CBT 로 응시한 적이 있으면 상태 행은 원본 id 에
+          남고 대표 id 에는 안 생긴다. 그러면 items 로 되돌려 보낸 문항이 필터에 걸려 빠지고,
+          전부 빠지면 EF 가 400 "다시 풀 문항이 없어요." 로 떨어진다. 웹이 mix 에서만
+          createRetryFromMix({sessionId}) 를 쓰는 이유가 정확히 이것이다(웹 review-solver.tsx
+          retryWrong 주석). 오답 다시 풀기(mix 아님)는 세션 문항이 곧 내 오답노트 문항이라
+          필터를 그대로 통과하므로 웹과 같은 items 통로를 쓴다. */}
       {!mix && wrongItems.length > 0 && (
         <Pressable
           accessibilityRole="button"

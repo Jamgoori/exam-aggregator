@@ -1,11 +1,10 @@
 import { FREE_UNTIL_LABEL, isFreeForAll, kstDateKey } from "@gongmoa/core";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { BrainCircuit, FileCheck2, NotebookPen, Sparkles } from "lucide-react-native";
 import { Pressable, View } from "react-native";
 import { markSeenThisSession, seenThisSession, type HomePopupControls, type HomePopupSource } from "./home-popup";
 import { AppText } from "../app-text";
-import { loginHref } from "../login-link";
 import { kvGet, kvSet } from "../../lib/kv";
 
 // 홈에 뜨는 "전면 무료" 이벤트 팝업 — 비회원 전용, 홈 팝업 슬라이드의 첫 장.
@@ -20,8 +19,9 @@ import { kvGet, kvSet } from "../../lib/kv";
 //   - "오늘 하루 보지 않기" — kv 에 KST 날짜. 그 날은 안 뜬다.
 // 영구 숨김을 두지 않은 건 이벤트가 기간 한정이라서다.
 //
-// 웹과 다른 곳 하나: CTA 가 `/signup` 이 아니라 `/login` 이다. 앱에는 가입 화면이 따로 없고
-// (소셜 로그인 = 가입) §5 도 `/signup` 을 `/login` 리다이렉트로 잡아 두었다.
+// CTA 는 웹과 같이 `/signup` 을 가리킨다. 앱에도 가입 화면이 따로 있는 건 아니고(소셜 로그인
+// = 가입), `app/signup.tsx` 가 웹 app/signup/page.tsx 처럼 `/login` 으로 넘기는 리다이렉트다
+// (§5 `/signup` 행) — 웹과 같은 주소를 쓰면 딥링크·문구가 한 매핑으로 남는다.
 const HIDDEN_KEY = "free-promo-hidden-day-v1";
 const SHOWN_KEY = "free-promo-shown-v1";
 
@@ -153,8 +153,8 @@ function Perk({
   );
 }
 
-// 오른쪽(주요) 버튼은 로그인(=가입)으로 보낸다. 이 장의 용건이 그것이고, 비회원에게만
-// 뜬다. 왼쪽은 이 장만 오늘 하루 치운다 — 뒤에 실린 다른 안내까지 같이 없애지 않는다.
+// 오른쪽(주요) 버튼은 가입(= `/signup` → 로그인)으로 보낸다. 이 장의 용건이 그것이고,
+// 비회원에게만 뜬다. 왼쪽은 이 장만 오늘 하루 치운다 — 뒤에 실린 다른 안내까지 같이 없애지 않는다.
 function FreePromoFooter({ close, dismiss }: HomePopupControls) {
   return (
     <View className="flex-row gap-2 border-t border-zinc-100 px-5 py-3 dark:border-zinc-800">
@@ -174,7 +174,7 @@ function FreePromoFooter({ close, dismiss }: HomePopupControls) {
         accessibilityRole="link"
         onPress={() => {
           close();
-          router.push(loginHref("/"));
+          router.push("/signup" as Href);
         }}
         className="flex-[1.4] items-center overflow-hidden rounded-xl active:opacity-90"
       >

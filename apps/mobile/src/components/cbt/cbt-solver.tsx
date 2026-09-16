@@ -5,6 +5,7 @@ import { useCallback } from "react";
 import { Pressable, View } from "react-native";
 import { GestureDetector } from "react-native-gesture-handler";
 import { AppText } from "../app-text";
+import { ReportQuestionButton } from "../papers/report-question-button";
 import { Sheet } from "../sheet";
 import { themedIcon } from "../../theme/icons";
 import { CbtResultModal } from "./cbt-result-modal";
@@ -202,7 +203,10 @@ export function CbtSolver({
                     / {totalQuestions}
                   </AppText>
                 )}
-                {/* TODO(Phase 2): ReportQuestionButton(세트 첫 번호) — RPC submit_question_report 신설 후. */}
+                {/* 문항 오류 신고(웹 cbt-solver.tsx 상태줄과 같은 자리·같은 props). 세트문제는
+                    웹과 같이 세트 첫 번호로 보낸다. 응시 중이라 사유는 core 가 "이미지/표시
+                    오류"·"기타"만 남긴다(questionReportReasonsFor("cbt")). */}
+                <ReportQuestionButton paperId={paperId} questionNumber={s.groupFirstNumber} context="cbt" />
               </View>
               {!s.result && (
                 <Pressable

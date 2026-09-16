@@ -1,4 +1,6 @@
 import { Stack } from "expo-router";
+import { BottomTabBarHeightContext } from "expo-router/tabs";
+import { useContext } from "react";
 import { FlatList, RefreshControl, ScrollView, View, type FlatListProps, type ScrollViewProps } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppFooter } from "./app-footer";
@@ -13,6 +15,31 @@ import { useIsOnline } from "../lib/net";
 // 뒤로가기를 끈다(응시 이탈 확인은 화면이 자체 버튼 + Alert 로). 몰입 라우트는 (tabs) 그룹
 // 밖(루트 Stack)에 두어 하단 탭도 자연히 빠진다. 폰 가로 폭에서는 1열 + max-w-[640px].
 const IMMERSIVE_OPTIONS = { gestureEnabled: false, fullScreenGestureEnabled: false, headerShown: false } as const;
+
+// 화면에 고정되는 겹침 요소(하단 선택 바·되돌리기 토스트)가 앉는 자리.
+//
+// 웹에서 `fixed bottom-4` 인 것들을 그대로 옮겨 놓으면 앱에서는 **뷰포트가 아니라 목록에**
+// 붙는다 — 본문이 ScrollView 의 contentContainer 안에 있어서, RN 의 absolute 는 그 안쪽
+// 콘텐츠 박스를 기준으로 잡힌다. 긴 목록에서는 바가 화면 한참 아래(스크롤을 끝까지 내려야
+// 보이는 자리)로 밀려 사실상 사라진다. 그래서 겹침 요소는 본문이 아니라 이 슬롯으로 올려
+// ScrollView **다음에** 루트 View 안에 그린다(= 뷰포트 고정 + 본문 위).
+//
+// 바닥 여백: 탭바가 있는 화면에서는 탭바가 이미 `paddingBottom: insets.bottom` 을 먹고 씬이
+// 탭바 **위에서** 끝나므로(탭바는 absolute 가 아니라 형제 뷰다) 0 이고, 탭 밖(루트 Stack)
+// 에서는 홈 인디케이터만큼 띄운다. 이 슬롯이 여백을 책임지므로 안에 들어가는 요소는 웹과
+// 똑같은 `bottom-4`·`bottom-20` 클래스를 그대로 쓴다.
+function useOverlayBottom(insetBottom: number): number {
+  const tabBarHeight = useContext(BottomTabBarHeightContext);
+  return tabBarHeight === undefined ? insetBottom : 0;
+}
+
+function ScreenOverlay({ children, bottom }: { children: React.ReactNode; bottom: number }) {
+  return (
+    <View pointerEvents="box-none" style={{ bottom }} className="absolute inset-x-0 top-0">
+      {children}
+    </View>
+  );
+}
 
 type ShellProps = {
   immersive?: boolean;
@@ -37,14 +64,18 @@ function useShell({ immersive, header = true, footer = true, padded = true }: Sh
 
 export function Screen({
   children,
+  // 뷰포트에 고정되는 겹침 요소(하단 선택 바·UndoToast). ScreenOverlay 설명 참고 — 본문
+  // 안에 두면 목록에 붙어 화면 밖으로 밀리므로 화면이 여기로 올려 준다.
+  overlay,
   refreshing,
   onRefresh,
   className,
   contentClassName,
   ...shell
-}: ShellProps & ScrollViewProps & { children?: React.ReactNode }) {
+}: ShellProps & ScrollViewProps & { children?: React.ReactNode; overlay?: React.ReactNode }) {
   const { insets, online, showHeader, showFooter, pad } = useShell(shell);
   const { immersive } = shell;
+  const overlayBottom = useOverlayBottom(insets.bottom);
   return (
     <View className={["flex-1 bg-background", className ?? ""].join(" ")} style={immersive ? { paddingTop: insets.top } : null}>
       {immersive && <Stack.Screen options={IMMERSIVE_OPTIONS} />}
@@ -66,6 +97,7 @@ export function Screen({
           {showFooter && <AppFooter />}
         </ScrollView>
       )}
+      {overlay != null && <ScreenOverlay bottom={overlayBottom}>{overlay}</ScreenOverlay>}
     </View>
   );
 }

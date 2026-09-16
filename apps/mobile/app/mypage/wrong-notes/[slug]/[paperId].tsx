@@ -10,6 +10,10 @@ import { LoginRequiredScreen, useRequireLogin } from "../../../../src/components
 import { QueryState } from "../../../../src/components/query-state";
 import { Screen } from "../../../../src/components/screen";
 import { Skeleton } from "../../../../src/components/skeleton";
+import {
+  useWrongNoteDeletions,
+  type WrongNoteDeletions,
+} from "../../../../src/components/wrong-notes/wrong-note-mark-actions";
 import { WrongNotePaperView } from "../../../../src/components/wrong-notes/wrong-note-paper-view";
 import { paperCbtHref } from "../../../../src/lib/paper-href";
 import { useAuth } from "../../../../src/providers/auth-provider";
@@ -44,17 +48,34 @@ function PaperWrongNoteScreen({ slug, paperId }: { slug: string; paperId: string
   const query = usePaperWrongNote(paperId);
   // 응시 기록이 없거나(웹 null) 다른 과목의 문제지 주소로 들어오면 404.
   const mismatched = query.isSuccess && query.data != null && query.data.paper.subjects?.slug !== slug;
+  // 삭제 되돌리기 토스트는 뷰포트에 고정돼야 해서 Screen 의 overlay 슬롯으로 올린다
+  // (src/components/screen.tsx ScreenOverlay 머리말) — 그 상태를 화면이 들고, 목록에는
+  // 값으로 내려 준다. 훅 순서를 지키려고 조기 반환보다 먼저 부른다.
+  const deletions = useWrongNoteDeletions<number>();
   if (query.isSuccess && (query.data === null || mismatched)) return <NotFoundScreen />;
   return (
-    <Screen contentClassName="gap-6" refreshing={query.isRefetching} onRefresh={() => void query.refetch()}>
+    <Screen
+      contentClassName="gap-6"
+      overlay={deletions.toast()}
+      refreshing={query.isRefetching}
+      onRefresh={() => void query.refetch()}
+    >
       <QueryState query={query} skeleton={<PaperSkeleton />}>
-        {(note) => (note ? <PaperWrongNoteBody slug={slug} note={note} /> : null)}
+        {(note) => (note ? <PaperWrongNoteBody slug={slug} note={note} deletions={deletions} /> : null)}
       </QueryState>
     </Screen>
   );
 }
 
-function PaperWrongNoteBody({ slug, note }: { slug: string; note: PaperWrongNote }) {
+function PaperWrongNoteBody({
+  slug,
+  note,
+  deletions,
+}: {
+  slug: string;
+  note: PaperWrongNote;
+  deletions: WrongNoteDeletions<number>;
+}) {
   const { isPremium } = useAuth();
   const { paper, rounds, questions, unresolvedCount } = note;
   const subject = paper.subjects;
@@ -131,6 +152,7 @@ function PaperWrongNoteBody({ slug, note }: { slug: string; note: PaperWrongNote
         lockNext={self}
         roundComparisons={comparisons.data ?? []}
         premium={isPremium}
+        deletions={deletions}
       />
 
       {!isPremium && (

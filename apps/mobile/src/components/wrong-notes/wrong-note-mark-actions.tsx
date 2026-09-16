@@ -1,4 +1,5 @@
 import { BookmarkCheck, Trash2 } from "lucide-react-native";
+import { useCallback, useMemo, useState } from "react";
 import { Alert, Pressable, View } from "react-native";
 import { AppText } from "../app-text";
 import { UndoToast } from "../feedback";
@@ -127,17 +128,21 @@ export function WrongNoteUndoToast({
   questionNumber,
   onRestored,
   onDismiss,
+  bottomClassName,
 }: {
   paperId: string;
   questionNumber: number;
   onRestored: () => void;
   onDismiss: () => void;
+  bottomClassName?: string;
 }) {
   const restore = useRestoreWrongNoteQuestion();
   return (
     <UndoToast
       visible
       message={`${questionNumber}번 문항을 오답노트에서 삭제했어요`}
+      pending={restore.isPending}
+      bottomClassName={bottomClassName}
       onUndo={() => {
         if (restore.isPending) return;
         restore.mutate(
@@ -150,5 +155,70 @@ export function WrongNoteUndoToast({
       }}
       onDismiss={onDismiss}
     />
+  );
+}
+
+// 삭제 + 되돌리기 상태를 **화면**이 들고 있게 하는 훅.
+//
+// 토스트는 뷰포트에 고정돼야 해서 `Screen` 의 overlay 슬롯으로 들어가야 하는데(screen.tsx
+// ScreenOverlay 머리말), 삭제 목록(`deletedKeys`)은 본문 목록이 필터에 쓴다. 둘이 같은
+// 상태라 목록 컴포넌트 안에 두면 토스트를 위로 올릴 수 없다 — 그래서 상태만 화면으로 올리고
+// 목록 컴포넌트는 값을 받아 쓴다. 과목 오답노트(문항 모아보기)·문제지 오답노트·섞어풀기 기록
+// 세 화면이 같은 훅을 쓴다(키 타입만 다르다: `${paperId}#${n}` 또는 문항 번호).
+export type WrongNoteDeletions<K extends string | number> = {
+  deletedKeys: ReadonlySet<K>;
+  // 낙관적 삭제(서버 반영 전에 부른다) — 목록에서 감추고 되돌리기 토스트를 띄운다.
+  markDeleted: (key: K, paperId: string, questionNumber: number) => void;
+  // 서버 반영이 실패했을 때 되돌린다.
+  unmarkDeleted: (key: K) => void;
+  // `Screen overlay` 에 그대로 넘긴다. 삭제한 문항이 없으면 null.
+  toast: (opts?: { bottomClassName?: string }) => React.ReactNode;
+};
+
+export function useWrongNoteDeletions<K extends string | number>(): WrongNoteDeletions<K> {
+  const [deletedKeys, setDeletedKeys] = useState<Set<K>>(() => new Set<K>());
+  const [lastDeleted, setLastDeleted] = useState<{ key: K; paperId: string; questionNumber: number } | null>(null);
+  // UndoToast 의 8초 타이머는 onDismiss 참조가 바뀌면 다시 걸린다 — 안정 참조로 둔다.
+  const dismiss = useCallback(() => setLastDeleted(null), []);
+
+  const markDeleted = useCallback((key: K, paperId: string, questionNumber: number) => {
+    setDeletedKeys((prev) => new Set(prev).add(key));
+    setLastDeleted({ key, paperId, questionNumber });
+  }, []);
+
+  const unmarkDeleted = useCallback((key: K) => {
+    setDeletedKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+    setLastDeleted((cur) => (cur?.key === key ? null : cur));
+  }, []);
+
+  const toast = useCallback(
+    (opts?: { bottomClassName?: string }) =>
+      lastDeleted ? (
+        <WrongNoteUndoToast
+          key={lastDeleted.key}
+          paperId={lastDeleted.paperId}
+          questionNumber={lastDeleted.questionNumber}
+          bottomClassName={opts?.bottomClassName}
+          onRestored={() => {
+            setDeletedKeys((prev) => {
+              const next = new Set(prev);
+              next.delete(lastDeleted.key);
+              return next;
+            });
+            setLastDeleted(null);
+          }}
+          onDismiss={dismiss}
+        />
+      ) : null,
+    [lastDeleted, dismiss],
+  );
+
+  return useMemo(
+    () => ({ deletedKeys, markDeleted, unmarkDeleted, toast }),
+    [deletedKeys, markDeleted, unmarkDeleted, toast],
   );
 }
