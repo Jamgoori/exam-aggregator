@@ -52,7 +52,7 @@
 | URL | 제목 슬러그(`core/paper-slug.ts`, `lib/paper-href.ts`, `lib/paper-slug-map.ts`) | UUID — 유니버설 링크 불가 |
 | 중복 로직 | — | backend 리포트 §8 기준 24항목(≈15 복사 쌍). `_shared/srs.ts`·`review-pick.ts`·`profanity.ts` 는 core 와 의미 동일(공백 차이만). 함수 **정의** 기준 실측: `fetchQuestionMedia` 계열 3벌(`apps/web/src/lib/wrong-notes.ts:200`, `supabase/functions/_shared/media.ts:7`, `apps/mobile/src/lib/wrong-notes.ts:235 fetchQuestionImages`), `kstToday` 3벌(`apps/web/src/lib/ai-diagnosis.ts:145`, `supabase/functions/ai-diagnose/index.ts:15`, `_shared/membership.ts:108`), `isUuid` 8벌(웹 `app/{board,notifications,suggestions,subjects,notices,papers}/actions.ts` + `mypage/attempts/[attemptId]/page.tsx` 7 + `_shared/cbt.ts:31`; 정본은 core `paper-slug.ts:90 UUID_RE`), `chunk` 8벌(웹 `lib/{status-targets,mix-practice,wrong-notes,review-preferences,review-queue,diagnosis-live}.ts` 6 + `_shared/status-targets.ts` + 모바일 `wrong-notes.ts`), Edge 에러 언랩 6벌, `getAttendanceSummary` 웹·앱 verbatim 중복, `computeAttemptRounds` 는 `apps/web/src/app/mypage/page.tsx:82` 와 `apps/mobile/src/lib/mypage.ts:55` 중복. 근본 원인은 Deno 가 `@gongmoa/core` 를 import 못 하는 것 하나 |
 
-**앱에 없는 기능**: 랜딩 `/`, `/exams*`, `/mix`·`/subjects/[slug]/mix`·mix 세션 노트, 오늘의 복습(SRS: `review-due-card`, `review-fab`, 설정), `/notifications`+종, `/membership*`·`/mypage/payments`, `/board*`·`/notices*`·`/suggestions*`·채팅, 아바타, 문항 신고, 정답지 열기, 회독 평균 비교, 홈 팝업, 테마 토글, 검색 제안, 오답노트·응시 상세의 정답·해설(`paper_answers`·`question_explanations` RLS 차단), `/terms`·`/privacy` 내 링크만 존재.
+**앱에 없는 기능**: 랜딩 `/`, `/exams*`, `/mix`·`/subjects/[slug]/mix`·mix 세션 노트, 오늘의 복습(SRS: `review-due-card`, `review-fab`, 설정), `/notifications`+종, `/membership*`·`/mypage/payments`, `/board*`·`/notices*`·`/suggestions*`·채팅, 문항 신고, 정답지 열기, 회독 평균 비교, 홈 팝업, 테마 토글, 검색 제안, 오답노트·응시 상세의 정답·해설(`paper_answers`·`question_explanations` RLS 차단), `/terms`·`/privacy` 내 링크만 존재.
 
 **앱에만 있는 것**: 오프라인 JSON 캐시(`offline.ts`)+`OfflineBanner`, 로컬 20시 리마인더(`reminders.ts`, 단 `cancelAllScheduledNotificationsAsync` 로 타 알림까지 지움), `expo-updates` OTA, Apple 로그인, `FatalErrorScreen`, CBT 안 메모 필드(웹엔 없음), 전역 복습 기록 목록.
 
@@ -315,7 +315,7 @@ Supabase Postgres 한 곳. 앱은 **로컬에 권위 있는 상태를 갖지 않
 | 게시판 | `board_posts`, `board_comments`, `board_post_likes`, `board-images` | 읽기 RLS / EF `board-write`(신설) / RPC `toggle_board_like`(신설) | `sanitizeRichText` 서버 강제 |
 | 건의 | `suggestions`, `suggestion_comments` | EF `suggestions`(신설, 읽기 포함) | SELECT 조차 회수 |
 | 채팅 | `chat_messages` | 읽기 RLS + Realtime / EF `chat-send`(신설) | 이미 publication |
-| 아바타 | `avatars` 버킷, `profiles.avatar_path` | EF `avatar-upload`(신설), RPC `avatar_paths(uuid[])`(신설) | 버킷 쓰기 정책 열지 않음 |
+| 아바타 | `avatars` 버킷, `profiles.avatar_path` | EF `avatar-upload` ✅ | 버킷 쓰기 정책 열지 않음. 굽기는 앱(Skia), 서버는 헤더 검사만 — §12-8 |
 | AI 진단 | `ai_diagnoses` | EF `diagnosis-request`(신설, `ai-diagnose` 대체) + `diagnosis-aggregate`(신설); 리포트는 RLS 읽기 | 웹 Batches 파이프라인 재사용 |
 | 다운로드 집계 | — | RPC `increment_download_count`(저장·공유 탭에서만) | 봇 필터 없음 |
 | 계정 삭제 | — | EF `account-delete`(기존) | — |
@@ -386,7 +386,7 @@ TanStack Query 키는 `['catalog', …]`, `['me', userId, …]`, `['edge', name,
 | 13 | `review-prefs`(신설) | EF | `lib/review-preferences.ts#setDailyLimit(:157)/setSubjectPaused(:447, 재분산)/spreadOverdueBacklog/restoreSuspendedQuestions/saveStudyPhase(:129)`, `wrong-notes/actions.ts:347-372` 의 `isPremium` 게이트 | `{action:"daily-limit"\|"pause"\|"diagnosis-pause"\|"study-phase"\|"spread"\|"restore", subjectId?, limit?, phase?}` — `review_preferences` 의 **모든 쓰기**(`daily_limit`, `paused_subject_ids` 토글+재분산, `diagnosis_paused_subject_ids`, `study_phase`)를 이 EF 가 맡고 앱은 이 테이블을 읽기만 한다(§6.2). 방어선으로 DB check `daily_limit in (10,20,40,60)` 과 `study_phase` check(신설 SQL) 추가. 웹의 RLS insert/update 정책(schema.sql:1804-1823) 회수 여부는 §13 질문 15 — 웹 서버 액션이 `getSessionUser()` 의 **세션 클라이언트(RLS)** 로 쓰고 있어(`review-preferences.ts:167 upsert`), 회수하려면 웹 어댑터도 admin 클라이언트로 바꿔야 한다 | 3 |
 | 14 | `mix-create`(신설) | EF | `lib/mix-practice.ts#getMixOverview/createMixSessionForUser/createRetryFromMixSession` | `{action:"overview", subjectSlug}` → cells/levelGroups; `{action:"create", subjectSlug, levels[], yearRange, limit, requestId}` → `{sessionId,total,unseenCount,coveredAll}`; `{action:"retry", sessionId}` | 3 |
 | 15 | `mark_notification_read(p_id)`, `mark_all_notifications_read()`, `delete_notification(p_id)`(신설) | RPC SD | `notifications/actions.ts` | `auth.uid()` 범위; `mark_all` 은 60일 초과 읽음 정리(`pruneReadNotifications`) 포함 | 4 |
-| 16 | `avatar-upload`(신설), `avatar_paths(p_user_ids uuid[])`(신설) | EF, RPC | `app/actions.ts#uploadAvatar/removeAvatar`, `lib/avatars.ts#fetchAvatarUrls` | multipart → 256px webp(Deno 는 sharp 없음 → WASM 코덱; 5MB·MIME 검증은 core `avatar.ts`), `profiles.avatar_path` + `auth.updateUser`; 실패 시 Next route handler(bearer JWT) 대안 | 4 |
+| 16 | `avatar-upload` ✅ | EF | `app/actions.ts#uploadAvatar/removeAvatar` | 이미지는 **앱이 구워** base64 한 필드로 보낸다(Deno 는 sharp 없음 → WASM 코덱 대신 Skia 로 결정, §12-8). 서버는 디코딩 없이 헤더만 검사(core `avatarBytesError`) 후 규칙 한 벌(core `rules/avatar.ts`)을 부른다. 남의 아바타 일괄 조회(`avatar_paths` RPC)는 **앱에 그 자리가 없어 넣지 않았다** — 필요해지는 날의 SQL 은 §12-8 | 4 |
 | 17 | `board-write`(신설), `toggle_board_like(p_post_id)`(신설) | EF, RPC | `board/actions.ts` 전부 | `{action:"post.create"\|"post.update"\|"post.delete"\|"image"\|"comment.create"\|"comment.update"\|"comment.delete"}`; 순서 **새니타이즈(`sanitizeRichText`) → `validateBoardPostInput` → 저장**; 10/30/60 시간당 한도; 이미지 1600px webp; 알림 생성 | 5 |
 | 18 | `report_post(p_post_id, p_reason)`, `block_user(p_user_id)`(신설) | RPC SD | 웹에 없음 — 스토어 UGC 요건(Apple 1.2) | `board_post_reports`·`user_blocks` 테이블(신설); 차단 목록은 앱 전용 필터로 시작, 웹 적용은 §13 질문 8 | 5 |
 | 19 | `suggestions`(신설) | EF | `lib/suggestions.ts` + `suggestions/actions.ts` | `{action:"list"\|"get"\|"comments"\|"create"\|"update"\|"delete"\|"comment.*"}`; `canReadSuggestion` 마스킹 서버에서; `increment_suggestion_view` 는 EF 내부 | 5 |
@@ -450,7 +450,7 @@ TanStack Query 키는 `['catalog', …]`, `['me', userId, …]`, `['edge', name,
 - **로그인 직후 순서**(웹 `/auth/callback` 파리티): `signInWithIdToken` → `membership-get`(체험 시작) → `user_metadata.nickname` 없으면 `/onboarding/nickname?next=` → `next`(**기본 `/`** — 웹 `sanitizeNextPath`(`lib/safe-redirect.ts:18-19`)가 값이 없거나 부적합하면 `"/"` 를 돌려주고 `auth/callback/route.ts:13,52` 가 그리로 리다이렉트한다; 앱이 `/papers` 를 기본으로 두면 로그인 직후 화면이 웹과 갈라진다 — §13 질문 11 의 "앱은 `/papers` 로 바로 열지" 와 묶어 결정; §5 의 `next` 화이트리스트 실패 시 폴백 `/papers` 는 별개).
 - **닉네임 온보딩**: 웹 `onboarding/nickname/page.tsx` 1:1(CTA "시작하기"). core `validateNickname`(2–10자) + RPC `is_nickname_taken` + `auth.updateUser` 하나로 충분 — DB 트리거 `sync_nickname_from_auth` 가 `profiles` upsert·금칙어를 강제하므로 웹의 admin upsert(`persistNickname`) 경로는 앱에 불필요. 저장 후 `refreshSession()`. 기존 `NicknameGate` 유지. **오류 매핑**: 트리거는 길이·금칙어를 `raise exception`(schema.sql:1356,1361,1382 — "닉네임은 2~10자로 입력해주세요." / "닉네임에 사용할 수 없는 문자가 포함되어 있어요." / "사용할 수 없는 닉네임이에요.")으로 막지만 중복은 `profiles_nickname_unique_idx`(`lower(nickname)`, schema.sql:1050) 유니크 위반으로 터져 `auth.updateUser` 가 일반 500 성 에러를 돌려준다 — `is_nickname_taken` 선검사와 경합하면 원인 없는 오류가 된다 → 메시지가 위 세 문구면 그대로, 유니크 위반(`23505` 문자열 포함)이면 "이미 사용 중인 닉네임" 으로 매핑.
 - **프로필/아바타**: `/mypage/edit` 파리티 — 사진(EF `avatar-upload`, `expo-image-picker`, `AVATAR_MAX_BYTES` 5MB, `{userId}/{uuid}.webp`), 닉네임, `default_cbt_view_mode`(`single|full|null` — 앱도 null 해제 지원; 현행 `settings.tsx` 는 불가), 이메일 표시, 리마인더 토글(앱 전용 유지), 탈퇴.
-- **탈퇴**: "탈퇴" 입력 2단계 → EF `account-delete`(`comments` 익명화 "탈퇴한 회원" + `uploaded_by/verified_by` null → `auth.admin.deleteUser`; `account-delete/index.ts:36-61`) + 로컬 signOut + 캐시·kv 초기화(§6.5). 웹도 같은 EF 를 부르므로(`delete-account-button.tsx:24`) 파리티는 맞고 스토어 요건(계정 삭제)은 충족하지만 "완전성" 은 다음을 알고 써야 한다: (1) `avatars`·`board-images` 버킷의 사용자 객체는 `auth.users` 삭제로 지워지지 않는다(스토리지는 FK 가 없고 공개 버킷이라 탈퇴 후에도 URL 로 접근된다) → **`account-delete` 확장(Phase 4, 아바타 도입과 함께)**: `deleteUser` 전에 `storage.from('avatars').list(userId)` → remove, 본인이 올린 `board-images/{userId}/…` remove; (2) `board_posts`·`board_comments`·`chat_messages`·`suggestions`·`suggestion_comments`·`notice_comments` 는 `on delete cascade`(schema.sql:130, 2031, 2115, 2451, 2549, 2624) 라 글이 통째로 사라지고 그 글에 달린 타인의 댓글도 같이 삭제된다(댓글 익명화 정책과 불일치; `user_id` 가 FK not null 이라 익명화 불가 → §13 질문 16: 익명 계정 id 로 이전할지 cascade 를 유지할지 — 현재 cascade 동작은 웹과 동일); (3) `payments` 도 cascade 로 지워진다(schema.sql:1863 — §8.2 IAP 원장과 결제 분쟁 대응용 스냅샷 여부는 §13 질문 16). App Review 5.1.1(v) 충족. **Apple 토큰 revoke 는 필수**(Apple 계정 삭제 안내: Sign in with Apple 앱은 삭제 시 REST API `/auth/revoke` 로 토큰을 폐기해야 하며(문구는 "should") 이 항목으로 5.1.1(v) 반려 사례가 다수) — `account-delete` EF 가 `deleteUser` 전에 `https://appleid.apple.com/auth/revoke` 호출(현재 TODO, `account-delete/index.ts:18`); `.p8`+Services ID 는 Android PKCE Apple 로그인에도 필요하므로 §13 질문 7 은 "발급 시점" 질문으로 축소. **Google Play 정책도 앱 내 삭제 + 웹 링크 둘 다 요구**(§11).
+- **탈퇴**: "탈퇴" 입력 2단계 → EF `account-delete`(`comments` 익명화 "탈퇴한 회원" + `uploaded_by/verified_by` null → `auth.admin.deleteUser`; `account-delete/index.ts:36-61`) + 로컬 signOut + 캐시·kv 초기화(§6.5). 웹도 같은 EF 를 부르므로(`delete-account-button.tsx:24`) 파리티는 맞고 스토어 요건(계정 삭제)은 충족하지만 "완전성" 은 다음을 알고 써야 한다: (1) `avatars`·`board-images` 버킷의 사용자 객체는 `auth.users` 삭제로 지워지지 않는다(스토리지는 FK 가 없고 공개 버킷이라 탈퇴 후에도 URL 로 접근된다) → **`account-delete` 확장 완료(§12-8)**: `deleteUser` **전에** 두 버킷의 `{userId}/` 를 빌 때까지 `list`→`remove` 한다(정리 실패는 로그만 남기고 탈퇴를 막지 않는다 — 못 지운 계정은 사용자가 스스로 복구할 수 없다); (2) `board_posts`·`board_comments`·`chat_messages`·`suggestions`·`suggestion_comments`·`notice_comments` 는 `on delete cascade`(schema.sql:130, 2031, 2115, 2451, 2549, 2624) 라 글이 통째로 사라지고 그 글에 달린 타인의 댓글도 같이 삭제된다(댓글 익명화 정책과 불일치; `user_id` 가 FK not null 이라 익명화 불가 → §13 질문 16: 익명 계정 id 로 이전할지 cascade 를 유지할지 — 현재 cascade 동작은 웹과 동일); (3) `payments` 도 cascade 로 지워진다(schema.sql:1863 — §8.2 IAP 원장과 결제 분쟁 대응용 스냅샷 여부는 §13 질문 16). App Review 5.1.1(v) 충족. **Apple 토큰 revoke 는 필수**(Apple 계정 삭제 안내: Sign in with Apple 앱은 삭제 시 REST API `/auth/revoke` 로 토큰을 폐기해야 하며(문구는 "should") 이 항목으로 5.1.1(v) 반려 사례가 다수) — `account-delete` EF 가 `deleteUser` 전에 `https://appleid.apple.com/auth/revoke` 호출(현재 TODO, `account-delete/index.ts:18`); `.p8`+Services ID 는 Android PKCE Apple 로그인에도 필요하므로 §13 질문 7 은 "발급 시점" 질문으로 축소. **Google Play 정책도 앱 내 삭제 + 웹 링크 둘 다 요구**(§11).
 - **로그아웃**: `signOut({scope:"local"})` → `queryClient.clear()` + `persister.removeClient()` + kv `me:*` 삭제(§6.5) → 로컬 리마인더 취소(§10 `reminders.ts`) → Google SDK signOut.
 - **관리자**: 앱에 관리자 UI·링크 없음. `is_admin` 은 광고 제외·프리미엄 판정에만.
 
@@ -509,7 +509,7 @@ TanStack Query 키는 `['catalog', …]`, `['me', userId, …]`, `['edge', name,
 | 소셜 로그인 Google/Kakao/Apple | G+K | G+K+A 구현(콘솔 미설정) | 1 | `signInWithIdToken`; 웹에 Apple 추가 |
 | 체험 자동 시작 | `/auth/callback` | 없음 | 1 | `membership-get` |
 | 닉네임 온보딩·수정 | ✓ | ✓(경로 `/nickname`) | 1 | `auth.updateUser`+트리거 |
-| 아바타 | ✓ | ✗ | 4 | EF `avatar-upload` |
+| 아바타 | ✓ | ✓(4) | 4 | EF `avatar-upload` — 등록·삭제. 남의 사진이 보이는 자리는 앱에 없다(웹도 기출 댓글에는 없음) |
 | 탈퇴(+Apple revoke, 스토리지 객체 정리) | ✓ | ✓(revoke 없음) | 1 / revoke 는 스토어 제출 전 **필수**(`.p8`) / 스토리지 정리 4 | EF `account-delete` + Play 계정 삭제 웹 링크(§11) |
 | 게스트 모드·`LoginPrompt` | ✓ | 부분 | 1 | §7.0 |
 | 크래시·분석 | Vercel Analytics·GA4·Clarity | ✗(`FatalErrorScreen` 만) | 1 | Sentry(+GA4 앱 스트림 선택, §3.1) |
@@ -540,7 +540,7 @@ TanStack Query 키는 `['catalog', …]`, `['me', userId, …]`, `['edge', name,
 | 출석 카드·탭·메뉴(열릴 때만) | ✓(닫힘) | 항상 표시(버그) | 1(숨김) | RLS + `isAttendanceOpen()` |
 | 스트릭·티어 배지 | ✓ | ✓(색 다름) | 1 | core + `badge-classes.ts` |
 | 마이페이지 4탭·스탯·NextAction·멤버십 타일·즐겨과목 편집 | ✓ | 3탭 | 1 | RLS |
-| `/mypage/edit`(아바타·CBT 모드 null) | ✓ | 부분 | 2(아바타 4) | `avatar-upload`, `auth.updateUser` |
+| `/mypage/edit`(아바타·CBT 모드 null) | ✓ | ✓ | 2(아바타 4) | `avatar-upload` |
 | 알림함·벨·읽음 | ✓ | ✗ | 4 | RLS + 3 RPC |
 | AI 진단 소개·보드·요청·진행 | ✓(Batches) | 동기 EF(드리프트) | 4 | `diagnosis-request/aggregate` |
 | 멤버십 상태 화면·결제 내역 | ✓ | ✗ | 1(상태) / 2(내역) / 5(IAP) | `membership-get`, `payments` RLS |
@@ -610,7 +610,7 @@ TanStack Query 키는 `['catalog', …]`, `['me', userId, …]`, `['edge', name,
 | `APP_MIN_BUILD_IOS/ANDROID`, `GEO_BLOCK*`(`GEO_BLOCK_BYPASS_TOKEN` 포함), `CRON_SECRET` | Vercel 환경변수 | 비밀, **앱 번들 금지** |
 - **EAS Update 정책**: `runtimeVersion: { policy: "fingerprint" }`. JS/토큰/문구 변경만 OTA(채널별, `preview` → 하루 검증 → `production`); 네이티브 의존 변경(SDK·Skia·pdf·IAP·AdMob 플러그인)은 스토어 빌드. Edge 계약 변경을 동반하는 릴리스는 "추가 전용" 규칙(§6.6)을 지키고 앱 OTA 를 같은 날 내보낸다. 기존 `updates.ts`(포그라운드 fetch, 다음 실행 적용) 유지.
 - **CI**: 기존 `.github/workflows/eas-build.yml`(workflow_dispatch, jq 로 `EXPO_PUBLIC_*` 주입) 유지 + `mobile-ci.yml`(신설: PR 마다 typecheck/lint/core test/생성물 diff) + `contract-tests.yml`.
-- **스토어 제출 체크리스트**: Sign in with Apple(4.8 동등 프라이버시 옵션) ✓ 구현됨 + Android PKCE 경로(§7.1); 앱 내 탈퇴(5.1.1(v)) ✓(스토리지 객체 삭제는 아바타 도입 시 추가, §7.1); **Apple 토큰 revoke — 필수**(Apple 계정 삭제 안내: `/auth/revoke`; `.p8`+Services ID 는 Android PKCE Apple 로그인에도 필요) — `account-delete` EF 가 `deleteUser` 전에 `https://appleid.apple.com/auth/revoke` 호출; **Google Play 계정 삭제 웹 링크**(Play User Data 정책, 2024-04-15 전면 시행 — 계정을 만드는 앱은 앱 내 삭제 경로와 앱 밖 웹 링크 둘 다 요구하고 그 URL 을 Play Console → App content → Data safety → "데이터 삭제" 항목에 기재해야 한다): 로그인 없이 열리는 신설 `apps/web/src/app/account/delete-request/page.tsx`(삭제 절차 안내 + `/mypage/edit`(`delete-account-button.tsx`) 로그인 유도) 를 URL 로 등록하고 §5 geo-block 면제 목록에 포함(`/mypage/edit` 자체도 차단 대상이라 안내 페이지가 필요); ATT 문구·App Privacy(광고 식별자·진단 데이터 + **크래시·분석 SDK 가 수집하는 식별자(IDFV·광고 ID)를 App Privacy·Play Data safety·`/privacy` 5항 위탁표에 기재**); Android Data safety("광고 포함" 신고 포함); **UGC 신고·차단**(Apple 1.2 — 게시판·건의·채팅 출시 전 `report_post`/`block_user`); 개인정보처리방침 URL(`https://gongmoa.kr/privacy`, App Store Connect·Play 콘솔 동일) + **웹 `/privacy`·`/terms` 개정**(§12 Phase 4·5 — 앱 SDK 고지, 7일 사전 공지); **해외 IP 심사자 geo-block 403 대응 = `/terms`·`/privacy`·`/.well-known`·`/app-ads.txt`·`/account/delete-request` 면제 목록 등록**(§5; 우회 토큰 링크·앱 내 정적 사본은 채택하지 않음); AASA/assetlinks; `app-ads.txt`(스토어 등록정보의 "개발자 웹사이트" 가 `https://gongmoa.kr` 이어야 크롤링됨); AdMob UMP — 배포 국가에 EEA/UK 포함 여부 결정·기록(§8.4); 아이콘 초록 재생성; 스크린샷(다크·라이트, 폰만 — `supportsTablet: false`); iOS 16.4+ 최소; `ITSAppUsesNonExemptEncryption=false`; IAP 심사 노트(Phase 5); 연령 등급.
+- **스토어 제출 체크리스트**: Sign in with Apple(4.8 동등 프라이버시 옵션) ✓ 구현됨 + Android PKCE 경로(§7.1); 앱 내 탈퇴(5.1.1(v)) ✓(스토리지 객체 삭제 포함 — §12-8); **Apple 토큰 revoke — 필수**(Apple 계정 삭제 안내: `/auth/revoke`; `.p8`+Services ID 는 Android PKCE Apple 로그인에도 필요) — `account-delete` EF 가 `deleteUser` 전에 `https://appleid.apple.com/auth/revoke` 호출; **Google Play 계정 삭제 웹 링크**(Play User Data 정책, 2024-04-15 전면 시행 — 계정을 만드는 앱은 앱 내 삭제 경로와 앱 밖 웹 링크 둘 다 요구하고 그 URL 을 Play Console → App content → Data safety → "데이터 삭제" 항목에 기재해야 한다): 로그인 없이 열리는 신설 `apps/web/src/app/account/delete-request/page.tsx`(삭제 절차 안내 + `/mypage/edit`(`delete-account-button.tsx`) 로그인 유도) 를 URL 로 등록하고 §5 geo-block 면제 목록에 포함(`/mypage/edit` 자체도 차단 대상이라 안내 페이지가 필요); ATT 문구·App Privacy(광고 식별자·진단 데이터 + **크래시·분석 SDK 가 수집하는 식별자(IDFV·광고 ID)를 App Privacy·Play Data safety·`/privacy` 5항 위탁표에 기재**); Android Data safety("광고 포함" 신고 포함); **UGC 신고·차단**(Apple 1.2 — 게시판·건의·채팅 출시 전 `report_post`/`block_user`); 개인정보처리방침 URL(`https://gongmoa.kr/privacy`, App Store Connect·Play 콘솔 동일) + **웹 `/privacy`·`/terms` 개정**(§12 Phase 4·5 — 앱 SDK 고지, 7일 사전 공지); **해외 IP 심사자 geo-block 403 대응 = `/terms`·`/privacy`·`/.well-known`·`/app-ads.txt`·`/account/delete-request` 면제 목록 등록**(§5; 우회 토큰 링크·앱 내 정적 사본은 채택하지 않음); AASA/assetlinks; `app-ads.txt`(스토어 등록정보의 "개발자 웹사이트" 가 `https://gongmoa.kr` 이어야 크롤링됨); AdMob UMP — 배포 국가에 EEA/UK 포함 여부 결정·기록(§8.4); 아이콘 초록 재생성; 스크린샷(다크·라이트, 폰만 — `supportsTablet: false`); iOS 16.4+ 최소; `ITSAppUsesNonExemptEncryption=false`; IAP 심사 노트(Phase 5); 연령 등급.
 - **아직 남은 콘솔 작업**(mobile-audit 리포트 + Phase 별 재배치 — 이들이 Phase 1 종료 조건(설치)의 실제 병목이다):
   - **Phase 0 전(소유자)**: Apple Developer Program 가입(Mac + $99/년, SETUP.md §4-1·§6-B) + App Store Connect 앱 레코드(Bundle ID `com.gongmoa.app` 등록 — 없으면 `eas build -p ios` 가 자격 생성에서 막힘, SKU) + ASC API 키(`eas.json submit.production.ios.ascAppId/ascApiKeyPath` — 현행 `submit.production` 은 `{}`); Play 콘솔 개발자 계정·앱 생성·내부 테스트 트랙(신규 개인 계정이면 폐쇄 테스트 14일 요건 확인); `eas credentials` 로 Android 키스토어 생성 후 **그 SHA-1** 로 Google Android 클라이언트, **그 키 해시**로 Kakao Android 플랫폼 등록(로컬 keytool 값 아님 — SETUP.md §3 61행·76행); Google Web/iOS/Android 클라이언트 ID(`app.json` `iosUrlScheme` 가 `PLACEHOLDER_REVERSED_CLIENT_ID`); Kakao Developers OIDC ON + 네이티브 앱 키를 Supabase Kakao client-ID 목록에; Apple Services ID·`.p8`·Authorized Client `com.gongmoa.app`(Sign In with Apple capability 는 EAS 가 자동, Services ID 는 수동); Supabase 제공자 3종 활성화 + Auth Redirect URLs 에 `gongmoa://auth/callback`; `EXPO_TOKEN` 재발급(SECURITY.md §4); GitHub secrets(`EXPO_PUBLIC_SUPABASE_URL/PUBLISHABLE_KEY`, `EXPO_PUBLIC_WEB_URL`); Edge 9+신설 배포 + `ANTHROPIC_API_KEY`(`diagnosis-request` 채택 시 Edge 쪽은 불필요); `sync_nickname_from_auth`·`trg_create_membership` 프로덕션 적용 확인; Sentry 프로젝트·DSN.
   - **Phase 4 전**: 스토어 등록정보 "개발자 웹사이트" = `https://gongmoa.kr`(`app-ads.txt` 크롤링 조건), AdMob 앱·단위 ID·ATT 문구, Play App Signing SHA-256(assetlinks), Apple Team ID(AASA).
@@ -923,6 +923,134 @@ revoke/grant). `create or replace` 라 여러 번 실행해도 안전하다. 적
 
 ---
 
+## 12-8. Phase 4 2라운드 — 프로필 사진·유니버설 링크 (2026-09-16, 코드 완료 · 실기기 미검증)
+
+§12-6 이 "2라운드로 넘긴 것" 표에 적어 둔 네 항목 중 **선행 조건이 없는 둘**을 넣었다. 루트
+`typecheck`/`lint`/`test`(core 564 · web · design-tokens), `bundle-edge --check: 최신`,
+`apps/mobile` 의 `tsc --noEmit` + `expo lint` 통과. Edge 18개는 `tsc` 하네스로 타입만 검사(오류 0).
+남은 둘(AdMob · 웹 `/privacy` 개정)은 소유자가 광고 도입 시점을 정해야 해서 **Phase 5** 다.
+
+| 영역 | 들어간 것 |
+|---|---|
+| 아바타 규칙 | `packages/core/src/rules/avatar.ts` 신설 — 검증 → 업로드 → `profiles` → `user_metadata` → **예전 사진 삭제는 맨 뒤**. 웹 서버 액션(`uploadAvatar`/`removeAvatar`)과 EF 가 이 한 벌을 부르는 어댑터가 됐다 |
+| 아바타 서버 | EF `avatar-upload`(`action: "upload" \| "remove"`, 이미지는 base64 한 필드). `account-delete` 가 탈퇴 **전에** `avatars`·`board-images` 의 `{userId}/` 를 비운다 |
+| 아바타 앱 | `/mypage/edit` 의 사진 칸(웹 `profile-image-field.tsx` 1:1) — 앨범에서 고르기(정사각 크롭 UI) → Skia 로 256px webp 굽기 → EF. `Avatar` 에 `onError` 폴백(없는 객체를 가리키면 첫 글자로) |
+| 유니버설 링크 | 웹 `/.well-known/apple-app-site-association`·`/.well-known/assetlinks.json` 라우트(값은 env, 없으면 **404**), `app.json` 의 `ios.associatedDomains`·`android.intentFilters` |
+
+**굽는 쪽이 앱이고 서버는 검사만 한다.** 웹은 서버에서 sharp 로 256px webp 를 굽지만 **Deno 에는
+sharp 가 없다.** 선택지는 (가) Edge 에 WASM 이미지 코덱 (나) 앱에서 굽기 둘이었고 (나)로 갔다 —
+(가)는 콜드스타트·메모리를 아바타 하나 때문에 요청마다 치르고, 앱 쪽은 **이미 들어 있는**
+`@shopify/react-native-skia`(CBT 필기 레이어)로 되기 때문에 **새 네이티브 의존이 0 이다**(새 의존은
+OTA 를 깨고 APK 재빌드를 강제한다). Skia 빌드에 WEBP 인코더가 실제로 링크돼 있는지는 추측하지 않고
+동봉 정적 라이브러리를 직접 확인했다 — Android 4개 ABI·iOS 2개 슬라이스 **전부**에
+`webp_encode.SkWebpEncoderImpl.o` 와 `SkWebpEncoder::Encode(...)` 정의가 있다(근거는
+`src/lib/avatar-image.ts` 머리 주석). 그래도 런타임에 빈 결과를 확인한다.
+
+서버 검사는 **디코딩이 아니라 헤더 읽기**다(core `avatar.ts#readWebpInfo`/`avatarBytesError`,
+웹·Edge 가 같은 함수를 부른다): RIFF/WEBP 매직바이트 → VP8·VP8L·VP8X 캔버스 크기(정사각 ≤256px)
+→ VP8X ANIM 비트 → **RIFF 가 선언한 길이보다 바이트가 많으면 거절**(진짜 webp 머리 뒤에 임의의
+512KB 를 붙여 공개 버킷에 얹는 길을 막는다). base64 는 `atob` **전에** 문자 수로 먼저 거른다.
+
+**`avatars` 버킷 쓰기 정책은 그대로 닫혀 있다**(§6.1 금지선). 앱이 버킷에 직접 올릴 길이 없어야
+규격 강제가 반드시 EF 를 지난다.
+
+**운영 DB 에 적용할 SQL — 없다.** `avatars` 버킷·`profiles.avatar_path`·`public read avatars` 는
+이미 있고 이번 라운드가 건드리지 않았다. (초안에는 남의 아바타를 읽는 SD 함수
+`avatar_paths(uuid[])` 가 있었지만 아래 이유로 뺐다.)
+
+**웹과 벌어질 뻔한 것을 되돌렸다 — 기출 댓글 아바타.** 초안은 앱의 기출 문제지 댓글 줄에 아바타를
+붙였다(웹 *자유게시판* 댓글에서 가져온 줄). 그러면 앱에만 있는 UI 가 되고, 그 한 줄을 위해
+`avatar_paths` RPC 와 일괄 조회 훅이 필요해진다. **웹 `comment-row.tsx` 에는 아바타가 없다** —
+이 프로젝트의 기준은 "웹과 똑같이"이므로 되돌렸다. 앱에서 남의 사진이 보이는 자리는 아직 없고,
+따라서 RPC 도 필요 없다(적용할 SQL 이 0 이 된 이유). 그 자리가 생기는 날 — 게시판이 앱에 오거나
+(Phase 5) 웹 기출 댓글에 아바타가 붙는 날 — 필요한 것은 이 함수 하나다(`profiles` 는 "본인 +
+관리자"만 select 하는 RLS 라 앱 세션으로는 남의 행을 못 읽는다):
+
+```sql
+create or replace function avatar_paths(p_user_ids uuid[])
+returns table(user_id uuid, avatar_path text)
+language plpgsql stable security definer set search_path = public
+as $$
+declare v_uid uuid := auth.uid();
+begin
+  if v_uid is null then raise exception 'not authenticated'; end if;
+  if p_user_ids is null or array_length(p_user_ids, 1) is null then return; end if;
+  if array_length(p_user_ids, 1) > 200 then raise exception 'too many ids'; end if;
+  return query
+  select p.user_id, p.avatar_path from profiles p
+   where p.user_id = any(p_user_ids) and p.avatar_path is not null;
+end $$;
+revoke all on function avatar_paths(uuid[]) from public, anon;
+grant execute on function avatar_paths(uuid[]) to authenticated;
+```
+
+돌려주는 컬럼을 둘로 못 박는 것이 핵심이다 — SD 공통 규칙(§6.7 머리말) (3)의 유일한 예외라,
+`profiles` 에 나중에 비공개 컬럼이 생겨도 새지 않아야 한다. 행 → URL 변환은 core `avatarUrlMap`
+한 곳을 쓴다(웹 `fetchAvatarUrls` 가 이미 그 함수를 부른다).
+
+**의도적으로 웹과 다르게 둔 것**
+
+- **자르는 방식.** 웹 sharp 는 `fit:"cover", position:"attention"`(내용을 보고 고르는 스마트 크롭)
+  인데 Skia 에는 그에 해당하는 것이 없다. 대신 앱은 `expo-image-picker` 의 정사각 크롭 UI
+  (`allowsEditing` + `aspect:[1,1]`)를 먼저 거치게 하고 **가운데**를 잘라 넣는다 — 어디를 남길지는
+  사용자가 이미 정한 뒤다. 결과 규격(정사각 256px webp)은 같고, 그게 서버가 검사하는 전부다.
+- **5MB 검사 지점.** 웹은 앨범 원본에, 앱은 picker 가 `quality:0.9` 로 다시 구운 결과에 검사한다
+  (앱이 조금 더 관대하다). 최종 규격 강제는 `avatarBytesError` 한 곳이라 저장되는 것은 같다.
+  `quality` 를 1 로 올리지 말 것 — 안드로이드가 원본 바이트를 그대로 실어 주어 HEIC 가 넘어온다.
+- **AVIF.** core `AVATAR_ALLOWED_MIME` 에 있어 웹(sharp)은 받지만 Skia 코덱에 없어 앱은 거절한다.
+  picker 가 언제나 JPEG 로 다시 내보내므로 실제로는 닿지 않는다.
+
+**유니버설 링크 — 값이 없으면 파일이 없어야 한다.** AASA·assetlinks 두 라우트는 Team ID·서명 지문을
+환경변수에서 읽고, 없거나 형식이 어긋나면 **404** 를 낸다. 자리표시자가 든 파일을 한 번 내주면 OS 가
+"이 도메인은 그 앱 것이 아니다"를 캐시해서, 나중에 진짜 값을 넣어도 한동안(재설치 전까지) 링크가
+안 열린다. 빈 배열을 내주는 것은 명시적 부정이라 더 나쁘다. `/ads.txt`(게시자 ID 가 코드 상수)와
+**반대 방향의 선택**이다 — 저쪽은 비면 광고가 조용히 멈추는 값이고 이쪽은 틀리면 조용히 캐시되는 값이다.
+
+**어느 경로를 앱이 여는가는 세 곳에 같은 목록으로 있다**(한 곳만 열면 반드시 깨진다):
+
+| 파일 | 역할 | 한쪽만 열었을 때 |
+|---|---|---|
+| `apps/mobile/src/lib/next-path.ts` 의 `ALLOWED` | 로그인 복귀(`?next=`)·알림 링크 매처 | 앱이 열렸다가 `+not-found` |
+| 웹 `.well-known/apple-app-site-association` 의 `ALLOWED_PATHS` | iOS 가 보는 목록 | iOS 에서 브라우저로 샌다 |
+| `apps/mobile/app.json` 의 `android.intentFilters` pathPrefix | Android 가 보는 목록 | Android 에서 브라우저로 샌다 |
+
+아직 앱에 없는 화면(게시판·건의·공지 — Phase 5)은 **세 곳 모두에서 빠져 있다.** 화면을 만들 때 함께
+연다. 제외 목록(`/admin/*`·`/api/*`·`/auth/*`·`/payments/*`·`/download/*`·`/sitemaps/*` …)은 화이트
+리스트라 원래 매칭되지 않지만 `components` 배열 앞에 세워 둔다 — 나중에 넓은 줄이 아래에 붙어도
+결제 리다이렉트를 앱이 가로채지 않게 하려는 것이다.
+
+**소유자 작업 — 값 두 개(`SETUP.md` §5-3)**
+
+| Vercel 환경변수 | 어디서 |
+|---|---|
+| `APP_APPLE_TEAM_ID` | Apple Developer → Membership details 의 Team ID(영숫자 10자) |
+| `APP_ANDROID_CERT_FINGERPRINTS` | Play Console → 앱 서명 의 **앱 서명 키 + 업로드 키** SHA-256 둘 다(쉼표) |
+
+> `app.json` 변경은 네이티브 설정이라 **OTA 로 안 나간다** — 링크가 앱으로 들어오려면 새 빌드를
+> 설치해야 한다. 아바타 쪽은 새 네이티브 의존이 없어 OTA 로 나간다.
+
+**이번 라운드에서 검토가 잡은 것**
+
+- 정상 webp 머리 뒤에 임의 바이트를 붙인 파일이 검사를 통과해 공개 버킷에 올라갔다(RIFF 선언 길이
+  검사로 막음).
+- `profiles.avatar_path` 값을 소유자 확인 없이 `storage.remove()` 에 넘기고 있었다. 오늘은 그 컬럼에
+  서버가 적은 값만 들어오지만, `profiles` 에 사용자 쓰기 정책이 열리는 날 곧바로 "남의 사진 지우기"가
+  된다(`isOwnAvatarPath` 가드).
+- 웹 `fetchAvatarUrls` 가 앱 상한에 맞춘다는 이유로 200명에서 **잘라** 버리고 있었다(웹 기능 회귀).
+  같은 크기로 끊되 전부 이어 붙이도록 고쳤다.
+- `account-delete` 의 스토리지 정리가 `list` 한 장(최대 1000개)으로 끝나, 게시판 이미지가 많은 계정은
+  "지웠다"고 응답한 뒤 공개 URL 로 남았다. 빌 때까지 도는 루프로 바꿨다(페이지 수 천장 50 — remove 가
+  오류 없이 아무것도 못 지우는 상황에서 탈퇴가 타임아웃까지 매달리지 않게).
+- `FakeSupabase` 가 읽은 행을 **저장된 객체 그대로** 돌려줘서(PostgREST 는 새 JSON 을 준다) 이 라운드에서
+  가장 위험한 규칙 — "예전 사진은 새 사진이 자리를 잡은 뒤에 지운다" — 이 테스트에서 조용히 통과했다.
+- TypeScript 의 `**` 와일드카드가 `.` 으로 시작하는 디렉터리를 건너뛰어 `.well-known` 라우트 두 개가
+  타입검사에서 통째로 빠져 있었다(`tsconfig.json` 에 경로 명시).
+
+**배포 순서**: (SQL 없음) → Edge 배포(`avatar-upload`, 또는 `all` = 18개) → 웹 재배포(환경변수를 넣었다면)
+→ 앱 OTA. Edge 가 없으면 사진 올리기만 실패하고 그 실패가 화면에 한 줄로 보인다.
+
+---
+
 ## 13. 리스크·미결 사항
 
 | 리스크 | 완화 |
@@ -951,7 +1079,7 @@ revoke/grant). `create or replace` 라 여러 번 실행해도 안전하다. 적
 | 릴리스 크래시가 어디에도 남지 않음(`FatalErrorScreen` 스크린샷뿐) | Sentry(§3.1) Phase 1a 부터; 크래시 payload 에 정답·해설·`user_metadata` 금지 |
 | `supportsTablet: true` 상태로 첫 iOS 빌드 → iPad 스크린샷·심사 요구, 레이아웃 임의 결정 | `supportsTablet: false` + 폰 전용(§4.4); iPad 는 §13 질문 13 |
 | 계약 테스트가 Docker 의존 | Actions 전용; 로컬은 core 단위 테스트만 |
-| Deno 이미지 처리(아바타) | WASM 코덱 검증; 실패 시 Next route handler(bearer JWT) |
+| Deno 이미지 처리(아바타) | **해소(§12-8)** — Edge 에서 굽지 않는다. 앱이 Skia 로 굽고 서버는 헤더만 검사한다(WASM 코덱·Next route handler 둘 다 불필요) |
 | `explanation_excluded_subjects`·`exam-papers` 버킷 정책·`concepts` 테이블이 레포에 없거나 스크립트에만 있음 | 앱 영향 없음(읽기 공개); 배포 스크립트에 주석; 운영 적용 여부 확인 |
 | 무료 이벤트 종료(2027-07-01) 시 잠기는 기능 급증 | 게이팅은 전부 서버 판정이라 앱 코드 변경 없음; 잠금 UI 는 Phase 1 부터; 시계 주입 테스트 |
 | 유출된 `EXPO_TOKEN`(SECURITY.md §4) | Phase 0 전에 재발급 |

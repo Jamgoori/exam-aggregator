@@ -375,11 +375,22 @@ const mixCreateSession = {
   coveredAll: false,
 } satisfies EdgeResponse<"mix-create">;
 
-// ── comments-write / account-delete ─────────────────────────────────────────
+// ── comments-write / avatar-upload / account-delete ─────────────────────────
 ({ action: "create", paperId: "p1", content: "…", parentId: null }) satisfies EdgeRequest<"comments-write">;
 ({ action: "update", commentId: "c1", content: "…" }) satisfies EdgeRequest<"comments-write">;
 ({ action: "delete", commentId: "c1" }) satisfies EdgeRequest<"comments-write">;
 ({ ok: true }) satisfies EdgeResponse<"comments-write">;
+// 이미지는 base64 문자열 한 필드로 싣는다(계약 주석 참고 — multipart 를 쓰지 않는 이유).
+({ action: "upload", webpBase64: "UklGRg==" }) satisfies EdgeRequest<"avatar-upload">;
+({ action: "remove" }) satisfies EdgeRequest<"avatar-upload">;
+({
+  success: true,
+  avatarPath: "11111111-1111-1111-1111-111111111111/22222222-2222-2222-2222-222222222222.webp",
+  avatarUrl: "https://p.supabase.co/storage/v1/object/public/avatars/a/b.webp",
+}) satisfies EdgeResponse<"avatar-upload">;
+// 삭제는 같은 응답에서 둘 다 null 이다 — 앱은 null 을 "사진 없음"(첫 글자 아바타)으로 그린다.
+({ success: true, avatarPath: null, avatarUrl: null }) satisfies EdgeResponse<"avatar-upload">;
+
 ({}) satisfies EdgeRequest<"account-delete">;
 ({ ok: true }) satisfies EdgeResponse<"account-delete">;
 
@@ -499,8 +510,8 @@ type _EveryEntry = { [N in EdgeName]: EdgeContracts[N] extends { request: unknow
 const _every: _EveryEntry[EdgeName] = true;
 void _every;
 
-test("EDGE_NAMES 는 배포된 함수 17개", () => {
-  assert.equal(EDGE_NAMES.length, 17);
+test("EDGE_NAMES 는 배포된 함수 18개", () => {
+  assert.equal(EDGE_NAMES.length, 18);
   assert.equal(new Set(EDGE_NAMES).size, EDGE_NAMES.length);
 });
 

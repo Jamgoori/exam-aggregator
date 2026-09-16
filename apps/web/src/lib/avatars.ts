@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { avatarPublicUrl } from "@gongmoa/core";
+import { avatarPublicUrl, avatarUrlMap, AVATAR_PATHS_MAX, chunk } from "@gongmoa/core";
 
 // 프로필 사진 경로 → 공개 URL. 버킷이 public 이라 서명 없이 그대로 붙는다.
 //
@@ -25,16 +25,22 @@ export async function fetchAvatarUrls(
   if (unique.length === 0) return new Map();
 
   const admin = createAdminClient();
-  const { data } = await admin
-    .from("profiles")
-    .select("user_id, avatar_path")
-    .in("user_id", unique)
-    .not("avatar_path", "is", null);
-
-  const map = new Map<string, string>();
-  for (const row of data ?? []) {
-    const url = avatarUrl(row.avatar_path as string | null);
-    if (url) map.set(row.user_id as string, url);
+  // AVATAR_PATHS_MAX 명씩 **끊어서 전부** 물어본다 — 끊은 뒤 버리지 않는다.
+  // 끊는 이유: .in() 은 PostgREST 쿼리스트링으로 나가므로 id 수백 개를 한 번에 넣으면
+  // URL 길이에서 먼저 깨진다. 자르면 안 되는 이유: 게시판 댓글 조회
+  // (lib/board.ts#fetchBoardComments)는 한 글의 댓글을 **상한 없이** 읽어서 넘기므로,
+  // 작성자가 200명을 넘는 글에서 뒷줄 아바타가 조용히 사라진다.
+  const rows: { user_id: string; avatar_path: string | null }[] = [];
+  for (const ids of chunk(unique, AVATAR_PATHS_MAX)) {
+    const { data } = await admin
+      .from("profiles")
+      .select("user_id, avatar_path")
+      .in("user_id", ids)
+      .not("avatar_path", "is", null);
+    rows.push(...((data ?? []) as { user_id: string; avatar_path: string | null }[]));
   }
-  return map;
+
+  // 행 → URL 변환은 core 한 곳(avatarUrlMap)이다. 경로 모양 검증을 한쪽만 빠뜨리면
+  // 웹과 앱이 같은 계정에 다른 아바타를 그린다.
+  return avatarUrlMap(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "", rows);
 }

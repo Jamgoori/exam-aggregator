@@ -173,13 +173,9 @@ eas update --branch production --message "설명"   # OTA 배포 (스토어 심�
   로그인 세션(SecureStore)은 재설치 후에도 이어지고, 잃는 것은 kv 편의값뿐이다
   (`docs/redesign-architecture.md` §10).
 
-**웹 주소로 앱 열기(딥링크)는 도메인 확인이 필요하다.** 지금은 `gongmoa://` 커스텀 스킴만
-동작한다. `https://gongmoa.kr/papers/...` 로 앱이 열리게 하려면:
-
-- iOS: `app.json` 의 `ios.associatedDomains` 에 `applinks:gongmoa.kr` 추가 +
-  웹 서버에 `/.well-known/apple-app-site-association` 배포
-- Android: `android.intentFilters` 에 `autoVerify` 링크 추가 +
-  `/.well-known/assetlinks.json` 배포(서명 인증서 지문 필요)
+**웹 주소로 앱 열기(딥링크)는 코드가 준비됐고 값 두 개만 남았다.** `app.json` 의
+`ios.associatedDomains`·`android.intentFilters` 와 웹의 `/.well-known` 두 파일은 이미 있다.
+남은 것은 Apple Team ID 와 Android 서명 지문을 Vercel 환경변수에 넣는 일 — **5-3** 참고.
 
 **원격 푸시(FCM/APNs)는 아직 없다.** 지금 리마인더는 로컬 알림이라 서버가 필요 없다.
 "내 댓글에 답글이 달렸다" 같은 서버발 알림을 넣을 때 FCM 키·기기 토큰 테이블·발송
@@ -214,6 +210,86 @@ cd apps/mobile && node scripts/generate-icons.mjs
 
 디자인 도구 없이 코드로 그리고 의존성도 없다(PNG 를 직접 쓴다). 브랜드 색은
 `src/theme/colors.ts` 의 primary 와 같은 값을 쓰므로 앱 색을 바꾸면 여기도 같이 고칠 것.
+
+---
+
+## 5-3. 웹 주소로 앱 열기 (유니버설 링크 / 앱 링크)
+
+`https://gongmoa.kr/papers/...` 를 눌렀을 때 브라우저 대신 **앱**이 열리게 하는 설정이다.
+카카오톡으로 받은 문제지 링크, 검색 결과, 알림 메일이 전부 앱으로 들어온다. 지금도
+`gongmoa://` 커스텀 스킴은 동작하지만, 그건 우리가 만든 링크에서만 쓸 수 있다.
+
+코드는 다 들어가 있다(`app.json` 의 `ios.associatedDomains`·`android.intentFilters`,
+웹의 `/.well-known/apple-app-site-association`·`/.well-known/assetlinks.json` 라우트).
+**남은 건 소유자만 볼 수 있는 값 두 개를 Vercel 에 넣는 일이다.**
+
+> ⚠ `app.json` 변경은 **네이티브 설정**이라 OTA(`eas update`)로 안 나간다. 지금까지의
+> 기능 추가와 달리 이번엔 **APK/IPA 를 새로 빌드해 설치**해야 링크가 앱으로 들어온다
+> (`runtimeVersion` 이 `fingerprint` 정책이라 지문이 바뀐다 — 5-1 참고).
+> 이미 깔려 있는 빌드는 계속 브라우저로 열린다.
+
+### (1) Android — 서명 인증서 SHA-256 지문
+
+둘 중 있는 쪽에서 얻는다. **둘 다 있으면 둘 다** 넣는다(쉼표로 이어서):
+
+- **Play Console** → 해당 앱 → **테스트 및 출시 → 설정 → 앱 서명**
+  - "앱 서명 키 인증서"의 SHA-256 [결과 P1] ← Play 가 배포본에 다시 서명하는 키
+  - "업로드 키 인증서"의 SHA-256 [결과 P2] ← 우리가 올릴 때 쓰는 키
+- **아직 Play 에 안 올렸으면**: `eas credentials` → Android → 해당 프로필 →
+  키스토어 정보에 SHA-256 이 나온다 [결과 P2]
+
+> **두 지문이 다른 게 정상이다.** Play 앱 서명을 쓰면 우리가 업로드 키로 서명해 올린
+> APK 를 Play 가 앱 서명 키로 **다시 서명해서** 배포한다. 업로드 키 지문만 넣으면
+> 내부 테스트용 APK 는 열리는데 Play 에서 받은 앱은 안 열리고, 반대면 그 반대가 된다.
+> 로컬 `keytool` 로 뽑은 디버그 키 지문은 여기 넣지 말 것(그 키로 만든 빌드는 배포하지 않는다).
+
+### (2) iOS — Apple Team ID
+
+Apple Developer → 오른쪽 위 계정 → **Membership details** 의 **Team ID**(영숫자 10자,
+예: `A1B2C3D4E5`) [결과 A1]. App Store Connect 앱 페이지의 "App Information" 에도 같은 값이 있다.
+
+> 4-1 에서 `.p8` 키를 만들 때 메모해 둔 Team ID 와 같은 값이다.
+
+### (3) Vercel 환경변수에 넣고 재배포
+
+Vercel → 웹 프로젝트 → **Settings → Environment Variables** (Production):
+
+| 이름 | 값 |
+|---|---|
+| `APP_APPLE_TEAM_ID` | [결과 A1] |
+| `APP_ANDROID_CERT_FINGERPRINTS` | [결과 P1]`,`[결과 P2] (쉼표로, 콜론은 있어도 없어도 됨) |
+
+넣은 뒤 **재배포**해야 반영된다(환경변수는 빌드에 실린다 — `APP_MIN_BUILD_*` 와 같다).
+
+> 값을 저장소에 커밋하지 말 것. 지문·Team ID 는 비밀이 아니지만(APK 에서 뽑을 수 있다)
+> 값은 언제나 환경변수로 받는 게 이 저장소의 규칙이다.
+
+### (4) 확인
+
+```bash
+curl -i https://gongmoa.kr/.well-known/apple-app-site-association
+curl -i https://gongmoa.kr/.well-known/assetlinks.json
+```
+
+- **200 + `content-type: application/json`** 이어야 한다. **404 면 환경변수가 비었거나
+  형식이 틀린 것**(Team ID 가 10자가 아니거나 지문이 16진수 64자가 아니면 값이 없는 것으로
+  친다 — 오타로 링크가 조용히 죽는 것보다 파일이 없는 편이 낫다).
+- **301/302 가 있으면 안 된다.** iOS·Android 검증기는 리다이렉트를 따라가지 않는다.
+  (주소를 `https://gongmoa.kr` 로 정확히 칠 것 — `www.` 는 301 이다.)
+- 로그인 없이 열려야 한다. 해외에서도 열려야 한다(애플 CDN·구글 검증기는 해외 IP다 —
+  `/.well-known` 은 해외 IP 차단 면제 목록에 이미 있다).
+
+그다음 **새 빌드를 설치**하고:
+
+- Android: `adb shell pm get-app-links com.gongmoa.app` → 도메인 상태가 `verified` 여야 한다.
+  (실패하면 `adb shell pm verify-app-links --re-verify com.gongmoa.app` 로 재검증)
+- iOS: 메모앱에 `https://gongmoa.kr/papers` 를 적고 **길게 눌러 "앱에서 열기"** 가 뜨는지.
+  (사파리 주소창에 직접 입력한 주소는 유니버설 링크로 안 열린다 — 애플의 의도된 동작이다)
+
+> **앱에 아직 없는 화면은 일부러 뺐다.** 게시판·건의·공지(Phase 5)는 목록에 없어서 브라우저로
+> 열린다 — 넣으면 앱이 열렸다가 "페이지를 찾을 수 없어요"로 떨어진다. 화면을 만들 때
+> 세 곳을 함께 연다: `src/lib/next-path.ts`, `app.json` 의 `android.intentFilters`,
+> 웹 `apps/web/src/app/.well-known/apple-app-site-association/route.ts`.
 
 ---
 

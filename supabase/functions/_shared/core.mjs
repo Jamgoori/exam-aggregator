@@ -1667,6 +1667,239 @@ async function setSubjectPaused(client, admin, userId, subjectId, paused, now = 
   return { pausedSubjectIds: next };
 }
 
+// src/nickname.ts
+var NICKNAME_MIN = 2;
+var NICKNAME_MAX = 10;
+var CONTROL_CHARS = /\p{Cc}/u;
+var BANNED_SUBSTRINGS = [
+  // 운영진/관리자 사칭
+  "admin",
+  "administrator",
+  "관리자",
+  "운영자",
+  "운영진",
+  "매니저",
+  "manager",
+  "moderator",
+  "모더레이터",
+  "system",
+  "시스템",
+  "root",
+  "공지사항",
+  "notice",
+  "staff",
+  "스태프",
+  "고객센터",
+  "공모아",
+  // 비속어 (일부, 완전하지 않음)
+  "씨발",
+  "시발",
+  "병신",
+  "지랄",
+  "좆",
+  "개새끼",
+  "새끼",
+  "썅",
+  "닥쳐",
+  "fuck",
+  "shit",
+  "bitch",
+  "asshole"
+];
+function normalizeForBanCheck(s) {
+  return s.toLowerCase().replace(/[^\p{L}]/gu, "");
+}
+function containsBannedWord(nickname) {
+  const normalized = normalizeForBanCheck(nickname);
+  return BANNED_SUBSTRINGS.some((word) => normalized.includes(word));
+}
+function validateNickname(raw) {
+  const nickname = raw.trim().replace(/\s+/g, " ");
+  if (nickname.length < NICKNAME_MIN || nickname.length > NICKNAME_MAX) {
+    return {
+      nickname: null,
+      error: `닉네임은 ${NICKNAME_MIN}~${NICKNAME_MAX}자로 입력해주세요.`
+    };
+  }
+  if (CONTROL_CHARS.test(nickname)) {
+    return { nickname: null, error: "닉네임에 사용할 수 없는 문자가 포함되어 있어요." };
+  }
+  if (containsBannedWord(nickname)) {
+    return { nickname: null, error: "사용할 수 없는 닉네임이에요." };
+  }
+  return { nickname, error: null };
+}
+var FALLBACK_NICKNAME = "회원";
+function authorNickname(metadataNickname) {
+  if (typeof metadataNickname !== "string") return FALLBACK_NICKNAME;
+  const trimmed = metadataNickname.trim();
+  return trimmed ? trimmed.slice(0, NICKNAME_MAX) : FALLBACK_NICKNAME;
+}
+
+// src/avatar.ts
+var AVATAR_MAX_BYTES = 5 * 1024 * 1024;
+var AVATAR_SIZE = 256;
+var AVATAR_ALLOWED_MIME = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/avif"
+];
+function isAllowedAvatarMime(mime) {
+  return AVATAR_ALLOWED_MIME.includes(mime);
+}
+function avatarUploadError(file) {
+  if (!isAllowedAvatarMime(file.type)) {
+    return "JPG·PNG·WEBP·GIF 이미지만 올릴 수 있어요.";
+  }
+  if (file.size > AVATAR_MAX_BYTES) {
+    return `이미지는 ${Math.floor(AVATAR_MAX_BYTES / (1024 * 1024))}MB 이하로 올려주세요.`;
+  }
+  if (file.size === 0) return "이미지를 선택해주세요.";
+  return null;
+}
+function avatarInitial(nickname) {
+  return [...String(nickname ?? "").trim()][0] ?? "회";
+}
+var AVATAR_PATH_RE = /^[A-Za-z0-9-]{1,64}\/[A-Za-z0-9-]{1,64}\.webp$/;
+function isValidAvatarPath(path) {
+  return typeof path === "string" && AVATAR_PATH_RE.test(path);
+}
+function avatarPublicUrl(supabaseUrl, path) {
+  if (!isValidAvatarPath(path)) return null;
+  return `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/public/avatars/${path}`;
+}
+var AVATAR_ENCODED_MAX_BYTES = 512 * 1024;
+var AVATAR_BASE64_MAX_CHARS = Math.ceil(AVATAR_ENCODED_MAX_BYTES / 3) * 4;
+var AVATAR_PATHS_MAX = 200;
+function u16(bytes, at) {
+  return bytes[at] | bytes[at + 1] << 8;
+}
+function u24(bytes, at) {
+  return bytes[at] | bytes[at + 1] << 8 | bytes[at + 2] << 16;
+}
+function u32(bytes, at) {
+  return (bytes[at] | bytes[at + 1] << 8 | bytes[at + 2] << 16 | bytes[at + 3] << 24) >>> 0;
+}
+function ascii(bytes, at, len) {
+  let out = "";
+  for (let i = 0; i < len; i++) out += String.fromCharCode(bytes[at + i]);
+  return out;
+}
+function readWebpInfo(bytes) {
+  if (bytes.length < 30) return null;
+  if (ascii(bytes, 0, 4) !== "RIFF" || ascii(bytes, 8, 4) !== "WEBP") return null;
+  const chunk2 = ascii(bytes, 12, 4);
+  if (chunk2 === "VP8 ") {
+    if (bytes[23] !== 157 || bytes[24] !== 1 || bytes[25] !== 42) return null;
+    return {
+      width: u16(bytes, 26) & 16383,
+      height: u16(bytes, 28) & 16383,
+      animated: false
+    };
+  }
+  if (chunk2 === "VP8L") {
+    if (bytes[20] !== 47) return null;
+    const packed = u32(bytes, 21);
+    return {
+      width: (packed & 16383) + 1,
+      height: (packed >>> 14 & 16383) + 1,
+      animated: false
+    };
+  }
+  if (chunk2 === "VP8X") {
+    return {
+      width: u24(bytes, 24) + 1,
+      height: u24(bytes, 27) + 1,
+      animated: (bytes[20] & 2) !== 0
+    };
+  }
+  return null;
+}
+function avatarBytesError(bytes) {
+  if (bytes.length === 0) return "이미지를 선택해주세요.";
+  if (bytes.length > AVATAR_ENCODED_MAX_BYTES) {
+    return "이미지가 너무 커요. 다른 사진으로 시도해주세요.";
+  }
+  const info = readWebpInfo(bytes);
+  if (!info) return "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요.";
+  if (info.animated) return "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요.";
+  if (info.width !== info.height) return "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요.";
+  if (info.width < 1 || info.width > AVATAR_SIZE) {
+    return "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요.";
+  }
+  if (bytes.length > u32(bytes, 4) + 8) {
+    return "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요.";
+  }
+  return null;
+}
+function avatarUrlMap(supabaseUrl, rows) {
+  const map = /* @__PURE__ */ new Map();
+  for (const row of rows ?? []) {
+    const url = avatarPublicUrl(supabaseUrl, row.avatar_path);
+    if (url) map.set(row.user_id, url);
+  }
+  return map;
+}
+
+// src/rules/avatar.ts
+async function uploadUserAvatar(client, input, deps = {}) {
+  const invalid = avatarBytesError(input.webp);
+  if (invalid) return { error: invalid, status: 400 };
+  const uuid = deps.randomUuid ?? (() => crypto.randomUUID());
+  const path = `${input.userId}/${uuid()}.webp`;
+  const { error: uploadError } = await client.storage.from("avatars").upload(path, input.webp, { contentType: "image/webp", cacheControl: "31536000" });
+  if (uploadError) {
+    console.error("[avatar] 업로드 실패:", uploadError.message);
+    return {
+      error: /bucket/i.test(uploadError.message) ? "이미지 저장소가 아직 준비되지 않았어요. 운영자에게 알려주세요." : "업로드에 실패했어요. 잠시 후 다시 시도해주세요.",
+      status: 500
+    };
+  }
+  const { data: previous } = await client.from("profiles").select("avatar_path").eq("user_id", input.userId).maybeSingle();
+  const { error: profileError } = previous ? await client.from("profiles").update({ avatar_path: path }).eq("user_id", input.userId) : await client.from("profiles").insert({
+    user_id: input.userId,
+    nickname: authorNickname(await resolveNickname(client, input)),
+    avatar_path: path
+  });
+  if (profileError) {
+    await client.storage.from("avatars").remove([path]);
+    return { error: "저장에 실패했어요.", status: 500 };
+  }
+  await writeMetadataAvatarPath(client, input.userId, path);
+  const stale = previous?.avatar_path;
+  if (stale && stale !== path && isOwnAvatarPath(input.userId, stale)) {
+    await client.storage.from("avatars").remove([stale]);
+  }
+  return { avatarPath: path };
+}
+async function removeUserAvatar(client, input) {
+  const { data: profile } = await client.from("profiles").select("avatar_path").eq("user_id", input.userId).maybeSingle();
+  const { error } = await client.from("profiles").update({ avatar_path: null }).eq("user_id", input.userId);
+  if (error) return { error: "삭제에 실패했어요.", status: 500 };
+  await writeMetadataAvatarPath(client, input.userId, null);
+  const path = profile?.avatar_path;
+  if (path && isOwnAvatarPath(input.userId, path)) {
+    await client.storage.from("avatars").remove([path]);
+  }
+  return { avatarPath: null };
+}
+function isOwnAvatarPath(userId, path) {
+  return isValidAvatarPath(path) && path.startsWith(`${userId}/`);
+}
+async function resolveNickname(client, input) {
+  if (input.metadataNickname !== void 0) return input.metadataNickname;
+  const { data } = await client.auth.admin.getUserById(input.userId);
+  return data?.user?.user_metadata?.nickname;
+}
+async function writeMetadataAvatarPath(client, userId, path) {
+  const { error } = await client.auth.admin.updateUserById(userId, {
+    user_metadata: { avatar_path: path }
+  });
+  if (error) console.error("[avatar] user_metadata 갱신 실패:", error.message);
+}
+
 // src/concept-key.ts
 var TRAILING_NOISE = [
   "의 이해",
@@ -5184,81 +5417,18 @@ function profanityError(text) {
 
 // src/comment-constraints.ts
 var COMMENT_CONTENT_MAX = 2e3;
-
-// src/nickname.ts
-var NICKNAME_MIN = 2;
-var NICKNAME_MAX = 10;
-var CONTROL_CHARS = /\p{Cc}/u;
-var BANNED_SUBSTRINGS = [
-  // 운영진/관리자 사칭
-  "admin",
-  "administrator",
-  "관리자",
-  "운영자",
-  "운영진",
-  "매니저",
-  "manager",
-  "moderator",
-  "모더레이터",
-  "system",
-  "시스템",
-  "root",
-  "공지사항",
-  "notice",
-  "staff",
-  "스태프",
-  "고객센터",
-  "공모아",
-  // 비속어 (일부, 완전하지 않음)
-  "씨발",
-  "시발",
-  "병신",
-  "지랄",
-  "좆",
-  "개새끼",
-  "새끼",
-  "썅",
-  "닥쳐",
-  "fuck",
-  "shit",
-  "bitch",
-  "asshole"
-];
-function normalizeForBanCheck(s) {
-  return s.toLowerCase().replace(/[^\p{L}]/gu, "");
-}
-function containsBannedWord(nickname) {
-  const normalized = normalizeForBanCheck(nickname);
-  return BANNED_SUBSTRINGS.some((word) => normalized.includes(word));
-}
-function validateNickname(raw) {
-  const nickname = raw.trim().replace(/\s+/g, " ");
-  if (nickname.length < NICKNAME_MIN || nickname.length > NICKNAME_MAX) {
-    return {
-      nickname: null,
-      error: `닉네임은 ${NICKNAME_MIN}~${NICKNAME_MAX}자로 입력해주세요.`
-    };
-  }
-  if (CONTROL_CHARS.test(nickname)) {
-    return { nickname: null, error: "닉네임에 사용할 수 없는 문자가 포함되어 있어요." };
-  }
-  if (containsBannedWord(nickname)) {
-    return { nickname: null, error: "사용할 수 없는 닉네임이에요." };
-  }
-  return { nickname, error: null };
-}
-var FALLBACK_NICKNAME = "회원";
-function authorNickname(metadataNickname) {
-  if (typeof metadataNickname !== "string") return FALLBACK_NICKNAME;
-  const trimmed = metadataNickname.trim();
-  return trimmed ? trimmed.slice(0, NICKNAME_MAX) : FALLBACK_NICKNAME;
-}
 export {
   ANON_PREVIEW_CARDS,
   ATTENDANCE_MILESTONES,
   ATTENDANCE_MIN_QUESTIONS,
   ATTENDANCE_MIN_SECONDS_PER_QUESTION,
   ATTENDANCE_MONTHLY_MAX_DAYS,
+  AVATAR_ALLOWED_MIME,
+  AVATAR_BASE64_MAX_CHARS,
+  AVATAR_ENCODED_MAX_BYTES,
+  AVATAR_MAX_BYTES,
+  AVATAR_PATHS_MAX,
+  AVATAR_SIZE,
   AnthropicRequestError,
   BANNED_SUBSTRINGS,
   COACH_PER_SUBJECT,
@@ -5316,6 +5486,11 @@ export {
   attendanceProgress,
   attendanceQuestionCount,
   authorNickname,
+  avatarBytesError,
+  avatarInitial,
+  avatarPublicUrl,
+  avatarUploadError,
+  avatarUrlMap,
   batchCustomId,
   buildCoachingParams,
   buildMixHubIndex,
@@ -5402,6 +5577,7 @@ export {
   inParallel,
   isAdFreeMembership,
   isAdminEmail,
+  isAllowedAvatarMime,
   isAttendanceOpen,
   isCbtRuleError,
   isFreeForAll,
@@ -5411,6 +5587,7 @@ export {
   isPremiumUserFor,
   isSameSrsDay,
   isTrialUnstarted,
+  isValidAvatarPath,
   kstDateKey,
   kstDayKey,
   kstMonthKey,
@@ -5439,8 +5616,10 @@ export {
   pickWeightedReviewCandidates,
   planCoaching,
   profanityError,
+  readWebpInfo,
   recordAttendance,
   recordQuestionResults,
+  removeUserAvatar,
   representativePaperIds,
   requestDiagnosisForUser,
   resolveDiagnosisModel,
@@ -5476,5 +5655,6 @@ export {
   toReviewSolveItems,
   trialDaysLeft,
   trialExpiresAt,
+  uploadUserAvatar,
   validateNickname
 };

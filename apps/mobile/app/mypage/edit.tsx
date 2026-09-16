@@ -1,7 +1,7 @@
 import { router, type Href } from "expo-router";
 import { Pressable, View } from "react-native";
 import { AppText } from "../../src/components/app-text";
-import { Avatar } from "../../src/components/avatar";
+import { AvatarField } from "../../src/components/mypage/avatar-field";
 import { CbtViewModeField } from "../../src/components/mypage/cbt-view-mode-field";
 import { DeleteAccountButton } from "../../src/components/mypage/delete-account-button";
 import { NicknameField } from "../../src/components/mypage/nickname-field";
@@ -13,8 +13,8 @@ import { useUnresolvedBySubject } from "../../src/queries/wrong-notes";
 import { useAuth } from "../../src/providers/auth-provider";
 
 // `/mypage/edit`(설계서 §5 행, 웹 app/mypage/edit/page.tsx 1:1 + 현행 settings.tsx 통합 — §7.1
-// 프로필/아바타 항목): 프로필 사진(읽기 전용 — 업로드는 Phase 4 EF avatar-upload) → 닉네임 →
-// CBT 시작 화면 → 리마인더(앱 전용) → 이메일 → 회원 탈퇴. 로그아웃은 웹처럼 여기 없다(드로어).
+// 프로필/아바타 항목): 프로필 사진(EF avatar-upload) → 닉네임 → CBT 시작 화면 →
+// 리마인더(앱 전용) → 이메일 → 회원 탈퇴. 로그아웃은 웹처럼 여기 없다(드로어).
 export default function EditAccountScreen() {
   const { userId, loading } = useRequireLogin("/mypage/edit");
   if (loading) return <Screen contentClassName="gap-8" />;
@@ -23,7 +23,7 @@ export default function EditAccountScreen() {
 }
 
 function EditAccountBody() {
-  const { user, nickname, avatarUrl } = useAuth();
+  const { user, nickname } = useAuth();
   const { total: unresolvedCount } = useUnresolvedBySubject();
   const meta = user?.user_metadata as Record<string, unknown> | undefined;
 
@@ -41,13 +41,7 @@ function EditAccountBody() {
       </View>
 
       <Section title="프로필 사진" first>
-        <View className="flex-row items-center gap-4">
-          <Avatar nickname={nickname} avatarUrl={avatarUrl} size="xl" />
-          {/* 사진 선택·업로드(expo-image-picker + EF avatar-upload)는 Phase 4 — 지금은 보기만. */}
-          <AppText variant="sm" className="min-w-0 flex-1 text-zinc-500 dark:text-zinc-500" pretty>
-            프로필 사진 변경은 다음 업데이트에서 지원돼요.
-          </AppText>
-        </View>
+        <AvatarField />
       </Section>
 
       <Section title="닉네임">

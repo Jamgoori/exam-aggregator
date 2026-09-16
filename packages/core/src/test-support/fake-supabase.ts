@@ -11,7 +11,8 @@
 //   쓰기 뒤 .select(cols) 는 영향받은 행을 돌려준다(returning).
 //   insert 가 기본키/onConflict 로 겹치면 { error: { code: "23505" } } (PostgREST 와 같은 모양).
 //   .rpc(name, args) 는 생성자에 넘긴 핸들러가 처리한다.
-//   storage.from(...).getPublicUrl(...)
+//   storage.from(bucket).getPublicUrl / .upload / .remove — 호출을 uploads·removes 에 기록.
+//   auth.admin.getUserById / .updateUserById — users 테이블의 user_metadata 를 병합.
 //
 // select 문자열은 해석하지 않는다 — 테이블에 넣어 둔 행 객체를 그대로 돌려준다.
 // 임베드(questions → question_images)는 행 안에 중첩 객체로 미리 넣어 두면 된다.
@@ -31,6 +32,7 @@ export type WriteLog = {
 };
 
 export type RpcLog = { name: string; args: Row };
+export type StorageOpLog = { bucket: string; paths: string[] };
 
 type RpcHandler = (args: Row, db: FakeSupabase) => unknown;
 
@@ -240,10 +242,15 @@ class Query {
         if (this.rangeTo != null) page = page.slice(this.rangeFrom, this.rangeTo + 1);
         if (this.limitCount != null) page = page.slice(0, this.limitCount);
 
+        // 읽은 행은 **사본**으로 돌려준다. PostgREST 는 JSON 을 새로 만들어 주므로
+        // "먼저 읽어 둔 값"은 그 뒤의 update 로 바뀌지 않는데, 저장한 객체를 그대로
+        // 내주면 여기서만 같이 바뀐다 — rules/avatar.ts 의 "예전 경로를 기억해 뒀다가
+        // 맨 뒤에 그 객체를 지운다" 같은 규칙이 테스트에서 조용히 통과해 버린다.
+        const detach = (r: Row) => ({ ...r });
         result = this.singleMode
-          ? { data: page[0] ?? null, error: null }
+          ? { data: page[0] ? detach(page[0]) : null, error: null }
           : {
-              data: this.headOnly ? null : page,
+              data: this.headOnly ? null : page.map(detach),
               error: null,
               count: this.wantCount ? matched.length : null,
             };
@@ -304,11 +311,51 @@ export class FakeSupabase {
     }
   }
 
+  // 스토리지에 올리고 지운 흔적. rules/avatar.ts 처럼 "업로드 → DB → 예전 것 삭제" 순서가
+  // 곧 규칙인 코드는 **순서와 대상**을 봐야 해서, 호출을 기록만 하고 성공을 돌려준다.
+  readonly uploads: StorageOpLog[] = [];
+  readonly removes: StorageOpLog[] = [];
+  // 다음 한 번의 upload 를 실패시킨다(버킷 없음 분기 등).
+  failNextUpload: string | null = null;
+
   storage = {
-    from: () => ({
+    from: (bucket = "exam-papers") => ({
       getPublicUrl: (path: string) => ({ data: { publicUrl: `https://cdn.test/${path}` } }),
+      upload: async (path: string, _body: unknown, _opts?: unknown) => {
+        const message = this.failNextUpload;
+        this.failNextUpload = null;
+        if (message) return { data: null, error: { message } };
+        this.uploads.push({ bucket, paths: [path] });
+        return { data: { path }, error: null };
+      },
+      remove: async (paths: string[]) => {
+        this.removes.push({ bucket, paths });
+        return { data: paths.map((p) => ({ name: p })), error: null };
+      },
     }),
   };
+
+  // auth.admin 은 service_role 규칙이 user_metadata 를 고칠 때만 쓴다(닉네임·아바타 경로).
+  // 저장소는 users 테이블 하나로 흉내 내고, 병합은 실제와 같게 top-level 키 단위다.
+  auth = {
+    admin: {
+      getUserById: async (id: string) => {
+        const row = (this.tables.users ?? []).find((u) => u.id === id);
+        return { data: { user: row ? { id, user_metadata: row.user_metadata ?? {} } : null }, error: null };
+      },
+      updateUserById: async (id: string, attrs: { user_metadata?: Row }) => {
+        const row = (this.tables.users ??= []).find((u) => u.id === id) ?? this.addUser(id);
+        row.user_metadata = { ...((row.user_metadata as Row) ?? {}), ...(attrs.user_metadata ?? {}) };
+        return { data: { user: { id, user_metadata: row.user_metadata } }, error: null };
+      },
+    },
+  };
+
+  private addUser(id: string): Row {
+    const row: Row = { id, user_metadata: {} };
+    (this.tables.users ??= []).push(row);
+    return row;
+  }
 
   rowsOf(table: string): Row[] {
     return this.tables[table] ?? [];

@@ -9,12 +9,15 @@ import { getRequestOrigin } from "@/lib/request-origin";
 import { sanitizeNextPath } from "@/lib/safe-redirect";
 import sharp from "sharp";
 import {
-  authorNickname,
   avatarPublicUrl,
   avatarUploadError,
   AVATAR_SIZE,
   validateNickname,
 } from "@gongmoa/core";
+// 프로필 사진의 규칙 본문(검증·업로드·profiles·user_metadata·예전 사진 정리)은 core 한
+// 벌이고 Edge `avatar-upload` 가 같은 함수를 부른다. 여기는 굽기(sharp)와 웹 전용
+// 후처리(refreshSession·revalidatePath)만 맡는 어댑터다.
+import { removeUserAvatar, uploadUserAvatar } from "@gongmoa/core/server";
 
 // 로그인/가입은 소셜 로그인(구글·카카오)으로만 받는다. 이메일/비밀번호 방식은 계정 복구
 // (아이디·비밀번호 찾기)를 전부 자체 구현해야 해서 폐쇄했고, 복구·비밀번호 보안을
@@ -245,78 +248,35 @@ export async function uploadAvatar(formData: FormData): Promise<AvatarResult> {
     return { error: "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요." };
   }
 
-  const admin = createAdminClient();
-  const path = `${user.id}/${crypto.randomUUID()}.webp`;
+  // 굽는 도구만 런타임마다 다르고(앱은 Skia, Deno 에는 sharp 가 없다) 그 뒤는 같은
+  // 규칙이다 — 규칙이 결과 바이트를 한 번 더 검사하므로 sharp 가 규격을 벗어나면
+  // (예: 나중에 resize 인자를 잘못 고치면) 여기서 걸린다.
+  const result = await uploadUserAvatar(createAdminClient(), {
+    userId: user.id,
+    webp: new Uint8Array(resized),
+    metadataNickname: user.user_metadata?.nickname,
+  });
+  if ("error" in result) return { error: result.error };
 
-  const { error: uploadError } = await admin.storage
-    .from("avatars")
-    .upload(path, resized, { contentType: "image/webp", cacheControl: "31536000" });
-  if (uploadError) {
-    console.error("[avatar] 업로드 실패:", uploadError.message);
-    return {
-      error: /bucket/i.test(uploadError.message)
-        ? "이미지 저장소가 아직 준비되지 않았어요. 운영자에게 알려주세요."
-        : "업로드에 실패했어요. 잠시 후 다시 시도해주세요.",
-    };
-  }
-
-  // 예전 사진은 새 사진이 자리를 잡은 뒤에 지운다 — 먼저 지웠다가 업로드가 실패하면
-  // 사진만 사라진 계정이 된다.
-  const { data: previous } = await admin
-    .from("profiles")
-    .select("avatar_path")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  // profiles 행은 닉네임을 정할 때 만들어지지만(persistNickname), 그 이전에 만들어진
-  // 계정에는 없을 수 있다. 없으면 지금 만든다 — 없다고 사진 업로드가 실패하면
-  // 사용자로서는 이유를 알 길이 없다.
-  const { error: profileError } = previous
-    ? await admin.from("profiles").update({ avatar_path: path }).eq("user_id", user.id)
-    : await admin.from("profiles").insert({
-        user_id: user.id,
-        nickname: authorNickname(user.user_metadata?.nickname),
-        avatar_path: path,
-      });
-  if (profileError) {
-    await admin.storage.from("avatars").remove([path]);
-    return { error: "저장에 실패했어요." };
-  }
-
-  await supabase.auth.updateUser({ data: { avatar_path: path } });
   // 헤더는 JWT 를 그대로 읽어 아바타를 그리므로(layout.tsx), 토큰을 갱신하지 않으면
   // 다음 로그인 때까지 예전 사진이 남는다 — 닉네임 변경과 같은 처리.
   await supabase.auth.refreshSession();
 
-  const stale = previous?.avatar_path as string | null | undefined;
-  if (stale && stale !== path) await admin.storage.from("avatars").remove([stale]);
-
   revalidatePath("/", "layout");
-  return { success: true, avatarUrl: avatarPublicUrl(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "", path) };
+  return {
+    success: true,
+    avatarUrl: avatarPublicUrl(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "", result.avatarPath),
+  };
 }
 
 export async function removeAvatar(): Promise<AvatarResult> {
   const { supabase, user } = await getSessionUser();
   if (!user) return { error: "로그인이 필요해요." };
 
-  const admin = createAdminClient();
-  const { data: profile } = await admin
-    .from("profiles")
-    .select("avatar_path")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const result = await removeUserAvatar(createAdminClient(), { userId: user.id });
+  if ("error" in result) return { error: result.error };
 
-  const { error } = await admin
-    .from("profiles")
-    .update({ avatar_path: null })
-    .eq("user_id", user.id);
-  if (error) return { error: "삭제에 실패했어요." };
-
-  await supabase.auth.updateUser({ data: { avatar_path: null } });
   await supabase.auth.refreshSession();
-
-  const path = profile?.avatar_path as string | null | undefined;
-  if (path) await admin.storage.from("avatars").remove([path]);
 
   revalidatePath("/", "layout");
   return { success: true, avatarUrl: null };

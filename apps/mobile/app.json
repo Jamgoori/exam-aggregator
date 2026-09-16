@@ -11,6 +11,9 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.gongmoa.app",
       "usesAppleSignIn": true,
+      "associatedDomains": [
+        "applinks:gongmoa.kr"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -21,7 +24,64 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "monochromeImage": "./assets/adaptive-icon-monochrome.png",
         "backgroundColor": "#12b382"
-      }
+      },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "path": "/"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/papers"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/exams"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/subjects"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/mix"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/diagnosis"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/mypage"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/membership"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/notifications"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "plugins": [
       "expo-router",
