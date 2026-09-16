@@ -8,7 +8,8 @@ import {
   fetchUnresolvedCountBySubject,
   fetchWrongAnswerRows,
   fetchWrongNoteGroupsForAttempts,
-  isReviewHistoryList,
+  isReviewHistoryDetail,
+  isReviewHistoryLastChoices,
   representativePaperIds,
   stripTrackFromTitle,
   sumUnresolved,
@@ -238,6 +239,81 @@ export function useSubjectWrongNotePapers(subject: Subject | null | undefined) {
 
 // ── 과목 오답노트 "문제만 모아보기" ────────────────────────────────────────────
 
+// CBT 응시 없이 채점된 오답 — 기출 섞어풀기와 진단의 "같은개념 기출"이 여기 해당한다. 응시
+// (cbt_attempts)에는 없고 통합 상태(user_question_status)에만 있어, 응시만 훑으면 그 오답이
+// 목록에서 통째로 빠진다. 문제지의 과목으로 좁혀 이 과목 것만 받는다(웹 fetchSubjectStatusWrongs
+// 와 같은 조회 — user_question_status 는 select-own RLS 라 앱이 그대로 읽는다).
+const STATUS_WRONG_BATCH = 1000;
+
+type SubjectStatusWrong = {
+  paper: AttemptPaperRow;
+  questionNumber: number;
+  wrongCount: number;
+  lastAnsweredAt: string;
+};
+
+async function fetchSubjectStatusWrongs(
+  client: SupabaseClient,
+  userId: string,
+  subjectId: string,
+): Promise<SubjectStatusWrong[]> {
+  type Row = {
+    paper_id: string;
+    question_number: number;
+    wrong_count: number | null;
+    last_answered_at: string;
+    exam_papers: AttemptPaperRow | null;
+  };
+  const out: SubjectStatusWrong[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await client
+      .from("user_question_status")
+      .select(
+        "paper_id, question_number, wrong_count, last_answered_at, exam_papers!inner(id, title, level, round, track, choice_count, subject_id, exam_type_id, year, created_at, subjects(*), exam_types(*))",
+      )
+      .eq("user_id", userId)
+      .gt("wrong_count", 0)
+      .eq("exam_papers.subject_id", subjectId)
+      // range 로 이어받을 때 페이지 경계가 흔들리지 않게 키 순으로 고정한다.
+      .order("paper_id", { ascending: true })
+      .order("question_number", { ascending: true })
+      .range(from, from + STATUS_WRONG_BATCH - 1);
+    // 조회가 실패해도 응시 기준 목록은 그려야 한다 — 보태는 값이라 조용히 비운다.
+    if (error) break;
+    const rows = (data ?? []) as unknown as Row[];
+    for (const r of rows) {
+      if (!r.exam_papers) continue;
+      out.push({
+        paper: r.exam_papers,
+        questionNumber: r.question_number,
+        wrongCount: r.wrong_count ?? 1,
+        lastAnsweredAt: r.last_answered_at,
+      });
+    }
+    if (rows.length < STATUS_WRONG_BATCH) break;
+    from += STATUS_WRONG_BATCH;
+  }
+  return out;
+}
+
+// 그 문항을 마지막으로 틀렸을 때 고른 답. review_session_items 는 RLS 정책이 0개라 앱이 못
+// 읽으므로 EF `review-history {view:"last-choices"}`(§6.7 #10 확장)가 대신 준다 — 웹 오답노트와
+// 같은 규칙(core fetchLastWrongChoices)이다. 실패하면 빈 표: 고른 답만 빠지고 목록은 그대로다.
+async function fetchLastChoices(subjectSlug: string): Promise<Map<string, number | null>> {
+  const out = new Map<string, number | null>();
+  if (!subjectSlug) return out;
+  try {
+    const res = await callEdge("review-history", { view: "last-choices", subjectSlug });
+    if (!isReviewHistoryLastChoices(res)) return out;
+    for (const c of res.choices) out.set(`${c.paperId}#${c.questionNumber}`, c.selectedChoice);
+  } catch {
+    // 무시.
+  }
+  return out;
+}
+
+
 // 웹 SubjectWrongNoteQuestion 에서 정답·해설을 뺀 모양. 정답(own_wrong_answers)과 해설
 // (explanations-get context:"wrong-note")은 화면이 메모리 전용 쿼리로 따로 받아 합친다.
 export type SubjectWrongNoteQuestion = {
@@ -265,21 +341,33 @@ export type SubjectWrongNoteQuestions = {
 // 웹 getSubjectWrongNoteQuestions 1:1(정답·해설 제외). 중복 시험지(직류만 다른 같은 시험지)는
 // dedup 대표로 접어 문항을 합친다 — 표시 통합과 같은 기준.
 //
-// **응시 없이 채점된 오답**(기출 섞어풀기·같은개념 기출)은 아직 합산하지 않는다: 웹은 그 문항이
-// 마지막에 고른 답을 review_session_items 에서 되짚는데(fetchLastReviewChoices) 그 테이블은 RLS
-// 정책이 하나도 없어 앱이 읽을 수 없다. 설계서 §12 Phase 3 "상태 전용 오답 합산" 항목.
+// **응시 없이 채점된 오답**(기출 섞어풀기·같은개념 기출)도 합산한다(§9 "상태 전용 오답(mix)
+// 합산·마지막 선택", Phase 3): 그 문항은 통합 상태(user_question_status)에만 있어 응시만 훑으면
+// 목록에서 통째로 빠진다. 그때 고른 답은 review_session_items 에 있고 그 테이블은 RLS 정책이
+// 0개라, EF `review-history {view:"last-choices"}` 가 웹과 같은 규칙으로 대신 읽어 준다.
 async function fetchSubjectWrongNoteQuestions(
   client: SupabaseClient,
   userId: string,
   subjectId: string,
+  subjectSlug: string,
 ): Promise<SubjectWrongNoteQuestions> {
-  const attempts = await fetchSubjectAttempts(client, userId, subjectId);
-  if (attempts.length === 0) return { questions: [], unresolvedCount: 0, resolvedCount: 0 };
+  const [attempts, extraStatus] = await Promise.all([
+    fetchSubjectAttempts(client, userId, subjectId),
+    fetchSubjectStatusWrongs(client, userId, subjectId),
+  ]);
+  if (attempts.length === 0 && extraStatus.length === 0) {
+    return { questions: [], unresolvedCount: 0, resolvedCount: 0 };
+  }
 
+  // 응시에 등장한 문제지들(중복 제거) — dedup 대표 계산 입력. 상태에만 있는 오답의 문제지도
+  // 함께 넣어야 대표·제목·마크 정규화가 같은 기준으로 돈다.
   const distinctPapers = new Map<string, AttemptPaperRow>();
   for (const a of attempts) {
     const p = a.exam_papers!;
     if (!distinctPapers.has(p.id)) distinctPapers.set(p.id, p);
+  }
+  for (const r of extraStatus) {
+    if (!distinctPapers.has(r.paper.id)) distinctPapers.set(r.paper.id, r.paper);
   }
   const paperList = [...distinctPapers.values()];
 
@@ -350,6 +438,31 @@ async function fetchSubjectWrongNoteQuestions(
     }
   }
 
+  // 상태에만 있는 오답을 보탠다. 응시로 이미 잡힌 문항은 응시 쪽 값(그때 고른 답)을 그대로
+  // 두고, 없는 문항만 추가한다(웹과 같은 우선순위). 고른 답은 세션 기록에서 되짚는다.
+  const extraKeys: string[] = [];
+  for (const r of extraStatus) {
+    const rep = repId(r.paper.id);
+    const key = `${rep}#${r.questionNumber}`;
+    if (byRepQ.has(key)) continue;
+    byRepQ.set(key, {
+      repId: rep,
+      questionNumber: r.questionNumber,
+      wrongCount: r.wrongCount,
+      selectedChoice: null,
+      lastWrongAt: r.lastAnsweredAt,
+    });
+    extraKeys.push(key);
+  }
+  if (extraKeys.length > 0) {
+    const chosen = await fetchLastChoices(subjectSlug);
+    for (const key of extraKeys) {
+      const agg = byRepQ.get(key);
+      const choice = chosen.get(key);
+      if (agg && choice !== undefined) agg.selectedChoice = choice;
+    }
+  }
+
   const repIds = [...repInfo.keys()];
   // 화면에 실제로 그릴 (대표 문제지, 문항 번호)만 이미지 조회 대상으로 넘긴다.
   const wantedNumbers = new Map<string, Set<number>>();
@@ -411,9 +524,10 @@ async function fetchSubjectWrongNoteQuestions(
 export function useSubjectWrongNoteQuestions(subject: Subject | null | undefined) {
   const { userId } = useAuth();
   const subjectId = subject?.id ?? "";
+  const subjectSlug = subject?.slug ?? "";
   return useQuery<SubjectWrongNoteQuestions>({
     queryKey: subjectQuestionsKey(userId ?? "", subjectId),
-    queryFn: () => fetchSubjectWrongNoteQuestions(supabase, userId!, subjectId),
+    queryFn: () => fetchSubjectWrongNoteQuestions(supabase, userId!, subjectId, subjectSlug),
     enabled: !!userId && !!subjectId,
     staleTime: STALE.me,
   });
@@ -534,7 +648,7 @@ export function useMixSessionNote(sessionId: string | null) {
     queryKey: mixNoteKey(userId ?? "", sessionId ?? ""),
     queryFn: async () => {
       const res = await callEdge("review-history", { sessionId: sessionId!, view: "mix-note" });
-      if (isReviewHistoryList(res) || !res.mixNote) throw new Error("세션을 찾을 수 없어요.");
+      if (!isReviewHistoryDetail(res) || !res.mixNote) throw new Error("세션을 찾을 수 없어요.");
       return res.mixNote;
     },
     enabled: !!userId && !!sessionId,

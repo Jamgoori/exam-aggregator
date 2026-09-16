@@ -23,7 +23,7 @@ import { themedIcon } from "../../../src/theme/icons";
 // `/subjects/[slug]?level&examTypes&page`(설계서 §5 행) — 웹 app/subjects/[slug]/page.tsx 1:1:
 // 크럼 → 제목 + 과목 즐겨찾기 → N건 → 섞어풀기 입구(필터 없을 때만) → 급수 탭 → 직렬 탭 →
 // 카드 목록(24/페이지, 중복 통합 후 메모리 페이지네이션) → Pagination. 기출 섞어풀기
-// (/subjects/[slug]/mix)는 Phase 3(§12 "믹스") 라 지금은 openSubjectMix(lib/mix-href.ts)가 안내한다.
+// (/subjects/[slug]/mix)는 Phase 3 에서 붙었다 — openSubjectMix(lib/mix-href.ts)가 그리로 보낸다.
 const PAGE_SIZE = 24;
 const ChevronIcon = themedIcon(ChevronRight);
 

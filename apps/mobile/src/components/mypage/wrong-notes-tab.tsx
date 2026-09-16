@@ -13,9 +13,9 @@ import { themedIcon } from "../../theme/icons";
 // "오답노트" 탭(웹 mypage/page.tsx WrongNotesTab:701): 과목별로 틀린 문제 수를 요약해서 보여주고,
 // 과목을 누르면 문제 이미지까지 모아둔 과목 오답노트 페이지로 이어준다.
 //
-// 과목 카드의 목적지 `/mypage/wrong-notes/[slug]`(과목 오답노트)는 Phase 2 에서 붙었다. 기출
-// 섞어풀기 `/subjects/[slug]/mix` 는 아직 Phase 3 라 라우트가 없어 `openSubjectMix`(lib/mix-href.ts)
-// 한 곳으로 모아 안내를 띄운다. 이 파일은 목록 수준(과목 요약 카드)만 그린다.
+// 과목 카드의 목적지 `/mypage/wrong-notes/[slug]`(과목 오답노트)는 Phase 2 에서, 기출 섞어풀기
+// `/subjects/[slug]/mix` 는 Phase 3 에서 붙었다 — 섞어풀기로 보내는 자리는 `openSubjectMix`
+// (lib/mix-href.ts) 한 곳으로 모여 있다. 이 파일은 목록 수준(과목 요약 카드)만 그린다.
 const BookIcon = themedIcon(BookOpenCheck);
 const ChevronIcon = themedIcon(ChevronRight);
 const ShuffleIcon = themedIcon(Shuffle);
