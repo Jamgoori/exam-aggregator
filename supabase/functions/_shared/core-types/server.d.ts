@@ -15,6 +15,7 @@ export * from "./data/question-media.d.ts";
 export * from "./data/query-utils.d.ts";
 export * from "./data/wrong-notes.d.ts";
 export * from "./data/subjects.d.ts";
+export * from "./data/papers.d.ts";
 export * from "./srs.d.ts";
 export * from "./review-pick.d.ts";
 export * from "./profanity.d.ts";

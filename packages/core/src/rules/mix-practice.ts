@@ -163,10 +163,23 @@ async function fetchCanonicalConcepts(
 //
 // client — 공개 테이블(exam_papers·questions)을 읽는 클라이언트(웹은 공개 anon 클라이언트).
 // admin  — paper_answers(voided)·question_explanations(concept_id) 읽기.
+//
+// opts.includeConcepts — 문항별 정본 개념(concept_id)을 함께 읽을지. 기본 true.
+//   개념은 **출제(pickMixQuestions)의 분산에만** 쓰이고 화면 요약(toMixOverview)·기록
+//   (listMixSessions 의 repByPaperId)에는 전혀 쓰이지 않는다. 그런데 이 조회만 문항
+//   200개당 한 번씩 붙어(fetchCanonicalConcepts), 문항 수천 개짜리 과목에서는 왕복이
+//   십수 번 는다. 웹은 'use cache' 로 한 시간에 한 번만 치르지만 **Edge 에는 캐시 계층이
+//   없어 요청마다 치른다**(설계서 §6.2 — 규칙이 캐시를 모르게 두려는 선택). 그래서
+//   개념이 필요 없는 호출부(EF mix-create 의 overview, review-history 의 mix 기록 목록)는
+//   false 로 끈다.
+//
+//   ⚠ false 로 만든 풀은 **createMixSessionForUser 에 넘기지 말 것** — 후보의 conceptId 가
+//   전부 null 이 되어 개념 분산이 조용히 사라진다(한 개념이 세션을 도배한다).
 export async function buildMixPool(
   client: SupabaseClient,
   admin: SupabaseClient,
   subjectId: string,
+  opts: { includeConcepts?: boolean } = {},
 ): Promise<MixPool> {
   const papers = await fetchAllPages<PoolPaper>(
     (from, to) =>
@@ -246,7 +259,10 @@ export async function buildMixPool(
   // 문항별 정본 개념. 해설 배치가 붙인 concept_id 를 읽고, 합쳐진 개념(merged_into)은
   // 합쳐진 쪽으로 되짚는다 — 같은 개념이 옛 id 와 새 id 로 갈라져 있으면 분산이 안 된다.
   // 해설이 없는 문항은 null 로 남는다(개념 분산에서 상한을 받지 않는다).
-  const conceptByQuestionId = await fetchCanonicalConcepts(admin, [...rowsById.keys()]);
+  const conceptByQuestionId =
+    opts.includeConcepts === false
+      ? new Map<string, string>()
+      : await fetchCanonicalConcepts(admin, [...rowsById.keys()]);
 
   const yearByPaper = new Map(papers.map((p) => [p.id, p.year ?? null]));
   const candidates: MixCandidate[] = [];

@@ -35,6 +35,9 @@ export * from "./data/question-media";
 export * from "./data/query-utils";
 export * from "./data/wrong-notes";
 export * from "./data/subjects";
+// 문제지 카탈로그 — Edge `mix-create` 의 허브(§6.7 #14)가 웹 lib/all-papers.ts 와 같은
+// 목록·정렬(fetchExamPaperRows)을 쓴 뒤 dedup 대표로 접어 buildMixHubIndex 에 넘긴다.
+export * from "./data/papers";
 
 // ── Edge 번들이 함께 쓰는 순수 규칙(index.ts 의 부분집합) ────────────────
 export * from "./srs";

@@ -8,6 +8,11 @@
 //   body 없음 / { scope?, subjectSlug?, limit? }
 //     → 내 기록 목록(채점 완료분만): { sessions: [{ sessionId, scope, subjectName, total, score,
 //       submittedAt, subjectSlug, createdAt }] } (subjectSlug·createdAt 은 추가 필드)
+//       `scope:"mix"` + `subjectSlug` 로 물으면 각 항목에 **`title`·`wrongCount`·`resolvedCount`
+//       가 더 실린다**(전부 추가 필드 — 옛 앱·다른 호출은 그대로다). 웹 과목 오답노트의
+//       섞어풀기 기록 카드(lib/mix-practice.ts#listMixSessions)와 같은 값이라 앱 MixSessionList
+//       가 "12문항 중 5개 틀림 · 3개 극복"을 그릴 수 있다. Phase 2 가 이 세 값이 없어 그
+//       화면을 미뤘다(§12-4 "Phase 3 로 넘긴 것" — 믹스 기록 목록).
 //   { sessionId }
 //     → 그 세션의 문항별 결과(review-submit 응답과 같은 모양): { score, total, items,
 //       sessionId, scope, subjectSlug, subjectName, submitted, createdAt }
@@ -27,7 +32,9 @@ import {
   buildMixPool,
   getMixSessionWrongNote,
   getReviewSessionView,
+  getSubjectBySlug,
   isPremiumUserFor,
+  listMixSessions,
   listSubmittedReviewSessions,
   toReviewResultItems,
 } from "../_shared/core.mjs";
@@ -48,12 +55,42 @@ Deno.serve(async (req) => {
 
   // ── 목록 ──────────────────────────────────────────────────────────────────
   if (!sessionId) {
+    const scope = typeof body?.scope === "string" ? body.scope : null;
+    const subjectSlug = typeof body?.subjectSlug === "string" ? body.subjectSlug : null;
     try {
       const rows = await listSubmittedReviewSessions(admin, userId, {
-        scope: typeof body?.scope === "string" ? body.scope : null,
-        subjectSlug: typeof body?.subjectSlug === "string" ? body.subjectSlug : null,
+        scope,
+        subjectSlug,
         limit: Number.isInteger(body?.limit) ? body.limit : LIST_LIMIT,
       });
+
+      // 과목 하나의 섞어풀기 기록이면 웹 카드와 같은 값(같은 날 순번이 붙은 제목·틀린 수·
+      // 극복 수)을 규칙 listMixSessions 에서 그대로 가져와 얹는다. 과목을 특정해야만 하는
+      // 계산이라(극복 판정이 그 과목의 dedup 대표 매핑을 쓴다) 다른 조합에서는 얹지 않는다 —
+      // 그때는 예전 그대로다. 개념(concept_id)은 여기서 쓰이지 않으므로 풀을 개념 없이
+      // 만든다(mix-create 머리말 참고 — Edge 에는 캐시가 없어 왕복 하나가 그대로 비용이다).
+      const extras = new Map<string, { title: string; wrongCount: number; resolvedCount: number }>();
+      if (scope === "mix" && subjectSlug && rows.length > 0) {
+        try {
+          const subject = await getSubjectBySlug(admin, subjectSlug);
+          if (subject) {
+            const summaries = await listMixSessions(admin, admin, userId, subject.id, {
+              getMixPool: (subjectId: string) =>
+                buildMixPool(admin, admin, subjectId, { includeConcepts: false }),
+            });
+            for (const s of summaries) {
+              extras.set(s.id, {
+                title: s.title,
+                wrongCount: s.wrongCount,
+                resolvedCount: s.resolvedCount,
+              });
+            }
+          }
+        } catch {
+          // 무시: 추가 필드가 없으면 앱이 개수 없이 그린다(목록 자체를 잃는 것보다 낫다).
+        }
+      }
+
       return json({
         sessions: rows.map((s) => ({
           sessionId: s.sessionId,
@@ -64,6 +101,7 @@ Deno.serve(async (req) => {
           submittedAt: s.submittedAt,
           subjectSlug: s.subjectSlug,
           createdAt: s.createdAt,
+          ...(extras.get(s.sessionId) ?? {}),
         })),
       });
     } catch {

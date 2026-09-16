@@ -37,12 +37,27 @@
 | 13 | `review-create` 응답 | `paperId`/`correctChoice` **부재**(정답 유출 없음) |
 | 14 | `own_wrong_answers` | (a) 형제 문제지 행만 있는 사용자 → 반환 (b) 행 없음 → 미반환 (c) `selected_choice` null → 반환 |
 | 15 | `review-create` 멱등 | 30분 재사용 **없음**; 같은 `requestId` 두 번 → 세션 1개(유니크 인덱스) |
+| 16 | `review-history { sessionId, view:"mix-note" }` | (아직 없음 — 아래 "값어치가 큰 케이스") |
+| 17 | `submit_question_report` RPC | (아직 없음 — 아래 "값어치가 큰 케이스") |
+| 18 | **`review-guessed` 멱등·상수** | 두 번 눌러도 행이 안 바뀌고, `srs_due_at` 이 **`SRS_RELEARN_DELAY_HOURS`(core `srs.ts`)만큼만** 뒤로. 틀린 문항은 무변화, 남의 세션은 404 (§6.7 #11 — 이 기능을 RPC 로 만들면 SQL 에 SRS 상수 세 번째 사본이 생기고 번들 게이트가 못 잡는다) |
+| 19 | **`review-due {action:"summary"}`** | 웹 규칙(`getDueReviewSummary`)을 같은 시각으로 직접 부른 결과와 Edge 응답이 **같은 JSON**(§12 Phase 3 종료 조건 "웹과 앱에서 같은 날 같은 `todayCount`·`forecast`"). 읽기만 했으므로 승격이 안 일어난다(§6.6 "SRS"), `nudge` 는 같은 요약의 부분집합 |
+| 20 | **`mix-create` 생성·재도전** | `overview` 가 웹 요약과 같고, `create` 가 같은 행을 남기고(`source="mix"`), `retry` 가 `createRetryFromMixSession` 과 같은 문항만 담는다. 남의 세션 재도전은 거절. `review-history` mix 목록의 추가 필드(`title`·`wrongCount`·`resolvedCount`)도 함께 본다 |
 
 케이스 이름은 이 표의 번호·제목을 그대로 쓴다(스냅샷 파일명도).
 
-지금 `contract-tests.mjs` 에 들어 있는 것: #1 · #2 · #4 · #5+#6(`review` source 만) · #8(비로그인
-미리보기만) · #9 · #10 · #13+#15. 나머지(#3 재제출, #6 `mix`, #7 문항 수 다른 형제, #8 한도 순서,
-#11 마일스톤, #12 닉네임 트리거, #14)는 아직 없다 — 추가할 때 이 줄을 갱신한다.
+지금 `contract-tests.mjs` 에 들어 있는 것: #1 · #2 · #4 · #5+#6(`review`·`mix` 양쪽 source) ·
+#8(비로그인 미리보기만) · #9 · #10 · #13+#15 · **#18 · #19 · #20**. 나머지(#3 재제출, #7 문항 수
+다른 형제, #8 한도 순서, #11 마일스톤, #12 닉네임 트리거, #14, #16, #17)는 아직 없다 — 추가할 때
+이 줄을 갱신한다.
+
+**#18~#20 의 제약(멤버십 판정은 주입 시각을 안 쓴다)**: `review-due`·`review-prefs` 는
+`x-gongmoa-test-clock` 을 **규칙(큐·스케줄·설정 저장)에만** 넘기고 `isPremiumUserFor` 에는 넘기지
+않는다. 이유는 둘이다 — (1) 시각으로 잠금을 여닫을 수 있는 자리를 만들지 않는다(아래 #9 와 같은
+이유), (2) 이 스크립트의 `CLOCK` 은 `FREE_UNTIL` **뒤**라 그대로 넣으면 테스트 계정의 체험이 만료된
+것으로 잡혀 모든 케이스가 403 `"오늘의 복습(간격 반복)은 멤버십 기능이에요."` 가 된다. 그래서
+프리미엄 **잠금** 분기(403)는 이 스크립트가 고정하지 않는다 — 고정하려면 `memberships` 를 만료된
+상태로 만드는 픽스처가 따로 필요하다(지금은 `rules/membership-server.ts` 의 단위 테스트가 판정을
+고정한다). 이 함수들에 시각 훅을 멤버십 판정까지 넓히지 말 것.
 
 **#9 의 제약**: `explanations-get` 은 `testOverrides`(테스트 시각 주입)를 읽지 않으므로 전면 무료
 기간(`FREE_UNTIL`) 동안에는 Edge 의 멤버십 판정이 언제나 프리미엄이다 — 케이스는 `membership-get`
@@ -77,7 +92,9 @@
 - **Edge 쪽 주입 경로**: 요청 헤더 `x-gongmoa-test-clock`(ISO 8601 → `now`)과
   `x-gongmoa-test-fuzz`(0 이상 1 미만 → `fuzz = () => 값`). `supabase/functions/_shared/clients.ts` 의
   `testOverrides(req)` 가 **환경변수 `GONGMOA_TEST_HOOKS=1` 일 때만** 헤더를 읽고, 아니면 빈 객체를
-  돌려준다. `cbt-start`·`cbt-submit`·`review-submit` 이 그 값을 규칙 opts 로 넘긴다. 워크플로가
+  돌려준다. `cbt-start`·`cbt-submit`·`review-submit`·`review-guessed`·`review-due`·`review-prefs`
+  가 그 값을 규칙 opts 로 넘긴다(뒤 셋은 **멤버십 판정에는 안 넘긴다** — 위 "#18~#20 의 제약").
+  워크플로가
   `functions serve --env-file supabase/.env.local` 에 넣는 파일에만 이 변수가 있다 — **프로덕션
   `supabase secrets` 에는 절대 넣지 말 것.** 클라이언트가 채점 시각을 지정할 수 있으면 최소
   응시시간이 무력화되고 SRS 가 조작된다. 스크립트는 시작 전에 `cbt-start` 의 `startedAt` 이 보낸

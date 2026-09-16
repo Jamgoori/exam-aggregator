@@ -1,4 +1,4 @@
-// Edge Function 10개가 전부 쓰는 HTTP 공통(예전 _shared/cbt.ts 의 corsHeaders·json·isUuid).
+// Edge Function 14개가 전부 쓰는 HTTP 공통(예전 _shared/cbt.ts 의 corsHeaders·json·isUuid).
 // 규칙(채점·상수)은 _shared/core.mjs(packages/core 번들)로 옮겨 갔고 여기엔 응답 헬퍼만 남는다.
 
 // @ts-types="./core.d.ts"

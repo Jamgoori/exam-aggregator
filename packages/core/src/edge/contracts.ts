@@ -19,7 +19,15 @@
 import type { CbtSubmitSuccess } from "../rules/cbt-attempt";
 import type { ExplanationAccess } from "../rules/explanation-access";
 import type { QuestionExplanationContent } from "../rules/explanations";
-import type { MixSessionQuestion, MixSessionWrongNote } from "../rules/mix-practice";
+import type {
+  MixHubIndex,
+  MixOverview,
+  MixSessionQuestion,
+  MixSessionSummary,
+  MixSessionWrongNote,
+} from "../rules/mix-practice";
+import type { ReviewPrefs, ReviewSubjectOption } from "../rules/review-preferences";
+import type { DueReviewSummary } from "../rules/review-queue";
 import type {
   ReviewHistoryEntry,
   ReviewResultItem,
@@ -27,6 +35,8 @@ import type {
 } from "../rules/review-session";
 import type { Membership } from "../membership";
 import type { ReviewPickStrategy } from "../review-pick";
+import type { SessionSchedule } from "../review-queue";
+import type { StudyPhase } from "../study-phase";
 
 // ── 오류 ────────────────────────────────────────────────────────────────────
 
@@ -188,7 +198,15 @@ export type ReviewHistoryDetailRequest = {
 export type ReviewHistoryRequest = ReviewHistoryListRequest | ReviewHistoryDetailRequest;
 
 // 목록 항목 — 규칙의 ReviewHistoryEntry 와 같은 키(subjectSlug·createdAt 은 추가 필드).
-export type ReviewHistoryListEntry = ReviewHistoryEntry;
+//
+// `scope:"mix"` + `subjectSlug` 로 물었을 때만 뒤 셋이 더 실린다(추가 필드라 optional):
+// 규칙 listMixSessions 가 만드는 웹 카드와 같은 값 — `title` 은 같은 날 순번이 붙은
+// "9월 5일 섞어풀기 (2)", `wrongCount` 는 그 세션에서 틀린 문항 수, `resolvedCount` 는 그중
+// 지금은 극복한(가장 최근 채점에서 맞힌) 수다. Phase 2 가 이 세 값이 없어 앱 MixSessionList
+// 를 미뤘다(§12-4). 과목을 특정해야 계산할 수 있어(극복 판정이 그 과목의 dedup 대표 매핑을
+// 쓴다) 다른 조합에서는 undefined 다.
+export type ReviewHistoryListEntry = ReviewHistoryEntry &
+  Partial<Pick<MixSessionSummary, "title" | "wrongCount" | "resolvedCount">>;
 export type ReviewHistoryListResponse = { sessions: ReviewHistoryListEntry[] };
 
 // mix 기록 뷰(§6.7 #10, view:"mix-note"). 규칙 getMixSessionWrongNote 의 반환을 그대로 싣는다
@@ -214,6 +232,179 @@ export type ReviewHistoryResponse = ReviewHistoryListResponse | ReviewHistoryDet
 // 응답 판별 — 목록이면 sessions, 상세면 sessionId.
 export function isReviewHistoryList(r: ReviewHistoryResponse): r is ReviewHistoryListResponse {
   return "sessions" in r;
+}
+
+// ── review-guessed (§6.7 #11) ────────────────────────────────────────────────
+
+// "찍었어요" — 채점 결과 화면에서 **맞힌** 문항의 복습 스케줄만 되돌린다(SRS_RELEARN_DELAY_HOURS).
+// 단방향·멱등(§6.6 "SRS"): 여러 번 눌러도 결과가 같고, 취소하는 요청은 없다.
+// 멤버십으로 막지 않는다(§8.3 "찍었어요" 행). 틀린 문항·스케줄이 없는 문항은 조용히 무시(ok:true).
+// RPC 가 아니라 EF 인 이유는 supabase/functions/review-guessed/index.ts 머리말 참고
+// (SQL 에 SRS 상수를 두면 srs.ts 밖의 세 번째 사본이 되고 CI 게이트가 못 잡는다).
+export type ReviewGuessedRequest = { sessionId: string; position: number };
+export type ReviewGuessedResponse = { ok: true };
+
+// ── review-due (§6.7 #12) ────────────────────────────────────────────────────
+
+// "오늘의 복습"(간격 반복). **다섯 액션 모두 프리미엄**이고, 아니면 403
+// `{ error: "오늘의 복습(간격 반복)은 멤버십 기능이에요." }` 다(§8.3) — 앱은 그 403 을
+// "숫자 없는 잠긴 카드"로 그린다(게이트를 앱에서 실행하지 않는다).
+export type ReviewDueRequest =
+  // 배너·설정 화면의 요약. 읽기만 하므로 대기 풀 승격이 일어나지 않는다(§6.6 "SRS").
+  | { action: "summary" }
+  // 오늘의 복습 세션 시작. 24시간 안에 두고 나온 due 세션이 있으면 **그것을 돌려준다**
+  // (resumed:true, 웹 createDueReviewSession 과 같은 판정) — 새로 만들면 기기에 저장해 둔
+  // 답이 안 붙는다. requestId 는 재시도 멱등 키(UUID, 생성마다 새로 — §6.6).
+  | { action: "create"; requestId?: string }
+  // "복습 더하기" — 오늘치를 끝낸 사람이 대기 풀에서 한 묶음 더. 오늘 큐에 남은 것이 있으면
+  // 400 "오늘 예정된 복습을 먼저 끝내주세요.", 대기가 없으면 400 "더 가져올 오답이 없어요."
+  | { action: "extra"; requestId?: string }
+  // 채점 결과 화면의 "다음 복습" 섹션. 남의 세션·채점 전 세션이면 schedule:null(오류 아님).
+  | { action: "schedule"; sessionId: string }
+  // 홈 복습 유도 모달. 요약에서 두 값만 잘라 보낸다.
+  | { action: "nudge" };
+
+// action:"summary" — 규칙 getDueReviewSummary 의 반환 그대로(todayCount·forecast 가
+// §12 Phase 3 종료 조건 "웹과 앱에서 같은 날 같은 todayCount·forecast"의 비교 대상).
+export type ReviewDueSummaryResponse = DueReviewSummary;
+
+// action:"create"|"extra" — review-create 응답과 **같은 모양** + resumed(추가 필드).
+// 정답·출처(paperId/correctChoice/paperTitle/questionNumber)는 실리지 않는다.
+export type ReviewDueSessionResponse = {
+  sessionId: string;
+  total: number;
+  items: ReviewSolveItem[];
+  scope: string;
+  subjectSlug: string | null;
+  subjectName: string | null;
+  // 두고 나온 세션을 이어 받았는지. extra 는 언제나 false.
+  resumed: boolean;
+};
+
+// action:"schedule" — 규칙 getSessionSchedule 의 반환(문항별 "며칠 뒤" + 향후 7일 예보).
+export type ReviewDueScheduleResponse = { schedule: SessionSchedule | null };
+
+// action:"nudge" — 웹 getReviewNudge 와 같은 값.
+export type ReviewDueNudgeResponse = {
+  todayCount: number;
+  subjects: { name: string; count: number }[];
+};
+
+export type ReviewDueResponse =
+  | ReviewDueSummaryResponse
+  | ReviewDueSessionResponse
+  | ReviewDueScheduleResponse
+  | ReviewDueNudgeResponse;
+
+// 응답 판별(isReviewHistoryList 와 같은 방식) — 호출부는 자기가 보낸 action 을 알지만,
+// 계약 타입은 함수 이름 단위라 좁혀 줄 자리가 필요하다. 네 응답의 키는 서로 겹치지 않는다:
+// 세션 = sessionId, 요약 = forecast, 일정 = schedule, 넛지 = 나머지(todayCount + subjects).
+export function isReviewDueSession(r: ReviewDueResponse): r is ReviewDueSessionResponse {
+  return "sessionId" in r;
+}
+export function isReviewDueSummary(r: ReviewDueResponse): r is ReviewDueSummaryResponse {
+  return "forecast" in r;
+}
+export function isReviewDueSchedule(r: ReviewDueResponse): r is ReviewDueScheduleResponse {
+  return "schedule" in r;
+}
+
+// ── review-prefs (§6.7 #13) ──────────────────────────────────────────────────
+
+// `review_preferences` 의 **모든 쓰기**가 여기로 온다 — 앱은 이 테이블을 읽기만 한다(§6.2).
+// RLS 로 직접 쓰면 멤버십 게이트·과목 재개 재분산·study_phase 히스테리시스가 통째로 우회된다.
+//
+// 프리미엄 게이트(웹 actions.ts 와 같은 목록): `daily-limit`·`pause`·`spread`·`restore` 는
+// 403 + REVIEW_LOCKED. `study-phase`·`diagnosis-pause`·읽기는 웹에도 게이트가 없다.
+export type ReviewPrefsRequest =
+  // 설정 화면이 한 번에 읽는 것. 빈 body(`{}`)도 같다.
+  | { action?: "get" }
+  // 하루 문항 수. 값 검증(DAILY_LIMIT_OPTIONS = 10/20/40/60)은 서버가 한다 —
+  // 목록 밖이면 400 "고를 수 없는 값이에요."
+  | { action: "daily-limit"; limit: number }
+  // 복습 과목 보류/재개. 재개(paused:false)면 서버가 밀린 문항의 srs_due_at 을 며칠에 걸쳐
+  // 다시 뿌린다(service_role 쓰기 — 앱이 이 테이블을 직접 못 쓰는 가장 큰 이유).
+  | { action: "pause"; subjectId: string; paused: boolean }
+  // AI 약점 진단에서 뺄 과목(복습 보류와 다른 컬럼 — schema.sql). 재분산 없음.
+  | { action: "diagnosis-pause"; subjectId: string; paused: boolean }
+  // 직전 판정 국면 저장. 판정 자체는 core `detectStudyPhase`(순수, 앱도 부를 수 있다)가 하고
+  // 여기는 히스테리시스의 입력을 남기는 쓰기다. 국면이 **바뀐 순간에만** 부를 것.
+  | { action: "study-phase"; phase: StudyPhase }
+  // "밀린 복습 정리하기" — 연체분을 오늘부터 며칠에 걸쳐 다시 뿌린다.
+  | { action: "spread" }
+  // 접어둔(leech) 문항 되살리기.
+  | { action: "restore" };
+
+// 응답은 액션과 무관하게 같은 모양이다(추가만). 쓰기 뒤에도 갱신된 설정을 그대로 실어 보내
+// 앱이 토글 직후 다시 부르지 않아도 된다(웹 revalidatePath 에 해당하는 자리).
+export type ReviewPrefsResponse = {
+  // 최종 멤버십 판정(관리자·전면 무료 포함). false 면 앱은 설정 패널을 잠긴 카드로 그린다.
+  premium: boolean;
+  dailyLimit: ReviewPrefs["dailyLimit"];
+  // Set 이 아니라 배열로 직렬화된다(규칙의 ReviewPrefs.pausedSubjectIds 는 Set).
+  pausedSubjectIds: string[];
+  diagnosisPausedSubjectIds: string[];
+  // 저장된 직전 국면(없으면 null — 첫 판정).
+  studyPhase: StudyPhase | null;
+  // action:"get" 에서만. 무료 사용자에게는 빈 배열이다(§8.3 "숫자 없음").
+  subjects?: ReviewSubjectOption[];
+  // action:"spread"/"restore" 에서만 — 다시 뿌린/되살린 문항 수.
+  spreadCount?: number;
+  restoredCount?: number;
+};
+
+// ── mix-create (§6.7 #14) ────────────────────────────────────────────────────
+
+// 기출 섞어풀기(한 과목의 기출 전체에서 새 문제를 뽑아 푼다). 멤버십 게이트 없음 —
+// 웹에서도 무료다(§8.3 첫 줄). hub·overview 는 로그인과 무관한 공개 통계다.
+export type MixCreateRequest =
+  // /mix 허브의 급수 탭·과목 목록.
+  | { action: "hub" }
+  // 시작 화면 요약(급수·연도 교차 문항 수). 없는 과목이면 404.
+  | { action: "overview"; subjectSlug: string }
+  // 세션 생성. levels 는 풀에 실제로 있는 급수 키만 받아들이고(빈 배열 = 전체),
+  // yearRange 는 자료가 있는 구간 안으로 정리된다. limit 은 서버가 다시 묶는다(clampMixLimit).
+  | {
+      action: "create";
+      subjectSlug: string;
+      levels?: string[];
+      yearRange?: { from?: number | null; to?: number | null };
+      limit?: number;
+      requestId?: string;
+    }
+  // 기록·결과 화면의 "틀린 N문항만 다시 풀기". 문항 목록은 서버가 세션에서 직접 읽는다
+  // (클라이언트가 (문제지, 문항)을 보내면 채점 응답의 공식 정답이 새어 나간다).
+  // 채점 전 세션이면 400, 남의 세션이면 400 "세션을 찾을 수 없어요."
+  | { action: "retry"; sessionId: string; requestId?: string };
+
+export type MixCreateHubResponse = MixHubIndex;
+export type MixCreateOverviewResponse = MixOverview;
+
+// create·retry — review-create 응답과 같은 모양(정답·출처 없음) + create 의 두 값.
+export type MixCreateSessionResponse = {
+  sessionId: string;
+  total: number;
+  items: ReviewSolveItem[];
+  scope: string;
+  subjectSlug: string | null;
+  subjectName: string | null;
+  // action:"create" 에서만. 뽑힌 문항 중 처음 보는 수 / 새 문항만으로 정원을 못 채웠는지
+  // (= 이 과목 기출을 한 바퀴 돌았다).
+  unseenCount?: number;
+  coveredAll?: boolean;
+};
+
+export type MixCreateResponse =
+  | MixCreateHubResponse
+  | MixCreateOverviewResponse
+  | MixCreateSessionResponse;
+
+// 응답 판별 — 세션 = sessionId, 허브 = tiers, 요약 = 나머지(subject).
+export function isMixCreateSession(r: MixCreateResponse): r is MixCreateSessionResponse {
+  return "sessionId" in r;
+}
+export function isMixCreateHub(r: MixCreateResponse): r is MixCreateHubResponse {
+  return "tiers" in r;
 }
 
 // ── comments-write ───────────────────────────────────────────────────────────
@@ -271,6 +462,10 @@ export type EdgeContracts = {
   "review-create": { request: ReviewCreateRequest; response: ReviewCreateResponse };
   "review-submit": { request: ReviewSubmitRequest; response: ReviewSubmitResponse };
   "review-history": { request: ReviewHistoryRequest; response: ReviewHistoryResponse };
+  "review-guessed": { request: ReviewGuessedRequest; response: ReviewGuessedResponse };
+  "review-due": { request: ReviewDueRequest; response: ReviewDueResponse };
+  "review-prefs": { request: ReviewPrefsRequest; response: ReviewPrefsResponse };
+  "mix-create": { request: MixCreateRequest; response: MixCreateResponse };
   "comments-write": { request: CommentsWriteRequest; response: CommentsWriteResponse };
   "account-delete": { request: AccountDeleteRequest; response: AccountDeleteResponse };
   "ai-diagnose": { request: AiDiagnoseRequest; response: AiDiagnoseResponse };
@@ -289,6 +484,10 @@ export const EDGE_NAMES = [
   "review-create",
   "review-submit",
   "review-history",
+  "review-guessed",
+  "review-due",
+  "review-prefs",
+  "mix-create",
   "comments-write",
   "account-delete",
   "ai-diagnose",

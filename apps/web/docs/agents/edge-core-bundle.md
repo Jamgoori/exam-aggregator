@@ -50,6 +50,24 @@ npm run bundle-edge:check -w @gongmoa/core      # 재생성해 커밋본과 diff
 - 결정성이 필요한 규칙(`recordQuestionResults` 의 `fuzz`, `now`)은 주입 가능하게 만들고 기본값만
   `Math.random`/`new Date()` 로 둔다 — `docs/agents/contract-tests.md`.
 
+## Edge 에는 캐시 계층이 없다 — 무거운 규칙은 호출부가 좁힌다
+
+웹 어댑터는 무거운 공개 조회를 `'use cache'` 로 감싼다(`lib/mix-practice.ts` 의 `getMixPool`·
+`getMixHubIndex`·`getMixOverview`, 1시간 + `home-data` 태그). **Edge 에는 그 계층이 없다** —
+`Deno.serve` 아이솔레이트는 요청마다 새로 시작할 수 있고 메모리를 공유하지 않는다. 그래서 같은
+규칙을 Edge 에서 부르면 웹이 한 시간에 한 번 치르는 비용을 요청마다 치른다.
+
+규칙에 캐시를 넣지 않는다(§6.2 — 런타임마다 캐시가 달라 규칙이 그걸 알면 안 된다). 대신:
+
+- **규칙에 "덜 읽는" 선택지를 만들고 호출부가 고른다.** 예: `buildMixPool(client, admin, subjectId,
+  { includeConcepts: false })` — 개념(`concept_id`)은 출제 분산(`pickMixQuestions`)에만 쓰이므로
+  화면 요약(`toMixOverview`)·기록 목록에서는 끈다(문항 200개당 1왕복이 사라진다). 끈 풀을
+  `createMixSessionForUser` 에 넘기면 분산이 조용히 사라지므로 그쪽에는 절대 넘기지 않는다.
+- **캐시가 꼭 필요하면 어댑터 안에 짧은 메모로 둔다.** `mix-create` 의 `hub`·`overview` 가 그렇다
+  (60초, 공개 통계만 — 사용자 행은 절대 넣지 않는다). 아이솔레이트마다 따로 있고 언제든 사라지는
+  최선노력 캐시라 **정합성 판정에는 쓰지 말 것**(멱등 판정은 DB 유니크로만 — §6.6 "복습 세션 생성 연타").
+- 줄일 수 없으면 비용을 함수 머리 주석에 적는다. 다음 사람이 "왜 이 함수만 느린가"를 다시 재지 않게.
+
 ## 규칙 하나를 새로 넣는 순서
 
 1. `packages/core/src/rules/<name>.ts` 에 규칙을 쓴다. 시그니처는 `(client, input, deps?)`.
