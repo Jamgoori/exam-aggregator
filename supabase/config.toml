@@ -110,6 +110,9 @@ enabled = false
 [functions.account-delete]
 import_map = "./functions/deno.json"
 
+[functions.avatar-upload]
+import_map = "./functions/deno.json"
+
 [functions.ai-diagnose]
 import_map = "./functions/deno.json"
 

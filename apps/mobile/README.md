@@ -176,6 +176,22 @@ react-native-pdf 의 **네이티브 줌을 잠그고**(min=max=1), 줌/팬은 re
 > 타입 검증: 이 저장소 코드는 내부 타입 일관성만 확인됐다(tsc 통과). 라이브러리 API
 > 시그니처 최종 검증은 `npx expo install` 후 `npx tsc --noEmit` 로 할 것.
 
+## 웹 주소로 앱 열기 (유니버설 링크)
+
+`https://gongmoa.kr/papers/...` 를 누르면 앱이 열린다. iOS 는 `app.json` 의
+`ios.associatedDomains` + 웹 `/.well-known/apple-app-site-association`, Android 는
+`android.intentFilters`(`autoVerify`) + 웹 `/.well-known/assetlinks.json` 이 짝이다.
+
+- **어느 경로를 앱이 여는가**는 세 곳에 같은 목록으로 있다: `src/lib/next-path.ts` 의
+  `ALLOWED`(로그인 복귀·알림 링크 매처), `app.json` 의 `android.intentFilters` pathPrefix,
+  웹 `apps/web/src/app/.well-known/apple-app-site-association/route.ts` 의 `ALLOWED_PATHS`.
+  **아직 앱에 없는 화면은 넣지 않는다** — 넣으면 앱이 열렸다가 `+not-found` 로 떨어진다.
+  화면을 만들 때 세 곳을 함께 연다.
+- 웹의 두 파일은 Team ID·서명 지문을 **환경변수**에서 읽고, 값이 없으면 **404** 를 낸다
+  (자리표시자가 든 파일을 한 번 내주면 OS 가 검증 실패를 캐시한다). 값 얻는 곳과 넣는
+  곳은 `SETUP.md` §5-3.
+- `app.json` 변경은 네이티브 설정이라 **OTA 로 안 나간다 — 새 빌드를 설치해야 한다.**
+
 ## 유지보수 주의
 
 - 타입 사본 파일은 없다. 타입·순수 규칙은 `@gongmoa/core` 에서 import 한다(스키마가 바뀌면 core 를 고친다).

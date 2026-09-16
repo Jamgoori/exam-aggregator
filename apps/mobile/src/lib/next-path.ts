@@ -15,7 +15,11 @@ import { sanitizeNextPath } from "@gongmoa/core";
 // 알림 목록(§6.7 #15)도 이 매처를 쓴다: 알림의 `link` 는 웹 경로라 아직 없는 화면
 // (/board/*, /suggestions/*)을 가리키는 것이 대부분인데, 그 줄을 누를 때 여기서 걸러
 // `+not-found` 대신 그 자리에 머문다(components/notifications/open-notification.ts).
-// (AASA·assetlinks 의 `paths` 도 같은 기준으로 화면이 생길 때 함께 연다 — §5 딥링크 문단.)
+//
+// **유니버설 링크도 같은 목록이다** — 화면이 생기면 세 곳을 함께 연다(§5 딥링크 문단):
+// 이 파일 · 웹 `apps/web/src/app/.well-known/apple-app-site-association/route.ts` 의
+// `ALLOWED_PATHS`(iOS) · `app.json` 의 `android.intentFilters` pathPrefix(Android).
+// 여기만 열면 웹 링크가 브라우저로 새고, 저 둘만 열면 앱이 열렸다가 `+not-found` 로 떨어진다.
 const ALLOWED: RegExp[] = [
   /^\/$/,
   /^\/papers(\/[^/]+(\/(cbt|explanations|pdf))?)?$/,

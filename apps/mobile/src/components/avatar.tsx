@@ -1,6 +1,7 @@
 import { avatarInitial } from "@gongmoa/core";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import { useState } from "react";
 import { View } from "react-native";
 import { AppText } from "./app-text";
 import { tokens } from "../theme";
@@ -27,7 +28,14 @@ export function Avatar({
   size?: AvatarSize;
 }) {
   const box = BOX[size];
-  if (avatarUrl) {
+  // 못 불러온 URL 은 첫 글자 아바타로 되돌린다. 아바타 경로는 JWT(user_metadata)에서 오는데
+  // 토큰은 갱신될 때까지 예전 값을 들고 있어서, 다른 기기에서 사진을 바꾸거나 지운 뒤에는
+  // 이미 없는 객체를 가리킨다 — 웹(<img>)은 빈 네모를 남기지만 앱은 "사진 없음" 이 기본
+  // 모습이라 그쪽으로 떨어지는 편이 자연스럽다. 값으로 들고 있으므로 avatarUrl 이 새 값으로
+  // 바뀌면(토큰 갱신·업로드 직후) 다시 시도한다.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
+  if (avatarUrl && avatarUrl !== failedUrl) {
     // expo-image 의 Image 는 Uniwind 가 감싸지 않아 className 이 버려진다 — 배경(로딩 중 자리)은
     // 바깥 View 에 주고 이미지에는 style 만 준다.
     return (
@@ -39,6 +47,7 @@ export function Avatar({
           source={{ uri: avatarUrl }}
           cachePolicy="memory-disk"
           contentFit="cover"
+          onError={() => setFailedUrl(avatarUrl)}
           accessible={false}
           style={{ width: box.px, height: box.px, borderRadius: box.px / 2 }}
         />

@@ -85,7 +85,7 @@ function MypageBody({ tab }: { tab: MyPageTabKey }) {
             ← 홈으로
           </AppText>
         </Pressable>
-        {/* 프로필 사진을 이름 옆에 둔다 — 아바타를 누르면 내 정보 수정으로 간다(사진 변경은 Phase 4). */}
+        {/* 프로필 사진을 이름 옆에 둔다 — 아바타를 누르면 내 정보 수정(사진 변경 칸)으로 간다. */}
         <View className="mt-2 flex-row items-center gap-3">
           <Pressable accessibilityRole="link" accessibilityLabel="프로필 사진 변경" onPress={() => router.push("/mypage/edit" as Href)} className="rounded-full">
             <Avatar nickname={nickname} avatarUrl={avatarUrl} size="xl" />

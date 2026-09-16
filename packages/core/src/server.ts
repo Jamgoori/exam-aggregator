@@ -25,6 +25,8 @@ export * from "./rules/explanations-wrong-note";
 export * from "./rules/cbt-attempt";
 export * from "./rules/status-targets";
 export * from "./rules/review-preferences";
+// 프로필 사진 — 웹 서버 액션(uploadAvatar/removeAvatar)과 Edge `avatar-upload` 의 공통 규칙.
+export * from "./rules/avatar";
 export * from "./rules/review-queue";
 export * from "./rules/review-session";
 export * from "./rules/mix-practice";
@@ -60,6 +62,9 @@ export * from "./format";
 export * from "./dedup-papers";
 export * from "./comment-constraints";
 export * from "./nickname";
+// 프로필 사진의 순수 규칙(경로 모양·공개 URL·구워진 webp 검사). Edge 어댑터가 응답에
+// 넣을 URL 을 만들고, 규칙이 바이트를 검사하는 데 쓴다.
+export * from "./avatar";
 // 진단 리포트 스키마·개념 선택 정규화·코칭 대상 선정(순수) — 웹 생성기와 Edge 가 같은 것을 쓴다.
 export * from "./diagnosis-report";
 export * from "./diagnosis-targets";

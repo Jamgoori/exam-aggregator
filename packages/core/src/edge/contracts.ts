@@ -453,6 +453,38 @@ export type CommentsWriteRequest =
   | { action: "delete"; commentId: string };
 export type CommentsWriteResponse = { ok: true };
 
+// ── avatar-upload (§6.7 #16) ─────────────────────────────────────────────────
+//
+// 프로필 사진 등록·삭제. 웹 서버 액션(app/actions.ts#uploadAvatar/removeAvatar)과 같은
+// 규칙(core rules/avatar.ts)을 부르는 다른 어댑터다.
+//
+// **이미지는 앱이 굽고 서버가 검사한다.** 웹은 서버에서 sharp 로 256px webp 를 굽지만
+// Deno 에는 sharp 가 없다. 앱은 이미 들어 있는 @shopify/react-native-skia 로
+// 256×256 webp 를 구워 보내고(새 네이티브 의존을 늘리면 OTA 가 깨진다), 서버는 받은
+// 바이트가 정말 그 규격인지 헤더로 확인한다(core avatarBytesError — RIFF/WEBP 매직바이트 +
+// 캔버스 크기 + 애니메이션 여부). 클라이언트가 말하는 MIME·확장자는 근거로 쓰지 않는다.
+//
+// 바이트를 싣는 방식은 **base64 문자열**이다. multipart 는 supabase-js `invoke` 로 다루기
+// 번거롭고(Content-Type 경계 처리), JSON 본문 한 필드면 invokeEdge 를 그대로 쓴다. 대신
+// base64 는 33% 부푸므로 상한도 그만큼 여유 있게 잡는다 — 바이트 상한
+// AVATAR_ENCODED_MAX_BYTES(512KB)에 대응하는 문자 수 상한이 AVATAR_BASE64_MAX_CHARS 다
+// (256px webp 는 보통 10~40KB 라 실제로는 한참 남는다).
+
+export type AvatarUploadRequest =
+  // webpBase64: 데이터 URL 접두(`data:image/webp;base64,`) 없이 base64 본문만.
+  // expo-file-system 의 `readAsStringAsync(..., { encoding: 'base64' })` 결과 그대로.
+  | { action: "upload"; webpBase64: string }
+  | { action: "remove" };
+
+export type AvatarUploadResponse = {
+  success: true;
+  // 저장 경로(`{userId}/{uuid}.webp`). 삭제했으면 null. 앱은 이 값을 화면 상태로 쓰지 말고
+  // avatarUrl 을 쓴다 — 경로 → URL 변환 규칙(isValidAvatarPath)은 서버가 쥔다.
+  avatarPath: string | null;
+  // 공개 버킷의 사진 URL. 삭제했거나 경로가 규격 밖이면 null(= 첫 글자 아바타를 그린다).
+  avatarUrl: string | null;
+};
+
 // ── account-delete ───────────────────────────────────────────────────────────
 
 export type AccountDeleteRequest = Record<string, never>;
@@ -653,6 +685,7 @@ export type EdgeContracts = {
   "review-prefs": { request: ReviewPrefsRequest; response: ReviewPrefsResponse };
   "mix-create": { request: MixCreateRequest; response: MixCreateResponse };
   "comments-write": { request: CommentsWriteRequest; response: CommentsWriteResponse };
+  "avatar-upload": { request: AvatarUploadRequest; response: AvatarUploadResponse };
   "account-delete": { request: AccountDeleteRequest; response: AccountDeleteResponse };
   "ai-diagnose": { request: AiDiagnoseRequest; response: AiDiagnoseResponse };
   "diagnosis-request": { request: DiagnosisRequestRequest; response: DiagnosisRequestResponse };
@@ -678,6 +711,7 @@ export const EDGE_NAMES = [
   "review-prefs",
   "mix-create",
   "comments-write",
+  "avatar-upload",
   "account-delete",
   "ai-diagnose",
   "diagnosis-request",

@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       function:
-        description: 배포할 함수 (all = 17개 전부)
+        description: 배포할 함수 (all = 18개 전부)
         type: choice
         default: all
         options:
@@ -30,6 +30,7 @@ on:
           - review-prefs
           - mix-create
           - comments-write
+          - avatar-upload
           - account-delete
           - diagnosis-request
           - diagnosis-collect
@@ -75,11 +76,11 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ inputs.function }}" = "all" ]; then
-            # 목록의 정본은 packages/core/src/edge/contracts.ts 의 EDGE_NAMES 다(17개).
+            # 목록의 정본은 packages/core/src/edge/contracts.ts 의 EDGE_NAMES 다(18개).
             # 여기와 위 choice 목록 둘 다 손으로 적는 자리라, EF 를 새로 만들면 세 곳을 함께
             # 고쳐야 한다 — Phase 3·4 의 6개가 빠진 채로 "all" 을 눌러 새 화면이 배포 뒤에도
             # 빈 상태로 남은 적이 있다(옛 함수만 갱신되고 새 함수는 아예 없었다).
-            FUNCS="cbt-start cbt-submit explanations-get membership-get review-create review-submit review-history review-guessed review-due review-prefs mix-create comments-write account-delete diagnosis-request diagnosis-collect diagnosis-aggregate ai-diagnose"
+            FUNCS="cbt-start cbt-submit explanations-get membership-get review-create review-submit review-history review-guessed review-due review-prefs mix-create comments-write avatar-upload account-delete diagnosis-request diagnosis-collect diagnosis-aggregate ai-diagnose"
           else
             FUNCS="${{ inputs.function }}"
           fi
