@@ -3388,6 +3388,477 @@ async function createRetryFromMixSession(admin, userId, sessionId, opts = {}) {
   });
 }
 
+// src/diagnosis-progress.ts
+var DIAGNOSIS_MIN_WRONG = 15;
+var DIAGNOSIS_MIN_ATTEMPTS = 3;
+function computeDiagnosisProgress({
+  attemptCount,
+  wrongCount
+}) {
+  const byAttempts = Math.min(1, attemptCount / DIAGNOSIS_MIN_ATTEMPTS);
+  const byWrongs = Math.min(1, wrongCount / DIAGNOSIS_MIN_WRONG);
+  const eligible = byAttempts >= 1 || byWrongs >= 1;
+  if (byAttempts >= byWrongs) {
+    const left2 = Math.max(0, DIAGNOSIS_MIN_ATTEMPTS - attemptCount);
+    return {
+      eligible,
+      ratio: byAttempts,
+      label: `응시 ${Math.min(attemptCount, DIAGNOSIS_MIN_ATTEMPTS)}/${DIAGNOSIS_MIN_ATTEMPTS}`,
+      remainingHint: eligible ? null : left2 === 1 ? "한 회차만 더 풀면 진단이 열려요" : `${left2}회차만 더 풀면 진단이 열려요`
+    };
+  }
+  const left = Math.max(0, DIAGNOSIS_MIN_WRONG - wrongCount);
+  return {
+    eligible,
+    ratio: byWrongs,
+    label: `오답 ${Math.min(wrongCount, DIAGNOSIS_MIN_WRONG)}/${DIAGNOSIS_MIN_WRONG}`,
+    remainingHint: eligible ? null : `오답 ${left}개가 더 모이면 진단이 열려요`
+  };
+}
+
+// src/data/home.ts
+var SAMPLE_TODAY_STUDY = {
+  todayAttempts: 2,
+  accuracyPct: 84,
+  streakDays: 7,
+  week: [38, 55, 46, 72, 61, 88, 24],
+  todayIndex: 5,
+  attemptCount: DIAGNOSIS_MIN_ATTEMPTS - 1,
+  wrongCount: 5
+};
+var DIAGNOSIS_CYCLE_DAYS = 7;
+var DIAGNOSIS_WINDOW_DAYS = 7;
+var COACH_MAX_TOTAL = 10;
+function kstToday2(now = /* @__PURE__ */ new Date()) {
+  return kstDateKey(now);
+}
+function kstDaysAgo(days, now = /* @__PURE__ */ new Date()) {
+  const d = /* @__PURE__ */ new Date(`${kstToday2(now)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+function currentCycleStartDate(now = /* @__PURE__ */ new Date()) {
+  return kstDaysAgo(DIAGNOSIS_CYCLE_DAYS - 1, now);
+}
+function nextDiagnosisDate(lastDate) {
+  const d = /* @__PURE__ */ new Date(`${lastDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + DIAGNOSIS_CYCLE_DAYS);
+  return d.toISOString().slice(0, 10);
+}
+function isDiagnosisEligible(counts) {
+  return computeDiagnosisProgress(counts).eligible;
+}
+var DIAGNOSIS_LOCKED_HINT = `문제를 조금 더 풀면 진단을 받을 수 있어요 (오답 ${DIAGNOSIS_MIN_WRONG}개 또는 ${DIAGNOSIS_MIN_ATTEMPTS}회 응시).`;
+
+// src/data/mypage.ts
+async function fetchDiagnosisEligibility(client, userId) {
+  const [{ count: attemptCount }, { count: wrongCount }] = await Promise.all([
+    client.from("cbt_attempts").select("id", { count: "exact", head: true }).eq("user_id", userId),
+    client.from("user_question_status").select("paper_id", { count: "exact", head: true }).eq("user_id", userId).gt("wrong_count", 0)
+  ]);
+  const counts = { attemptCount: attemptCount ?? 0, wrongCount: wrongCount ?? 0 };
+  return { eligible: isDiagnosisEligible(counts), ...counts };
+}
+
+// src/diagnosis-report.ts
+function conceptSelectionKey(c) {
+  return c.conceptId ?? `kw:${c.concept.trim()}`;
+}
+function normalizeConceptSelection(input) {
+  if (!Array.isArray(input)) return [];
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const raw of input) {
+    const concept = typeof raw?.concept === "string" ? raw.concept.trim() : "";
+    if (!concept) continue;
+    const conceptId = typeof raw?.conceptId === "string" && raw.conceptId ? raw.conceptId : null;
+    const key = conceptId ?? `kw:${concept}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ conceptId, concept });
+    if (out.length >= COACH_MAX_TOTAL) break;
+  }
+  return out;
+}
+
+// src/rules/diagnosis-request.ts
+async function getWeeklyDiagnosis(client, userId, now = /* @__PURE__ */ new Date()) {
+  const { data } = await client.from("ai_diagnoses").select("id, report, diagnosis_date, selected_concepts").eq("user_id", userId).gte("diagnosis_date", currentCycleStartDate(now)).order("diagnosis_date", { ascending: false }).limit(1).maybeSingle();
+  if (!data) return null;
+  const row = data;
+  const report = row.report ?? null;
+  return {
+    status: report ? "ready" : "pending",
+    report,
+    date: row.diagnosis_date,
+    id: row.id,
+    selectedConcepts: row.selected_concepts ?? null
+  };
+}
+async function getLatestReadyDiagnosis(client, userId) {
+  const { data } = await client.from("ai_diagnoses").select("report, diagnosis_date").eq("user_id", userId).not("report", "is", null).order("diagnosis_date", { ascending: false }).limit(1).maybeSingle();
+  const row = data;
+  if (!row || !row.report) return null;
+  return { report: row.report, date: row.diagnosis_date };
+}
+var DIAGNOSIS_LOCKED = "AI 약점 진단은 멤버십 기능이에요.";
+var REQUEST_FAILED = "진단 요청에 실패했어요. 잠시 후 다시 시도해주세요.";
+async function requestDiagnosisForUser(client, input, deps) {
+  const now = deps.now ?? /* @__PURE__ */ new Date();
+  const { userId } = input;
+  if (!input.premium) return { ok: false, reason: "premium", error: DIAGNOSIS_LOCKED };
+  const selected = normalizeConceptSelection(input.selectedConcepts ?? []);
+  const existing = await getWeeklyDiagnosis(client, userId, now);
+  if (existing) {
+    if (existing.status === "pending" && selected.length > 0) {
+      await deps.getAdmin().from("ai_diagnoses").update({ selected_concepts: selected }).eq("user_id", userId).eq("diagnosis_date", existing.date).is("report", null);
+    }
+    return {
+      ok: true,
+      status: existing.status,
+      diagnosisId: existing.id,
+      date: existing.date,
+      nextDate: nextDiagnosisDate(existing.date),
+      // 이번에 고른 것이 있으면 그것(위에서 행에 갈아 넣었다), 없으면 행에 남아 있던 선택.
+      // 호출부(웹 즉시 생성 경로)가 "요청 행에 실제로 박힌 목록"으로 생성기를 부른다.
+      selectedConcepts: selected.length > 0 ? selected : existing.selectedConcepts ?? []
+    };
+  }
+  const eligibility = await fetchDiagnosisEligibility(client, userId);
+  if (!eligibility.eligible) {
+    return { ok: false, reason: "not-eligible", error: DIAGNOSIS_LOCKED_HINT };
+  }
+  const date = kstToday2(now);
+  const { data, error } = await deps.getAdmin().from("ai_diagnoses").insert({
+    user_id: userId,
+    diagnosis_date: date,
+    report: null,
+    selected_concepts: selected.length > 0 ? selected : null
+  }).select("id").maybeSingle();
+  if (error) {
+    if (error.code !== "23505") {
+      return { ok: false, reason: "insert-failed", error: REQUEST_FAILED };
+    }
+    const raced = await getWeeklyDiagnosis(client, userId, now);
+    return {
+      ok: true,
+      status: raced?.status ?? "pending",
+      diagnosisId: raced?.id ?? null,
+      date: raced?.date ?? date,
+      nextDate: nextDiagnosisDate(raced?.date ?? date),
+      selectedConcepts: selected
+    };
+  }
+  return {
+    ok: true,
+    status: "pending",
+    diagnosisId: data?.id ?? null,
+    date,
+    nextDate: nextDiagnosisDate(date),
+    selectedConcepts: selected
+  };
+}
+
+// src/rules/diagnosis-aggregate.ts
+var PAGE_SIZE = 1e3;
+async function fetchAll(admin, table, columns, apply) {
+  const rows = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await apply(
+      admin.from(table).select(columns).range(from, from + PAGE_SIZE - 1)
+    );
+    if (error) throw new Error(`${table} 조회 실패: ${error.message}`);
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return rows;
+}
+var questionKey = (pid, n) => `${pid}#${n}`;
+function sinceIso(days, now) {
+  if (days == null) return null;
+  const d = new Date(now);
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
+async function collectAnswerEvents(admin, userId, days, now) {
+  const since = sinceIso(days, now);
+  const out = /* @__PURE__ */ new Map();
+  const bump = (paperId, questionNumber, isCorrect) => {
+    const k = questionKey(paperId, questionNumber);
+    const e = out.get(k) ?? { paperId, questionNumber, wrong: 0, total: 0 };
+    e.total++;
+    if (isCorrect === false) e.wrong++;
+    out.set(k, e);
+  };
+  const attemptRows = await fetchAll(
+    admin,
+    "cbt_attempts",
+    "id, paper_id",
+    (q) => since ? q.eq("user_id", userId).gte("created_at", since) : q.eq("user_id", userId)
+  );
+  const attemptPaperId = new Map(attemptRows.map((a) => [a.id, a.paper_id]));
+  for (const ids of chunk([...attemptPaperId.keys()], 100)) {
+    if (ids.length === 0) continue;
+    const rows = await fetchAll(
+      admin,
+      "cbt_attempt_answers",
+      "attempt_id, question_number, selected_choice, is_correct",
+      (q) => q.in("attempt_id", ids)
+    );
+    for (const r of rows) {
+      if (r.selected_choice == null) continue;
+      const paperId = attemptPaperId.get(r.attempt_id);
+      if (paperId) bump(paperId, r.question_number, r.is_correct);
+    }
+  }
+  const sessionRows = await fetchAll(admin, "review_sessions", "id", (q) => {
+    const base = q.eq("user_id", userId).not("submitted_at", "is", null);
+    return since ? base.gte("created_at", since) : base;
+  });
+  for (const ids of chunk(sessionRows.map((s) => s.id), 100)) {
+    if (ids.length === 0) continue;
+    const rows = await fetchAll(
+      admin,
+      "review_session_items",
+      "paper_id, question_number, selected_choice, is_correct",
+      (q) => q.in("session_id", ids)
+    );
+    for (const r of rows) {
+      if (r.selected_choice == null) continue;
+      bump(r.paper_id, r.question_number, r.is_correct);
+    }
+  }
+  return out;
+}
+var WIDEN_LADDER = [7, 30, 90, null];
+async function getDiagnosisAggregate(admin, userId, opts = {}, deps = {}) {
+  const now = deps.now ?? /* @__PURE__ */ new Date();
+  const requested = opts.days === void 0 ? 7 : opts.days;
+  const widenAllowed = opts.widen !== false;
+  const subjectFilter = opts.subjectSlug ?? null;
+  const attempts = await fetchAll(
+    admin,
+    "cbt_attempts",
+    "id, paper_id, score, total_questions, exam_papers!inner(subject_id, subjects(name, slug))",
+    (q) => q.eq("user_id", userId).order("created_at", { ascending: true })
+  );
+  const bySubjectMap = /* @__PURE__ */ new Map();
+  for (const a of attempts) {
+    const subj = a.exam_papers?.subjects;
+    if (!subj) continue;
+    const entry = bySubjectMap.get(subj.slug) ?? {
+      id: a.exam_papers?.subject_id ?? "",
+      name: subj.name,
+      slug: subj.slug,
+      attempts: 0,
+      scoreSum: 0,
+      totalSum: 0,
+      recentPct: []
+    };
+    entry.attempts++;
+    entry.scoreSum += a.score ?? 0;
+    entry.totalSum += a.total_questions ?? 0;
+    if ((a.total_questions ?? 0) > 0) {
+      entry.recentPct.push(Math.round((a.score ?? 0) / a.total_questions * 100));
+    }
+    bySubjectMap.set(subj.slug, entry);
+  }
+  const subjects = [...bySubjectMap.values()].map((e) => ({
+    id: e.id,
+    name: e.name,
+    slug: e.slug,
+    attempts: e.attempts,
+    avgScorePct: e.totalSum > 0 ? Math.round(e.scoreSum / e.totalSum * 100) : null,
+    recentScores: e.recentPct.slice(-5)
+  }));
+  const ladder = !widenAllowed || requested === null ? [requested] : [requested, ...WIDEN_LADDER.filter((d) => d === null || d > requested)];
+  let statsByQuestion = /* @__PURE__ */ new Map();
+  let usedDays = requested;
+  let widened = false;
+  for (const days of ladder) {
+    statsByQuestion = await collectAnswerEvents(admin, userId, days, now);
+    const anyWrong = [...statsByQuestion.values()].some((s) => s.wrong > 0);
+    if (anyWrong) {
+      usedDays = days;
+      widened = days !== requested;
+      break;
+    }
+    usedDays = days;
+    widened = days !== requested;
+  }
+  const statusRows = [...statsByQuestion.values()].filter((s) => s.wrong > 0).map((s) => ({ paper_id: s.paperId, question_number: s.questionNumber }));
+  const answeredRows = [...statsByQuestion.values()];
+  const answerStats = statsByQuestion;
+  const paperIds = [...new Set(answeredRows.map((r) => r.paperId))];
+  const questionIdByKey = /* @__PURE__ */ new Map();
+  const paperSubject = /* @__PURE__ */ new Map();
+  for (const ids of chunk(paperIds, 100)) {
+    if (ids.length === 0) continue;
+    const qrows = await fetchAll(
+      admin,
+      "questions",
+      "id, paper_id, question_number",
+      (q) => q.in("paper_id", ids)
+    );
+    for (const r of qrows) questionIdByKey.set(questionKey(r.paper_id, r.question_number), r.id);
+    const prows = await fetchAll(admin, "exam_papers", "id, subject_id, subjects(name, slug)", (q) => q.in("id", ids));
+    for (const p of prows) {
+      paperSubject.set(p.id, p.subjects ? { name: p.subjects.name, slug: p.subjects.slug } : null);
+    }
+  }
+  const questionIds = [...questionIdByKey.values()];
+  const conceptRefByQuestionId = /* @__PURE__ */ new Map();
+  const conceptIdsSeen = /* @__PURE__ */ new Set();
+  for (const ids of chunk(questionIds, 100)) {
+    if (ids.length === 0) continue;
+    const rows = await fetchAll(
+      admin,
+      "question_explanations",
+      "question_id, keyword_title, concept_id",
+      (q) => q.in("question_id", ids)
+    );
+    for (const r of rows) {
+      const title = (r.keyword_title ?? "").trim();
+      if (!r.concept_id && !title) continue;
+      if (r.concept_id) conceptIdsSeen.add(r.concept_id);
+      conceptRefByQuestionId.set(r.question_id, { conceptId: r.concept_id, title });
+    }
+  }
+  const conceptMeta = /* @__PURE__ */ new Map();
+  for (const ids of chunk([...conceptIdsSeen], 100)) {
+    if (ids.length === 0) continue;
+    const rows = await fetchAll(
+      admin,
+      "concepts",
+      "id, name, kind",
+      (q) => q.in("id", ids)
+    );
+    for (const r of rows) conceptMeta.set(r.id, { name: r.name, kind: r.kind });
+  }
+  const conceptMap = /* @__PURE__ */ new Map();
+  const answeredBySubject = /* @__PURE__ */ new Map();
+  for (const r of answeredRows) {
+    const slug = paperSubject.get(r.paperId)?.slug;
+    if (slug) answeredBySubject.set(slug, (answeredBySubject.get(slug) ?? 0) + 1);
+  }
+  for (const r of answeredRows) {
+    const qid = questionIdByKey.get(questionKey(r.paperId, r.questionNumber));
+    if (!qid) continue;
+    const ref = conceptRefByQuestionId.get(qid);
+    if (!ref) continue;
+    const meta = ref.conceptId ? conceptMeta.get(ref.conceptId) : void 0;
+    const concept = meta?.name ?? ref.title;
+    if (!concept) continue;
+    const subj = paperSubject.get(r.paperId);
+    if (subjectFilter && subj?.slug !== subjectFilter) continue;
+    const key = `${ref.conceptId ?? `kw:${ref.title}`}###${subj?.slug ?? ""}`;
+    const entry = conceptMap.get(key) ?? {
+      concept,
+      conceptId: ref.conceptId,
+      conceptKind: meta?.kind ?? null,
+      subject: subj?.name ?? null,
+      subjectSlug: subj?.slug ?? null,
+      wrongCount: 0,
+      correctSum: 0,
+      answerSum: 0
+    };
+    if (r.wrong > 0) entry.wrongCount++;
+    const st = answerStats.get(questionKey(r.paperId, r.questionNumber));
+    if (st) {
+      entry.correctSum += st.total - st.wrong;
+      entry.answerSum += st.total;
+    }
+    conceptMap.set(key, entry);
+  }
+  const conceptsRaw = [...conceptMap.values()].filter((e) => e.wrongCount > 0).map((e) => ({
+    concept: e.concept,
+    conceptId: e.conceptId,
+    conceptKind: e.conceptKind,
+    subject: e.subject,
+    subjectSlug: e.subjectSlug,
+    wrongCount: e.wrongCount,
+    answeredCount: e.answerSum,
+    accuracyPct: e.answerSum > 0 ? Math.round(e.correctSum / e.answerSum * 100) : null,
+    scoreGainPct: (() => {
+      const denom = e.subjectSlug ? answeredBySubject.get(e.subjectSlug) ?? 0 : 0;
+      if (denom <= 0) return null;
+      return Math.round(e.wrongCount / denom * 1e3) / 10;
+    })()
+  })).sort((a, b) => b.wrongCount - a.wrongCount || a.concept.localeCompare(b.concept)).slice(0, 60);
+  const corpusCount = /* @__PURE__ */ new Map();
+  const countKeyOf = (c) => c.conceptId ?? `kw:${c.concept}`;
+  const uniqueTargets = /* @__PURE__ */ new Map();
+  for (const c of conceptsRaw) uniqueTargets.set(countKeyOf(c), c);
+  await Promise.all(
+    [...uniqueTargets.entries()].map(async ([k, c]) => {
+      const q = admin.from("question_explanations").select("question_id", { count: "exact", head: true });
+      const { count } = await (c.conceptId ? q.eq("concept_id", c.conceptId) : q.eq("keyword_title", c.concept));
+      corpusCount.set(k, count ?? 0);
+    })
+  );
+  const concepts = conceptsRaw.map((c) => ({
+    ...c,
+    corpusCount: corpusCount.get(countKeyOf(c)) ?? 0
+  }));
+  const groupMap = /* @__PURE__ */ new Map();
+  for (const c of concepts) {
+    const key = c.subjectSlug ?? "__none__";
+    const g = groupMap.get(key) ?? { subject: c.subject ?? "기타", subjectSlug: c.subjectSlug, totalWrong: 0, concepts: [] };
+    g.totalWrong += c.wrongCount;
+    g.concepts.push(c);
+    groupMap.set(key, g);
+  }
+  const bySubject = [...groupMap.values()].map((g) => ({ ...g, concepts: g.concepts.sort((a, b) => b.wrongCount - a.wrongCount) })).sort((a, b) => b.totalWrong - a.totalWrong);
+  return {
+    window: { days: usedDays, widened },
+    totals: {
+      attempts: attempts.length,
+      wrongQuestions: subjectFilter ? statusRows.filter((r) => paperSubject.get(r.paper_id)?.slug === subjectFilter).length : statusRows.length,
+      conceptsWithKeyword: [...conceptMap.values()].filter((e) => e.wrongCount > 0).length
+    },
+    subjects,
+    concepts,
+    bySubject
+  };
+}
+function toBoardConcept(c) {
+  return {
+    concept: c.concept,
+    conceptId: c.conceptId,
+    subject: c.subject,
+    subjectSlug: c.subjectSlug,
+    wrongCount: c.wrongCount,
+    accuracyPct: c.accuracyPct,
+    scoreGainPct: c.scoreGainPct,
+    corpusCount: c.corpusCount
+  };
+}
+function toDiagnosisBoard(agg) {
+  return {
+    window: agg.window,
+    subjects: agg.subjects.map((s) => ({ name: s.name, slug: s.slug })),
+    concepts: agg.concepts.map(toBoardConcept),
+    bySubject: agg.bySubject.map((g) => ({
+      subject: g.subject,
+      subjectSlug: g.subjectSlug,
+      totalWrong: g.totalWrong,
+      concepts: g.concepts.map(toBoardConcept)
+    }))
+  };
+}
+async function getPendingDiagnosisBatch(admin, userId) {
+  const { data } = await admin.from("ai_diagnosis_batches").select("requested_at, context").eq("user_id", userId).eq("status", "pending").order("requested_at", { ascending: false }).limit(1).maybeSingle();
+  if (!data) return null;
+  const context = data.context;
+  return {
+    requestedAt: data.requested_at,
+    conceptCount: Array.isArray(context?.targets) ? context.targets.length : 0
+  };
+}
+
 // src/levels.ts
 var LEVEL_ORDER = ["9급", "7급", "5급"];
 function compareLevels(a, b) {
@@ -3846,6 +4317,45 @@ function authorNickname(metadataNickname) {
   const trimmed = metadataNickname.trim();
   return trimmed ? trimmed.slice(0, NICKNAME_MAX) : FALLBACK_NICKNAME;
 }
+
+// src/diagnosis-targets.ts
+var COACH_PER_SUBJECT = 7;
+function pickCoachTargets(agg, excludedSubjectSlugs, selected = null) {
+  if (selected && selected.length > 0) return pickSelectedConcepts(agg, selected);
+  const bySubject = /* @__PURE__ */ new Map();
+  for (const c of agg.concepts) {
+    const slug = c.subjectSlug ?? "";
+    if (slug && excludedSubjectSlugs.has(slug)) continue;
+    const list = bySubject.get(slug) ?? [];
+    if (list.length >= COACH_PER_SUBJECT) continue;
+    list.push(c);
+    bySubject.set(slug, list);
+  }
+  const groups = [...bySubject.values()].sort(
+    (a, b) => b.reduce((n, c) => n + c.wrongCount, 0) - a.reduce((n, c) => n + c.wrongCount, 0)
+  );
+  for (const g of groups) {
+    g.sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101));
+  }
+  const picked = [];
+  for (let rank = 0; rank < COACH_PER_SUBJECT && picked.length < COACH_MAX_TOTAL; rank++) {
+    for (const g of groups) {
+      if (picked.length >= COACH_MAX_TOTAL) break;
+      if (g[rank]) picked.push(g[rank]);
+    }
+  }
+  return picked;
+}
+function pickSelectedConcepts(agg, selected) {
+  const wanted = new Set(selected.map(conceptSelectionKey));
+  const picked = [];
+  for (const c of agg.concepts) {
+    if (!wanted.has(conceptSelectionKey(c))) continue;
+    picked.push(c);
+    if (picked.length >= COACH_MAX_TOTAL) break;
+  }
+  return picked;
+}
 export {
   ANON_PREVIEW_CARDS,
   ATTENDANCE_MILESTONES,
@@ -3853,7 +4363,10 @@ export {
   ATTENDANCE_MIN_SECONDS_PER_QUESTION,
   ATTENDANCE_MONTHLY_MAX_DAYS,
   BANNED_SUBSTRINGS,
+  COACH_PER_SUBJECT,
   COMMENT_CONTENT_MAX,
+  DIAGNOSIS_LOCKED,
+  DIAGNOSIS_WINDOW_DAYS,
   EMPTY_MIX_POOL,
   EXPLANATION_CONTENT_COLUMNS,
   EXPLANATION_DOWNLOAD_HOURLY_LIMIT,
@@ -3916,6 +4429,7 @@ export {
   collectPaperReviewCandidates,
   collectSubjectReviewSource,
   collidingPaperIds,
+  conceptSelectionKey,
   consumeFreeExplanationQuota,
   containsProfanity,
   createAllReviewSessionForUser,
@@ -3936,6 +4450,7 @@ export {
   fetchCatalog,
   fetchCbtAvailability,
   fetchCorrectAnswers,
+  fetchDiagnosisEligibility,
   fetchExamPaperRows,
   fetchExplainedNumbers,
   fetchExplanations,
@@ -3959,20 +4474,24 @@ export {
   formatDuration,
   formatFileSize,
   fuzzInterval,
+  getDiagnosisAggregate,
   getDiagnosisPausedSubjectIds,
   getDueReviewSummary,
   getExamTypeNames,
   getExcludedDiagnosisSubjectSlugs,
+  getLatestReadyDiagnosis,
   getMembership,
   getMixSessionWrongNote,
   getPaperSlug,
   getPausedSubjectIds,
+  getPendingDiagnosisBatch,
   getReviewPrefs,
   getReviewSessionView,
   getReviewSubjectOptions,
   getSessionSchedule,
   getStoredStudyPhase,
   getSubjectBySlug,
+  getWeeklyDiagnosis,
   groupByYearAndSubject,
   hasOwnPremiumPeriod,
   inParallel,
@@ -3998,11 +4517,14 @@ export {
   membershipDaysLeft,
   membershipFromRow,
   nextAttendanceMilestone,
+  nextDiagnosisDate,
   nextSrs,
   normalizeChoiceExplanations,
+  normalizeConceptSelection,
   normalizeForProfanityCheck,
   normalizePaperSlugParam,
   paperDedupKey,
+  pickCoachTargets,
   pickRandomReviewCandidates,
   pickReviewCandidates,
   pickWeightedReviewCandidates,
@@ -4010,6 +4532,7 @@ export {
   recordAttendance,
   recordQuestionResults,
   representativePaperIds,
+  requestDiagnosisForUser,
   resolveExplanationAccess,
   resolveStatusTargets,
   resolveWrongNoteExplanations,
@@ -4032,6 +4555,7 @@ export {
   statusTargetKey,
   submitCbtAttempt,
   submitReviewSessionForUser,
+  toDiagnosisBoard,
   toExplanationContent,
   toMixOverview,
   toMixSessionBriefs,

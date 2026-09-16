@@ -36,6 +36,34 @@ export type NotificationItem = {
   createdAt: string;
 };
 
+// 한 번에 내려주는 개수 — `/notifications` 한 페이지와 헤더 종의 최근 목록.
+// 웹 `lib/notifications.ts` 는 `server-only` 라 앱이 import 할 수 없어서, 예전에는 두 곳에
+// 같은 숫자를 적어두고 "같은 값이어야 한다"는 주석으로 묶어 뒀다. 한쪽만 바꾸면 종의
+// "알림 전체보기"로 넘어갔을 때 목록이 어긋나므로(페이지 경계가 달라진다) 여기 한 벌만 둔다.
+export const NOTIFICATIONS_PAGE_SIZE = 20;
+export const NOTIFICATION_DROPDOWN_SIZE = 8;
+
+// 브라우저 URL 파서는 주소를 해석하기 **전에** 탭·개행을 지운다(safe-redirect.ts 의 긴 설명).
+const URL_PARSER_STRIPPED = /[\t\n\r]/g;
+
+// 알림 링크는 서버가 만든 사이트 내부 경로뿐이어야 한다. 행은 service_role 만 쓰지만(RLS),
+// 혹시 다른 값이 들어 있어도 화면이 그 주소로 보내지 않게 한 번 더 좁힌다.
+//
+// 웹(`<Link href>`)과 앱(`router.push`)이 각자 판정하면 한쪽만 고쳤을 때 같은 행이 서로 다른
+// 곳으로 열린다 — 판정도 기본값("/notifications")도 여기 한 벌이다.
+//
+// `//` 뿐 아니라 `/\` 와 탭·개행도 막는 것은 `sanitizeNextPath` 와 같은 이유다: 브라우저는
+// URL 의 `\` 를 `/` 로 고쳐 읽으므로 `/\evil.com` 은 `//evil.com`(프로토콜 상대 URL)이 되어
+// 사이트 밖으로 나간다. 지금은 여기 닿는 값이 전부 서버가 만든 경로지만, 이 함수의 존재
+// 이유가 "그래도 혹시"이므로 검사한 문자열과 실제로 열리는 문자열을 같게 맞춰 둔다.
+export function safeNotificationLink(link: unknown): string {
+  if (typeof link !== "string") return "/notifications";
+  const path = link.replace(URL_PARSER_STRIPPED, "");
+  return path.startsWith("/") && !path.startsWith("//") && !path.startsWith("/\\")
+    ? path
+    : "/notifications";
+}
+
 // 알림 한 줄의 문구. "○○님이 …" 형태로 통일한다.
 export function notificationMessage(type: NotificationType): string {
   switch (type) {

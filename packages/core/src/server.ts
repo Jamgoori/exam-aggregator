@@ -28,6 +28,10 @@ export * from "./rules/review-preferences";
 export * from "./rules/review-queue";
 export * from "./rules/review-session";
 export * from "./rules/mix-practice";
+// AI 약점 진단 — 요청 행 생성(웹 서버 액션·Edge diagnosis-request)과 무AI 집계
+// (웹 진단 페이지·Edge diagnosis-aggregate). 리포트 **생성**은 웹 크론 전용이라 여기 없다.
+export * from "./rules/diagnosis-request";
+export * from "./rules/diagnosis-aggregate";
 
 // ── 서버 조회(DI) ──────────────────────────────────────────────────────────
 export * from "./data/dedup-signals";
@@ -50,3 +54,6 @@ export * from "./format";
 export * from "./dedup-papers";
 export * from "./comment-constraints";
 export * from "./nickname";
+// 진단 리포트 스키마·개념 선택 정규화·코칭 대상 선정(순수) — 웹 생성기와 Edge 가 같은 것을 쓴다.
+export * from "./diagnosis-report";
+export * from "./diagnosis-targets";

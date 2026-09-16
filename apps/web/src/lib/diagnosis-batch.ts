@@ -1,6 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getPendingDiagnosisBatch as getPendingDiagnosisBatchRule } from "@gongmoa/core/server";
 import { DIAGNOSIS_CYCLE_DAYS } from "@/lib/ai-diagnosis";
 import { DIAGNOSIS_MODEL } from "@/lib/diagnosis-coach";
 import { planCoaching, saveDiagnosisReport } from "@/lib/diagnosis-generate";
@@ -374,21 +375,13 @@ async function closeItems(ids: string[], status: "ready" | "failed", error: stri
 // 다시 눌러야 함"을 구분해 말해 주려면 필요하다. conceptCount 는 로딩 카드가 "고른 8개
 // 개념을 분석하는 중"이라고 말해 주기 위한 값 — 몇 개를 기다리는지 모르면 대기가 더 길게
 // 느껴진다.
+//
+// 조회 본문은 core rules/diagnosis-aggregate.ts 에 있다 — `ai_diagnosis_batches` 는 RLS
+// 정책이 하나도 없어(service_role 전용) 앱이 직접 못 읽으므로, Edge `diagnosis-aggregate`
+// 가 같은 판정을 실어 보내야 앱 선택창도 생성 중에는 닫힌다. 여기는 admin 클라이언트를
+// 넘기는 어댑터다.
 export async function getPendingDiagnosisBatch(
   userId: string,
 ): Promise<{ requestedAt: string; conceptCount: number } | null> {
-  const { data } = await createAdminClient()
-    .from("ai_diagnosis_batches")
-    .select("requested_at, context")
-    .eq("user_id", userId)
-    .eq("status", "pending")
-    .order("requested_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!data) return null;
-  const context = data.context as BatchItemContext | null;
-  return {
-    requestedAt: data.requested_at as string,
-    conceptCount: context?.targets?.length ?? 0,
-  };
+  return getPendingDiagnosisBatchRule(createAdminClient(), userId);
 }

@@ -1,3 +1,24 @@
+// ⚠ **폐기(deprecated).** 이 함수를 새로 부르지 말 것 — Phase 4 에서 두 함수로 갈라졌다
+// (설계서 §6.7 #21):
+//   · `diagnosis-request`   요청 행만 만든다(프리미엄·자격·개념 상한·주기 1회, core 규칙)
+//   · `diagnosis-aggregate` 진단 보드가 그리는 무AI 집계
+// 리포트는 웹 Vercel 크론 `/api/cron/diagnosis`(Message Batches)가 채운다 — 웹과 앱이 같은
+// 파이프라인·같은 리포트 스키마를 쓰게 된 것이 갈라 놓은 이유다. 이 함수는 동기 생성(그 자리에서
+// Claude 호출)이라 웹 배치와 같은 `ai_diagnoses` 행을 3필드 리포트로 잠갔다(§2 "이미 어긋난 규칙").
+//
+// **그런데도 지우지 않는다.** 스토어에 나가 있는 옛 빌드가 이 함수를 부르고, Edge 응답 계약은
+// "추가만"이라 삭제가 곧 그 빌드의 진단 화면 고장이다(§6.6 "Edge 계약 버전"). 옛 앱이 전부
+// 최소 버전 게이트(426) 아래로 내려간 뒤 지울 것 — 그때 **함께** 고쳐야 하는 곳:
+//   · `.github/workflows/edge-deploy.yml` 의 함수 목록 2곳(선택지 + FUNCS 문자열)
+//   · `supabase/config.toml` 의 `[functions.ai-diagnose]`
+//   · `packages/core/src/edge/contracts.ts` 의 `ai-diagnose` 절·맵·EDGE_NAMES,
+//     `edge/contracts.test.ts`·`edge/invoke.test.ts`(202 케이스가 이 함수를 예로 든다)
+//   · `apps/mobile/README.md`·`SETUP.md`·`SECURITY.md` 의 배포·기능 목록
+//
+// 아래 본문은 그대로 둔다(동작 변경도 계약 위반이다). 자격·주기 상수가 core 와 별도로 적혀
+// 있는데, 그것도 옛 앱이 받는 판정을 바꾸지 않기 위해 남긴다 — 새 판정은 위 두 함수가 한다.
+//
+// ── 아래는 옛 주석 ──────────────────────────────────────────────────────────
 // AI 약점 진단(온디맨드). 웹은 요청 행만 만들고 배치가 채우지만, 앱은 이 함수에서
 // 바로 Claude 를 호출해 리포트를 생성·저장·반환한다(스키마는 웹 AiDiagnosisReport 동일).
 //

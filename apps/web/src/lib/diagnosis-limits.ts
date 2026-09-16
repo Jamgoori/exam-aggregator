@@ -9,25 +9,20 @@
 // 값을 복제해 두었다. **바꿀 때 반드시 함께 고칠 것** — 두 경로가 어긋나면 같은 계정에
 // 대해 배치와 앱이 서로 다른 개념 집합을 코칭한다.
 
-// 과목당 상한. 전체 상위 N개만 뽑으면 문항을 많이 푼 과목이 자리를 다 가져간다
+// 과목당 상한과 개념 선택 키는 core 가 정본이다(diagnosis-targets.ts·diagnosis-report.ts) —
+// 선정 규칙(pickCoachTargets)이 웹 화면·웹 생성기·Edge `diagnosis-aggregate` 세 곳에서
+// 같은 개념을 골라야 하므로 상수와 키 규칙이 규칙 옆에 있어야 한다. 여기는 기존 import
+// 경로를 지키는 re-export 뿐이다.
+//
+// COACH_PER_SUBJECT: 전체 상위 N개만 뽑으면 문항을 많이 푼 과목이 자리를 다 가져간다
 // (실측 계정에서 상위 5개가 국어·영어뿐이었다). 과목당으로 끊어야 준비하는 모든 과목이
 // 최소한 다뤄진다.
-export const COACH_PER_SUBJECT = 7;
-
-// 전체 상한. 과목이 많은 사용자의 요금 폭주를 막는 장치 — 5과목이면 과목당 7개가
-// 35개가 된다. 요금이 개념 수에 정비례하므로 이 값을 올리는 건 그대로 요금 인상이다.
 //
-// 15에서 10으로 내렸다. 극복법 한 덩이가 두 문장에서 "원인 + 문항별 근거 + 실행 계획 +
-// 체크리스트"로 커지면서 개념 하나당 입력·출력이 함께 늘었고, 15개를 꽉 채우면 한 번에
-// 1,000원대가 나갔다. 한 주에 10개도 실제로 다 잡기는 벅찬 양이다.
-// 값 자체는 @gongmoa/core 의 data/home.ts(모바일 /diagnosis 소개 화면과 공유). 여기는 기존
-// import 경로를 지키는 re-export.
-export { COACH_MAX_TOTAL } from "@gongmoa/core";
-
-// 개념 선택 키. 같은 표기(keyword_title)라도 과목이 다르면 다른 개념이므로, 정본
-// 개념 id 가 있으면 그것을 쓰고 없을 때만 표기로 떨어진다 — diagnosis-live 의 오답 문항
-// 표본(conceptKey)과 **같은 규칙**이어야 화면에서 고른 개념과 프롬프트가 맞물린다.
-// 화면(체크박스)과 서버(선택 저장·대상 선정)가 같이 쓰므로 server-only 가 아닌 이 파일에 둔다.
-export function conceptSelectionKey(c: { conceptId: string | null; concept: string }): string {
-  return c.conceptId ?? `kw:${c.concept.trim()}`;
-}
+// COACH_MAX_TOTAL: 15에서 10으로 내렸다. 극복법 한 덩이가 두 문장에서 "원인 + 문항별 근거 +
+// 실행 계획 + 체크리스트"로 커지면서 개념 하나당 입력·출력이 함께 늘었고, 15개를 꽉 채우면
+// 한 번에 1,000원대가 나갔다. 한 주에 10개도 실제로 다 잡기는 벅찬 양이다.
+//
+// conceptSelectionKey: 같은 표기(keyword_title)라도 과목이 다르면 다른 개념이므로, 정본
+// 개념 id 가 있으면 그것을 쓰고 없을 때만 표기로 떨어진다 — 집계의 개념 키와 **같은 규칙**
+// 이어야 화면에서 고른 개념과 프롬프트가 맞물린다.
+export { COACH_PER_SUBJECT, COACH_MAX_TOTAL, conceptSelectionKey } from "@gongmoa/core";

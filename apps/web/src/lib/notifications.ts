@@ -1,20 +1,24 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  NOTIFICATION_DROPDOWN_SIZE,
+  NOTIFICATIONS_PAGE_SIZE,
   richTextToPlain,
+  safeNotificationLink,
   type NotificationItem,
   type NotificationType,
 } from "@gongmoa/core";
 
-// 알림 읽기·쓰기. 규칙(종류·문구)은 packages/core/src/notifications.ts 에 있다.
+// 알림 읽기·쓰기. 규칙(종류·문구·한 페이지 개수·링크 검사)은 packages/core/src/notifications.ts
+// 에 있다 — 이 파일은 `server-only` 라 앱이 import 할 수 없어서, 여기에 상수나 판정을 두면
+// 앱이 같은 값을 다시 적어야 하고 그 사본이 조용히 어긋난다.
 //
 // notifications 는 "본인 것만 select" RLS 지만, 여기서는 서버가 이미 세션 사용자를
 // 확정한 뒤 그 id 로만 조회하므로 admin 클라이언트를 쓴다(다른 게시판 조회와 같은
 // 방식 — 화면마다 세션 클라이언트를 만들지 않아도 되고, 조건이 코드에 드러난다).
 
-export const NOTIFICATIONS_PAGE_SIZE = 20;
-// 드롭다운에 한 번에 보여주는 개수. 더 보려면 /notifications 로 간다.
-export const NOTIFICATION_DROPDOWN_SIZE = 8;
+// 화면·액션이 계속 `@/lib/notifications` 에서 가져가도록 core 값을 그대로 다시 내보낸다.
+export { NOTIFICATION_DROPDOWN_SIZE, NOTIFICATIONS_PAGE_SIZE };
 
 // 알림 미리보기에 싣는 본문 길이. 길게 실으면 드롭다운이 한 화면을 넘긴다.
 const PREVIEW_MAX = 80;
@@ -87,14 +91,6 @@ export async function createNotifications(
   }
 }
 
-// 알림 링크는 서버가 만든 사이트 내부 경로뿐이어야 한다. 행은 service_role 만 쓰지만
-// (RLS), 혹시 다른 값이 들어 있어도 화면이 그 주소로 보내지 않게 한 번 더 좁힌다.
-function safeLink(link: unknown): string {
-  return typeof link === "string" && link.startsWith("/") && !link.startsWith("//")
-    ? link
-    : "/notifications";
-}
-
 function toItem(row: Record<string, unknown>): NotificationItem {
   return {
     id: row.id as string,
@@ -102,7 +98,7 @@ function toItem(row: Record<string, unknown>): NotificationItem {
     actorNickname: row.actor_nickname as string,
     title: row.title as string,
     preview: (row.preview as string) ?? "",
-    link: safeLink(row.link),
+    link: safeNotificationLink(row.link),
     isRead: row.read_at !== null,
     createdAt: row.created_at as string,
   };

@@ -4,6 +4,7 @@ import {
   isNotificationType,
   notificationMessage,
   relativeTimeLabel,
+  safeNotificationLink,
   unreadBadgeLabel,
 } from "./notifications";
 
@@ -39,4 +40,17 @@ test("상대 시각", () => {
   // 미래 시각(시계 어긋남)도 음수가 되지 않게 0으로 눌린다.
   assert.equal(relativeTimeLabel("2026-09-05T00:00:00Z", now), "방금");
   assert.equal(relativeTimeLabel("올바르지 않은 값", now), "");
+});
+
+test("알림 링크는 사이트 안 경로만 통과한다", () => {
+  assert.equal(safeNotificationLink("/board/1#comment-2"), "/board/1#comment-2");
+  // 사이트 밖으로 나가는 값은 전부 알림함으로 떨어뜨린다.
+  assert.equal(safeNotificationLink("https://evil.com"), "/notifications");
+  assert.equal(safeNotificationLink("//evil.com"), "/notifications");
+  // 브라우저가 `\` 를 `/` 로 고쳐 읽어 프로토콜 상대 URL 이 되는 경로.
+  assert.equal(safeNotificationLink("/\\evil.com"), "/notifications");
+  // 파서가 먼저 지우는 문자를 끼워 검사를 피해가는 경로.
+  assert.equal(safeNotificationLink("/\t/evil.com"), "/notifications");
+  assert.equal(safeNotificationLink(null), "/notifications");
+  assert.equal(safeNotificationLink(42), "/notifications");
 });
