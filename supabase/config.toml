@@ -125,6 +125,9 @@ import_map = "./functions/deno.json"
 [functions.diagnosis-aggregate]
 import_map = "./functions/deno.json"
 
+[functions.diagnosis-collect]
+import_map = "./functions/deno.json"
+
 [functions.diagnosis-request]
 import_map = "./functions/deno.json"
 

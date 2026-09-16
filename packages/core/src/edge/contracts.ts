@@ -493,10 +493,18 @@ export type AiDiagnoseResponse = {
 
 // ── diagnosis-request (§6.7 #21) ─────────────────────────────────────────────
 //
-// 진단 **요청 행만** 만든다. 리포트는 웹 크론 `/api/cron/diagnosis`(시간당, Batches)가
-// 채우므로 응답에 리포트가 없다 — 앱은 요청 뒤 `ai_diagnoses` 를 RLS 로 폴링한다
-// (select own, schema.sql:807-809). 웹 서버 액션 `requestDiagnosis` 와 **같은 core 규칙**
-// (rules/diagnosis-request.ts#requestDiagnosisForUser)을 부른다.
+// 진단 요청 행을 만들고 **그 자리에서 배치를 제출한다**(Message Batches API, 표준가의
+// 50%). 예전에는 행만 만들고 제출·수거를 모두 웹 크론이 시간당 한 번 했다 — 최악이
+// "제출 대기 1시간 + 배치 + 수거 대기 1시간"이었다. 지금 남는 것은 배치 자체의 처리
+// 시간뿐이고(대부분 1시간 안), 앱은 기다리는 동안 `diagnosis-collect` 로 직접 수거한다.
+//
+// 응답에 리포트 본문은 없다 — 앱은 `ai_diagnoses` 를 RLS 로 직접 읽는다(select own,
+// schema.sql). 웹 서버 액션 `requestDiagnosis` 와 **같은 core 규칙**
+// (rules/diagnosis-request.ts#requestDiagnosisForUser + rules/diagnosis-batch.ts#
+// submitPendingDiagnoses)을 부른다.
+//
+// 제출이 실패해도(키 미설정·API 오류) 이 함수는 200 이다 — 요청 행은 남고 시간당 웹
+// 크론이 예전처럼 주워 간다. 여기서 5xx 를 내면 secret 이 없는 동안 진단이 통째로 죽는다.
 //
 // 오류: 403 "AI 약점 진단은 멤버십 기능이에요." · 400 자격 미달 안내 · 500 요청 실패.
 export type DiagnosisRequestRequest = {
@@ -507,8 +515,7 @@ export type DiagnosisRequestRequest = {
 };
 export type DiagnosisRequestResponse = {
   // ready  — 이번 주기 리포트가 이미 있다(주기 잠금, 새로 만들지 않았다)
-  // pending— 요청 행이 있다. 크론이 채울 때까지 기다린다. 제출도 수거도 시간당 크론이라
-  //          최악은 두 시간이다(화면 문구도 그렇게 적는다 — diagnosis-generating.tsx)
+  // pending— 요청 행이 있다. 극복법은 배치가 끝나면 채워진다
   status: "ready" | "pending";
   // 요청 행의 KST 날짜(YYYY-MM-DD). 앱이 폴링 대상 행을 고르는 축.
   date: string;
@@ -516,6 +523,49 @@ export type DiagnosisRequestResponse = {
   nextDate: string;
   // 실제로 저장된 개념 수(상한으로 잘린 뒤). 화면이 "N개 개념으로 만들어요"를 이 수로 말한다.
   selectedCount: number;
+  // 이 호출에서 배치를 실제로 제출했는지. false 여도 오류가 아니다 — 이미 진행 중이거나
+  // (generating=true), 만들 게 없거나(submitError), 키가 아직 없는(크론이 줍는다) 경우다.
+  submitted: boolean;
+  // 지금 극복법이 만들어지는 중인지(방금 냈거나 이미 진행 중). 화면은 true 면 선택창을
+  // 닫고 대기 카드를 띄운다 — 열어 두면 같은 진단을 두 번 누르게 된다.
+  generating: boolean;
+  // 제출하지 못한 사유 중 **사용자가 고칠 수 있는 것**(예: "최근 7일 동안 새로 틀린 문제가
+  // 없어요"). 그대로 화면에 올린다. 없으면 null.
+  submitError: string | null;
+  // `diagnosis-collect` 를 부를 때 지켜야 할 최소 간격(초). 서버가 강제하는 값과 같다 —
+  // 더 자주 불러도 Anthropic 을 두드리지 않고 pending 만 돌아온다.
+  recheckSeconds: number;
+};
+
+// ── diagnosis-collect (§6.7 #21) ─────────────────────────────────────────────
+//
+// 앱이 결과를 기다리는 동안 부르는 **수거**. 진행 중인 내 배치가 끝났는지 보고, 끝났으면
+// 그 자리에서 결과를 합쳐 리포트를 저장한다. 크론(시간당)은 안전망으로 그대로 남는다 —
+// 앱을 닫은 사용자와 웹 요청이 그걸로 산다.
+//
+// 요청 본문은 없다(`{}`). 대상은 언제나 **호출자 본인의 이번 주기 진단**이다 — 남의 배치를
+// 지목할 방법 자체를 두지 않는다.
+//
+// 오류: 401 로그인 필요. 그 외에는 200 이고 status 로 말한다(수거 실패와 "아직 안 끝남"은
+// 사용자가 할 수 있는 일이 같다 — 기다리는 것뿐이다).
+export type DiagnosisCollectRequest = Record<string, never>;
+
+export type DiagnosisCollectResponse = {
+  // none    — 이번 주기에 요청 자체가 없다(화면은 "진단 받기"를 그린다)
+  // pending — 아직 만들어지는 중(배치 미완료·제출 대기·재확인 간격 전)
+  // ready   — 리포트가 채워졌다. 앱은 `ai_diagnoses` 를 다시 읽어 본문을 그린다
+  // failed  — 이 주기 배치가 실패로 닫혔다(사유는 error). 다시 요청할 수 있다
+  status: "none" | "pending" | "ready" | "failed";
+  // 이번 주기 요청 행의 KST 날짜(YYYY-MM-DD). 없으면 요청 자체가 없다.
+  date: string | null;
+  // 배치가 제출된 시각(ISO). 화면이 "N분째 만드는 중"을 말한다. 아직 제출 전이면 null.
+  requestedAt: string | null;
+  // 이 배치가 물어본 개념 수. 0 이면 아직 제출 전이다.
+  conceptCount: number;
+  // 실패 사유(사용자에게 그대로 보여줄 수 있는 문구). 그 외에는 null.
+  error: string | null;
+  // 다음 호출까지 기다릴 최소 간격(초). 서버가 강제하는 값과 같다.
+  recheckSeconds: number;
 };
 
 // ── diagnosis-aggregate (§6.7 #21) ───────────────────────────────────────────
@@ -606,6 +656,7 @@ export type EdgeContracts = {
   "account-delete": { request: AccountDeleteRequest; response: AccountDeleteResponse };
   "ai-diagnose": { request: AiDiagnoseRequest; response: AiDiagnoseResponse };
   "diagnosis-request": { request: DiagnosisRequestRequest; response: DiagnosisRequestResponse };
+  "diagnosis-collect": { request: DiagnosisCollectRequest; response: DiagnosisCollectResponse };
   "diagnosis-aggregate": { request: DiagnosisAggregateRequest; response: DiagnosisAggregateResponse };
 };
 
@@ -630,5 +681,6 @@ export const EDGE_NAMES = [
   "account-delete",
   "ai-diagnose",
   "diagnosis-request",
+  "diagnosis-collect",
   "diagnosis-aggregate",
 ] as const satisfies readonly EdgeName[];

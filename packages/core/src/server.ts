@@ -29,9 +29,15 @@ export * from "./rules/review-queue";
 export * from "./rules/review-session";
 export * from "./rules/mix-practice";
 // AI 약점 진단 — 요청 행 생성(웹 서버 액션·Edge diagnosis-request)과 무AI 집계
-// (웹 진단 페이지·Edge diagnosis-aggregate). 리포트 **생성**은 웹 크론 전용이라 여기 없다.
+// (웹 진단 페이지·Edge diagnosis-aggregate).
 export * from "./rules/diagnosis-request";
 export * from "./rules/diagnosis-aggregate";
+// 리포트 생성(준비·저장)과 Message Batches 제출·수거. 예전에는 웹 크론 전용이라 웹 lib 에
+// 있었지만, 지금은 **요청한 그 순간 제출하고 기다리는 동안 수거**하므로 Edge 도 같은
+// 함수를 부른다(diagnosis-request·diagnosis-collect). 프롬프트·모델·max_tokens·custom_id·
+// 합치기가 두 벌이 되면 어긋난 날 요금이 나간 뒤에 안다.
+export * from "./rules/diagnosis-generate";
+export * from "./rules/diagnosis-batch";
 
 // ── 서버 조회(DI) ──────────────────────────────────────────────────────────
 export * from "./data/dedup-signals";
@@ -57,3 +63,7 @@ export * from "./nickname";
 // 진단 리포트 스키마·개념 선택 정규화·코칭 대상 선정(순수) — 웹 생성기와 Edge 가 같은 것을 쓴다.
 export * from "./diagnosis-report";
 export * from "./diagnosis-targets";
+// 극복법 프롬프트·JSON 스키마·max_tokens·모델과 배치 custom_id·합치기(순수). **index.ts 에는
+// 두지 않는다** — 앱은 프롬프트를 알 이유가 없고, 리포트를 만드는 쪽은 서버뿐이다.
+export * from "./diagnosis-coach";
+export * from "./diagnosis-batch-merge";

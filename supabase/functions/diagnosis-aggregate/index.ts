@@ -13,15 +13,20 @@
 //   · 리포트 본문(conceptCoaching·summary·weakConcepts) — 앱이 `ai_diagnoses.report` 를
 //     RLS 로 직접 읽는다(§6.7 #21 "앱은 ai_diagnoses 를 RLS 로 폴링"). 진단 본문은 메모리
 //     쿼리캐시에만 두는 값이라(앱 AGENTS.md 금지선), 집계 응답에 섞어 두면 디스크로 새기 쉽다.
-//   · 정답·해설 본문·오답 문항 표본 — 그건 웹 생성기(`lib/diagnosis-live.ts#
-//     getWrongQuestionSamples`)가 모델에 넣는 입력이고 화면에는 원래 안 나온다.
+//   · 정답·해설 본문·오답 문항 표본 — 그건 배치 제출이 모델 요청 본문을 만들 때만 쓰는
+//     입력이고(core `rules/diagnosis-samples.ts#getWrongQuestionSamples`, service_role)
+//     화면에는 원래 안 나온다. 응답에 섞지 말 것 — 정답은 RLS 로 막아 둔 값이다.
 //   · totals·conceptKind·answeredCount·과목 평균/추세 — 보드가 그리지 않는다(자세한 이유는
 //     core rules/diagnosis-aggregate.ts 의 "앱(Edge)용 투영" 절).
 //
 // ⚠ **비싼 호출이다.** 계정 전체 응시 이력 → 기간 안 응답 → 문항·해설·개념 → 개념별 기출 수로
 // 최대 60왕복이 붙고, 웹의 `'use cache'`(30초)에 해당하는 계층이 Edge 에는 없다. 앱은 화면
 // 진입과 기간 칩 전환에만 부를 것 — 리포트 대기 폴링은 이 함수가 아니라 `ai_diagnoses`
-// 직접 조회로 한다(그쪽은 인덱스 한 방이다).
+// 직접 조회(인덱스 한 방)와 `diagnosis-collect`(내 배치 행 두 번 읽기)로 한다.
+//
+// 그래서 이 응답의 `generating` 은 **화면에 들어온 그 순간의 값**이고 다시 받지 않는다.
+// 대기 카드를 그릴지 말지는 요청 행(`ai_diagnoses`)과 `diagnosis-collect` 가 정본이다 —
+// 이 값만 믿으면 리포트가 도착한 뒤에도 "만드는 중"이 남는다(diagnosis-board.tsx).
 import { corsHeaders, json } from "../_shared/http.ts";
 import { coreAdmin, requireUser } from "../_shared/clients.ts";
 // @ts-types="../_shared/core.d.ts"

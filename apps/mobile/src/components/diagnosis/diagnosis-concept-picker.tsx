@@ -79,10 +79,19 @@ export function DiagnosisConceptPicker({
       .filter((c) => selected.has(c.key))
       .map((c) => ({ conceptId: c.conceptId, concept: c.concept }));
     try {
-      // ready(이번 주기 리포트가 이미 있다)든 pending(요청 행이 생겼다)든 할 일은 같다 —
-      // 요청 행이 캐시에 들어오면(훅의 무효화) 화면이 스스로 선택창을 닫고 대기 카드나 지난
-      // 진단으로 바뀐다. 여기서 따로 말할 것이 없다.
-      await request.mutateAsync(picked);
+      // ready(이번 주기 리포트가 이미 있다)든 pending(요청 행이 생겼고 배치가 나갔다)든 할
+      // 일은 같다 — 요청 행이 캐시에 들어오면(훅의 무효화) 화면이 스스로 선택창을 닫고 대기
+      // 카드나 지난 진단으로 바뀐다. 여기서 따로 말할 것이 없다.
+      const res = await request.mutateAsync(picked);
+      // 예외는 **제출이 막힌 경우**다(200 이지만 배치가 안 나갔다: 고른 개념에 최근 7일 오답이
+      // 없다 · 생성이 아직 설정되지 않았다 등). 그때는 선택창을 닫지 않는다 — 사유를 그 자리에
+      // 띄우고 개념을 다시 골라 누를 수 있어야 한다. 요청 행은 이미 남았으므로 주기를 한 번 더
+      // 쓰는 것이 아니고, 훅도 그 경우에는 요청 행을 다시 읽지 않는다(queries/diagnosis.ts).
+      if (res.submitError && !res.generating) {
+        setConfirming(false);
+        setError(res.submitError);
+        return;
+      }
       setSubmitted(true);
     } catch (e) {
       const handled = await handleEdgeError(e, { next: "/mypage/diagnosis" });
@@ -132,14 +141,15 @@ export function DiagnosisConceptPicker({
           </AppText>
         </View>
       </View>
-      {/* 마지막 한 마디만 웹과 다르다. 웹은 "보통 5~10분"이라고 적는데 그건 버튼을 누른 그
-          자리에서 배치를 제출하기 때문이고, 앱 요청은 크론이 집어 갈 때까지 기다린다
-          (diagnosis-generating.tsx 머리말 — 소유자 결정 대기). 나머지 문장은 웹 그대로다. */}
+      {/* 마지막 한 마디만 웹과 다르다. 웹은 "보통 5~10분"이라고 적지만 그건 배치가 빨리 끝난
+          날의 이야기고, Message Batches 의 약속은 "대부분 1시간 안, 최대 24시간"이다
+          (diagnosis-generating.tsx 머리말). 누르기 전에 읽는 문장이라 여기서 없는 시간을
+          약속하면 대기 카드가 그 약속을 어기게 된다. 나머지 문장은 웹 그대로다. */}
       <AppText variant="xs" className="mt-1 leading-relaxed text-violet-700/80 dark:text-violet-300/70" pretty>
         고른 개념마다 <AppText variant="xs" weight="bold" className="text-violet-700/80 dark:text-violet-300/70">내가 실제로 고른 오답</AppText>을 하나씩 짚어 왜 그렇게 골랐는지
         분석하고, 오늘부터의 극복 계획과 시험장 체크리스트까지 만들어드려요.{" "}
         <AppText variant="xs" weight="bold" className="text-violet-700/80 dark:text-violet-300/70">한 번에 {COACH_MAX_TOTAL}개까지</AppText> 고를 수 있고, 최근 {analysisDays}일 안에 틀린
-        문제에서 고른 개념만 분석해요. 만드는 데 시간이 걸려요(최대 두 시간) — 다 되면 이 화면에
+        문제에서 고른 개념만 분석해요. 만드는 데 보통 한 시간쯤 걸려요 — 다 되면 이 화면에
         나타나요.
       </AppText>
 

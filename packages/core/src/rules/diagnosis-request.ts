@@ -15,14 +15,14 @@ import {
 // AI 약점 진단 "요청"의 서버 규칙 — 웹 `lib/ai-diagnosis.ts#requestWeeklyDiagnosis` +
 // `app/mypage/actions.ts#requestDiagnosis` 의 게이트 부분을 옮긴 것(설계서 §6.7 #21).
 //
-// **여기서 하는 일은 요청 행 하나를 만드는 것뿐이다.** 리포트를 실제로 만드는 것은
-// Vercel 크론 `/api/cron/diagnosis`(시간당, Anthropic Message Batches)이고, 웹 서버 액션과
-// Edge `diagnosis-request` 는 둘 다 이 함수를 부른 뒤 자기 몫만 더한다(웹은 배치 제출과
-// revalidatePath, Edge 는 없음). 앱·Edge 는 배치를 돌리지 않는다 — 요청 행만 만들고
-// `ai_diagnoses` 를 RLS 로 폴링한다.
+// **여기서 하는 일은 요청 행 하나를 만드는 것뿐이다.** 극복법을 실제로 만드는 것은
+// `rules/diagnosis-batch.ts#submitPendingDiagnoses`(Anthropic Message Batches)이고, 웹 서버
+// 액션과 Edge `diagnosis-request` 는 둘 다 이 함수를 부른 **직후** 그 제출을 이어서 한다
+// (웹은 거기에 revalidatePath 를 더한다). Vercel 크론 `/api/cron/diagnosis`(시간당)는
+// 안전망으로 남아 제출하지 못한 요청과 앱을 닫은 사용자를 줍는다.
 //
-// 게이트가 세 겹인 이유는 전부 요금이다. 이 행이 생기면 크론이 그걸 집어 유료 모델을
-// 부르므로, 화면을 우회한 호출 하나가 그대로 청구서가 된다:
+// 게이트가 세 겹인 이유는 전부 요금이다. 이 행이 생기면 곧바로(또는 늦어도 다음 크론에)
+// 유료 모델이 불리므로, 화면을 우회한 호출 하나가 그대로 청구서가 된다:
 //   1) 프리미엄(§8.3 "AI 약점 진단 대시보드·요청" 행)
 //   2) 자격(오답 15개 ∨ 응시 3회 — 데이터가 빈약하면 진단이 뻔해져 신뢰를 깎는다)
 //   3) 주기 1회(ai_diagnoses 의 unique(user_id, diagnosis_date) + 최근 7일 창)

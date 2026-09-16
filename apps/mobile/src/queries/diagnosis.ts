@@ -3,12 +3,13 @@ import {
   isEdgeError,
   type AiDiagnosisReport,
   type DiagnosisAggregateResponse,
+  type DiagnosisCollectResponse,
   type DiagnosisConceptCoaching,
   type DiagnosisConceptSelection,
 } from "@gongmoa/core";
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useIsFocused } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { diagnosisEligibilityKey, weeklyDiagnosisKey } from "./mypage";
 import { callEdge } from "../lib/edge";
 import { STALE } from "../lib/query-client";
@@ -23,6 +24,13 @@ import { useAuth } from "../providers/auth-provider";
 // 2를 Edge 계약에 싣지 않은 이유가 그대로 여기서의 규칙이다: 진단 본문은 메모리 쿼리캐시에만
 // 둔다(앱 AGENTS.md 금지선 · §6.5 (5)). 아래 report 쿼리의 `meta.persist:false` 가 빠지면
 // 극복법 전문이 기기 디스크에 남는다.
+//
+// 기다리는 동안 두드리는 곳은 세 번째 갈래다: EF `diagnosis-collect`. 그 함수가 내 배치가
+// 끝났는지 보고 **끝났으면 그 자리에서 결과를 수거해** `ai_diagnoses.report` 를 채운다.
+// 예전에는 제출·수거를 모두 웹 크론이 시간당 한 번 해서 앱은 행이 채워지기를 기다리는 것밖에
+// 할 수 없었고(최악 "제출 대기 1시간 + 배치 + 수거 대기 1시간"), 그래서 여기 폴링도
+// `ai_diagnoses` 를 다시 읽는 것뿐이었다. 지금은 요청이 그 자리에서 배치를 내고 이 폴링이
+// 수거를 부르므로, 남는 대기는 배치 자체의 처리 시간뿐이다(대부분 1시간 안, 최대 24시간).
 //
 // 규칙은 전부 서버에 있다 — 자격·주기 잠금·개념 상한(10)은 core `rules/diagnosis-request.ts`
 // 가 판정하고 앱은 결과를 그릴 뿐이다. 여기에 문턱 숫자를 복사하지 말 것.
@@ -82,7 +90,7 @@ export const diagnosisReportKey = (userId: string) => ["me", userId, "diagnosis-
 export type DiagnosisCycleRow = {
   // KST YYYY-MM-DD. 주기 잠금의 축이자 `nextDiagnosisDate` 의 입력.
   date: string;
-  // ready = report 가 채워졌다 · pending = 요청만 있고 크론을 기다린다.
+  // ready = report 가 채워졌다 · pending = 요청 행만 있다(배치가 도는 중이거나, 아직 제출 전).
   status: "ready" | "pending";
   // 요청 시각(ISO). 대기 카드가 "N분 지났어요"를 잰다.
   requestedAt: string;
@@ -153,33 +161,62 @@ async function fetchDiagnosisReport(userId: string): Promise<DiagnosisReportView
   return { cycle, coaching: coaching ?? [], coachingDate };
 }
 
-// 리포트가 도착할 때까지 다시 묻는 간격. 웹은 10초지만 웹의 폴링은 **배치 수거까지 겸한다**
-// (checkDiagnosisProgress 가 Anthropic 에서 결과를 걷어 온다). 앱은 걷어 올 수 없고 크론이
-// 채워 주기를 기다릴 뿐이라, 같은 간격으로 두드려 봐야 DB 조회만 세 배가 된다.
-const POLL_MS = 30_000;
-// 폴링을 접기까지의 시간. 앱 경로의 리포트는 시간 단위로 걸릴 수 있어서(대기 카드 주석) 끝까지
-// 붙잡는 폴링은 배터리만 먹는다 — 여기서 멈추고 "당겨서 새로고침"으로 넘긴다. 상한은 **화면에
-// 머문 시간** 기준이라 나갔다 들어오면 다시 20분이 주어진다(어제 넣어 둔 요청을 오늘 열었을 때
-// 한 번도 안 묻고 끝나면 안 된다).
-const POLL_STOP_MS = 20 * 60_000;
+export const diagnosisCollectKey = (userId: string) => ["edge", "diagnosis-collect", userId] as const;
+
+// 수거를 다시 부르는 간격. 요청 직후 얼마간은 촘촘히 묻는다 — 개념 한두 개짜리 배치는 몇 분
+// 만에 끝나기도 해서, 그때 30초 간격이면 다 된 리포트를 눈앞에 두고 기다리게 된다.
+const POLL_FAST_MS = 15_000;
+const POLL_FAST_WINDOW_MS = 2 * 60_000;
+const POLL_SLOW_MS = 30_000;
+// **바닥은 언제나 서버가 정한다.** 응답의 `recheckSeconds`(지금 20초)보다 이르게 부르면 서버는
+// Anthropic 을 두드리지 않고 pending 만 돌려준다 — 그 왕복은 통째로 버리는 것이라, 위 간격이
+// 그보다 짧으면 서버 값으로 늘린다(아래 Math.max). 앱에 20 을 상수로 박지 않는 이유가 같은
+// 규칙이다: 요금과 레이트리밋이 걸린 판정은 서버 한 곳에만 둔다.
+
+// 폴링을 접기까지의 시간. 배치는 대부분 1시간 안에 끝나지만 보장은 24시간이라, 끝까지 붙잡는
+// 폴링은 배터리만 먹는다 — 여기서 멈추고 "앱을 닫아도 계속 만들어진다 · 당겨서 새로고침"으로
+// 넘긴다. 상한은 **화면에 머문 시간** 기준이라 나갔다 들어오면 다시 10분이 주어진다(어제 넣어
+// 둔 요청을 오늘 열었을 때 한 번도 안 묻고 끝나면 안 된다).
+const POLL_STOP_MS = 10 * 60_000;
+
+// 수거가 실패로 닫혔는데 사유가 비어 있을 때의 문구. 서버는 사유를 실어 주지만(개념별 실패
+// 목록·"배치를 찾을 수 없어요." 등) 없는 응답에 스피너를 계속 돌리지 않으려는 마지막 자리다.
+const COLLECT_FAILED_FALLBACK = "극복법을 만들지 못했어요.";
 
 export type DiagnosisReportState = {
   query: UseQueryResult<DiagnosisReportView>;
-  // 지금 30초마다 다시 묻고 있는가. false 면 상한에 걸려 접은 것이고(화면이 보이는 동안만
-  // 재는 값이다), 대기 카드가 그때 "당겨서 새로고침" 안내로 바뀐다.
+  // 지금도 수거를 다시 부르고 있는가. false 면 상한에 걸려 접었거나(화면이 보이는 동안만 재는
+  // 값이다) 실패로 닫힌 것이고, 대기 카드가 그때 안내를 바꾼다.
   polling: boolean;
+  // 수거가 본 이번 배치(제출 시각·개념 수). 집계 응답의 `generating` 은 화면에 들어온 뒤 다시
+  // 받지 않으므로(60왕복) 요청 직후에는 비어 있다 — 이 값이 그 자리를 메운다.
+  batch: { requestedAt: string; conceptCount: number } | null;
+  // 이 주기 배치가 실패로 닫혔을 때의 사유(그대로 화면에 올린다). 아니면 null.
+  failure: string | null;
+  // 요청 행은 있는데 **배치가 아직 나가지 않았다**(수거가 pending 인데 제출 시각이 없다).
+  // 제출이 막혔다는 뜻이다 — 키 미설정·제출 오류·만들 게 없음. 여기서 스피너를 계속 돌리면
+  // 영원히 안 오는 것을 기다리게 되므로 화면은 다른 카드를 그린다.
+  awaitingSubmit: boolean;
+  // 당겨서 새로고침. 리포트 재조회 + (기다리는 중이면) 수거 한 번 — 폴링을 접은 뒤에는 이것이
+  // 유일한 길이라 `enabled` 와 무관하게 도는 refetch 를 쓴다.
+  refresh: () => void;
 };
 
 // 리포트 조회 + 대기 폴링. 폴링은 **이 화면이 포커스를 가진 동안, 포그라운드에서만** 돈다:
 //   · `useIsFocused()` 가 false 면 간격을 끈다 → 화면을 떠나면 멈춘다.
 //   · TanStack 의 `refetchIntervalInBackground` 기본값이 false 라, 앱이 백그라운드로 내려가면
 //     (focusManager ← AppState, lib/query-client.ts) 간격이 스스로 쉰다.
+//   · 오프라인이면 `onlineManager` 가 쿼리를 멈춰 세운다(networkMode 기본값).
+//
+// 리포트 쿼리 자체에는 간격을 두지 않는다. 행을 다시 읽어야 하는 순간은 **수거가 ready 를
+// 말한 그때 한 번**뿐이라, 두 쿼리가 각자 돌면 같은 대기 동안 조회가 두 배가 된다.
 export function useDiagnosisReport(enabled: boolean): DiagnosisReportState {
   const { userId } = useAuth();
   const focused = useIsFocused();
-  // "어느 요청을 기다리다 접었는가". 불린이 아니라 요청 시각을 담는 이유는 되돌리기 위해서다 —
-  // 다음 주기에 새 요청을 넣으면 requestedAt 이 달라져 이 값이 저절로 어긋나고 폴링이 다시
-  // 시작된다(효과 안에서 setState 로 되돌리면 렌더가 연쇄로 돈다).
+  const queryClient = useQueryClient();
+  // "어느 대기를 기다리다 접었는가". 불린이 아니라 시각을 담는 이유는 되돌리기 위해서다 —
+  // 새 배치가 나가면 그 시각이 달라져 이 값이 저절로 어긋나고 폴링이 다시 시작된다(효과 안에서
+  // setState 로 되돌리면 렌더가 연쇄로 돈다).
   const [stoppedFor, setStoppedFor] = useState<string | null>(null);
 
   const query = useQuery<DiagnosisReportView>({
@@ -187,49 +224,121 @@ export function useDiagnosisReport(enabled: boolean): DiagnosisReportState {
     queryFn: () => fetchDiagnosisReport(userId!),
     enabled: enabled && !!userId,
     staleTime: STALE.me,
-    refetchInterval: (q) => {
-      const cycle = q.state.data?.cycle;
-      if (!focused || cycle?.status !== "pending" || stoppedFor === cycle.requestedAt) return false;
-      return POLL_MS;
-    },
     // 극복법 본문이다 — 디스크에 남기지 않는다(§6.5 (5) · 앱 AGENTS.md 금지선).
     meta: { persist: false },
   });
 
   const cycle = query.data?.cycle;
   const waitingFor = cycle?.status === "pending" ? cycle.requestedAt : null;
-  const stopped = waitingFor != null && stoppedFor === waitingFor;
+
+  // 수거 응답은 아래 useQuery 가 돌려주지만, `enabled` 는 옵션을 만드는 그 자리에서 값이
+  // 필요하다(콜백이 아니다) — 그래서 같은 값을 캐시에서 먼저 읽는다. 같은 키를 보는 쿼리가
+  // 갱신되면 이 컴포넌트가 다시 렌더되므로 두 값은 언제나 같은 것을 가리킨다.
+  const collected =
+    queryClient.getQueryData<DiagnosisCollectResponse>(diagnosisCollectKey(userId ?? "")) ?? null;
+  // 폴링을 멈추는 두 가지. 실패로 닫힌 뒤에도 계속 부르면 같은 실패를 20초마다 다시 받아 올
+  // 뿐이다(사용자가 할 일은 "다시 요청"이지 기다리는 것이 아니다).
+  const failed = collected?.status === "failed";
+  // 상한을 재는 축. 배치가 실제로 나간 시각이 있으면 그것을(재시도로 새 배치가 나가면 값이
+  // 달라져 상한이 저절로 풀린다), 아직 없으면 요청 행 시각을 쓴다.
+  const waitKey = collected?.requestedAt ?? waitingFor;
+  const stopped = waitKey != null && stoppedFor === waitKey;
+  const pollable = enabled && !!userId && waitingFor != null && focused && !stopped && !failed;
+
+  const collect = useQuery<DiagnosisCollectResponse>({
+    queryKey: diagnosisCollectKey(userId ?? ""),
+    queryFn: () => callEdge("diagnosis-collect", {}),
+    enabled: pollable,
+    refetchInterval: () => {
+      if (!pollable || waitingFor == null) return false;
+      const floor = (collected?.recheckSeconds ?? 0) * 1000;
+      const elapsed = Date.now() - Date.parse(waitingFor);
+      const base = Number.isNaN(elapsed) || elapsed > POLL_FAST_WINDOW_MS ? POLL_SLOW_MS : POLL_FAST_MS;
+      return Math.max(base, floor);
+    },
+    staleTime: STALE.edge,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    // 한 번 실패해도 여기서 다시 보내지 않는다 — 다음 간격이 어차피 같은 일을 한다.
+    retry: false,
+    meta: { persist: false },
+  });
 
   useEffect(() => {
-    // 대기 중이 아니거나, 화면을 떠났거나, 이미 접었으면 타이머를 두지 않는다.
-    if (!waitingFor || !focused || stopped) return;
-    const timer = setTimeout(() => setStoppedFor(waitingFor), POLL_STOP_MS);
+    // 대기 중이 아니거나, 화면을 떠났거나, 이미 접었거나 실패로 끝났으면 타이머를 두지 않는다.
+    if (!waitKey || !focused || stopped || failed) return;
+    const timer = setTimeout(() => setStoppedFor(waitKey), POLL_STOP_MS);
     return () => clearTimeout(timer);
-  }, [waitingFor, focused, stopped]);
+  }, [waitKey, focused, stopped, failed]);
 
-  return { query, polling: waitingFor != null && focused && !stopped };
+  // 수거가 리포트를 채웠다 — 그때 딱 한 번 행을 다시 읽는다(본문은 여전히 RLS 직접 조회다).
+  // 마이페이지 "다음 행동" 카드·홈이 보는 주기 상태도 방금 바뀌었다.
+  const collectStatus = collected?.status ?? null;
+  useEffect(() => {
+    if (collectStatus !== "ready" || !userId) return;
+    void queryClient.invalidateQueries({ queryKey: diagnosisReportKey(userId) });
+    void queryClient.invalidateQueries({ queryKey: weeklyDiagnosisKey(userId) });
+  }, [collectStatus, userId, queryClient]);
+
+  const refetchReport = query.refetch;
+  const refetchCollect = collect.refetch;
+  const refresh = useCallback(() => {
+    void refetchReport();
+    // 기다리는 중이 아니면 부르지 않는다(수거할 것이 없는데 Edge 를 깨우지 않는다).
+    if (waitingFor != null) void refetchCollect();
+  }, [refetchReport, refetchCollect, waitingFor]);
+
+  return {
+    query,
+    polling: pollable,
+    // **pending 일 때만** 실어 준다. 수거가 ready 로 끝난 응답에도 배치 시각이 들어 있어서,
+    // 그대로 넘기면 리포트가 도착한 뒤에도 대기 카드가 계속 그려진다.
+    batch:
+      collected?.status === "pending" && collected.requestedAt
+        ? { requestedAt: collected.requestedAt, conceptCount: collected.conceptCount }
+        : null,
+    failure: failed ? (collected?.error ?? COLLECT_FAILED_FALLBACK) : null,
+    awaitingSubmit: collected?.status === "pending" && collected.requestedAt == null,
+    refresh,
+  };
 }
 
 // ── 3) 요청(EF `diagnosis-request`) ──────────────────────────────────────────
 
-// "고른 N개 개념으로 극복법 받기". 응답은 요청 행의 상태뿐이다 — 리포트는 웹 크론이 채운다.
+// "고른 N개 개념으로 극복법 받기". **이 호출 안에서 배치까지 나간다**(서버가 요청 행을 만든
+// 직후 submitPendingDiagnoses 를 부른다) — 응답의 `submitted`·`generating`·`submitError` 가
+// 그 결과다. 제출이 실패해도 200 이고 요청 행은 남으므로, 화면은 `submitError` 를 그대로
+// 보여주고 시간당 웹 크론이 안전망으로 다시 집는다.
 //
 // 성공 뒤에도 **집계(diagnosis-aggregate)는 무효화하지 않는다.** 요청 한 번으로 달라지는 것은
 // 주기 상태(선택창 → 대기 카드)뿐이고 막대그래프는 같은 오답을 그대로 그리는데, 그걸 다시
 // 받으려면 60왕복이 또 든다. 화면은 아래 무효화로 되살아나는 요청 행으로 상태를 가른다.
+//
+// 인자가 빈 배열이면 서버는 요청 행의 개념 선택을 **그대로 둔다**(덮어쓰지 않는다) — 실패한
+// 진단을 같은 개념으로 다시 내는 재시도 버튼이 그 경로를 쓴다.
 export function useRequestDiagnosis() {
   const { userId } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (selectedConcepts: DiagnosisConceptSelection[]) =>
       callEdge("diagnosis-request", { selectedConcepts }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       if (!userId) return;
-      // 요청 행이 생겼다 — 대기 카드를 그리려면 requested_at·개념 수가 필요하다.
-      void queryClient.invalidateQueries({ queryKey: diagnosisReportKey(userId) });
       // 마이페이지 "다음 행동" 카드·홈이 보는 주기 상태(ready/pending)도 방금 바뀌었다.
       void queryClient.invalidateQueries({ queryKey: weeklyDiagnosisKey(userId) });
       void queryClient.invalidateQueries({ queryKey: diagnosisEligibilityKey(userId) });
+      // 지난 수거 결과는 버린다. invalidate 가 아니라 remove 인 이유: 실패로 닫힌 응답이
+      // 남아 있으면 폴링이 꺼진 채라 무효화해도 다시 묻지 않는다(disabled 쿼리는 refetch
+      // 대상이 아니다). 값을 지우면 실패 상태가 풀려 새 배치를 곧바로 따라간다.
+      queryClient.removeQueries({ queryKey: diagnosisCollectKey(userId) });
+      // **제출까지 갔을 때만** 요청 행을 다시 읽는다. 요청 행이 캐시에 들어오는 순간 화면은
+      // 선택창을 닫고 대기 카드로 바꾸는데(diagnosis-board.tsx), 제출이 막힌 경우
+      // (submitError — 고른 개념에 오답이 없다 등)에는 그게 **사유가 사라진 스피너**가 된다.
+      // 그대로 두면 선택창이 남아 사유를 보여주고 개념을 다시 골라 누를 수 있다.
+      if (res.generating || !res.submitError) {
+        void queryClient.invalidateQueries({ queryKey: diagnosisReportKey(userId) });
+      }
     },
   });
 }

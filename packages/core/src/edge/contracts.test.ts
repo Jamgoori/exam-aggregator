@@ -16,6 +16,7 @@ import type {
 import type { ReviewPrefs, ReviewSubjectOption } from "../rules/review-preferences";
 import type { DueReviewSummary } from "../rules/review-queue";
 import { FREE_MEMBERSHIP } from "../membership";
+import { DIAGNOSIS_RECHECK_SECONDS } from "../rules/diagnosis-batch";
 import type { SessionSchedule } from "../review-queue";
 import {
   EDGE_NAMES,
@@ -394,7 +395,7 @@ const mixCreateSession = {
   cached: false,
 }) satisfies EdgeResponse<"ai-diagnose">;
 
-// ── diagnosis-request / diagnosis-aggregate (§6.7 #21) ──────────────────────
+// ── diagnosis-request / diagnosis-collect / diagnosis-aggregate (§6.7 #21) ──
 ({}) satisfies EdgeRequest<"diagnosis-request">;
 ({ selectedConcepts: [{ conceptId: null, concept: "행정행위" }] }) satisfies EdgeRequest<"diagnosis-request">;
 ({
@@ -402,7 +403,36 @@ const mixCreateSession = {
   date: "2026-09-16",
   nextDate: "2026-09-23",
   selectedCount: 3,
+  // 요청한 그 자리에서 배치를 제출한다(크론을 기다리지 않는다). 아래 네 필드는 추가분이다.
+  submitted: true,
+  generating: true,
+  submitError: null,
+  recheckSeconds: DIAGNOSIS_RECHECK_SECONDS,
 }) satisfies EdgeResponse<"diagnosis-request">;
+
+({}) satisfies EdgeRequest<"diagnosis-collect">;
+({
+  status: "pending",
+  date: "2026-09-16",
+  requestedAt: "2026-09-16T03:00:00.000Z",
+  conceptCount: 3,
+  error: null,
+  recheckSeconds: DIAGNOSIS_RECHECK_SECONDS,
+}) satisfies EdgeResponse<"diagnosis-collect">;
+({
+  status: "none",
+  date: null,
+  requestedAt: null,
+  conceptCount: 0,
+  error: null,
+  recheckSeconds: DIAGNOSIS_RECHECK_SECONDS,
+}) satisfies EdgeResponse<"diagnosis-collect">;
+
+// 폴링 간격을 서버가 정한다는 계약. 앱이 이보다 자주 불러도 서버는 Anthropic 을 두드리지
+// 않고 pending 만 돌려주므로, 이 값이 0 이 되면 폴링이 그대로 레이트리밋 사고가 된다.
+test("재확인 간격은 양수다", () => {
+  assert.ok(DIAGNOSIS_RECHECK_SECONDS > 0);
+});
 
 ({}) satisfies EdgeRequest<"diagnosis-aggregate">;
 ({ days: null }) satisfies EdgeRequest<"diagnosis-aggregate">;
@@ -469,8 +499,8 @@ type _EveryEntry = { [N in EdgeName]: EdgeContracts[N] extends { request: unknow
 const _every: _EveryEntry[EdgeName] = true;
 void _every;
 
-test("EDGE_NAMES 는 배포된 함수 16개", () => {
-  assert.equal(EDGE_NAMES.length, 16);
+test("EDGE_NAMES 는 배포된 함수 17개", () => {
+  assert.equal(EDGE_NAMES.length, 17);
   assert.equal(new Set(EDGE_NAMES).size, EDGE_NAMES.length);
 });
 

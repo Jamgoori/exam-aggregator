@@ -31,7 +31,8 @@ import { themedIcon } from "../../src/theme/icons";
 // **앱이 웹과 다른 곳은 둘뿐이고 둘 다 "서버가 하는 일이 달라서"다**:
 //   1) 집계·요청은 EF(`diagnosis-aggregate`·`diagnosis-request`)로 간다. 규칙은 웹 서버
 //      액션과 같은 core 함수 하나다(rules/diagnosis-{aggregate,request}.ts).
-//   2) 리포트 본문은 `ai_diagnoses` 를 RLS 로 직접 읽고 대기 중에는 그 행만 폴링한다 —
+//   2) 리포트 본문은 `ai_diagnoses` 를 RLS 로 직접 읽고, 기다리는 동안에는 EF
+//      `diagnosis-collect` 를 불러 **배치를 직접 수거한다**(다음 정시를 기다리지 않는다).
 //      집계로 폴링하면 한 번에 60왕복이다(queries/diagnosis.ts 머리말).
 const HelpIcon = themedIcon(CircleQuestionMark);
 
@@ -109,7 +110,9 @@ function DiagnosisScreen() {
       refreshing={boardQuery.isRefetching || report.query.isRefetching}
       onRefresh={() => {
         void boardQuery.refetch();
-        void report.query.refetch();
+        // 리포트 재조회 + (기다리는 중이면) 수거 한 번. 폴링 상한(화면에 머문 10분)에 걸린
+        // 뒤에는 이것이 결과를 당겨 오는 유일한 길이다.
+        report.refresh();
       }}
     >
       <DiagnosisHeader />
@@ -138,7 +141,10 @@ function DiagnosisScreen() {
               cycle={report.query.data?.cycle ?? null}
               cycleLoaded={report.query.isSuccess}
               generating={board.generating}
+              batch={report.batch}
               polling={report.polling}
+              failure={report.failure}
+              awaitingSubmit={report.awaitingSubmit}
             />
           )
         }

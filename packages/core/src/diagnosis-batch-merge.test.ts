@@ -5,7 +5,7 @@ import {
   mergeConceptResults,
   parseBatchCustomId,
   type ConceptResult,
-} from "@/lib/diagnosis-batch-merge";
+} from "./diagnosis-batch-merge";
 
 // 배치 경로의 "개념 1개 = 요청 1건" 규칙. 여기서 어긋나면 사고가 나는 자리는 수거 시점
 // (제출 몇 분 뒤)이라 화면에서 재현하기 어렵다 — custom_id 를 잘못 되읽으면 남의 진단에

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseCoachingItems } from "@/lib/diagnosis-coach";
+import { parseCoachingItems } from "./diagnosis-coach";
 
 // 모델 응답을 화면 데이터로 되돌리는 지점. 배치 경로에서는 이 파싱이 **제출 몇 시간 뒤**
 // 에 일어나므로, 여기서 조용히 빈 배열을 돌려주면 그 주기의 극복법이 통째로 사라진다

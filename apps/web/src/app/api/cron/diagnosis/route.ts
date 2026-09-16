@@ -16,6 +16,12 @@ import { collectDiagnosisBatches, submitPendingDiagnoses } from "@/lib/diagnosis
 // (Cache Components 에서는 dynamic = "force-dynamic" 세그먼트 설정이 지원되지 않는다 —
 // 대신 connection() 을 기다려 "요청이 실제로 온 다음에 실행"임을 알린다. 이게 없으면
 // 빌드가 이 핸들러를 미리 실행하려다 실제 배치를 제출한다.)
+// 한 번에 사용자 25명분을 준비해(계정별 집계 + 오답 표본) 배치로 밀어 넣고, 진행 중인
+// 배치 200건까지 수거한다 — 기본 실행 시간으로는 모자란다. 중요한 것은 **배치를 내는 POST
+// 도중에 런타임이 함수를 죽이지 않는 것**이다: 그렇게 끊기면 배치는 만들어져 요금이 나가는데
+// batch_id 를 기록하지 못해 수거도 못 하고, 다음 실행이 같은 진단을 또 제출한다(요금 두 배).
+export const maxDuration = 300;
+
 export async function GET(request: Request) {
   await connection();
 

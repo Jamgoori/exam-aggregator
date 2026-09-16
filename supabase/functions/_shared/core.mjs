@@ -1206,9 +1206,9 @@ async function resolveStatusTargets(client, userId, items, opts = {}) {
   const siblingsByRep = /* @__PURE__ */ new Map();
   for (const p of group) {
     const rep = repByPaperId.get(p.id) ?? p.id;
-    const list = siblingsByRep.get(rep) ?? [];
-    list.push(p.id);
-    siblingsByRep.set(rep, list);
+    const list2 = siblingsByRep.get(rep) ?? [];
+    list2.push(p.id);
+    siblingsByRep.set(rep, list2);
   }
   const candidateIds = /* @__PURE__ */ new Set();
   for (const item of items) {
@@ -1277,9 +1277,9 @@ function takeWithSubjectFloor(sorted, cap, minPerSubject, caps = []) {
   const groups = /* @__PURE__ */ new Map();
   for (const it of sorted) {
     const key = it.subjectId ?? "";
-    const list = groups.get(key) ?? [];
-    list.push(it);
-    groups.set(key, list);
+    const list2 = groups.get(key) ?? [];
+    list2.push(it);
+    groups.set(key, list2);
   }
   const picked = [];
   const chosen = /* @__PURE__ */ new Set();
@@ -1300,9 +1300,9 @@ function takeWithSubjectFloor(sorted, cap, minPerSubject, caps = []) {
   if (groups.size > 1) {
     const floor = Math.max(1, Math.min(minPerSubject, Math.floor(cap / groups.size)));
     for (let i = 0; i < floor && picked.length < cap; i++) {
-      for (const list of groups.values()) {
+      for (const list2 of groups.values()) {
         if (picked.length >= cap) break;
-        const next = list[i];
+        const next = list2[i];
         if (!next) continue;
         take(next);
       }
@@ -2693,9 +2693,9 @@ async function submitReviewSessionForUser(client, admin, userId, sessionId, answ
   for (const r of gradedRows) {
     const paperIds2 = targets.get(statusTargetKey(r.paper_id, r.question_number)) ?? [r.paper_id];
     for (const paperId of paperIds2) {
-      const list = byPaper.get(paperId) ?? [];
-      list.push({ question_number: r.question_number, is_correct: r.is_correct });
-      byPaper.set(paperId, list);
+      const list2 = byPaper.get(paperId) ?? [];
+      list2.push({ question_number: r.question_number, is_correct: r.is_correct });
+      byPaper.set(paperId, list2);
     }
   }
   try {
@@ -2830,9 +2830,9 @@ function shuffleWith(arr, rand) {
 function roundRobinByPaper(items, limit, rand) {
   const byPaper = /* @__PURE__ */ new Map();
   for (const it of shuffleWith(items, rand)) {
-    const list = byPaper.get(it.paperId) ?? [];
-    list.push(it);
-    byPaper.set(it.paperId, list);
+    const list2 = byPaper.get(it.paperId) ?? [];
+    list2.push(it);
+    byPaper.set(it.paperId, list2);
   }
   const queues = shuffleWith([...byPaper.values()], rand);
   const out = [];
@@ -3224,9 +3224,9 @@ async function listMixSessions(client, admin, userId, subjectId, deps) {
   await inParallel(chunk(sessions.map((s) => s.id), 50), async (ids) => {
     const { data } = await admin.from("review_session_items").select("session_id, paper_id, question_number").in("session_id", ids).eq("is_correct", false);
     for (const r of data ?? []) {
-      const list = wrongBySession.get(r.session_id) ?? [];
-      list.push(r);
-      wrongBySession.set(r.session_id, list);
+      const list2 = wrongBySession.get(r.session_id) ?? [];
+      list2.push(r);
+      wrongBySession.set(r.session_id, list2);
     }
   });
   const pool = await deps.getMixPool(subjectId);
@@ -3859,6 +3859,942 @@ async function getPendingDiagnosisBatch(admin, userId) {
   };
 }
 
+// src/diagnosis-targets.ts
+var COACH_PER_SUBJECT = 7;
+function pickCoachTargets(agg, excludedSubjectSlugs, selected = null) {
+  if (selected && selected.length > 0) return pickSelectedConcepts(agg, selected);
+  const bySubject = /* @__PURE__ */ new Map();
+  for (const c of agg.concepts) {
+    const slug = c.subjectSlug ?? "";
+    if (slug && excludedSubjectSlugs.has(slug)) continue;
+    const list2 = bySubject.get(slug) ?? [];
+    if (list2.length >= COACH_PER_SUBJECT) continue;
+    list2.push(c);
+    bySubject.set(slug, list2);
+  }
+  const groups = [...bySubject.values()].sort(
+    (a, b) => b.reduce((n, c) => n + c.wrongCount, 0) - a.reduce((n, c) => n + c.wrongCount, 0)
+  );
+  for (const g of groups) {
+    g.sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101));
+  }
+  const picked = [];
+  for (let rank = 0; rank < COACH_PER_SUBJECT && picked.length < COACH_MAX_TOTAL; rank++) {
+    for (const g of groups) {
+      if (picked.length >= COACH_MAX_TOTAL) break;
+      if (g[rank]) picked.push(g[rank]);
+    }
+  }
+  return picked;
+}
+function pickSelectedConcepts(agg, selected) {
+  const wanted = new Set(selected.map(conceptSelectionKey));
+  const picked = [];
+  for (const c of agg.concepts) {
+    if (!wanted.has(conceptSelectionKey(c))) continue;
+    picked.push(c);
+    if (picked.length >= COACH_MAX_TOTAL) break;
+  }
+  return picked;
+}
+
+// src/diagnosis-coach.ts
+var DIAGNOSIS_MODEL_DEFAULT = "claude-opus-5";
+function resolveDiagnosisModel(envValue) {
+  return (envValue ?? "").trim() || DIAGNOSIS_MODEL_DEFAULT;
+}
+var MAX_EVIDENCE = 6;
+var MAX_STEPS = 5;
+var MAX_CHECKPOINTS = 5;
+function buildCoachingParams(targets, samples, model = DIAGNOSIS_MODEL_DEFAULT) {
+  const system = `당신은 한국 공무원·자격 시험 학습 코치입니다. 한 수험생이 개념별로 실제 틀린 문항들을 받습니다 — 발문 요약, 정답과 그 근거, 그 사람이 고른 오답 선지와 그 선지가 틀린 이유, 같은 문항을 몇 번 틀렸는지까지.
+
+당신이 쓸 것은 개념 설명이 아니라 **이 사람 한 명에 대한 진단서**입니다. 판단 기준은 하나입니다: 여기서 이 사람의 오답 기록을 빼면 남는 말이 없어야 합니다. 개념만 보고 누구에게나 쓸 수 있는 학습법(예: '기출을 반복하세요', '개념을 정리하세요')은 쓰지 마세요 — 그런 내용이라면 개념마다 미리 써 두면 되는 것이라 이 진단은 실패입니다.
+
+개념마다 아래를 씁니다.
+1) weakPattern — 이 개념에서 무너지는 지점(2~4문장). 고른 오답들에 공통으로 흐르는 판단 방식을 짚습니다.
+2) rootCause — 왜 그렇게 골랐는지(3~5문장). 무엇을 무엇으로 착각했는지, 어떤 판단 단계를 건너뛰었는지, 어떤 지식이 반쯤만 잡혀 있는지. 증상이 아니라 원인을 씁니다.
+3) evidence — 입력에 있는 문항에 한해, 문항마다 한 덩이씩. question 은 그 문항이 무엇을 물었는지 한 줄, myChoice 는 '내가고른선지'가 무엇이었고 그게 어떤 판단이었는지(기록이 없으면 null), insight 는 그 선택이 드러내는 착각. 최대 ${MAX_EVIDENCE}개.
+4) steps — 오늘부터의 극복 계획 3~${MAX_STEPS}단계. title 은 할 일 이름, detail 은 무엇을 어떻게 하는지(예: '정답 선지 5개를 옮겨 적고 각 문장에서 조건절에 밑줄'), minutes 는 예상 소요 시간(분). 순서대로 실행할 수 있어야 합니다.
+5) checkpoints — 시험장에서 같은 유형을 만났을 때 순서대로 확인할 것 3~${MAX_CHECKPOINTS}개. 각 한 줄, 생각이 아니라 동작으로.
+6) trap — 이 개념 문항에서 반복되는 함정 한 줄.
+7) howToOvercome — 처방 한 줄 요약(steps 를 한 문장으로).
+
+규칙:
+- 반드시 주어진 문항들에서 드러난 근거로만 말할 것. 입력에 없는 수치·과목·개념·판례·조문·교재명·강의명을 지어내지 말 것. 문항 수나 정답률을 다시 계산해 쓰지 말 것.
+- 표본이 적어 공통점이 안 보이면 억지로 패턴을 만들지 말고, 놓친 정답 진술이 무엇을 요구했는지와 그 개념의 핵심 함정을 근거로 쓸 것.
+- 분량은 충분히 써도 됩니다. 다만 같은 말을 표현만 바꿔 반복하지 말 것 — 길이는 근거의 개수에서 나와야 합니다.
+- 과장·위로·응원 문구 없이 담백하게. 수험생 본인에게 '~해요/~하세요' 체로 직접 말할 것.
+- 발문이 '옳지 않은 것 / 적절하지 않은 것 / 아닌 것'을 묻는 문항에서는 '고른 선지가 사실은 맞는 설명이었다', '발문의 부정 방향을 놓쳤다'를 진단으로 쓰지 말 것 — 그런 문항은 정답 하나만 틀린 진술이라 오답이면 반드시 맞는 선지를 고르게 된다. 아무나 해당하는 동어반복이라 이 수험생에 대해 아무것도 말해 주지 않는다. 이 유형에서는 '내가고른선지'가 아니라 **놓친 정답 진술(정답근거)**이 무엇을 요구했는지를 근거로 삼을 것.
+- 같은 문항을 여러 번 틀렸다면(틀린횟수 2 이상) 그 사실을 원인 분석에 반영할 것 — 한 번 보고 넘긴 것과 다시 걸린 것은 처방이 다릅니다.`;
+  const conceptKeyOf2 = (c) => c.conceptId ?? `kw:${c.concept.trim()}`;
+  const samplesByConcept = /* @__PURE__ */ new Map();
+  for (const s of samples) {
+    const list2 = samplesByConcept.get(s.conceptKey) ?? [];
+    list2.push(s);
+    samplesByConcept.set(s.conceptKey, list2);
+  }
+  const userPayload = {
+    concepts: targets.map((t) => ({
+      concept: t.concept,
+      subject: t.subject,
+      // 지식형이면 "개념을 모른다", 기능형이면 "이 유형 풀이에 약하다" 쪽으로 조언한다.
+      유형: t.conceptKind === "skill" ? "문제풀이 기능" : "지식 개념",
+      wrongCount: t.wrongCount,
+      answeredCount: t.answeredCount,
+      accuracyPct: t.accuracyPct,
+      // 이 개념에서 실제로 틀린 문항들. pickedChoice가 없으면 CBT 응시 기록이 없는
+      // 문항(섞어풀기 등)이라 "무엇을 골랐는지"는 알 수 없다.
+      wrongQuestions: (samplesByConcept.get(conceptKeyOf2(t)) ?? []).map((s) => ({
+        발문: s.questionText,
+        정답: s.correctChoice,
+        정답근거: s.correctSummary,
+        내가고른선지: s.pickedChoice,
+        그선지가틀린이유: s.pickedReason,
+        틀린횟수: s.wrongTimes,
+        // 마지막에 맞혔는지. "다시 걸렸다"와 "이미 잡았다"를 구분해 준다.
+        지금은맞히는지: s.resolved
+      }))
+    }))
+  };
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            concept: { type: "string", description: "입력에 있던 개념 이름 그대로" },
+            weakPattern: { type: "string", description: "무너지는 지점 2~4문장" },
+            rootCause: { type: "string", description: "왜 그렇게 골랐는지 3~5문장" },
+            evidence: {
+              type: "array",
+              description: `입력에 있는 오답 문항별 근거(최대 ${MAX_EVIDENCE}개)`,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  question: { type: "string" },
+                  // 응시 기록이 없어 무엇을 골랐는지 모르는 문항이 있다. 그때 지어내지
+                  // 않도록 null 을 허용한다(스키마가 문자열만 받으면 모델이 채운다).
+                  myChoice: { anyOf: [{ type: "string" }, { type: "null" }] },
+                  insight: { type: "string" }
+                },
+                required: ["question", "myChoice", "insight"]
+              }
+            },
+            steps: {
+              type: "array",
+              description: `오늘부터의 극복 계획(3~${MAX_STEPS}단계)`,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  title: { type: "string" },
+                  detail: { type: "string" },
+                  minutes: { type: "integer", description: "예상 소요 시간(분)" }
+                },
+                required: ["title", "detail", "minutes"]
+              }
+            },
+            checkpoints: {
+              type: "array",
+              description: `시험장 체크리스트(3~${MAX_CHECKPOINTS}개)`,
+              items: { type: "string" }
+            },
+            trap: { type: "string", description: "반복되는 함정 한 줄" },
+            howToOvercome: { type: "string", description: "처방 한 줄 요약" }
+          },
+          required: [
+            "concept",
+            "weakPattern",
+            "rootCause",
+            "evidence",
+            "steps",
+            "checkpoints",
+            "trap",
+            "howToOvercome"
+          ]
+        }
+      }
+    },
+    required: ["items"]
+  };
+  return {
+    model,
+    // 응답 상한은 실은 개념 수에 따라 잡는다(아래 maxTokensFor). 잘린 JSON 은 파싱에서
+    // 조용히 실패해 그 요청의 극복법이 0개가 되고, 생성은 주기당 1회라 그 개념은 그 주가
+    // 통째로 빈다(요금은 이미 나갔다). 상한은 지출 목표가 아니라 안전망이다.
+    //
+    // ⚠️ 이 값이 21,333(=128K/6)을 넘으면 SDK 가 **비스트리밍 요청을 아예 거부한다**
+    // (client.calculateNonstreamingTimeout: 10분 넘을 요청은 스트리밍 필수). 개념 1개짜리
+    // 요청(기본 경로)은 그 아래지만, 즉시 경로(diagnosis-generate.ts)는 여전히
+    // messages.stream 을 쓴다 — 여러 개념을 한 요청에 싣는 경우까지 같은 코드가 감당한다.
+    max_tokens: maxTokensFor(targets.length),
+    // effort 는 그대로 비용이다(thinking 토큰이 출력 요금으로 붙는다). 여러 문항의 오답
+    // 선지에서 공통 원인을 찾는 일이라 high 가 이상적이지만, 요금 대비 체감을 보고
+    // medium 으로 운영한다 — 프롬프트와 스키마(원인·근거·계획·체크리스트)는 그대로라
+    // 결과의 "모양"은 같고, 근거를 얼마나 파고드느냐가 달라진다.
+    // 결과가 다시 일반론으로 흐르면 개념 수를 줄이기 전에 여기를 high 로 되돌릴 것.
+    output_config: { effort: "medium", format: { type: "json_schema", schema } },
+    system,
+    messages: [
+      {
+        role: "user",
+        content: "다음은 한 수험생이 개념별로 실제 틀린 문항들입니다. 개념마다 이 사람이 무너지는 지점과 그 원인, 문항별 근거, 극복 계획을 만들어 주세요. 입력 JSON:\n" + JSON.stringify(userPayload)
+      }
+    ]
+  };
+}
+var MAX_TOKENS_BASE = 12e3;
+var MAX_TOKENS_PER_CONCEPT = 4e3;
+var MAX_TOKENS_CAP = 48e3;
+function maxTokensFor(conceptCount) {
+  return Math.min(MAX_TOKENS_CAP, MAX_TOKENS_BASE + MAX_TOKENS_PER_CONCEPT * Math.max(1, conceptCount));
+}
+function str(v) {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+function list(v, max, map) {
+  if (!Array.isArray(v)) return null;
+  const out = [];
+  for (const item of v) {
+    const mapped = map(item);
+    if (mapped) out.push(mapped);
+    if (out.length >= max) break;
+  }
+  return out.length > 0 ? out : null;
+}
+function toEvidence(item) {
+  const o = item ?? {};
+  const question = str(o.question);
+  const insight = str(o.insight);
+  if (!question || !insight) return null;
+  return { question, myChoice: str(o.myChoice), insight };
+}
+function toStep(item) {
+  const o = item ?? {};
+  const title = str(o.title);
+  const detail = str(o.detail);
+  if (!title || !detail) return null;
+  const minutes = typeof o.minutes === "number" && Number.isFinite(o.minutes) && o.minutes > 0 ? Math.round(o.minutes) : null;
+  return { title, detail, minutes };
+}
+function parseCoachingItems(responseText, targets) {
+  if (!responseText.trim()) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(responseText);
+  } catch {
+    return [];
+  }
+  const items = Array.isArray(parsed.items) ? parsed.items : [];
+  const targetByConcept = new Map(targets.map((t) => [t.concept, t]));
+  const out = [];
+  for (const raw of items) {
+    const it = raw ?? {};
+    const t = targetByConcept.get(typeof it.concept === "string" ? it.concept : "");
+    if (!t) continue;
+    const weakPattern = str(it.weakPattern);
+    const howToOvercome = str(it.howToOvercome);
+    if (!weakPattern || !howToOvercome) continue;
+    out.push({
+      concept: t.concept,
+      conceptId: t.conceptId ?? null,
+      subject: t.subject,
+      subjectSlug: t.subjectSlug,
+      weakPattern,
+      howToOvercome,
+      rootCause: str(it.rootCause),
+      evidence: list(it.evidence, MAX_EVIDENCE, toEvidence),
+      steps: list(it.steps, MAX_STEPS, toStep),
+      checkpoints: list(it.checkpoints, MAX_CHECKPOINTS, (v) => str(v)),
+      trap: str(it.trap)
+    });
+  }
+  return out;
+}
+
+// src/rules/diagnosis-samples.ts
+async function fetchAll2(admin, table, columns, apply) {
+  const rows = [];
+  let from = 0;
+  const SIZE = 1e3;
+  while (true) {
+    const base = admin.from(table).select(columns).range(from, from + SIZE - 1);
+    const q = apply(base);
+    const { data, error } = await q;
+    if (error) throw new Error(`${table} 조회 실패: ${error.message}`);
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    if (data.length < SIZE) break;
+    from += SIZE;
+  }
+  return rows;
+}
+var questionKey2 = (pid, n) => `${pid}#${n}`;
+var SAMPLE_TEXT_MAX = 240;
+function truncate(s, max = SAMPLE_TEXT_MAX) {
+  const t = (s ?? "").trim();
+  if (!t) return null;
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+async function getWrongQuestionSamples(admin, userId, targets, perConcept = 6) {
+  const wantedIds = new Set(targets.map((t) => t.conceptId).filter((v) => !!v));
+  const wantedTitles = new Set(
+    targets.filter((t) => !t.conceptId).map((t) => t.concept.trim()).filter(Boolean)
+  );
+  const displayByKey = new Map(
+    targets.map((t) => [t.conceptId ?? `kw:${t.concept.trim()}`, t.concept])
+  );
+  if (wantedIds.size === 0 && wantedTitles.size === 0) return [];
+  const statusRows = await fetchAll2(
+    admin,
+    "user_question_status",
+    "paper_id, question_number, wrong_count, last_is_correct",
+    (q) => q.eq("user_id", userId).gt("wrong_count", 0)
+  );
+  if (statusRows.length === 0) return [];
+  const paperIds = [...new Set(statusRows.map((r) => r.paper_id))];
+  const questionIdByKey = /* @__PURE__ */ new Map();
+  const paperSubject = /* @__PURE__ */ new Map();
+  for (const ids of chunk(paperIds, 100)) {
+    const qrows = await fetchAll2(
+      admin,
+      "questions",
+      "id, paper_id, question_number",
+      (q) => q.in("paper_id", ids)
+    );
+    for (const r of qrows) questionIdByKey.set(questionKey2(r.paper_id, r.question_number), r.id);
+    const prows = await fetchAll2(
+      admin,
+      "exam_papers",
+      "id, subjects(name)",
+      (q) => q.in("id", ids)
+    );
+    for (const p of prows) paperSubject.set(p.id, p.subjects?.name ?? null);
+  }
+  const questionIds = [...questionIdByKey.values()];
+  const expByQuestionId = /* @__PURE__ */ new Map();
+  for (const ids of chunk(questionIds, 100)) {
+    const rows = await fetchAll2(
+      admin,
+      "question_explanations",
+      "question_id, concept_id, keyword_title, question_text, correct_choice_number, correct_choice_summary, choice_explanations",
+      (q) => q.in("question_id", ids)
+    );
+    for (const r of rows) {
+      const hit = r.concept_id ? wantedIds.has(r.concept_id) : wantedTitles.has((r.keyword_title ?? "").trim());
+      if (hit) expByQuestionId.set(r.question_id, r);
+    }
+  }
+  if (expByQuestionId.size === 0) return [];
+  const byConcept = /* @__PURE__ */ new Map();
+  for (const st of statusRows) {
+    const qid = questionIdByKey.get(questionKey2(st.paper_id, st.question_number));
+    if (!qid) continue;
+    const exp = expByQuestionId.get(qid);
+    if (!exp) continue;
+    const ckey = exp.concept_id ?? `kw:${(exp.keyword_title ?? "").trim()}`;
+    if (!displayByKey.has(ckey)) continue;
+    const list2 = byConcept.get(ckey) ?? [];
+    list2.push({ row: exp, status: st, subject: paperSubject.get(st.paper_id) ?? null });
+    byConcept.set(ckey, list2);
+  }
+  const picked = [];
+  for (const list2 of byConcept.values()) {
+    list2.sort(
+      (a, b) => Number(a.status.last_is_correct) - Number(b.status.last_is_correct) || b.status.wrong_count - a.status.wrong_count
+    );
+    picked.push(...list2.slice(0, perConcept));
+  }
+  if (picked.length === 0) return [];
+  const pickedPaperIds = [...new Set(picked.map((c) => c.status.paper_id))];
+  const attempts = await fetchAll2(
+    admin,
+    "cbt_attempts",
+    "id, paper_id",
+    (q) => q.eq("user_id", userId).in("paper_id", pickedPaperIds)
+  );
+  const attemptPaper = new Map(attempts.map((a) => [a.id, a.paper_id]));
+  const chosenByKey = /* @__PURE__ */ new Map();
+  for (const ids of chunk([...attemptPaper.keys()], 100)) {
+    if (ids.length === 0) continue;
+    const rows = await fetchAll2(
+      admin,
+      "cbt_attempt_answers",
+      "attempt_id, question_number, selected_choice, is_correct",
+      (q) => q.in("attempt_id", ids)
+    );
+    for (const r of rows) {
+      if (r.is_correct || r.selected_choice == null) continue;
+      const paperId = attemptPaper.get(r.attempt_id);
+      if (!paperId) continue;
+      chosenByKey.set(questionKey2(paperId, r.question_number), r.selected_choice);
+    }
+  }
+  return picked.map(({ row, status, subject }) => {
+    const pickedChoice = chosenByKey.get(questionKey2(status.paper_id, status.question_number)) ?? null;
+    const choiceRow = pickedChoice != null ? (row.choice_explanations ?? []).find((c) => c?.number === pickedChoice) : void 0;
+    const reason = choiceRow ? [choiceRow.verdict_label, choiceRow.explanation].filter(Boolean).join(" — ") : null;
+    const conceptKey = row.concept_id ?? `kw:${(row.keyword_title ?? "").trim()}`;
+    return {
+      conceptKey,
+      concept: displayByKey.get(conceptKey) ?? (row.keyword_title ?? "").trim(),
+      subject,
+      questionText: truncate(row.question_text, 200),
+      correctChoice: row.correct_choice_number,
+      correctSummary: truncate(row.correct_choice_summary),
+      pickedChoice,
+      pickedReason: truncate(reason),
+      wrongTimes: status.wrong_count,
+      resolved: status.last_is_correct
+    };
+  });
+}
+
+// src/rules/diagnosis-generate.ts
+var SAMPLES_PER_CONCEPT = 8;
+function frequencyTerciles(corpusCounts) {
+  const counts = corpusCounts.filter((n) => n > 0).sort((a, b) => a - b);
+  const q1 = counts.length ? counts[Math.floor(counts.length / 3)] : 0;
+  const q2 = counts.length ? counts[Math.floor(counts.length * 2 / 3)] : 0;
+  return (n) => n <= 0 ? null : n > q2 ? 3 : n > q1 ? 2 : 1;
+}
+function toWeakConcepts(agg) {
+  const freq = frequencyTerciles(agg.concepts.map((c) => c.corpusCount));
+  return agg.concepts.map((c) => ({
+    concept: c.concept,
+    subject: c.subject,
+    subjectSlug: c.subjectSlug,
+    wrongCount: c.wrongCount,
+    // 리포트 스키마의 필드지만 진단은 더 이상 극복 여부를 세지 않는다(기간 안에
+    // 무엇을 틀렸는지만 본다). 앱이 값이 있을 때만 그리므로 null 로 둔다.
+    resolvedCount: null,
+    frequency: freq(c.corpusCount),
+    accuracyPct: c.accuracyPct
+  }));
+}
+function toSubjectTrends(agg) {
+  return agg.subjects.filter((s) => s.recentScores.length > 0).map((s) => {
+    const scores = s.recentScores;
+    let trend = "flat";
+    if (scores.length >= 2) {
+      const first = scores[0];
+      const last2 = scores[scores.length - 1];
+      if (last2 - first >= 5) trend = "up";
+      else if (first - last2 >= 5) trend = "down";
+    }
+    const last = scores[scores.length - 1];
+    const note = scores.length >= 2 ? `최근 ${scores.length}회 ${scores.join(" → ")}점.` : `최근 ${last}점.`;
+    return { subject: s.name, trend, note, scores };
+  });
+}
+function buildSummary(agg) {
+  const top = agg.concepts[0];
+  const parts = [];
+  if (top) {
+    const where = top.subject ? `${top.subject} ` : "";
+    parts.push(`가장 시급한 약점은 ${where}'${top.concept}'예요(${top.wrongCount}회 틀림).`);
+  }
+  const up = agg.subjects.find((s) => {
+    const sc = s.recentScores;
+    return sc.length >= 2 && sc[sc.length - 1] - sc[0] >= 5;
+  });
+  if (up) parts.push(`${up.name}은(는) 점수가 오르는 중이에요.`);
+  return parts.join(" ") || "오답을 개념별로 정리했어요. 하나씩 잡아봐요.";
+}
+async function planCoaching(admin, userId, excludedSubjectSlugs = /* @__PURE__ */ new Set(), selectedConcepts = null, deps = {}) {
+  const agg = await getDiagnosisAggregate(admin, userId, {
+    days: DIAGNOSIS_WINDOW_DAYS,
+    widen: false
+  });
+  if (agg.concepts.length === 0) {
+    return {
+      error: `최근 ${DIAGNOSIS_WINDOW_DAYS}일 동안 새로 틀린 문제가 없어요. 문제를 좀 더 풀고 다시 받아보세요.`
+    };
+  }
+  const picked = pickCoachTargets(agg, excludedSubjectSlugs, selectedConcepts);
+  if (picked.length === 0) {
+    return {
+      error: selectedConcepts && selectedConcepts.length > 0 ? `고른 개념에 최근 ${DIAGNOSIS_WINDOW_DAYS}일 오답이 없어요. 개념을 다시 골라주세요.` : "진단할 과목을 하나 이상 선택해주세요(고른 과목에 최근 오답이 없어요)."
+    };
+  }
+  const targets = picked.map((t) => ({
+    concept: t.concept,
+    conceptId: t.conceptId,
+    conceptKind: t.conceptKind,
+    subject: t.subject,
+    subjectSlug: t.subjectSlug,
+    wrongCount: t.wrongCount,
+    answeredCount: t.answeredCount,
+    accuracyPct: t.accuracyPct
+  }));
+  const samples = await getWrongQuestionSamples(
+    admin,
+    userId,
+    targets.map((t) => ({ conceptId: t.conceptId, concept: t.concept })),
+    SAMPLES_PER_CONCEPT
+  );
+  const model = deps.model ?? DIAGNOSIS_MODEL_DEFAULT;
+  const requests = targets.map((target, index) => ({
+    index,
+    target,
+    params: buildCoachingParams(
+      [target],
+      samples.filter((s) => s.conceptKey === conceptSelectionKey(target)),
+      model
+    )
+  }));
+  return {
+    plan: {
+      report: {
+        summary: buildSummary(agg),
+        weakConcepts: toWeakConcepts(agg),
+        subjectTrends: toSubjectTrends(agg),
+        mission: null,
+        insights: null
+      },
+      targets,
+      requests
+    }
+  };
+}
+async function saveDiagnosisReport(admin, diagnosisId, skeleton, conceptCoaching, model = DIAGNOSIS_MODEL_DEFAULT, now = /* @__PURE__ */ new Date()) {
+  const report = { ...skeleton, conceptCoaching };
+  const { error } = await admin.from("ai_diagnoses").update({ report, model, generated_at: now.toISOString() }).eq("id", diagnosisId).is("report", null);
+  return error ? { error: "진단 저장에 실패했어요." } : {};
+}
+
+// src/diagnosis-batch-merge.ts
+function batchCustomId(diagnosisId, index) {
+  return `${diagnosisId}_${index}`;
+}
+function parseBatchCustomId(customId) {
+  const at = customId.lastIndexOf("_");
+  if (at < 0) return { prefix: customId, index: null };
+  const suffix = customId.slice(at + 1);
+  if (!/^\d+$/.test(suffix)) return { prefix: customId, index: null };
+  return { prefix: customId.slice(0, at), index: Number(suffix) };
+}
+function mergeConceptResults(results, targets) {
+  const byIndex = /* @__PURE__ */ new Map();
+  const failures = [];
+  const answered = /* @__PURE__ */ new Set();
+  for (const r of results) {
+    const scoped = r.index == null ? targets : targets[r.index] ? [targets[r.index]] : [];
+    if (scoped.length === 0) continue;
+    const indices = r.index == null ? targets.map((_, i) => i) : [r.index];
+    for (const i of indices) answered.add(i);
+    if (r.status !== "succeeded") {
+      failures.push(`${scoped.map((t) => t.concept).join(", ")}: 배치 결과가 ${r.status} 상태`);
+      continue;
+    }
+    const parsed = parseCoachingItems(r.text, scoped);
+    for (const c of parsed) {
+      const i = r.index ?? targets.findIndex((t) => t.concept === c.concept);
+      if (i >= 0 && !byIndex.has(i)) byIndex.set(i, c);
+    }
+    for (const i of indices) {
+      if (!byIndex.has(i)) failures.push(`${targets[i].concept}: 모델이 극복법을 만들지 못함`);
+    }
+  }
+  for (const [i, t] of targets.entries()) {
+    if (!answered.has(i)) failures.push(`${t.concept}: 배치 결과에 없음`);
+  }
+  const coaching = targets.map((_, i) => byIndex.get(i)).filter((c) => !!c);
+  return { coaching, failures };
+}
+
+// src/rules/diagnosis-batch.ts
+var ANTHROPIC_BASE = "https://api.anthropic.com/v1/messages/batches";
+var ANTHROPIC_VERSION = "2023-06-01";
+var AnthropicRequestError = class extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "AnthropicRequestError";
+    this.status = status;
+  }
+};
+function isPermanentBatchError(e) {
+  const status = e instanceof AnthropicRequestError ? e.status : null;
+  return status === 404 || status === 401 || status === 403;
+}
+var DEFAULT_TIMEOUT_MS = 2e4;
+var DEFAULT_CREATE_TIMEOUT_MS = 9e4;
+function createAnthropicBatchTransport(opts) {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const createTimeoutMs = opts.createTimeoutMs ?? DEFAULT_CREATE_TIMEOUT_MS;
+  const headers = {
+    "x-api-key": opts.apiKey,
+    "anthropic-version": ANTHROPIC_VERSION,
+    "content-type": "application/json"
+  };
+  async function callAbsolute(url, init = {}, limitMs = timeoutMs) {
+    const res = await doFetch(url, {
+      ...init,
+      headers,
+      signal: AbortSignal.timeout(limitMs)
+    });
+    if (!res.ok) {
+      throw new AnthropicRequestError(
+        `Anthropic ${init.method ?? "GET"} → ${res.status}`,
+        res.status
+      );
+    }
+    return res;
+  }
+  function call(path, init = {}, limitMs) {
+    return callAbsolute(`${ANTHROPIC_BASE}${path}`, init, limitMs);
+  }
+  return {
+    async create(requests) {
+      const res = await call(
+        "",
+        { method: "POST", body: JSON.stringify({ requests }) },
+        createTimeoutMs
+      );
+      const body = await res.json();
+      if (!body.id) throw new Error("Anthropic 배치 응답에 id 가 없다");
+      return { id: body.id };
+    },
+    async cancel(batchId) {
+      await call(`/${batchId}/cancel`, { method: "POST" });
+    },
+    async retrieve(batchId) {
+      const res = await call(`/${batchId}`);
+      const body = await res.json();
+      return {
+        processingStatus: body.processing_status ?? "",
+        // 응답이 준 주소만 받아들이고, 그것도 api.anthropic.com 인 것만 쓴다 — 응답 한 필드에
+        // 따라 아무 주소나 부르러 가지 않는다(키가 헤더에 실려 나간다).
+        resultsUrl: typeof body.results_url === "string" && body.results_url.startsWith("https://api.anthropic.com/") ? body.results_url : null
+      };
+    },
+    results(batchId, resultsUrl) {
+      return {
+        async *[Symbol.asyncIterator]() {
+          const res = resultsUrl ? await callAbsolute(resultsUrl) : await call(`/${batchId}/results`);
+          const body = res.body;
+          if (!body) return;
+          const reader = body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          for (; ; ) {
+            const { done, value } = await reader.read();
+            buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+            for (; ; ) {
+              const nl = buffer.indexOf("\n");
+              if (nl < 0) break;
+              const line = buffer.slice(0, nl).trim();
+              buffer = buffer.slice(nl + 1);
+              const parsed = line ? safeParse(line) : null;
+              if (parsed) yield parsed;
+            }
+            if (done) break;
+          }
+          const tail = buffer.trim() ? safeParse(buffer.trim()) : null;
+          if (tail) yield tail;
+        }
+      };
+    }
+  };
+}
+function safeParse(line) {
+  try {
+    const v = JSON.parse(line);
+    return typeof v?.custom_id === "string" && v?.result ? v : null;
+  } catch {
+    return null;
+  }
+}
+var SUBMIT_BATCH_SIZE = 25;
+var MAX_ATTEMPTS_PER_DIAGNOSIS = 5;
+var SUBMIT_CLAIM_SECONDS = 120;
+var DIAGNOSIS_RECHECK_SECONDS = 20;
+var COLLECT_WORK_SECONDS = 90;
+var BATCH_SLA_HOURS = 24;
+async function submitPendingDiagnoses(admin, opts = {}, deps) {
+  const transport = deps.transport;
+  if (!transport) {
+    return { submitted: 0, skipped: 0, error: "진단 생성이 아직 설정되지 않았어요." };
+  }
+  const now = deps.now ?? /* @__PURE__ */ new Date();
+  const model = deps.model ?? DIAGNOSIS_MODEL_DEFAULT;
+  const limit = opts.limit ?? SUBMIT_BATCH_SIZE;
+  const since = new Date(now);
+  since.setDate(since.getDate() - (DIAGNOSIS_CYCLE_DAYS - 1));
+  let query = admin.from("ai_diagnoses").select("id, user_id, selected_concepts").is("report", null).gte("diagnosis_date", since.toISOString().slice(0, 10)).order("requested_at", { ascending: true }).limit(limit);
+  if (opts.userId) query = query.eq("user_id", opts.userId);
+  const { data: pendingRows } = await query;
+  const pending = pendingRows ?? [];
+  if (pending.length === 0) return { submitted: 0, skipped: 0 };
+  const { data: existing } = await admin.from("ai_diagnosis_batches").select("diagnosis_id, status").in("diagnosis_id", pending.map((p) => p.id));
+  const attempts = /* @__PURE__ */ new Map();
+  const inFlight = /* @__PURE__ */ new Set();
+  for (const row of existing ?? []) {
+    attempts.set(row.diagnosis_id, (attempts.get(row.diagnosis_id) ?? 0) + 1);
+    if (row.status === "pending") inFlight.add(row.diagnosis_id);
+  }
+  let skipped = 0;
+  const candidates = [];
+  for (const row of pending) {
+    if (inFlight.has(row.id)) continue;
+    if ((attempts.get(row.id) ?? 0) >= MAX_ATTEMPTS_PER_DIAGNOSIS) {
+      skipped++;
+      continue;
+    }
+    candidates.push(row);
+  }
+  if (candidates.length === 0) return { submitted: 0, skipped };
+  const claim = await claimForSubmit(admin, candidates.map((c) => c.id), now);
+  if (claim.error) {
+    return { submitted: 0, skipped, error: "진단 생성을 시작하지 못했어요. 잠시 후 다시 시도해주세요." };
+  }
+  const rows = candidates.filter((c) => claim.ids.has(c.id));
+  if (rows.length === 0) {
+    return {
+      submitted: 0,
+      skipped,
+      error: opts.userId ? "조금 전 요청을 처리하는 중이에요. 잠시 후 다시 시도해주세요." : void 0
+    };
+  }
+  const requests = [];
+  const items = [];
+  let lastError;
+  for (const row of rows) {
+    const { plan, error } = await planCoaching(
+      admin,
+      row.user_id,
+      // 개념을 직접 고른 요청이면 과목 제외 설정은 볼 필요가 없다(선택이 이미 과목까지
+      // 정한다). 고르지 않은 구버전 요청만 예전처럼 과목 제외로 좁힌다.
+      row.selected_concepts?.length ? /* @__PURE__ */ new Set() : await getExcludedDiagnosisSubjectSlugs(admin, row.user_id),
+      row.selected_concepts ?? null,
+      { model }
+    );
+    if (!plan) {
+      skipped++;
+      lastError = error;
+      continue;
+    }
+    for (const r of plan.requests) {
+      requests.push({ custom_id: batchCustomId(row.id, r.index), params: r.params });
+    }
+    items.push({
+      diagnosis_id: row.id,
+      user_id: row.user_id,
+      custom_id: row.id,
+      context: {
+        report: plan.report,
+        targets: plan.targets.map((t) => ({
+          concept: t.concept,
+          conceptId: t.conceptId,
+          subject: t.subject,
+          subjectSlug: t.subjectSlug
+        }))
+      }
+    });
+  }
+  if (items.length === 0) return { submitted: 0, skipped, error: lastError };
+  let batchId;
+  try {
+    batchId = (await transport.create(requests)).id;
+  } catch {
+    return {
+      submitted: 0,
+      skipped,
+      error: "진단 생성을 시작하지 못했어요. 잠시 후 다시 시도해주세요."
+    };
+  }
+  const { error: insertError } = await admin.from("ai_diagnosis_batches").insert(
+    items.map((it) => ({
+      diagnosis_id: it.diagnosis_id,
+      user_id: it.user_id,
+      batch_id: batchId,
+      custom_id: it.custom_id,
+      model,
+      context: it.context,
+      status: "pending"
+    }))
+  );
+  if (insertError) {
+    await transport.cancel?.(batchId).catch(() => {
+    });
+    return { submitted: 0, skipped, batchId, error: "진단 요청 기록에 실패했어요." };
+  }
+  return { submitted: items.length, skipped, batchId, error: lastError };
+}
+async function claimForSubmit(admin, ids, now) {
+  if (ids.length === 0) return { ids: /* @__PURE__ */ new Set() };
+  const cutoff = new Date(now.getTime() - SUBMIT_CLAIM_SECONDS * 1e3).toISOString();
+  const { data, error } = await admin.from("ai_diagnoses").update({ batch_claimed_at: now.toISOString() }).in("id", ids).is("report", null).lt("batch_claimed_at", cutoff).select("id");
+  if (error) return { ids: /* @__PURE__ */ new Set(), error: error.message };
+  return { ids: new Set((data ?? []).map((r) => r.id)) };
+}
+async function collectDiagnosisBatches(admin, opts = {}, deps) {
+  const transport = deps.transport;
+  if (!transport) return { ready: 0, failed: 0, pending: 0 };
+  const now = deps.now ?? /* @__PURE__ */ new Date();
+  const model = deps.model ?? DIAGNOSIS_MODEL_DEFAULT;
+  let query = admin.from("ai_diagnosis_batches").select("id").eq("status", "pending").order("requested_at", { ascending: true }).limit(opts.limit ?? 200);
+  if (opts.userId) query = query.eq("user_id", opts.userId);
+  const { data } = await query;
+  const ids = (data ?? []).map((r) => r.id);
+  if (ids.length === 0) return { ready: 0, failed: 0, pending: 0 };
+  const items = await claimForCollect(admin, ids, now);
+  const out = { ready: 0, failed: 0, pending: ids.length - items.length };
+  if (items.length === 0) return out;
+  const byBatch = /* @__PURE__ */ new Map();
+  for (const it of items) {
+    const list2 = byBatch.get(it.batch_id) ?? [];
+    list2.push(it);
+    byBatch.set(it.batch_id, list2);
+  }
+  for (const [batchId, group] of byBatch) {
+    let batch;
+    try {
+      batch = await transport.retrieve(batchId);
+    } catch (e) {
+      if (!isPermanentBatchError(e)) {
+        out.pending += group.length;
+        continue;
+      }
+      const stale = group.filter(
+        (g) => now.getTime() - Date.parse(g.requested_at) >= BATCH_SLA_HOURS * 36e5
+      );
+      if (stale.length === 0) {
+        out.pending += group.length;
+        continue;
+      }
+      await closeItems(admin, stale.map((g) => g.id), "failed", "배치를 찾을 수 없어요.", now);
+      out.failed += stale.length;
+      out.pending += group.length - stale.length;
+      continue;
+    }
+    if (batch.processingStatus !== "ended") {
+      out.pending += group.length;
+      continue;
+    }
+    await extendCollectLease(admin, group.map((g) => g.id), now);
+    const byPrefix = new Map(group.map((g) => [g.custom_id, g]));
+    const gathered = /* @__PURE__ */ new Map();
+    try {
+      for await (const line of transport.results(batchId, batch.resultsUrl)) {
+        const { prefix, index } = parseBatchCustomId(line.custom_id);
+        const item = byPrefix.get(prefix);
+        if (!item) continue;
+        const list2 = gathered.get(item.id) ?? [];
+        gathered.set(item.id, list2);
+        if (line.result.type !== "succeeded") {
+          list2.push({ index, status: line.result.type, text: "" });
+          continue;
+        }
+        list2.push({
+          index,
+          status: "succeeded",
+          text: (line.result.message?.content ?? []).map((b) => b.type === "text" ? b.text ?? "" : "").join("")
+        });
+      }
+    } catch {
+      out.pending += group.length;
+      continue;
+    }
+    for (const item of group) {
+      const conceptResults = gathered.get(item.id);
+      if (!conceptResults) {
+        await closeItems(admin, [item.id], "failed", "배치 결과에 이 요청이 없어요.", now);
+        out.failed++;
+        continue;
+      }
+      const { coaching, failures } = mergeConceptResults(conceptResults, item.context.targets);
+      if (coaching.length === 0) {
+        await closeItems(
+          admin,
+          [item.id],
+          "failed",
+          failures.join(" / ") || "모델이 극복법을 만들지 못했어요.",
+          now
+        );
+        out.failed++;
+        continue;
+      }
+      const saved = await saveDiagnosisReport(
+        admin,
+        item.diagnosis_id,
+        item.context.report,
+        coaching,
+        model,
+        now
+      );
+      if (saved.error) {
+        out.pending++;
+        continue;
+      }
+      await closeItems(
+        admin,
+        [item.id],
+        "ready",
+        failures.length > 0 ? failures.join(" / ") : null,
+        now
+      );
+      out.ready++;
+    }
+  }
+  return out;
+}
+async function claimForCollect(admin, ids, now) {
+  const cutoff = new Date(now.getTime() - DIAGNOSIS_RECHECK_SECONDS * 1e3).toISOString();
+  const { data } = await admin.from("ai_diagnosis_batches").update({ last_checked_at: now.toISOString() }).in("id", ids).eq("status", "pending").lt("last_checked_at", cutoff).select("id, diagnosis_id, user_id, batch_id, custom_id, requested_at, context");
+  return data ?? [];
+}
+async function extendCollectLease(admin, ids, now) {
+  if (ids.length === 0) return;
+  const until = new Date(now.getTime() + COLLECT_WORK_SECONDS * 1e3).toISOString();
+  await admin.from("ai_diagnosis_batches").update({ last_checked_at: until }).in("id", ids);
+}
+async function closeItems(admin, ids, status, error, now) {
+  if (ids.length === 0) return;
+  await admin.from("ai_diagnosis_batches").update({ status, error, completed_at: now.toISOString() }).in("id", ids);
+}
+async function collectDiagnosisForUser(admin, userId, deps) {
+  const now = deps.now ?? /* @__PURE__ */ new Date();
+  const empty = { date: null, requestedAt: null, conceptCount: 0, error: null };
+  const weekly = await getWeeklyDiagnosis(admin, userId, now);
+  if (!weekly) return { status: "none", ...empty };
+  if (weekly.status === "ready") {
+    return { status: "ready", ...empty, date: weekly.date };
+  }
+  let batch = await latestBatchFor(admin, weekly.id);
+  if (!batch) return { status: "pending", ...empty, date: weekly.date };
+  if (batch.status === "pending") {
+    await collectDiagnosisBatches(admin, { userId }, deps);
+    batch = await latestBatchFor(admin, weekly.id) ?? batch;
+  }
+  const shared = {
+    date: weekly.date,
+    requestedAt: batch.requestedAt,
+    conceptCount: batch.conceptCount
+  };
+  if (batch.status === "ready") return { status: "ready", ...shared, error: null };
+  if (batch.status === "failed") return { status: "failed", ...shared, error: batch.error };
+  return { status: "pending", ...shared, error: null };
+}
+async function latestBatchFor(admin, diagnosisId) {
+  const { data } = await admin.from("ai_diagnosis_batches").select("status, error, requested_at, context").eq("diagnosis_id", diagnosisId).order("requested_at", { ascending: false }).limit(1).maybeSingle();
+  if (!data) return null;
+  const row = data;
+  return {
+    status: row.status,
+    error: row.error,
+    requestedAt: row.requested_at,
+    conceptCount: Array.isArray(row.context?.targets) ? row.context.targets.length : 0
+  };
+}
+
 // src/levels.ts
 var LEVEL_ORDER = ["9급", "7급", "5급"];
 function compareLevels(a, b) {
@@ -4317,55 +5253,19 @@ function authorNickname(metadataNickname) {
   const trimmed = metadataNickname.trim();
   return trimmed ? trimmed.slice(0, NICKNAME_MAX) : FALLBACK_NICKNAME;
 }
-
-// src/diagnosis-targets.ts
-var COACH_PER_SUBJECT = 7;
-function pickCoachTargets(agg, excludedSubjectSlugs, selected = null) {
-  if (selected && selected.length > 0) return pickSelectedConcepts(agg, selected);
-  const bySubject = /* @__PURE__ */ new Map();
-  for (const c of agg.concepts) {
-    const slug = c.subjectSlug ?? "";
-    if (slug && excludedSubjectSlugs.has(slug)) continue;
-    const list = bySubject.get(slug) ?? [];
-    if (list.length >= COACH_PER_SUBJECT) continue;
-    list.push(c);
-    bySubject.set(slug, list);
-  }
-  const groups = [...bySubject.values()].sort(
-    (a, b) => b.reduce((n, c) => n + c.wrongCount, 0) - a.reduce((n, c) => n + c.wrongCount, 0)
-  );
-  for (const g of groups) {
-    g.sort((a, b) => b.wrongCount - a.wrongCount || (a.accuracyPct ?? 101) - (b.accuracyPct ?? 101));
-  }
-  const picked = [];
-  for (let rank = 0; rank < COACH_PER_SUBJECT && picked.length < COACH_MAX_TOTAL; rank++) {
-    for (const g of groups) {
-      if (picked.length >= COACH_MAX_TOTAL) break;
-      if (g[rank]) picked.push(g[rank]);
-    }
-  }
-  return picked;
-}
-function pickSelectedConcepts(agg, selected) {
-  const wanted = new Set(selected.map(conceptSelectionKey));
-  const picked = [];
-  for (const c of agg.concepts) {
-    if (!wanted.has(conceptSelectionKey(c))) continue;
-    picked.push(c);
-    if (picked.length >= COACH_MAX_TOTAL) break;
-  }
-  return picked;
-}
 export {
   ANON_PREVIEW_CARDS,
   ATTENDANCE_MILESTONES,
   ATTENDANCE_MIN_QUESTIONS,
   ATTENDANCE_MIN_SECONDS_PER_QUESTION,
   ATTENDANCE_MONTHLY_MAX_DAYS,
+  AnthropicRequestError,
   BANNED_SUBSTRINGS,
   COACH_PER_SUBJECT,
   COMMENT_CONTENT_MAX,
   DIAGNOSIS_LOCKED,
+  DIAGNOSIS_MODEL_DEFAULT,
+  DIAGNOSIS_RECHECK_SECONDS,
   DIAGNOSIS_WINDOW_DAYS,
   EMPTY_MIX_POOL,
   EXPLANATION_CONTENT_COLUMNS,
@@ -4416,6 +5316,8 @@ export {
   attendanceProgress,
   attendanceQuestionCount,
   authorNickname,
+  batchCustomId,
+  buildCoachingParams,
   buildMixHubIndex,
   buildMixPool,
   buildSubjectIndex,
@@ -4423,6 +5325,8 @@ export {
   collapseDuplicatePapers,
   collectAllReviewCandidates,
   collectConceptReviewCandidates,
+  collectDiagnosisBatches,
+  collectDiagnosisForUser,
   collectDueCandidates,
   collectDueQueueItems,
   collectExtraQueueItems,
@@ -4433,6 +5337,7 @@ export {
   consumeFreeExplanationQuota,
   containsProfanity,
   createAllReviewSessionForUser,
+  createAnthropicBatchTransport,
   createConceptReviewSessionForUser,
   createDueReviewSessionForUser,
   createMixSessionForUser,
@@ -4514,8 +5419,10 @@ export {
   listRecentMixSessions,
   listSubmittedReviewSessions,
   markReviewItemGuessed,
+  maxTokensFor,
   membershipDaysLeft,
   membershipFromRow,
+  mergeConceptResults,
   nextAttendanceMilestone,
   nextDiagnosisDate,
   nextSrs,
@@ -4524,21 +5431,26 @@ export {
   normalizeForProfanityCheck,
   normalizePaperSlugParam,
   paperDedupKey,
+  parseBatchCustomId,
+  parseCoachingItems,
   pickCoachTargets,
   pickRandomReviewCandidates,
   pickReviewCandidates,
   pickWeightedReviewCandidates,
+  planCoaching,
   profanityError,
   recordAttendance,
   recordQuestionResults,
   representativePaperIds,
   requestDiagnosisForUser,
+  resolveDiagnosisModel,
   resolveExplanationAccess,
   resolveStatusTargets,
   resolveWrongNoteExplanations,
   restoreSuspendedQuestions,
   reviewPickTier,
   sanitizeSelectedChoice,
+  saveDiagnosisReport,
   saveStudyPhase,
   setDailyLimit,
   setDiagnosisSubjectPaused,
@@ -4554,6 +5466,7 @@ export {
   startTrialIfEligible,
   statusTargetKey,
   submitCbtAttempt,
+  submitPendingDiagnoses,
   submitReviewSessionForUser,
   toDiagnosisBoard,
   toExplanationContent,
