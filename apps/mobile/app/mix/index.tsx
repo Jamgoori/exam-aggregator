@@ -11,7 +11,6 @@ import { ChevronRight, Shuffle } from "lucide-react-native";
 import { useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 import { AppText } from "../../src/components/app-text";
-import { LoginPrompt } from "../../src/components/login-prompt";
 import { MixSubjectPicker } from "../../src/components/mix/mix-subject-picker";
 import { QueryState } from "../../src/components/query-state";
 import { Screen } from "../../src/components/screen";
@@ -19,7 +18,6 @@ import { Skeleton } from "../../src/components/skeleton";
 import { useCatalog } from "../../src/queries/catalog";
 import { useMyBookmarkedSubjectIds } from "../../src/queries/bookmarks";
 import { useMixHub, useRecentMixSessions } from "../../src/queries/mix";
-import { useAuth } from "../../src/providers/auth-provider";
 import { themedIcon } from "../../src/theme/icons";
 
 // 메뉴(드로어)의 "섞어풀기" 입구 — 웹 app/mix/page.tsx 1:1. 섞어풀기는 과목 하나를 정해야 시작할
@@ -30,9 +28,10 @@ import { themedIcon } from "../../src/theme/icons";
 // 그대로 이어진다(?level=). 웹은 그 값이 주소에 실리지만 앱에서는 화면 상태로 든다 — 뒤로가기
 // 한 번에 급수 선택이 통째로 사라지지 않게(웹은 히스토리 항목이 하나씩 쌓인다).
 //
-// **웹과 다른 점**: 웹은 비로그인에게도 목록을 보여준다. 앱의 통로인 EF `mix-create` 는
-// hub·overview 까지 `requireUser` 뒤에 있어(내용은 공개 통계지만) 게스트에게는 로그인 안내를
-// 대신 그린다. 없는 숫자를 지어내지 않는다.
+// 로그인 전에도 화면은 보인다(웹과 같다 — 뭘 하는 기능인지 먼저 닿아야 로그인할 이유가 생긴다).
+// 목록을 주는 EF `mix-create {action:"hub"}` 가 정답을 싣지 않는 공개 통계라 인증 앞에 있고,
+// 시작은 과목 화면의 패널이 막는다. "최근 섞어풀기"·즐겨찾기 정렬은 본인 것이라 게스트에게는
+// 조회가 아예 안 걸리고(쿼리 enabled) 그 자리는 비어 있는다 — 없는 줄을 지어내지 않는다.
 const ShuffleIcon = themedIcon(Shuffle);
 const ChevronIcon = themedIcon(ChevronRight);
 
@@ -40,36 +39,22 @@ const INTRO =
   "급수와 과목을 고르면 그 과목 기출을 국가직·지방직·경찰·소방 구분 없이 섞어서 풀어요. 연도·문항 수는 다음 화면에서 고르고, 결과는 오답노트에 날짜별로 남아요.";
 
 export default function MixHubScreen() {
-  const { userId } = useAuth();
   const hub = useMixHub();
   const [level, setLevel] = useState<string | null>(null);
 
-  const header = (
-    <View className="gap-2">
-      <View className="flex-row items-center gap-2">
-        <ShuffleIcon size={22} colorClassName="text-blue-600 dark:text-blue-400" />
-        <AppText variant="2xl" weight="semibold" accessibilityRole="header">
-          기출 섞어풀기
-        </AppText>
-      </View>
-      <AppText variant="sm" className="text-zinc-600 dark:text-zinc-400" pretty>
-        {INTRO}
-      </AppText>
-    </View>
-  );
-
-  if (!userId) {
-    return (
-      <Screen contentClassName="gap-6">
-        {header}
-        <LoginPrompt message="섞어풀기는 로그인 후 이용할 수 있어요" />
-      </Screen>
-    );
-  }
-
   return (
     <Screen contentClassName="gap-6" refreshing={hub.isRefetching} onRefresh={() => void hub.refetch()}>
-      {header}
+      <View className="gap-2">
+        <View className="flex-row items-center gap-2">
+          <ShuffleIcon size={22} colorClassName="text-blue-600 dark:text-blue-400" />
+          <AppText variant="2xl" weight="semibold" accessibilityRole="header">
+            기출 섞어풀기
+          </AppText>
+        </View>
+        <AppText variant="sm" className="text-zinc-600 dark:text-zinc-400" pretty>
+          {INTRO}
+        </AppText>
+      </View>
       <QueryState query={hub} skeleton={<MixHubSkeleton />}>
         {(index) => <MixHubBody index={index} level={level} onLevel={setLevel} />}
       </QueryState>

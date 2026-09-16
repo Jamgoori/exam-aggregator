@@ -3,7 +3,6 @@ import { router, useLocalSearchParams, type Href } from "expo-router";
 import { ChevronRight, Shuffle } from "lucide-react-native";
 import { Pressable, View } from "react-native";
 import { AppText } from "../../../src/components/app-text";
-import { LoginPrompt } from "../../../src/components/login-prompt";
 import { MixPracticeStarter } from "../../../src/components/mix/mix-practice-starter";
 import { MixSessionList } from "../../../src/components/mix/mix-session-list";
 import { QueryState } from "../../../src/components/query-state";
@@ -11,17 +10,17 @@ import { Screen } from "../../../src/components/screen";
 import { Skeleton } from "../../../src/components/skeleton";
 import { useMixOverview, useMixSessions } from "../../../src/queries/mix";
 import NotFoundScreen from "../../+not-found";
-import { useAuth } from "../../../src/providers/auth-provider";
 import { themedIcon } from "../../../src/theme/icons";
 
 // 기출 섞어풀기 시작 화면(웹 app/subjects/[slug]/mix/page.tsx 1:1). 메뉴 허브(/mix)·과목 화면의
 // "기출 섞어풀기" 버튼·오답노트에서 들어온다. 고를 것은 급수·연도·문항 수뿐이고, 나머지(시행처,
 // 순서, 안 푼 문제 우선, 개념 분산)는 기본값으로 흡수한다.
 //
-// **웹과 다른 점**: 웹은 로그인 전에도 패널이 보이고 시작을 누를 때 로그인으로 보낸다. 앱에서
-// 요약을 주는 EF `mix-create {action:"overview"}` 는 `requireUser` 뒤에 있어(내용은 공개 통계다)
-// 게스트에게는 머리말과 안내 목록까지만 그리고 패널 자리에 로그인 안내를 둔다 — 숫자를 지어
-// 내지 않는다.
+// 로그인 전에도 화면은 보인다(웹과 같다). 요약을 주는 EF `mix-create {action:"overview"}` 는
+// 정답을 싣지 않는 공개 통계라 인증 앞에 있고, 게스트도 문항 수·급수·연도까지 그대로 본 뒤
+// "시작"에서만 로그인으로 간다(뭘 하는 기능인지 먼저 닿아야 로그인할 이유가 생긴다) — 막는
+// 자리는 패널 하나뿐이다. 아래 "최근 섞어풀기 기록"은 본인 것이라 로그인한 사람에게만 뜬다
+// (useMixSessions 가 enabled 로 조회를 막아 게스트에게는 빈 목록이다).
 const ShuffleIcon = themedIcon(Shuffle);
 const ChevronIcon = themedIcon(ChevronRight);
 
@@ -30,10 +29,8 @@ export default function SubjectMixScreen() {
   const slug = (Array.isArray(params.slug) ? params.slug[0] : params.slug) ?? "";
   const levelRaw = Array.isArray(params.level) ? params.level[0] : params.level;
   const level = levelRaw && levelRaw.length > 0 ? levelRaw : null;
-  const { userId } = useAuth();
 
   if (!slug) return <NotFoundScreen />;
-  if (!userId) return <GuestScreen slug={slug} />;
   return <SubjectMixBody slug={slug} level={level} />;
 }
 
@@ -132,28 +129,6 @@ function SubjectMixBody({ slug, level }: { slug: string; level: string | null })
           );
         }}
       </QueryState>
-    </Screen>
-  );
-}
-
-// 게스트가 보는 자리. 요약(문항 수·급수·연도)은 서버가 로그인한 사람에게만 주므로, 뭘 하는
-// 기능인지 알려주는 문구까지만 그리고 패널 자리에 로그인 안내를 둔다.
-function GuestScreen({ slug }: { slug: string }) {
-  return (
-    <Screen contentClassName="gap-6">
-      <BackLink slug={slug} />
-      <View className="flex-row items-center gap-2">
-        <ShuffleIcon size={22} colorClassName="text-blue-600 dark:text-blue-400" />
-        <AppText variant="2xl" weight="semibold" accessibilityRole="header">
-          기출 섞어풀기
-        </AppText>
-      </View>
-      <AppText variant="sm" className="text-zinc-600 dark:text-zinc-400" pretty>
-        이 과목 기출을 시험 구분 없이 한 번에 섞어서 풀어요. 급수·연도·문항 수를 고르면 그 조건에
-        맞는 문제를 무작위로 내드려요.
-      </AppText>
-      <LoginPrompt message="섞어풀기는 로그인 후 이용할 수 있어요" />
-      <HowItWorks subjectName="이 과목" />
     </Screen>
   );
 }

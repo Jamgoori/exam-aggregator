@@ -67,6 +67,10 @@ export async function loadThemePreference(): Promise<void> {
   notify();
 }
 
+// 이 함수는 **적용을 동기로 끝낸다**(저장만 await). theme-transition.tsx 가 판이 화면을 덮은
+// 프레임에 이걸 부르고 곧바로 `Uniwind.currentTheme` 을 읽어 걷을 때 쓸 배경색을 정하므로,
+// 적용을 await 뒤로 미루면 판이 옛 색으로 걷혀 색이 튄다. 애니메이션은 호출부 몫이라 여기에는
+// 넣지 않는다.
 export async function setThemePreference(next: ThemePreference): Promise<void> {
   preference = next;
   apply(next);

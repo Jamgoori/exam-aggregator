@@ -7,6 +7,7 @@ import {
   labelMixSessions,
   type MixCreateHubResponse,
   type MixCreateOverviewResponse,
+  type MixCreateResponse,
   type MixCreateSessionResponse,
   type MixYearRange,
 } from "@gongmoa/core";
@@ -21,9 +22,11 @@ import type { MixSessionCard } from "../components/mix/mix-session-list";
 // 기출 섞어풀기 — EF `mix-create`(§6.7 #14). 허브(`/mix`)·시작 화면(`/subjects/[slug]/mix`)·
 // 세션 생성·재도전이 전부 이 함수 하나를 지난다. 멤버십 게이트는 없다(웹에서도 무료 — §8.3).
 //
-// **로그인이 필요하다**: hub·overview 는 내용상 공개 통계지만 EF 가 `requireUser` 뒤에 있다.
-// 그래서 화면은 비로그인 사용자에게 조회를 걸지 않고 로그인 안내를 그린다(웹 `/mix` 는 비로그인
-// 에게도 목록이 보인다 — 설계서 §12-5 에 남긴 의도적 차이).
+// **hub·overview 는 로그인 없이도 부른다** — EF 가 그 둘만 인증 앞에 두기 때문이고(공개 통계),
+// 그래서 화면도 웹처럼 게스트에게 목록·시작 패널을 그대로 그린 뒤 "시작"에서만 로그인으로
+// 보낸다. 반대로 아래 useMixSessions·useRecentMixSessions 는 본인 기록이라 로그인 전에는 조회
+// 자체를 걸지 않는다 — 게스트에게 401 이 돌아오면 handleEdgeError 가 로컬 signOut + 캐시
+// 초기화 + /login 이동을 하는데, 애초에 세션이 없는 사람에게는 엉뚱한 반응이다.
 //
 // hub·overview 는 과목 수십 개 × 문제지 수백 장을 훑는 계산이라 Edge 안에서 60초 메모를 두고
 // 있다. 앱에서도 카탈로그 등급(5분)으로 잡아 탭을 오갈 때마다 다시 세지 않게 한다. 다만 ['edge',…]
@@ -37,17 +40,32 @@ function retryEdge(failureCount: number, error: unknown): boolean {
   return failureCount < 2;
 }
 
+// hub·overview 전용 호출. **401 은 상태를 떼어 평범한 오류로 낮춘다** — 이 둘은 인증 앞에 있어
+// 401 이 올 자리가 아니고, 그래도 온다면 배포된 Edge 가 아직 옛 판(hub 까지 `requireUser` 뒤)
+// 이라는 뜻이다. 앱 배포와 Edge 재배포는 별개 절차라 그 창이 실제로 생긴다.
+// 상태를 단 채로 흘리면 화면의 QueryState 가 handleEdgeError 에 넘기고, 그쪽은 401 을 "세션이
+// 죽었다"로 받아 로컬 signOut + 캐시 초기화(문항 이미지 디스크 캐시까지) + /login 이동을 한다 —
+// 지울 세션이 없는 게스트에게는 보던 화면만 빼앗는 반응이다(패널의 begin() 이 게스트의 create
+// 호출을 아예 막는 것과 같은 이유). 서버 문구는 그대로 두므로 자리에는 안내만 남는다.
+async function callPublicMix(
+  body: { action: "hub" } | { action: "overview"; subjectSlug: string },
+): Promise<MixCreateResponse> {
+  try {
+    return await callEdge("mix-create", body);
+  } catch (e) {
+    throw isEdgeError(e) && e.status === 401 ? new Error(e.message) : e;
+  }
+}
+
 // 허브의 급수 탭·과목 목록. 단위(unit)는 집계 RPC 가 없는 환경에서 문제지 수로 떨어진다.
 export function useMixHub() {
-  const { userId } = useAuth();
   return useQuery<MixCreateHubResponse>({
     queryKey: mixHubKey,
     queryFn: async () => {
-      const res = await callEdge("mix-create", { action: "hub" });
+      const res = await callPublicMix({ action: "hub" });
       if (!isMixCreateHub(res)) throw new Error("과목 목록을 불러오지 못했어요.");
       return res;
     },
-    enabled: !!userId,
     staleTime: STALE.catalog,
     retry: retryEdge,
   });
@@ -55,15 +73,14 @@ export function useMixHub() {
 
 // 시작 화면 요약(급수·연도 교차 문항 수). 없는 과목이면 404 → 화면이 "없는 과목" 자리를 그린다.
 export function useMixOverview(slug: string) {
-  const { userId } = useAuth();
   return useQuery<MixCreateOverviewResponse>({
     queryKey: mixOverviewKey(slug),
     queryFn: async () => {
-      const res = await callEdge("mix-create", { action: "overview", subjectSlug: slug });
+      const res = await callPublicMix({ action: "overview", subjectSlug: slug });
       if (isMixCreateHub(res) || isMixCreateSession(res)) throw new Error("과목을 찾을 수 없어요.");
       return res;
     },
-    enabled: slug.length > 0 && !!userId,
+    enabled: slug.length > 0,
     staleTime: STALE.catalog,
     retry: retryEdge,
   });

@@ -1,10 +1,11 @@
 import { newItemsForLimit } from "@gongmoa/core";
 import { Check, ChevronDown, Sparkles, X } from "lucide-react-native";
 import { useEffect, useState } from "react";
-import { AccessibilityInfo, ScrollView, Pressable, View } from "react-native";
+import { ScrollView, Pressable, View } from "react-native";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from "react-native-reanimated";
 import { AppText } from "../app-text";
 import { Sheet } from "../sheet";
+import { useReduceMotion } from "../../lib/reduce-motion";
 import { themedIcon } from "../../theme/icons";
 
 // 복습이 어떻게 돌아가는지 설명하는 시트(카드 헤더의 ? 버튼) — 웹 review-guide-modal.tsx 1:1.
@@ -273,25 +274,9 @@ const TIMELINE: { ok: boolean; when: string; pct: number }[] = [
   { ok: true, when: "20일 뒤", pct: 100 },
 ];
 
-// 움직임을 줄여달라고 한 사용자에게는 처음부터 다 자란 상태로 준다 — 이 애니메이션은 장식이
-// 아니라 내용이라, 빼는 게 아니라 결과만 보여줘야 한다(웹의 prefers-reduced-motion 자리).
-function useReduceMotion(): boolean {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((v) => {
-      if (alive) setReduce(v);
-    });
-    const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduce);
-    return () => {
-      alive = false;
-      sub.remove();
-    };
-  }, []);
-  return reduce;
-}
-
 function Timeline({ visible }: { visible: boolean }) {
+  // 움직임을 줄여달라고 한 사용자에게는 처음부터 다 자란 상태로 준다 — 이 애니메이션은 장식이
+  // 아니라 내용이라, 빼는 게 아니라 결과만 보여줘야 한다(웹의 prefers-reduced-motion 자리).
   const still = useReduceMotion();
   return (
     <View className="my-3 gap-2 rounded-xl bg-zinc-50 px-3.5 py-3 dark:bg-zinc-800/50">

@@ -12,9 +12,18 @@
 //                                                           unseenCount, coveredAll }
 //   { action: "retry", sessionId, requestId? }           → 같은 모양(unseenCount/coveredAll 없음)
 //
-// hub·overview 는 **로그인과 무관한 공개 통계**다(정답을 싣지 않는다). create·retry 만 사용자
-// 행을 만든다. 멤버십 게이트는 없다 — 섞어풀기는 웹에서도 무료다(§8.3 첫 줄). 다만 세션
-// 테이블은 정책이 0이라 생성·조회는 언제나 service_role 이다.
+// hub·overview 는 **비로그인도 부를 수 있다** — 정답을 싣지 않는 공개 통계이고, 웹도 /mix 와
+// /subjects/[slug]/mix 를 로그인 전에 그대로 보여준 뒤 "시작"에서만 로그인으로 보낸다(뭘 하는
+// 기능인지 먼저 닿아야 로그인할 이유가 생긴다). create·retry 만 로그인 필수다 — 사용자 행을
+// 만드는 경로라 열지 않는다.
+// 그래서 requireUser 를 함수 머리가 아니라 create·retry 분기 **바로 앞**에서 부른다. 게스트의
+// 허브·요약 조회가 auth 왕복 한 번 없이 끝나고, 401 이 정말로 로그인이 필요한 요청에만 나간다 —
+// 앱의 401 처리는 로컬 signOut + 캐시 초기화 + /login 이동이라(apps/mobile/src/lib/edge.ts),
+// 세션이 애초에 없는 게스트에게 그게 돌면 엉뚱하다.
+// 게이트웨이는 verify_jwt=true 그대로다(config.toml 은 손대지 않는다) — supabase-js 가 비로그인
+// 일 때 anon 키를 Authorization 으로 보내므로 익명 호출이 여기까지 도달한다.
+// 멤버십 게이트는 없다 — 섞어풀기는 웹에서도 무료다(§8.3 첫 줄). 다만 세션 테이블은 정책이
+// 0이라 생성·조회는 언제나 service_role 이다.
 //
 // `retry` 는 Phase 2 가 일부러 남겨 둔 자리다(섞어풀기 기록·결과 화면의 "틀린 N문항만 다시
 // 풀기"). 문항 목록은 서버가 세션에서 직접 읽는다 — 클라이언트가 (문제지, 문항)을 보내면
@@ -68,6 +77,14 @@ async function cachedPublic<T>(key: string, load: () => Promise<T>): Promise<T> 
     for (const [k, v] of publicCache) {
       if (Date.now() - v.at >= PUBLIC_TTL_MS) publicCache.delete(k);
     }
+    // 만료된 게 하나도 없으면 위 순회는 한 칸도 못 비운다 — 인증이 앞에 없으니 없는 과목
+    // 슬러그(미존재도 메모한다)를 60초 안에 수천 개 부르면 새 키만 쌓인다. 넘치는 만큼은
+    // 넣은 순서대로 버린다(Map 은 그 순서를 지킨다). 정합성에 쓰지 않는 최선노력 캐시라
+    // 남의 항목을 밀어내도 다음 요청이 다시 만들 뿐이다.
+    for (const k of publicCache.keys()) {
+      if (publicCache.size <= 64) break;
+      publicCache.delete(k);
+    }
   }
   return value;
 }
@@ -96,10 +113,6 @@ const ACTIONS: Action[] = ["hub", "overview", "create", "retry"];
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const auth = await requireUser(req);
-  if ("error" in auth) return auth.error;
-  const userId = auth.userId;
-
   const body = await req.json().catch(() => ({}));
   const action = (typeof body?.action === "string" ? body.action : "") as Action;
   if (!ACTIONS.includes(action)) return json({ error: "잘못된 접근입니다." }, 400);
@@ -112,7 +125,10 @@ Deno.serve(async (req) => {
 
   if (action === "overview") {
     const slug = typeof body?.subjectSlug === "string" ? body.subjectSlug.trim() : "";
-    if (!slug) return json({ error: "잘못된 접근입니다." }, 400);
+    // 길이를 여기서 막는 이유는 이 값이 아래 메모의 **키**가 되기 때문이다 — 로그인 없이
+    // 부를 수 있게 된 뒤로는 아무 문자열이나 키로 쌓일 수 있다. 실제 과목 슬러그는 32자가
+    // 최대다(apps/web/scripts/seed-subjects.mjs). create 의 슬러그는 메모하지 않아 그대로 둔다.
+    if (!slug || slug.length > 64) return json({ error: "잘못된 접근입니다." }, 400);
     const overview = await cachedPublic(`overview:${slug}`, async () => {
       const subject = await getSubjectBySlug(admin, slug);
       if (!subject) return null;
@@ -125,6 +141,11 @@ Deno.serve(async (req) => {
     if (!overview) return json({ error: "과목을 찾을 수 없어요." }, 404);
     return json(overview);
   }
+
+  // 여기부터는 사용자 행을 만드는 경로다(머리말) — 로그인 없이는 401 로 끝난다.
+  const auth = await requireUser(req);
+  if ("error" in auth) return auth.error;
+  const userId = auth.userId;
 
   // 멱등 키(UUID). review-create 와 같은 방식 — review_sessions.request_id + 부분 유니크
   // 인덱스로 DB 가 판정한다(§6.6). UUID 가 아니면 무시(null): 웹도 null 이다.

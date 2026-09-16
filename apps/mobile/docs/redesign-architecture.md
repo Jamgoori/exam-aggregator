@@ -176,6 +176,7 @@ apps/mobile/src/components/                 앱 전용 컴포넌트(패키지로
 | `hover:` 계열 | `Pressable` pressed = 웹 `active:` 값(`active:bg-zinc-100`, `active:scale-[0.99]`) |
 | `transition-colors` 150ms | 색 보간 생략(즉시), 스케일만 애니메이션 |
 | `prefers-reduced-motion` | `useReducedMotion()` 으로 진입 애니메이션 비활성 |
+| 다크 전환 `::view-transition-*` 크로스페이드 0.4s | **전면 워시** 0.4s(`src/theme/theme-transition.tsx`): 덮기 160ms(바뀌기 전 배경색) → 테마 교체 → 걷기 240ms + 앞 140ms 에 판 색을 바뀐 뒤 배경색으로 이동. 스냅샷 크로스페이드가 아닌 이유는 RN 에 View Transitions 가 없고 스냅샷 라이브러리가 네이티브 모듈이라 OTA 로 못 나가기 때문 — 400ms 예산과 "하드컷을 보이지 않는다"는 결과는 같다. 동작 줄이기면 즉시 전환 |
 
 햅틱(`expo-haptics`, SDK 정렬 버전)은 웹에 없는 플랫폼 적응이라 설정에서 끌 수 있게 하고 기본은 선택지 탭 `selectionAsync`, 채점 완료 `notificationAsync(Success)` 만.
 
@@ -772,13 +773,20 @@ Phase 2 까지 머지된 상태에서 SRS·믹스를 붙였다. 전부 루트 `t
 **새 SQL 없음.** 스키마에 이미 다 있다 — 소유자가 할 일은 **Edge Function 재배포**뿐이다
 (Actions → "Edge Function 배포" 전체). 배포 전에는 새 화면이 오류를 그리지 않고 빈 상태로 남는다.
 
+**소유자 확인 뒤 고친 것(2026-09-16)**
+
+- `/mix`·`/subjects/[slug]/mix` 를 **웹처럼 비로그인에게 열었다.** 처음에는 EF `mix-create` 가
+  hub·overview 까지 `requireUser` 뒤에 있어 게스트에게 로그인 안내만 그렸는데, 소유자가 "웹처럼
+  열어"라고 해서 인증을 `create`·`retry` 분기 바로 앞으로 옮겼다. 두 조회는 정답을 싣지 않는
+  공개 통계고 웹도 같은 값을 비로그인에게 내준다. 시작 버튼만 `/login?next=` 로 보낸다(웹과 같은
+  문구·같은 순서). 앱 쪽은 hub·overview 의 401 만 상태를 떼어 평범한 오류로 낮췄다 — Edge 재배포
+  전 옛 판이 401 을 주면 `handleEdgeError` 의 401 분기(로컬 signOut + 캐시 초기화)가 게스트에게
+  돌아 보던 화면과 이미지 캐시를 빼앗기기 때문이다.
+- **다크 모드 전환에 애니메이션을 붙였다**(§4.3 모션 매핑 표 마지막 행). 웹의 View Transition
+  크로스페이드에 대응하는 전면 워시 400ms — 네이티브 의존을 늘리지 않아 OTA 로 나간다.
+
 **의도적으로 웹과 다르게 둔 것**
 
-- `/mix`·`/subjects/[slug]/mix` 가 **로그인을 요구한다.** 웹은 비로그인에게도 목록·패널을
-  보여주고 시작할 때 로그인으로 보낸다. 앱의 통로인 EF `mix-create` 는 내용상 공개 통계인
-  hub·overview 까지 `requireUser` 뒤에 있어, 게스트에게는 머리말·안내만 그리고 패널 자리에
-  로그인 안내를 둔다. 숫자를 지어내지 않는다. (열려면 `mix-create` 의 hub·overview 분기를
-  인증 앞으로 빼야 한다 — 다음 Phase 의 선택지.)
 - 카드 버튼이 **언제나 "복습 시작"** 이다. 웹은 두고 나온 세션이 있으면 "이어서 풀기"로 바뀌는데,
   그 판정에 쓰는 미제출 세션 id 는 `review-due {action:"summary"}` 응답에 없다(생성 응답의
   `resumed` 로만 온다). 눌렀을 때 서버가 그 세션을 돌려주므로 **동작은 같고**, 기기에 저장해 둔

@@ -19,8 +19,10 @@ import { Shuffle } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, ScrollView, TextInput, View } from "react-native";
 import { AppText } from "../app-text";
+import { loginHref, useCurrentHref } from "../login-link";
 import { Sheet } from "../sheet";
 import { handleEdgeError } from "../../lib/edge";
+import { useAuth } from "../../providers/auth-provider";
 import { useCreateMixSession } from "../../queries/mix";
 import { themedIcon } from "../../theme/icons";
 
@@ -31,6 +33,8 @@ import { themedIcon } from "../../theme/icons";
 // 급수가 없는 시행처(경찰·소방·해경·계리직)는 서버가 난도 등급으로 환산해 보낸다. 그 등급이
 // 섞인 칩은 "9급"이 아니라 "9급 수준"으로 부른다 — 순경 준비생에게 "9급"은 자기 시험이 아니라는
 // 신호로 읽혀 아예 안 누른다.
+//
+// 비로그인도 이 패널까지는 본다(웹과 같다). 로그인을 요구하는 자리는 begin() 하나뿐이다.
 const ShuffleIcon = themedIcon(Shuffle);
 
 type LevelGroup = MixCreateOverviewResponse["levelGroups"][number];
@@ -75,6 +79,8 @@ export function MixPracticeStarter({
   // 직접 구간 고르기를 펼쳤는지. 칩으로 끝내는 사람이 대부분이라 접어 둔다.
   const [customYear, setCustomYear] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { userId } = useAuth();
+  const current = useCurrentHref();
   const create = useCreateMixSession();
   const pending = create.isPending;
 
@@ -127,9 +133,19 @@ export function MixPracticeStarter({
   const effectiveLimit = Math.min(maxForSubject, custom.trim() ? clampMixLimit(custom) : limit);
   const isCustomActive = custom.trim().length > 0;
 
+  // 웹 begin() 과 같다: 비로그인이면 세션 생성을 부르지 않고 곧장 로그인으로 보낸다. 게스트가
+  // create 를 부르면 EF 가 401 을 주고, 그 401 은 handleEdgeError 가 로컬 signOut + 캐시 초기화로
+  // 받는다 — 지울 세션이 애초에 없는 사람에게는 엉뚱한 반응이라 여기서 끊는다. 돌아오는 자리는
+  // 지금 이 화면이라(next = 현재 경로) 다시 누르기만 하면 된다.
   async function begin() {
     if (pending) return;
     setError(null);
+    if (!userId) {
+      router.push(
+        `${loginHref(current)}&error=${encodeURIComponent("로그인 후 섞어풀기를 시작할 수 있어요")}` as Href,
+      );
+      return;
+    }
     try {
       const res = await create.mutateAsync({
         subjectSlug,
