@@ -50,18 +50,24 @@ function parseArgs(argv) {
   return args;
 }
 
-async function pageAll(supabase, table, select) {
+// 키셋(cursor) 페이징. offset(range) 페이징은 깊은 페이지에서 매번 앞쪽을 다시 읽어,
+// questions/question_explanations 처럼 10만 행대가 되면 statement timeout 으로 감사가
+// 통째로 죽는다 (실측: 2026-09-17 question_explanations 10만 행에서 발생). key 는
+// 유일·정렬 가능한 열이어야 하고(uuid pk 등), select 에 없으면 자동으로 끼워 넣는다.
+async function pageAll(supabase, table, select, key = "id") {
+  const cols = select.split(",").map((c) => c.trim());
+  const query = cols.includes(key) ? select : `${key}, ${select}`;
   const rows = [];
   const PAGE = 1000;
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from(table)
-      .select(select)
-      .order(select.split(",")[0].trim())
-      .range(from, from + PAGE - 1);
+  let cursor = null;
+  for (;;) {
+    let q = supabase.from(table).select(query).order(key).limit(PAGE);
+    if (cursor !== null) q = q.gt(key, cursor);
+    const { data, error } = await q;
     if (error) throw new Error(`${table} 조회 실패: ${error.message}`);
     rows.push(...(data ?? []));
-    if (data.length < PAGE) break;
+    if (!data || data.length < PAGE) break;
+    cursor = data[data.length - 1][key];
   }
   return rows;
 }
@@ -85,7 +91,7 @@ async function main() {
       "exam_papers",
       "id, title, exam_type_id, year, level, round, track, subject_id",
     ),
-    await pageAll(supabase, "paper_answers", "paper_id, answers, voided_questions"),
+    await pageAll(supabase, "paper_answers", "paper_id, answers, voided_questions", "paper_id"),
   ];
   const typeName = new Map(examTypes.map((t) => [t.id, t.name]));
   const subjectName = new Map(subjects.map((s) => [s.id, s.name]));

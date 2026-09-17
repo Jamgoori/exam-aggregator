@@ -20,7 +20,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 | 해설 배치 루틴·해설 스크립트·해설 관련 RLS/스키마 (`next-explanation-chunk.mjs`, `save-explanations.mjs`, 루틴 프롬프트/훅) | `docs/agents/explanation-batch-routines.md` |
 | 법령 문항 해설 (생성·재생성·삭제·판별) | `docs/agents/law-explanations.md` |
 | 중복 시험지 표시 통합 (`dedup-papers.ts`, 목록에 같은 시험지가 여러 장 보이는 문제) | `docs/agents/dedup-papers.md` |
-| 정답 등록·검수 (`extract-answer-keys.mjs`, `list-pending-answer-keys.mjs`, `paper_answers` 직접 조작) | `docs/agents/answer-keys-tracks.md` |
+| 정답 등록·검수 (`extract-answer-keys.mjs`, `list-pending-answer-keys.mjs`, `audit-answer-keys.mjs`, `audit-answers-witness.mjs`, `paper_answers` 직접 조작) | `docs/agents/answer-keys-tracks.md` |
 | 통합본 PDF 과목별 분리 (`split-by-toc.mjs`/`split-combined-pdf.mjs`/`split-by-subject-header.mjs`) | `docs/agents/split-combined-pdfs.md` |
 | 복습 스케줄(SRS) 상수 조정 (`packages/core/src/srs.ts`, 학습 단계·ease·leech·연체 점수) | `docs/agents/srs-tuning.md` |
 | 개념 사전 정리 (`keyword_title` 정본화, `concepts`/`concept_aliases`, 약점 진단 축, 재분류 배치 `next-concept-chunk.mjs`/`save-concepts.mjs`) | `docs/agents/concept-dictionary.md` |
