@@ -1,5 +1,11 @@
 import type { MetadataRoute } from "next";
 import { absoluteUrl } from "@/lib/site-url";
+import {
+  HUBS_FILE,
+  getSitemapData,
+  paperFileName,
+  sitemapFileUrl,
+} from "@/lib/sitemap-data";
 
 // 크롤 예산을 공개 콘텐츠(홈·과목 목록·문제지 상세)에만 쓰게 막아둔다.
 // 아래 경로들은 색인돼도 검색 결과에 아무 가치가 없거나(로그인·회원가입),
@@ -51,7 +57,42 @@ const BLOCKED_BOTS = [
   "YisouSpider",
 ];
 
-export default function robots(): MetadataRoute.Robots {
+// robots.txt 에 적을 사이트맵 목록. 인덱스 한 줄로 끝내지 않고 하위 파일 스물두 장을
+// **전부** 적는다.
+//
+// **왜.** 사이트맵 규약에는 "파일이 놓인 경로가 그 파일이 담을 수 있는 주소 범위를
+// 정한다"는 규칙이 있다 — /sitemaps/ 밑의 파일은 /sitemaps/ 로 시작하는 주소만 담을
+// 수 있다. 우리 하위 파일은 전부 /sitemaps/ 에 놓여 있으면서 / · /papers/ · /subjects/
+// · /exams/ 주소만 담는다(실측: /sitemaps/ 로 시작하는 주소가 한 건도 없다). 즉 담긴
+// 주소가 전부 범위 밖이다.
+//
+// 서치콘솔 실측이 이것과 정확히 맞는다(2026-09-17, 재제출로 인덱스를 그날 다시 읽힌
+// 뒤): 인덱스는 "성공 · 사이트맵 색인 처리 완료"인데 **발견된 페이지 0**, "읽은
+// 사이트맵" 0 행이다. 파일은 200 으로 잘 읽히고 XML 도 정상인데(검증함) 담긴 주소가
+// 한 건도 인정되지 않은 모양새다.
+//
+// robots.txt 에 적은 사이트맵은 그 위치 규칙에서 면제된다(구글 문서). 그래서 인덱스
+// 한 줄에 맡기지 않고 스물두 장을 직접 적는다. robots.txt 는 사이트맵 인덱스보다 훨씬
+// 자주 읽히기도 해서 새 파일이 잡히는 속도도 빨라진다.
+//
+// **조회가 실패하면 인덱스 한 줄로 물러선다.** robots.txt 가 깨지는 쪽이 훨씬 위험한
+// 파일이다 — 사이트 유입 전체가 여기 걸려 있으므로, 목록을 못 만드는 것보다 목록이
+// 짧은 것이 낫다.
+async function sitemapUrls(): Promise<string[]> {
+  const index = absoluteUrl("/sitemap.xml");
+  try {
+    const { paperFiles } = await getSitemapData();
+    return [
+      index,
+      sitemapFileUrl(HUBS_FILE),
+      ...paperFiles.map((f) => sitemapFileUrl(paperFileName(f.slug))),
+    ];
+  } catch {
+    return [index];
+  }
+}
+
+export default async function robots(): Promise<MetadataRoute.Robots> {
   return {
     rules: [
       {
@@ -103,7 +144,7 @@ export default function robots(): MetadataRoute.Robots {
         ],
       },
     ],
-    sitemap: absoluteUrl("/sitemap.xml"),
+    sitemap: await sitemapUrls(),
     // host 는 넣지 않는다 — 원래 Yandex 전용 비표준 지시어인 데다 값도 스킴 없는
     // 호스트명이어야 해서, 엄격한 파서에게는 robots.txt 전체가 이상해 보일 수 있다
     // (네이버 "사이트 간단 체크"가 robots.txt 를 못 찾는다고 나온 뒤 제거).
