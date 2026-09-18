@@ -3391,11 +3391,13 @@ create trigger site_stats_papers_del
   referencing old table as old_rows
   for each statement execute function site_stats_papers_deleted();
 
--- `of download_count` 라 그 컬럼을 건드리는 update 에서만 깨어난다 — 제목·태그 수정
--- 같은 흔한 update 는 카운터 행을 건드리지 않는다.
+-- 컬럼 목록(`of download_count`)은 쓸 수 없다 — Postgres 는 전이 테이블(referencing)과
+-- 컬럼 목록을 같이 지정하면 거부한다(0A000: transition tables cannot be specified for
+-- triggers with column lists). 대신 모든 update 에서 깨어나되, 더하는 값이
+-- "신규 합 - 기존 합" 이라 제목·태그만 고친 update 는 0 을 더하고 지나간다.
 drop trigger if exists site_stats_papers_dl on exam_papers;
 create trigger site_stats_papers_dl
-  after update of download_count on exam_papers
+  after update on exam_papers
   referencing old table as old_rows new table as new_rows
   for each statement execute function site_stats_papers_downloads_changed();
 
