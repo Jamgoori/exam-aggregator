@@ -23,6 +23,11 @@ export function levelColor(level: string) {
 // ── 시험 유형(직렬) 배지 — 맵 넷 ─────────────────────────────────────────────
 // 국가직/지방직/지역인재처럼 카드에서 한눈에 구분돼야 하는 직렬 배지 색상.
 // 급수(level)·과목(subject) 배지와 헷갈리지 않도록 테두리만 있는 스타일을 쓴다.
+// 군무원만 Tailwind 팔레트 대신 hex(국방색)를 직접 쓴다 — 팔레트에 올리브 계열이
+// 없고, 가장 가까운 lime 은 이미 계리직 자리다. 세 맵이 같은 세 값을 쓴다:
+// 짙은 국방색 #4a5525(글자), 옅은 국방색 #b3c084(테두리)·#f4f6ec(탭 바탕),
+// 채움 #5f6d31(흰 글자 5.65:1). 임의값 클래스는 웹·앱 양쪽에서 이미 쓰고 있다
+// (site-header.tsx 의 bg-[#12b382] 등).
 export const EXAM_TYPE_OUTLINE_CLASSES: Record<string, string> = {
   국가직: "border border-indigo-300 text-indigo-700",
   지방직: "border border-emerald-300 text-emerald-700",
@@ -36,6 +41,7 @@ export const EXAM_TYPE_OUTLINE_CLASSES: Record<string, string> = {
   기상직: "border border-teal-300 text-teal-700",
   간호직: "border border-fuchsia-300 text-fuchsia-700",
   국회직: "border border-violet-300 text-violet-700",
+  군무원: "border border-[#b3c084] text-[#4a5525]",
   한능검: "border border-rose-300 text-rose-700",
 };
 
@@ -57,6 +63,7 @@ export const EXAM_TYPE_TAB_CLASSES: Record<string, string> = {
   기상직: "border border-teal-300 bg-teal-50 text-teal-700",
   간호직: "border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700",
   국회직: "border border-violet-300 bg-violet-50 text-violet-700",
+  군무원: "border border-[#b3c084] bg-[#f4f6ec] text-[#4a5525]",
   한능검: "border border-rose-300 bg-rose-50 text-rose-700",
 };
 
@@ -80,6 +87,7 @@ export const EXAM_TYPE_FILLED_CLASSES: Record<string, string> = {
   기상직: "bg-teal-700 text-white", // 5.47:1
   간호직: "bg-fuchsia-600 text-white", // 4.71:1
   국회직: "bg-violet-600 text-white", // 5.70:1
+  군무원: "bg-[#5f6d31] text-white", // 5.65:1
   한능검: "bg-rose-600 text-white", // 4.84:1
 };
 

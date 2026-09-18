@@ -26,9 +26,9 @@ test("급수 맵에 8급이 있고 폴백은 zinc 다", () => {
   assert.equal(levelColor("없는급"), "bg-zinc-500 text-white");
 });
 
-test("시험 유형 맵 넷이 전부 나가고, 셋(테두리·탭·채움)은 같은 13종을 안다", () => {
+test("시험 유형 맵 넷이 전부 나가고, 셋(테두리·탭·채움)은 같은 14종을 안다", () => {
   const names = Object.keys(EXAM_TYPE_OUTLINE_CLASSES);
-  assert.equal(names.length, 13);
+  assert.equal(names.length, 14);
   assert.deepEqual(Object.keys(EXAM_TYPE_TAB_CLASSES), names);
   assert.deepEqual(Object.keys(EXAM_TYPE_FILLED_CLASSES), names);
   assert.ok(names.includes("한능검"));
@@ -40,6 +40,16 @@ test("시험 유형 맵 넷이 전부 나가고, 셋(테두리·탭·채움)은 
   assert.equal(papersGroupColor("경찰"), "bg-sky-700 text-white");
   assert.notEqual(papersGroupColor("경찰"), examTypeFilledColor("경찰"));
   assert.equal(papersGroupColor("9급"), undefined);
+});
+
+// 군무원은 맵 셋에 이름이 없어서 회색 폴백(bg-zinc-500)으로 그려졌다 — 카드에 배지가
+// 나오긴 하니 "빠졌다"고 보이지도 않았다. 국방색은 팔레트에 없어 hex 를 직접 쓰므로,
+// 오타 한 글자면 조용히 다시 폴백으로 떨어진다. 세 맵의 값을 그대로 못 박아 둔다.
+test("군무원은 국방색 hex 를 쓰고, 회색 폴백으로 떨어지지 않는다", () => {
+  assert.equal(examTypeColor("군무원"), "border border-[#b3c084] text-[#4a5525]");
+  assert.equal(examTypeTabColor("군무원"), "border border-[#b3c084] bg-[#f4f6ec] text-[#4a5525]");
+  assert.equal(examTypeFilledColor("군무원"), "bg-[#5f6d31] text-white");
+  assert.notEqual(examTypeFilledColor("군무원"), examTypeFilledColor("없는시행처"));
 });
 
 test("모르는 시험 유형은 zinc 폴백으로 떨어진다", () => {
