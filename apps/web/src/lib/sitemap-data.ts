@@ -36,8 +36,15 @@ export type SitemapEntry = {
 };
 
 export type SitemapPaperFile = {
-  /** 시험 슬러그("국가직-9급"). 파일 이름 papers-<slug>.xml 의 재료. */
+  /** 시험 슬러그("국가직-9급"). 파일 이름의 재료다. */
   slug: string;
+  /**
+   * 사이트맵 파일 이름("sitemap-papers-gukgajik-9geup.xml"). 파일은 루트에 놓이므로
+   * 이것이 곧 주소다. **이름은 getSitemapData 에서 한 번만 정한다** — 이름을 쓰는
+   * 곳(robots.txt·인덱스·파일 라우트)이 제각기 다시 만들면 한 곳만 어긋나도 구글이
+   * 404 를 받는다.
+   */
+  file: string;
   label: string;
   entries: SitemapEntry[];
 };
@@ -72,16 +79,68 @@ export type SitemapData = {
 //    요청이 파일 단위로 나간다.
 export const PAPER_LASTMOD_FLOOR = "2026-09-09T00:00:00+09:00";
 
-export const HUBS_FILE = "hubs.xml";
+// 사이트맵 파일은 **반드시 사이트 루트에 둔다**(/sitemap-hubs.xml). 디렉터리 밑으로
+// 내리지 말 것 — 2026-09-06 에 그렇게 했다가 색인 발견 경로가 통째로 끊겼다.
+//
+// 사이트맵 규약에는 "파일이 놓인 경로가 그 파일이 담을 수 있는 주소 범위를 정한다"는
+// 규칙이 있다. /sitemaps/ 밑의 파일은 /sitemaps/ 로 시작하는 주소만 담을 수 있는데,
+// 우리 하위 파일이 담는 것은 / · /papers/ · /subjects/ · /exams/ 뿐이라 전부 범위
+// 밖이었다. 구글 공식 문서는 이 제한을 **서치콘솔 직접 제출로만** 면제한다 —
+// robots.txt 에 적는 것으로는 풀리지 않는다(2026-09-18 에 robots.txt 에 22장을 직접
+// 적어 본 것은 이 점에서 근거가 틀렸다).
+//
+// 실측(서치콘솔 리포트 최종 업데이트 2026-09-14): 사이트맵이 내주는 4,760 URL 중
+// 구글이 아는 것은 1,559(색인 83 + 미색인 1,476)뿐이고, 사이트맵에서 받은 주소가
+// 크롤링을 기다리는 자리인 "발견됨 - 현재 색인이 생성되지 않음"이 3,776 → 0 으로
+// 비었다. 분할 전(루트의 단일 /sitemap.xml)에 구글이 알던 주소는 6,000 가까이였다.
+export const HUBS_FILE = "sitemap-hubs.xml";
 
-export function paperFileName(slug: string): string {
-  return `papers-${slug}.xml`;
+// 한글 슬러그("국가직-9급")를 파일 이름에 쓸 ASCII 로 옮긴다 → "gukgajik-9geup".
+//
+// 왜 옮기나: 한글을 그대로 쓰면 파일 이름이
+// `sitemap-papers-%EA%B5%AD%EA%B0%80%EC%A7%81-9%EA%B8%89.xml` 이 된다. 주소로는
+// 적법하지만 **사이트맵 파일 이름**으로는 이 사이트에서 검증된 적이 없는 형태고
+// (분할 전 robots.txt 에 적혀 있던 사이트맵은 ASCII 인 /sitemap.xml 하나뿐이었다),
+// 서치콘솔 사이트맵 보고서에서 어느 시험인지 읽기도 어렵다. 색인이 돌아오는지를
+// 파일 단위로 지켜봐야 하는 판이라 변수를 하나라도 줄인다.
+//
+// 표기법은 국어의 로마자 표기법에서 음운 변화(자음 동화 등)를 뺀 것이다. 표에 없는
+// 글자는 버리고 영숫자는 그대로, 공백·밑줄은 하이픈으로 둔다. 되돌릴 필요는 없다 —
+// 주소에서 시험을 찾을 때는 이 함수로 만든 이름끼리 맞춰 본다.
+const HANGUL_CHO = ["g","kk","n","d","tt","r","m","b","pp","s","ss","","j","jj","ch","k","t","p","h"];
+const HANGUL_JUNG = ["a","ae","ya","yae","eo","e","yeo","ye","o","wa","wae","oe","yo","u","wo","we","wi","yu","eu","ui","i"];
+const HANGUL_JONG = ["","k","k","k","n","n","n","t","l","k","m","l","l","l","p","l","m","p","p","t","t","ng","t","t","k","t","p","t"];
+
+export function romanizeSlug(slug: string): string {
+  let out = "";
+  for (const ch of slug) {
+    const code = ch.codePointAt(0)!;
+    if (code >= 0xac00 && code <= 0xd7a3) {
+      const i = code - 0xac00;
+      out +=
+        HANGUL_CHO[Math.floor(i / 588)] +
+        HANGUL_JUNG[Math.floor((i % 588) / 28)] +
+        HANGUL_JONG[i % 28];
+    } else if (/[a-z0-9]/i.test(ch)) {
+      out += ch.toLowerCase();
+    } else if (/[\s\-_]/.test(ch)) {
+      out += "-";
+    }
+  }
+  out = out.replace(/-+/g, "-").replace(/^-|-$/g, "");
+  // 한글도 영숫자도 없는 슬러그(기호뿐)는 이름이 빈 문자열이 된다. 그대로 두면
+  // "sitemap-papers-.xml" 이 되어 서로 구분되지 않으므로 바이트에서 뽑은 고정 길이
+  // 이름으로 물러선다. 읽을 수는 없지만 주소는 유일하고 안정적이다.
+  if (out) return out;
+  let hash = 0x811c9dc5;
+  for (const ch of slug) {
+    hash = ((hash ^ ch.codePointAt(0)!) * 0x01000193) >>> 0;
+  }
+  return `exam-${hash.toString(16).padStart(8, "0")}`;
 }
 
-/** 시험별 파일 이름에서 슬러그를 되돌린다. 형식이 아니면 null. */
-export function slugFromPaperFileName(file: string): string | null {
-  const m = /^papers-(.+)\.xml$/.exec(file);
-  return m ? m[1] : null;
+export function paperFileName(slug: string): string {
+  return `sitemap-papers-${romanizeSlug(slug)}.xml`;
 }
 
 /**
@@ -205,16 +264,31 @@ export async function getSitemapData(): Promise<SitemapData> {
     bySlug.set(slug, list);
   }
 
-  const paperFiles: SitemapPaperFile[] = combos
+  const drafts: Omit<SitemapPaperFile, "file">[] = combos
     .filter((c) => bySlug.has(c.slug))
     .map((c) => ({ slug: c.slug, label: c.label, entries: bySlug.get(c.slug)! }));
   // 시험 인덱스에 없는 조합(시행처 행이 없는 문제지 등)이 있으면 버리지 않고 한 파일에
   // 모은다 — 사이트맵에서 빠지면 그 문제지는 검색에 안 뜬다.
   for (const [slug, entries] of bySlug) {
     if (!combos.some((c) => c.slug === slug)) {
-      paperFiles.push({ slug, label: slug, entries });
+      drafts.push({ slug, label: slug, entries });
     }
   }
+
+  // 파일 이름을 확정한다. 로마자 표기는 음운 변화를 반영하지 않으므로 서로 다른 시험이
+  // 같은 이름으로 떨어질 여지가 이론상 남아 있다(지금 22개는 전부 다르다). 겹치면 한
+  // 파일이 다른 파일을 가려 그 시험의 문제지가 통째로 사이트맵에서 사라지므로 —
+  // 조용히 사라지는 것이 여기서 가장 비싼 사고다 — 뒤에 오는 쪽에 번호를 붙여 가른다.
+  const taken = new Set<string>();
+  const paperFiles: SitemapPaperFile[] = drafts.map((d) => {
+    const base = paperFileName(d.slug);
+    let file = base;
+    for (let n = 2; taken.has(file); n += 1) {
+      file = base.replace(/\.xml$/, `-${n}.xml`);
+    }
+    taken.add(file);
+    return { ...d, file };
+  });
 
   return { hubs, paperFiles, newest };
 }
@@ -272,9 +346,15 @@ export function renderSitemapIndex(
   ].join("");
 }
 
-/** 시험별 파일의 절대 주소. 슬러그에 한글이 섞이므로 반드시 인코딩한다. */
+/**
+ * 사이트맵 파일의 절대 주소. **루트에 놓는다** — 이유는 HUBS_FILE 위 주석(경로가
+ * 담을 수 있는 주소 범위를 정한다는 규약)에 적어 두었다.
+ *
+ * 이름은 romanizeSlug 를 거쳐 ASCII 만 남지만, 표에 없는 글자가 섞인 이름이 언젠가
+ * 들어오더라도 주소가 깨지지 않게 인코딩은 그대로 통과시킨다.
+ */
 export function sitemapFileUrl(file: string): string {
-  return absoluteUrl(`/sitemaps/${encodeURIComponent(file)}`);
+  return absoluteUrl(`/${encodeURIComponent(file)}`);
 }
 
 export const SITEMAP_HEADERS = {

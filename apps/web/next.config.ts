@@ -86,6 +86,31 @@ const nextConfig: NextConfig = {
       })),
     ];
   },
+  // 하위 사이트맵의 **공개 주소를 루트에 둔다** — /sitemap-hubs.xml,
+  // /sitemap-papers-<시험>.xml.
+  //
+  // 사이트맵에는 "파일이 놓인 경로가 그 파일이 담을 수 있는 주소 범위를 정한다"는
+  // 규약이 있고, 구글은 여기에 서치콘솔 직접 제출에만 예외를 둔다(robots.txt 에 적는
+  // 것으로는 안 풀린다). 2026-09-06 에 하위 파일을 /sitemaps/ 밑으로 내렸더니 담긴
+  // 주소(/ · /papers/ · /subjects/ · /exams/)가 전부 범위 밖이 되어, 사이트맵이 내주는
+  // 4,760 주소 중 구글이 아는 것이 1,559 로 주저앉고 "발견됨 - 현재 색인되지 않음"이
+  // 3,776 → 0 으로 비었다. 분할 전(루트의 단일 /sitemap.xml)에는 6,000 가까이였다.
+  //
+  // **rewrite 를 쓰는 이유.** App Router 의 경로 조각은 통째로 정적이거나 통째로
+  // 동적이어야 해서 `sitemap-[file].xml` 같은 폴더를 만들 수 없고, 시험이 22개라
+  // 폴더를 하나씩 둘 수도 없다. rewrite 는 내부 전달이라 크롤러가 보는 주소는 루트
+  // 그대로다(리다이렉트가 아니다 — 사이트맵을 301 로 넘기면 안 된다).
+  //
+  // 하이픈을 literal 로 둔 덕에 인덱스 /sitemap.xml(app/sitemap.xml/route.ts)은 여기
+  // 걸리지 않는다. :file 은 `/` 를 넘지 않으므로 /sitemap-a/b 같은 주소도 안 걸린다.
+  async rewrites() {
+    return [
+      {
+        source: "/sitemap-:file",
+        destination: "/sitemaps/sitemap-:file",
+      },
+    ];
+  },
   async headers() {
     return [
       {

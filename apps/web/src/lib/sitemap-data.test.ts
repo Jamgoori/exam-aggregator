@@ -5,9 +5,12 @@ import {
   paperFileName,
   renderSitemapIndex,
   renderUrlset,
-  slugFromPaperFileName,
+  romanizeSlug,
+  sitemapFileUrl,
+  HUBS_FILE,
   PAPER_LASTMOD_FLOOR,
 } from "@/lib/sitemap-data";
+import { SITE_URL } from "@/lib/site-url";
 
 // 2026-09-06 실측 사고: 사이트맵 인덱스의 문제지 파일 lastmod 가 전부 하한값(당시
 // 2026-09-02T00:00:00+09:00 = 09-01T15:00Z)으로 나갔다. 실제 최신 업로드는 15:54Z 라 더
@@ -68,19 +71,64 @@ test("XML 특수문자는 이스케이프한다", () => {
 
 test("인덱스는 sitemapindex 로, 하위 파일 주소를 담는다", () => {
   const xml = renderSitemapIndex([
-    { url: "https://gongmoa.kr/sitemaps/hubs.xml", lastModified: "2026-09-01T15:54:52.075Z" },
-    { url: "https://gongmoa.kr/sitemaps/papers-x.xml" },
+    { url: "https://gongmoa.kr/sitemap-hubs.xml", lastModified: "2026-09-01T15:54:52.075Z" },
+    { url: "https://gongmoa.kr/sitemap-papers-x.xml" },
   ]);
   assert.match(xml, /^<\?xml version="1\.0" encoding="UTF-8"\?><sitemapindex /);
-  assert.match(xml, /<loc>https:\/\/gongmoa\.kr\/sitemaps\/hubs\.xml<\/loc>/);
+  assert.match(xml, /<loc>https:\/\/gongmoa\.kr\/sitemap-hubs\.xml<\/loc>/);
   assert.equal((xml.match(/<sitemap>/g) ?? []).length, 2);
 });
 
-test("파일 이름 ↔ 시험 슬러그가 왕복한다 (한글 슬러그 포함)", () => {
-  for (const slug of ["국가직-9급", "경찰", "법원직-9급"]) {
-    assert.equal(slugFromPaperFileName(paperFileName(slug)), slug);
+// 2026-09-06 ~ 09-18 사고: 하위 사이트맵을 /sitemaps/ 밑에 두었더니 사이트맵 경로
+// 규약("파일이 놓인 경로가 담을 수 있는 주소 범위를 정한다")에 걸려, 담긴 주소가 한
+// 건도 인정되지 않았다. 구글은 이 제한을 서치콘솔 직접 제출에만 면제한다 —
+// robots.txt 에 적는 것으로는 안 풀린다. 그래서 파일은 루트에 둔다. 이 규칙이 깨지면
+// 사이트 유입이 통째로 멈추므로 주소 모양 자체를 못 박는다.
+test("사이트맵 파일 주소는 루트에 놓인다 — 디렉터리 밑으로 내려가면 안 된다", () => {
+  for (const file of [HUBS_FILE, "sitemap-papers-gukgajik-9geup.xml"]) {
+    const url = sitemapFileUrl(file);
+    assert.equal(url, `${SITE_URL}/${file}`);
+    // 호스트 바로 뒤에 파일 이름이 와야 한다(슬래시가 하나뿐).
+    assert.equal(new URL(url).pathname.split("/").length, 2);
   }
-  // 형식이 아니면 null — /sitemaps/[file] 이 404 로 떨어뜨리는 근거다.
-  assert.equal(slugFromPaperFileName("hubs.xml"), null);
-  assert.equal(slugFromPaperFileName("papers-국가직-9급"), null);
+});
+
+test("파일 이름은 한글을 ASCII 로 옮긴다 — 퍼센트 인코딩이 남지 않는다", () => {
+  assert.equal(paperFileName("국가직-9급"), "sitemap-papers-gukgajik-9geup.xml");
+  assert.equal(paperFileName("경찰"), "sitemap-papers-gyeongchal.xml");
+  assert.equal(paperFileName("한능검-심화"), "sitemap-papers-hanneunggeom-simhwa.xml");
+  for (const slug of ["국가직-9급", "경찰", "지역인재-9급", "계리직"]) {
+    const file = paperFileName(slug);
+    assert.match(file, /^sitemap-papers-[a-z0-9-]+\.xml$/);
+    // 인코딩이 필요 없다는 것이 요점이다 — 주소에 그대로 실린다.
+    assert.equal(encodeURIComponent(file), file);
+  }
+});
+
+// 실제 운영 중인 시험 22개. 로마자 표기는 음운 변화를 반영하지 않으므로 서로 다른
+// 시험이 같은 파일 이름으로 떨어질 여지가 이론상 남아 있다. 겹치면 한 파일이 다른
+// 파일을 가려 그 시험의 문제지가 통째로 사이트맵에서 사라진다(조용히 사라지는 것이
+// 여기서 가장 비싼 사고다). getSitemapData 가 번호를 붙여 가르지만, 애초에 안 겹치는
+// 편이 낫다 — 새 시험을 넣었을 때 여기서 먼저 걸리게 둔다.
+test("운영 중인 시험 슬러그는 파일 이름이 서로 겹치지 않는다", () => {
+  const slugs = [
+    "경력경쟁-9급", "국가직-7급", "국가직-9급", "국가직-5급", "지방직-9급",
+    "지방직-7급", "경찰", "소방", "해경", "국회직-9급", "국회직-8급",
+    "국회직-5급", "법원직-9급", "법원직-5급", "기상직-9급", "기상직-7급",
+    "지역인재-9급", "계리직", "군무원-7급", "군무원-9급", "한능검-심화",
+  ];
+  const files = slugs.map(paperFileName);
+  assert.equal(new Set(files).size, slugs.length);
+  // 허브 파일과도 겹치면 안 된다.
+  assert.equal(files.includes(HUBS_FILE), false);
+});
+
+test("표에 없는 글자뿐인 슬러그도 빈 이름이 되지 않는다", () => {
+  // "sitemap-papers-.xml" 이 되면 그런 슬러그끼리 서로 구분되지 않는다.
+  const a = romanizeSlug("!!!");
+  const b = romanizeSlug("???");
+  assert.match(a, /^exam-[0-9a-f]{8}$/);
+  assert.notEqual(a, b);
+  // 같은 입력은 언제나 같은 이름 — 주소가 흔들리면 크롤러가 매번 새 파일로 본다.
+  assert.equal(romanizeSlug("!!!"), a);
 });

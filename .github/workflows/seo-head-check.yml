@@ -42,7 +42,7 @@ jobs:
 
           # 1. 사이트맵 인덱스에서 문제지 파일 하나를 고른다(허브 파일은 제외).
           index=$(curl -sS "${hdr[@]}" --max-time 60 "$APEX/sitemap.xml" || true)
-          paper_file=$(printf '%s' "$index" | grep -o '<loc>[^<]*sitemaps/papers-[^<]*</loc>' | sed 's/<[^>]*>//g' | shuf -n 1)
+          paper_file=$(printf '%s' "$index" | grep -o '<loc>[^<]*/sitemap-papers-[^<]*</loc>' | sed 's/<[^>]*>//g' | shuf -n 1)
           if [ -z "$paper_file" ]; then
             echo "## 크롤러 head 점검" >> "$GITHUB_STEP_SUMMARY"
             echo "- ❌ /sitemap.xml 에서 시험별 문제지 파일을 찾지 못했다." >> "$GITHUB_STEP_SUMMARY"
