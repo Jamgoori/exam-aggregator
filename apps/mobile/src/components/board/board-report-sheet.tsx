@@ -1,24 +1,39 @@
-import { REPORT_DETAIL_MAX, REPORT_REASONS, type ReportReasonSlug } from "@gongmoa/core";
+import { REPORT_DETAIL_MAX, REPORT_REASONS, reportTargetLabel, type ReportReasonSlug, type ReportTargetType } from "@gongmoa/core";
 import { Flag } from "lucide-react-native";
 import { useState } from "react";
 import { Pressable, ScrollView, TextInput, View } from "react-native";
 import { AppText } from "../app-text";
 import { Button } from "../button";
 import { Sheet } from "../sheet";
-import { useReportPost } from "../../queries/board";
+import { useReportContent } from "../../queries/ugc";
 import { themedIcon } from "../../theme/icons";
 
-// 게시글 신고 시트 — **웹에 없는 화면**(스토어 UGC 요건 Apple 1.2, 설계서 §6.7 #18·§12-2 #16).
-// 그래서 베낄 웹 마크업이 없고 문구는 짧고 사실만 적는다. 사유 목록은 core REPORT_REASONS(DB check 와
-// 같은 값), 검증은 core validateReportInput(뮤테이션 안) — RPC report_post 본문이 같은 검사를 되풀이한다.
+// 콘텐츠 신고 시트 — 1라운드에는 게시글 전용이었고(**웹에 없는 화면**, 스토어 UGC 요건 Apple 1.2, 설계서
+// §6.7 #18·§12-2 #16) 2라운드에서 대상 종류(target)를 인자로 받아 건의글도 같은 화면으로 신고한다 — 제목만
+// core reportTargetLabel 로 바뀐다("게시글 신고"/"건의글 신고"; 웹 2라운드 신고 다이얼로그도 같은 조립).
+// target 을 안 주면 게시글이라 1라운드 호출부는 그대로 동작한다. RPC 는 이제 report_content 하나
+// (queries/ugc.ts — report_post 는 그 본문을 부르는 껍데기로 남아 있다).
+// 베낄 웹 마크업이 없고 문구는 짧고 사실만 적는다. 사유 목록은 core REPORT_REASONS(DB check 와
+// 같은 값), 검증은 core validateReportInput(뮤테이션 안) — RPC 본문이 같은 검사를 되풀이한다.
 // "기타"만 상세 설명이 필수다(운영자가 무엇을 봐야 할지 알 수 있어야 한다). 다른 사유는 입력란을 그리지
 // 않는다(지시대로 — 선택 입력을 두면 비운 채 보내는 사람이 대부분이라 자리만 차지한다).
 const FlagIcon = themedIcon(Flag);
 
 export const REPORT_DONE_MESSAGE = "신고를 접수했어요. 확인 후 조치할게요.";
 
-export function BoardReportSheet({ postId, visible, onClose }: { postId: string; visible: boolean; onClose: () => void }) {
-  const report = useReportPost();
+export function BoardReportSheet({
+  postId,
+  target = "board_post",
+  visible,
+  onClose,
+}: {
+  // 신고 대상 id — 이름은 1라운드 호출부 호환으로 postId 그대로(건의글이면 건의글 id).
+  postId: string;
+  target?: ReportTargetType;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const report = useReportContent();
   const [reason, setReason] = useState<ReportReasonSlug | "">("");
   const [detail, setDetail] = useState("");
   const [done, setDone] = useState(false);
@@ -34,14 +49,14 @@ export function BoardReportSheet({ postId, visible, onClose }: { postId: string;
   }
 
   function submit() {
-    report.mutate({ postId, reason, detail }, { onSuccess: () => setDone(true) });
+    report.mutate({ target, targetId: postId, reason, detail }, { onSuccess: () => setDone(true) });
   }
 
   return (
     <Sheet
       visible={visible}
       onClose={close}
-      title="게시글 신고"
+      title={`${reportTargetLabel(target)} 신고`}
       icon={<FlagIcon size={18} colorClassName="text-white" />}
       maxHeight="88%"
     >

@@ -28,9 +28,9 @@ const BUNDLE_ID = "com.gongmoa.app";
 // 앱이 여는 경로. **apps/mobile/src/lib/next-path.ts 의 ALLOWED 와 같은 기준이다** —
 // 그쪽은 로그인 복귀(`?next=`)·알림 링크를 거르는 매처이고 여기는 OS 가 보는 목록인데,
 // 둘이 갈라지면 "앱은 열렸는데 +not-found" 또는 "앱이 있는데 브라우저로 샌다"가 된다.
-// 그래서 **아직 앱에 없는 화면(건의 — Phase 5 2라운드)은 여기에도 넣지 않는다.**
-// 화면이 생기는 단계에 세 곳(이 파일 · next-path.ts · app.json 의 android.intentFilters)을
-// 같이 연다(게시판·공지는 Phase 5 1라운드에서 그렇게 열었다).
+// 그래서 **아직 앱에 없는 화면은 여기에도 넣지 않는다.** 화면이 생기는 단계에 세 곳(이 파일 ·
+// next-path.ts · app.json 의 android.intentFilters)을 같이 연다(게시판·공지는 Phase 5 1라운드,
+// 건의는 2라운드에서 그렇게 열었다 — 설계서 §5 의 ✓ 경로는 이제 전부 들어 있다).
 //
 // 주의: AASA 의 `*` 는 `/` 를 넘어서도 매칭된다(정규식의 `[^/]+` 가 아니다). 그래서
 // `/papers/*` 는 `/papers/a/b/c` 까지 잡는데, 그런 주소는 웹에도 없어서 어차피 404 다 —
@@ -53,6 +53,8 @@ const ALLOWED_PATHS = [
   "/board/*", // 상세·new·[id]/edit
   "/notices",
   "/notices/*", // 상세 — new·[id]/edit 는 위 EXCLUDED 가 앞에 서 있어 먼저 걸린다
+  "/suggestions",
+  "/suggestions/*", // 상세·new·[id]/edit
 ] as const;
 
 // 위 목록이 이미 화이트리스트라 이것들은 원래 매칭되지 않는다. 그래도 앞에 세워 두는

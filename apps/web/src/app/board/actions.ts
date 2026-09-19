@@ -5,7 +5,8 @@ import sharp from "sharp";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionUser } from "@/lib/supabase/session";
 import { boardImageOrigin } from "@/lib/board";
-import { boardImageUploadError, BOARD_IMAGE_MAX_WIDTH } from "@gongmoa/core";
+import { rpcErrorMessage } from "@/lib/blocks";
+import { boardImageUploadError, BOARD_IMAGE_MAX_WIDTH, validateReportInput } from "@gongmoa/core";
 import {
   createBoardComment as createBoardCommentRule,
   createBoardPost as createBoardPostRule,
@@ -213,5 +214,89 @@ export async function deleteBoardComment(commentId: string): Promise<BoardResult
   if ("error" in result) return { error: result.error };
 
   revalidateBoard(result.id);
+  return { success: true };
+}
+
+// ── 신고·차단 ───────────────────────────────────────────────────────────────
+// 규칙은 전부 SD RPC 본문이다(schema.sql "Phase 5 1라운드" 절의 block_user·unblock_user, 2라운드
+// 절의 report_content — 앱도 같은 함수를 부른다, 설계서 §12-2 #16). 세션 클라이언트로 부른다
+// (auth.uid() 가 본인이어야 한다 — admin 으로 부르면 null 이라 "로그인 후 이용할 수 있어요."가
+// 난다). 오류는 RPC 가 던진 문장(P0001)만 그대로, 그 밖은 앱 queries/board.ts 와 같은 한 문장.
+// 성공 시 revalidate 는 차단·해제만 — 목록·상세·댓글이 그 집합으로 걸러지므로 화면이 바뀐다.
+// 신고는 화면이 바뀌지 않는다(신고한 글은 그대로 보인다).
+
+async function reportContent(
+  targetType: "board_post" | "chat_message",
+  targetId: string,
+  input: { reason: string; detail?: string | null },
+): Promise<BoardResult> {
+  if (!isUuid(targetId)) return { error: "잘못된 접근입니다." };
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  // 클라이언트 검증과 같은 함수 — RPC 본문이 한 번 더 되풀이한다(SD 공통 규칙 (4)).
+  const validated = validateReportInput(input);
+  if ("error" in validated) return { error: validated.error };
+
+  const { error } = await supabase.rpc("report_content", {
+    p_target_type: targetType,
+    p_target_id: targetId,
+    p_reason: validated.reason,
+    p_detail: validated.detail,
+  });
+  if (error) return { error: rpcErrorMessage(error, "신고에 실패했어요. 잠시 후 다시 시도해주세요.") };
+
+  return { success: true };
+}
+
+export async function reportBoardPost(input: {
+  postId: string;
+  reason: string;
+  detail?: string | null;
+}): Promise<BoardResult> {
+  return reportContent("board_post", input.postId, input);
+}
+
+export async function reportChatMessage(input: {
+  messageId: string;
+  reason: string;
+  detail?: string | null;
+}): Promise<BoardResult> {
+  return reportContent("chat_message", input.messageId, input);
+}
+
+function revalidateBlocks() {
+  revalidatePath("/board");
+  // 글 상세는 차단한 사용자의 글이면 안내 블록으로 바뀐다 — 모든 상세를 한 번에.
+  revalidatePath("/board/[id]", "page");
+  revalidatePath("/mypage/edit");
+}
+
+// 사용자 차단(RPC block_user, 멱등 — 이미 차단했으면 그대로 성공).
+export async function blockUser(userId: string): Promise<BoardResult> {
+  if (!isUuid(userId)) return { error: "잘못된 접근입니다." };
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  const { error } = await supabase.rpc("block_user", { p_user_id: userId });
+  if (error) return { error: rpcErrorMessage(error, "차단에 실패했어요. 잠시 후 다시 시도해주세요.") };
+
+  revalidateBlocks();
+  return { success: true };
+}
+
+// 차단 해제(RPC unblock_user, 멱등). 내 정보 수정의 "차단한 사용자" 절이 부른다.
+export async function unblockUser(userId: string): Promise<BoardResult> {
+  if (!isUuid(userId)) return { error: "잘못된 접근입니다." };
+
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+
+  const { error } = await supabase.rpc("unblock_user", { p_user_id: userId });
+  if (error) return { error: rpcErrorMessage(error, "차단 해제에 실패했어요. 잠시 후 다시 시도해주세요.") };
+
+  revalidateBlocks();
   return { success: true };
 }

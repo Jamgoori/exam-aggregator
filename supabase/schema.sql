@@ -3746,3 +3746,199 @@ begin
 end $$;
 revoke all on function my_blocked_users() from public, anon;
 grant execute on function my_blocked_users() to authenticated;
+
+-- ===== 모바일 앱 재시작 Phase 5 2라운드 (2026-09-19) =====
+-- 건의게시판·채팅이 앱에 들어오고 탈퇴 정책(§12-2 #17)·신고 대상 일반화(§12-2 #16, Apple 1.2)가 붙으면서
+-- 필요해진 것들(apps/mobile/docs/redesign-architecture.md §6.7 #18·#19·#20, §7.1 탈퇴, §12-9 "2라운드로
+-- 넘긴 것"). 전부 재실행 안전(drop if exists + add 쌍 / if not exists / create or replace / 예외 무시).
+-- **운영 DB 미적용** — 위 "Phase 5 1라운드" 절도 아직 미적용이라 적용 순서는 1라운드 → 2라운드다. 1라운드
+-- 절의 문장은 고치지 않았고 바꿔야 할 것(report_post 본문·board_post_reports)은 이 절에서 뒤집는다 —
+-- 둘을 차례로 실행해도 최종 상태가 맞다. 적용 순서는 §12-2 #3(운영 SQL → Edge 배포 → 웹 재배포 → 앱).
+-- ⚠ 이 절을 적용하기 전에 새 Edge(account-delete)를 배포하면, 탈퇴 시 board_posts 등의 user_id 를 null 로
+-- 만드는 update 가 not null 제약에 걸려 "글 정리에 실패했어요" 로 탈퇴가 막힌다. SQL 이 먼저다.
+--
+-- SD 공통 규칙(§6.7 머리말, 위 절들과 같다): (1) auth.uid() 가 null 이면 raise; (2) set search_path = public;
+-- (3) 사용자 범위 조회는 where 에 user_id = auth.uid() 명시; (4) 서버 액션의 인자 검증을 본문에서 되풀이;
+-- (5) revoke all from public, anon 후 grant execute to authenticated.
+--
+-- suggestions·suggestion_comments 의 SELECT 회수, chat_messages 의 insert 회수는 그대로다 — 앱은 EF
+-- `suggestions`(읽기 포함)·`chat-send` 를 부른다. 버킷 쓰기 정책도 열지 않는다.
+
+-- ── 탈퇴 정책 #17: cascade → set null ────────────────────────────────────────
+-- "본인 글만 지우고 타인의 답글은 유지한다." 예전에는 아래 여섯 표의 user_id 가 not null + on delete
+-- cascade 라 auth.users 행이 지워질 때 원글이 통째로 사라지고 그 글에 달린 **타인의** 댓글까지 같이
+-- 지워졌다(댓글 익명화 정책과 불일치, §7.1 (2)). 이제 행은 남기고 참조만 끊는다: EF account-delete 가
+-- deleteUser **전에** user_id null + 닉네임 "탈퇴한 회원"(원글은 제목·본문까지 비움)으로 갱신하고, 그 갱신을
+-- 놓친 행이 있어도 set null 이 같은 최종 상태를 만든다(core rules/account-delete.ts).
+-- 댓글 트리의 parent_id cascade 는 그대로다 — 댓글 **행**은 지우지 않으므로 답글이 살아남는다.
+-- 인라인 references 의 자동 이름은 <table>_<column>_fkey 다(이 파일의 표는 전부 인라인 선언).
+-- drop not null 은 멱등, drop if exists + add 는 쌍이라 재실행해도 같은 제약 하나만 남는다.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['board_posts', 'suggestions', 'chat_messages',
+                           'board_comments', 'suggestion_comments', 'notice_comments'] loop
+    execute format('alter table %I alter column user_id drop not null', t);
+    execute format('alter table %I drop constraint if exists %I', t, t || '_user_id_fkey');
+    execute format(
+      'alter table %I add constraint %I foreign key (user_id) references auth.users(id) on delete set null',
+      t, t || '_user_id_fkey');
+  end loop;
+end $$;
+
+-- suggestions.answered_by 는 on delete 규칙이 없어 답한 관리자가 탈퇴하면 deleteUser 가 FK 로 실패했다.
+-- 답변 본문은 남기고 참조만 끊는다(EF 도 deleteUser 전에 null 로 만들지만 이쪽이 최종 방어선).
+alter table suggestions drop constraint if exists suggestions_answered_by_fkey;
+alter table suggestions add constraint suggestions_answered_by_fkey
+  foreign key (answered_by) references auth.users(id) on delete set null;
+
+-- notices.created_by 도 같은 사정이다(관리자 작성 흔적, on delete 규칙 없음) — 공지를 쓴 관리자가 탈퇴하면
+-- deleteUser 가 FK 로 막힌다. EF 는 DETACH 목록(core rules/account-delete.ts)에서 먼저 끊지만, 대시보드에서
+-- 계정을 지우는 경로에는 그 코드가 없으므로 answered_by 와 같은 최종 방어선을 둔다. 공지 본문은 남는다.
+alter table notices drop constraint if exists notices_created_by_fkey;
+alter table notices add constraint notices_created_by_fkey
+  foreign key (created_by) references auth.users(id) on delete set null;
+
+-- ── 신고 테이블 일반화(§12-2 #16, Apple 1.2) ──────────────────────────────────
+-- 채팅 메시지·건의글도 UGC 라 신고 대상이어야 한다. 1라운드의 board_post_reports 는 글 전용(post_id FK)이라
+-- 종류 컬럼을 가진 content_reports 로 바꾼다. target_id 에는 FK 를 걸지 않는다(종류마다 다른 표를 가리키는
+-- 다형 참조) — 대상이 지워져도 신고 행은 남고, 존재 확인은 report_content 본문이 종류별로 한다.
+create table if not exists content_reports (
+  id uuid primary key default gen_random_uuid(),
+  -- 값 목록의 정본은 packages/core/src/ugc.ts 의 REPORT_TARGET_TYPES 다 — **두 곳을 함께 고칠 것**
+  -- (REPORT_REASONS 와 같은 관례). 아래 report_content 본문의 존재 확인 분기도 같은 값이다.
+  target_type text not null,
+  target_id uuid not null,
+  reporter_id uuid not null references auth.users(id) on delete cascade,
+  -- 사유. 1라운드와 같은 목록(core REPORT_REASONS).
+  reason text not null,
+  detail text,
+  created_at timestamptz not null default now(),
+  -- 같은 사람이 같은 대상을 두 번 신고하지 않는다(더블클릭·재시도). report_content 가 이 충돌을
+  -- "이미 신고한 글이에요." 로 바꾼다.
+  unique (target_type, target_id, reporter_id)
+);
+
+do $$ begin
+  alter table content_reports add constraint content_reports_target_type_check
+    check (target_type in ('board_post', 'suggestion', 'chat_message'));
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table content_reports add constraint content_reports_reason_check
+    check (reason in ('spam', 'abuse', 'sexual', 'privacy', 'other'));
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table content_reports add constraint content_reports_detail_len
+    check (detail is null or char_length(detail) <= 500);
+exception when duplicate_object then null; end $$;
+
+create index if not exists content_reports_target_idx
+  on content_reports(target_type, target_id, created_at desc);
+
+alter table content_reports enable row level security;
+
+-- 운영자가 보는 대기열이라 select 는 관리자만. 쓰기는 아래 SD RPC 로만.
+drop policy if exists "admin read content_reports" on content_reports;
+create policy "admin read content_reports" on content_reports
+  for select to authenticated using (is_admin());
+
+revoke insert, update, delete on content_reports from anon, authenticated;
+
+-- 신고. 대상 존재 확인은 종류별로 — 건의글은 원글 접근 규칙(canReadSuggestion: 공개글은 누구나, 비밀글은
+-- 글쓴이·관리자)을 그대로 얹는다: 볼 수 없는 비밀글은 "없는 글" 이다(id 만으로 존재를 확인하는 경로가
+-- 되지 않게). 사유·상세 검증은 core validateReportInput 과 같은 값(SD 공통 규칙 (4)).
+create or replace function report_content(
+  p_target_type text,
+  p_target_id uuid,
+  p_reason text,
+  p_detail text default null
+)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_detail text;
+  v_exists boolean;
+begin
+  if v_uid is null then
+    raise exception '로그인 후 이용할 수 있어요.';
+  end if;
+  if p_target_id is null
+     or p_target_type is null
+     or p_target_type not in ('board_post', 'suggestion', 'chat_message') then
+    raise exception '잘못된 접근입니다.';
+  end if;
+  if p_reason is null or p_reason not in ('spam', 'abuse', 'sexual', 'privacy', 'other') then
+    raise exception '신고 사유를 선택해주세요.';
+  end if;
+  -- (4) 서버 액션과 같은 검증: 공백만이면 null, 500자 초과는 거절(제약에 맡기면 SQL 메시지가 된다).
+  v_detail := nullif(btrim(coalesce(p_detail, '')), '');
+  if char_length(v_detail) > 500 then
+    raise exception '상세 설명은 500자 이하로 입력해주세요.';
+  end if;
+  if p_reason = 'other' and v_detail is null then
+    raise exception '기타 사유는 내용을 적어주세요.';
+  end if;
+
+  if p_target_type = 'board_post' then
+    select exists (select 1 from board_posts p where p.id = p_target_id) into v_exists;
+  elsif p_target_type = 'suggestion' then
+    select exists (
+      select 1 from suggestions s
+       where s.id = p_target_id
+         and (not s.is_secret or s.user_id = v_uid or is_admin())
+    ) into v_exists;
+  else
+    select exists (select 1 from chat_messages m where m.id = p_target_id) into v_exists;
+  end if;
+  if not v_exists then
+    raise exception '글을 찾을 수 없어요.';
+  end if;
+
+  begin
+    insert into content_reports (target_type, target_id, reporter_id, reason, detail)
+    values (p_target_type, p_target_id, v_uid, p_reason, v_detail);
+  exception when unique_violation then
+    raise exception '이미 신고한 글이에요.';
+  end;
+end $$;
+
+revoke all on function report_content(text, uuid, text, text) from public, anon;
+grant execute on function report_content(text, uuid, text, text) to authenticated;
+
+-- 1라운드의 report_post 는 시그니처를 그대로 두고 본문만 report_content('board_post', …) 호출 한 줄로
+-- 바꾼다 — 1라운드 앱 코드(queries/board.ts 의 rpc("report_post")) 가 그대로 동작한다. 예외 문구도 같다.
+create or replace function report_post(p_post_id uuid, p_reason text, p_detail text default null)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+begin
+  perform report_content('board_post', p_post_id, p_reason, p_detail);
+end $$;
+
+revoke all on function report_post(uuid, text, text) from public, anon;
+grant execute on function report_post(uuid, text, text) to authenticated;
+
+-- 1라운드의 board_post_reports 를 content_reports 로 옮긴 뒤 지운다. 1라운드 절이 아직 운영에 적용되지
+-- 않았으므로 이 표는 운영에 없거나(1라운드를 건너뛰고 이 절만 실행한 경우 — to_regclass 가 null) 1라운드
+-- 직후라 비어 있다. 순서: 위에서 report_post 가 이미 새 표를 쓰게 바뀌었으므로 옮기는 동안 새 행이
+-- 들어오지 않는다 → insert … select(id 충돌은 무시) → drop. 재실행하면 표가 없어 그대로 지나간다.
+do $$ begin
+  if to_regclass('public.board_post_reports') is not null then
+    insert into content_reports (id, target_type, target_id, reporter_id, reason, detail, created_at)
+    select id, 'board_post', post_id, reporter_id, reason, detail, created_at
+      from board_post_reports
+    on conflict do nothing;
+    drop table board_post_reports;
+  end if;
+end $$;

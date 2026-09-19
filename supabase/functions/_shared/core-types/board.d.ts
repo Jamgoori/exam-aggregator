@@ -27,7 +27,7 @@ export type BoardViewer = {
     isAdmin: boolean;
 };
 export type BoardOwnership = {
-    user_id: string;
+    user_id: string | null;
 };
 export declare function canEditBoardPost(post: BoardOwnership, viewer: BoardViewer): boolean;
 export declare function canDeleteBoardPost(post: BoardOwnership, viewer: BoardViewer): boolean;

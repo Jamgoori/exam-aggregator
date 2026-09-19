@@ -75,7 +75,8 @@ function isBlock(node: RichNode): node is ElementNode & { tag: BlockTag } {
   return node.type === "element" && TAG_KIND[node.tag] === "block";
 }
 
-// 웹 `.board-content` 의 블록 세로 마진(px). div 는 여백이 없다.
+// 웹 `.board-content` 의 블록 세로 마진(px). div 는 여백이 없고 p 도 같다(theme richText.paragraph —
+// 옛 웹 글의 div 문단과 새 글의 p 문단이 같은 모습이어야 해서 0). 문단 사이 간격은 빈 줄이 만든다.
 const BLOCK_MARGIN: Record<BlockTag, { top: number; bottom: number }> = {
   p: { top: 0, bottom: richText.paragraph.marginBottom },
   div: { top: 0, bottom: 0 },

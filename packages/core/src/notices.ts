@@ -50,7 +50,8 @@ export type NoticeViewer = {
 };
 
 export type NoticeCommentOwnership = {
-  user_id: string;
+  // null = 탈퇴한 회원의 댓글(설계서 §12-2 #17) — 본인 판정은 그대로 false.
+  user_id: string | null;
 };
 
 // 수정은 작성자 본인만 — 관리자에게도 열지 않는다(suggestion_comments와 같은 이유).

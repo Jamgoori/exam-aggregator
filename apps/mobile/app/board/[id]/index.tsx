@@ -138,7 +138,8 @@ function BoardPostScreen({
 
   const ownership = { user_id: post.authorId };
   const isOwn = userId !== null && userId === post.authorId;
-  const blocked = blockedIds.has(post.authorId);
+  // 탈퇴한 회원의 글(authorId null)은 차단 대상이 없다 — 그대로 보여준다.
+  const blocked = post.authorId !== null && blockedIds.has(post.authorId);
 
   return (
     <Screen
@@ -170,7 +171,7 @@ function BoardPostScreen({
           <View className="gap-5">
             <BoardPostHeader
               post={post}
-              avatarUrl={avatars[post.authorId] ?? null}
+              avatarUrl={(post.authorId !== null && avatars[post.authorId]) || null}
               canEdit={canEditBoardPost(ownership, viewer)}
               canDelete={canDeleteBoardPost(ownership, viewer)}
               isOwn={isOwn}

@@ -81,7 +81,7 @@ export function BoardComments({
     return (
       <BoardCommentRow
         comment={comment}
-        avatarUrl={avatars[comment.authorId] ?? null}
+        avatarUrl={(comment.authorId !== null && avatars[comment.authorId]) || null}
         loggedIn={loggedIn}
         canEdit={!comment.isDeleted && canEditBoardComment(ownership, viewer)}
         canDelete={!comment.isDeleted && canDeleteBoardComment(ownership, viewer)}

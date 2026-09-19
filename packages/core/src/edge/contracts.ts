@@ -35,6 +35,12 @@ import type {
   ReviewResultItem,
   ReviewSolveItem,
 } from "../rules/review-session";
+import type { ChatSentMessage } from "../rules/chat";
+import type {
+  SuggestionCommentItem,
+  SuggestionDetail,
+  SuggestionListItem,
+} from "../rules/suggestions";
 import type { Membership } from "../membership";
 import type { ReviewPickStrategy } from "../review-pick";
 import type { SessionSchedule } from "../review-queue";
@@ -486,6 +492,12 @@ export type AvatarUploadResponse = {
 };
 
 // ── account-delete ───────────────────────────────────────────────────────────
+//
+// 회원 탈퇴. 규칙은 core rules/account-delete.ts(설계서 §12-2 #17 — 본인 원글은 내용을 비워 "탈퇴한
+// 회원의 글" 로 남기고 타인의 댓글은 유지, 댓글류는 닉네임만 익명화, 스토리지 정리, deleteUser).
+// 웹도 같은 EF 를 부른다(delete-account-button.tsx). 오류는 전부 500 `{ error }` — 문구 4종
+// ("댓글 정리에 실패했어요…" / "글 정리에 실패했어요…" / "계정 정리에 실패했어요…" / "계정 삭제에
+// 실패했어요…"), 계정은 그대로라 다시 누르면 된다.
 
 export type AccountDeleteRequest = Record<string, never>;
 export type AccountDeleteResponse = { ok: true };
@@ -730,6 +742,99 @@ export type NoticesWriteRequest =
 // id 는 그 **공지**의 id(화면이 돌아갈 곳 — 웹 서버 액션과 같다).
 export type NoticesWriteResponse = { success: true; id: string };
 
+// ── suggestions (§6.7 #19) ───────────────────────────────────────────────────
+//
+// 건의게시판 **읽기와 쓰기 전부.** suggestions·suggestion_comments 는 anon/authenticated 의 SELECT
+// 조차 회수돼 있어(schema.sql — 남의 비밀글 자리를 "비밀글입니다" 로 보여주려면 행을 서버가 읽고
+// 마스킹해야 한다) 앱은 게시판·공지와 달리 목록·상세·댓글도 이 함수로 읽는다. 규칙은 core
+// rules/suggestions.ts 하나 — 웹 lib/suggestions.ts·suggestions/actions.ts 와 같은 함수다.
+//
+// list·get·comments 는 비로그인도 부를 수 있다(getOptionalUser). 나머지는 로그인 필수(401).
+// 관리자 판정은 board-write 와 같은 근거(admins 이메일 화이트리스트 — core isAdminEmail).
+//
+// **뷰어에 따라 달라지는 응답이다** — list 의 title/readable, get 의 canEdit/canDelete/canAnswer,
+// comments 의 canEdit/canDelete 는 부른 사람 기준이다. 앱은 공개 캐시(['catalog', …])가 아니라
+// 사용자 키(['me', userId, 'suggestions', …])에 두거나 persist 하지 않는다 — 다른 계정으로 로그인한
+// 화면에 이전 사용자의 "내 글" 판정이 남으면 안 된다.
+//
+// get: 조회수는 서버가 웹 countSuggestionView 규칙대로 센다(글쓴이 본인·관리자 제외; 탈퇴한
+// 회원의 글은 authorId null 이라 비로그인도 센다) — 앱이 따로 부를 RPC 는 없다(increment_suggestion_view
+// 는 service_role 전용). 비밀글이면 { status: "forbidden" }, 없는 id(uuid 모양이 아닌 것 포함)면
+// { status: "not_found" } — 둘 다 HTTP 200 이다(웹 fetchSuggestion 과 같은 세 갈래).
+// comments: 원글 접근 권한을 서버가 다시 확인한다 — 없으면 404 "글을 찾을 수 없어요.", 비밀글이면
+// 403 "권한이 없어요."(`{ error }`).
+//
+// 쓰기 오류: 400 검증 실패·잘못된 id · 403 "권한이 없어요."(남의 글·댓글, 비관리자 답변) / "잘못된
+// 접근입니다."(볼 수 없는 비밀글에 댓글) · 404 "글을 찾을 수 없어요."/"댓글을 찾을 수 없어요." ·
+// 429 시간당 한도(글 10·댓글 30, 웹과 같은 문장) · 500 저장 실패.
+// isPinned 는 관리자만 반영되고 비관리자가 보낸 값은 조용히 무시된다(고정되는 글은 isSecret 이
+// 강제로 꺼진다 — 웹 resolvePinAndSecret 와 같다).
+export type SuggestionsRequest =
+  // page 는 1부터. 없거나 모양이 틀리면 1.
+  | { action: "list"; page?: number }
+  | { action: "get"; id: string }
+  | { action: "comments"; id: string }
+  | { action: "create"; title: string; content: string; isSecret: boolean; isPinned?: boolean }
+  | { action: "update"; id: string; title: string; content: string; isSecret: boolean; isPinned?: boolean }
+  | { action: "delete"; id: string }
+  // 관리자 전용.
+  | { action: "answer"; id: string; answer: string }
+  | { action: "comment.create"; suggestionId: string; content: string }
+  | { action: "comment.update"; commentId: string; content: string }
+  | { action: "comment.delete"; commentId: string };
+
+// 목록 — 웹 fetchSuggestionPage 와 같은 모양. 볼 수 없는 비밀글은 title 이 이미 "비밀글입니다." 다.
+export type SuggestionsListResponse = {
+  items: SuggestionListItem[];
+  pinnedItems: SuggestionListItem[];
+  total: number;
+  totalPages: number;
+};
+// 상세 — suggestion 안의 canEdit/canDelete 는 웹 SuggestionDetail 그대로고, 화면이 바로 읽게
+// 바깥에도 canEdit/canDelete/canAnswer(관리자) 를 싣는다(같은 값).
+export type SuggestionsGetResponse =
+  | { status: "ok"; suggestion: SuggestionDetail; canEdit: boolean; canDelete: boolean; canAnswer: boolean }
+  | { status: "not_found" }
+  | { status: "forbidden" };
+export type SuggestionsCommentsResponse = { items: SuggestionCommentItem[] };
+// create → id 는 새 글의 id. update/delete/answer/comment.* → id 는 그 **글**의 id(화면이 돌아갈 곳 —
+// 웹 서버 액션이 돌려주는 값과 같다; 웹 deleteSuggestion·deleteSuggestionComment 는 id 없이
+// success 만 주지만 Edge 는 실어 준다 — 추가 필드).
+export type SuggestionsWriteResponse = { success: true; id: string };
+export type SuggestionsResponse =
+  | SuggestionsListResponse
+  | SuggestionsGetResponse
+  | SuggestionsCommentsResponse
+  | SuggestionsWriteResponse;
+
+export function isSuggestionsList(r: SuggestionsResponse): r is SuggestionsListResponse {
+  return "pinnedItems" in r;
+}
+export function isSuggestionsGet(r: SuggestionsResponse): r is SuggestionsGetResponse {
+  return "status" in r;
+}
+export function isSuggestionsComments(r: SuggestionsResponse): r is SuggestionsCommentsResponse {
+  return "items" in r && !("pinnedItems" in r);
+}
+export function isSuggestionsWrite(r: SuggestionsResponse): r is SuggestionsWriteResponse {
+  return "success" in r;
+}
+
+// ── chat-send (§6.7 #20) ─────────────────────────────────────────────────────
+//
+// 채팅 전송. 웹 서버 액션 app/chat/actions.ts#sendChatMessage 와 같은 규칙(core rules/chat.ts —
+// 300자·비속어·최소 간격 1.5초·같은 말 반복·10초에 5건). 읽기·Realtime 은 public read RLS 라 앱이
+// supabase-js 로 직접 구독한다(§6.4) — 이 함수는 쓰기만. 로그인 필수(401 "로그인 후 이용할 수
+// 있어요." — 웹 문장 "로그인 후 채팅에 참여할 수 있어요." 는 웹 어댑터가 낸다).
+//
+// 오류: 400 "메시지를 입력해주세요." / "메시지는 300자 이하로 입력해주세요." / 비속어 문구 ·
+// 429 "너무 빨리 보내고 있어요. 잠시 후 다시 시도해주세요." / "같은 메시지를 반복해서 보낼 수 없어요." /
+// "메시지를 너무 자주 보내고 있어요. 잠시 후 다시 시도해주세요." · 500 "전송에 실패했어요."
+export type ChatSendRequest = { content: string };
+// 방금 저장된 행 — 화면이 Realtime 이벤트보다 먼저 목록에 붙인다(웹 chat-panel 의 appendUnique 와
+// 같은 용도; id 로 중복을 접는다).
+export type ChatSendResponse = { message: ChatSentMessage };
+
 // ── 맵 ──────────────────────────────────────────────────────────────────────
 
 export type EdgeContracts = {
@@ -753,6 +858,8 @@ export type EdgeContracts = {
   "diagnosis-aggregate": { request: DiagnosisAggregateRequest; response: DiagnosisAggregateResponse };
   "board-write": { request: BoardWriteRequest; response: BoardWriteResponse };
   "notices-write": { request: NoticesWriteRequest; response: NoticesWriteResponse };
+  suggestions: { request: SuggestionsRequest; response: SuggestionsResponse };
+  "chat-send": { request: ChatSendRequest; response: ChatSendResponse };
 };
 
 export type EdgeName = keyof EdgeContracts;
@@ -781,4 +888,6 @@ export const EDGE_NAMES = [
   "diagnosis-aggregate",
   "board-write",
   "notices-write",
+  "suggestions",
+  "chat-send",
 ] as const satisfies readonly EdgeName[];

@@ -1,3 +1,4 @@
+import type { ReportTargetType } from "@gongmoa/core";
 import { router } from "expo-router";
 import { Ellipsis, Flag, Heart, Link2, Trash2, UserX } from "lucide-react-native";
 import { useState } from "react";
@@ -173,12 +174,30 @@ export function BoardDeleteButton({ postId }: { postId: string }) {
   );
 }
 
+// 차단 확인 문구. 채팅(chat/chat-panel.tsx)의 길게 누르기 → 차단도 같은 두 줄을 쓴다. 웹 BLOCK_CONFIRM_MESSAGE
+// (board-post-actions.tsx)는 이 둘을 줄바꿈으로 이은 한 문장이다.
+export const BLOCK_CONFIRM_TITLE = "이 사용자를 차단할까요?";
+export const BLOCK_CONFIRM_BODY = "차단한 사용자의 글과 댓글이 보이지 않아요. 내 정보 수정에서 해제할 수 있어요.";
+
 // 더보기(⋯) — **웹에 없다**(스토어 UGC 요건: 신고·차단 수단, 설계서 §6.7 #18). 본인 글에는 그리지 않는다
-// (호출부가 판단). 신고는 시트(board-report-sheet.tsx), 차단은 OS Alert 로 한 번 확인한 뒤 RPC block_user —
+// (호출부가 판단). 탈퇴한 회원의 글(user_id null — 2라운드 탈퇴 정책 #17)에도 그리지 않는다: 차단할 계정이 없고
+// RPC 도 "잘못된 접근입니다." 를 낸다 — 그래서 authorId 는 null 을 받지 않고 호출부가 숨긴다(board-post-header.tsx).
+// target 은 신고 대상 종류(기본 게시글) — 건의글 상세가 'suggestion' 으로 같은 메뉴를 쓴다.
+// 신고는 시트(board-report-sheet.tsx), 차단은 OS Alert 로 한 번 확인한 뒤 RPC block_user —
 // 성공하면 blocks 캐시가 바뀌어 이 글·이 사용자의 댓글이 상세·목록에서 곧바로 빠진다(상세 화면이 차단
 // 안내로 바뀌는 것이 곧 확인 문구다). 비로그인은 신고·차단 모두 로그인이 필요하므로 웹 좋아요와 같은
 // 문구를 그 자리에 보여준다.
-export function BoardMoreMenu({ postId, authorId, loggedIn }: { postId: string; authorId: string; loggedIn: boolean }) {
+export function BoardMoreMenu({
+  postId,
+  authorId,
+  loggedIn,
+  target = "board_post",
+}: {
+  postId: string;
+  authorId: string;
+  loggedIn: boolean;
+  target?: ReportTargetType;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -187,8 +206,8 @@ export function BoardMoreMenu({ postId, authorId, loggedIn }: { postId: string; 
   function confirmBlock() {
     setMenuOpen(false);
     Alert.alert(
-      "이 사용자를 차단할까요?",
-      "차단한 사용자의 글과 댓글이 보이지 않아요. 내 정보 수정에서 해제할 수 있어요.",
+      BLOCK_CONFIRM_TITLE,
+      BLOCK_CONFIRM_BODY,
       [
         { text: "취소", style: "cancel" },
         {
@@ -245,7 +264,7 @@ export function BoardMoreMenu({ postId, authorId, loggedIn }: { postId: string; 
         </View>
       </Sheet>
 
-      <BoardReportSheet postId={postId} visible={reportOpen} onClose={() => setReportOpen(false)} />
+      <BoardReportSheet postId={postId} target={target} visible={reportOpen} onClose={() => setReportOpen(false)} />
     </>
   );
 }

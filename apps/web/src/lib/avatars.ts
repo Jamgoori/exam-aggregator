@@ -18,10 +18,11 @@ export function avatarUrl(path: string | null | undefined): string | null {
 // profiles 는 본인 행만 select 할 수 있는 RLS 라(관리자 예외) 여기서는 admin
 // 클라이언트로 읽는다. 내려보내는 값은 아바타 URL 하나뿐이고, 그건 이미 게시판
 // 화면에 공개로 붙는 값이라 새로 새는 정보가 없다.
+// null(탈퇴한 회원의 글)은 그냥 걸러진다 — 물어볼 프로필이 없다.
 export async function fetchAvatarUrls(
-  userIds: readonly string[],
+  userIds: readonly (string | null)[],
 ): Promise<Map<string, string>> {
-  const unique = [...new Set(userIds.filter(Boolean))];
+  const unique = [...new Set(userIds.filter((id): id is string => !!id))];
   if (unique.length === 0) return new Map();
 
   const admin = createAdminClient();

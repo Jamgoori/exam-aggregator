@@ -83,7 +83,7 @@ export async function updateNoticeComment(
   if (!comment) return { error: "댓글을 찾을 수 없어요.", status: 404 };
 
   // 수정은 작성자 본인만 — 관리자에게도 열지 않는다(../notices.ts canEditNoticeComment).
-  if (!canEditNoticeComment({ user_id: comment.user_id as string }, input.actor)) {
+  if (!canEditNoticeComment({ user_id: comment.user_id as string | null }, input.actor)) {
     return { error: "권한이 없어요.", status: 403 };
   }
 
@@ -114,7 +114,7 @@ export async function deleteNoticeComment(
   if (!comment) return { error: "댓글을 찾을 수 없어요.", status: 404 };
 
   // 삭제는 본인 + 관리자(스팸·욕설 정리).
-  if (!canDeleteNoticeComment({ user_id: comment.user_id as string }, input.actor)) {
+  if (!canDeleteNoticeComment({ user_id: comment.user_id as string | null }, input.actor)) {
     return { error: "권한이 없어요.", status: 403 };
   }
 

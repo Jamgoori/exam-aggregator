@@ -3,29 +3,28 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionUser } from "@/lib/supabase/session";
-import { getSuggestionViewer } from "@/lib/suggestions";
-import { createNotification, notificationPreview } from "@/lib/notifications";
 import {
-  canDeleteSuggestion,
-  canDeleteSuggestionComment,
-  canEditSuggestion,
-  canEditSuggestionComment,
-  canPinSuggestion,
-  canReadSuggestion,
-  authorNickname,
   validateSuggestionAnswer,
   validateSuggestionCommentContent,
   validateSuggestionInput,
-  type SuggestionViewer,
 } from "@gongmoa/core";
+import {
+  answerSuggestion as answerSuggestionRule,
+  createSuggestion as createSuggestionRule,
+  createSuggestionComment as createSuggestionCommentRule,
+  deleteSuggestion as deleteSuggestionRule,
+  deleteSuggestionComment as deleteSuggestionCommentRule,
+  updateSuggestion as updateSuggestionRule,
+  updateSuggestionComment as updateSuggestionCommentRule,
+  type SuggestionActor,
+} from "@gongmoa/core/server";
+
+// 건의게시판 서버 액션 — **어댑터**다. 규칙(검증, 고정·비밀 확정, 시간당 한도 10/30, 비밀글 댓글 권한,
+// 소유자 조건, 알림)은 전부 packages/core/src/rules/suggestions.ts 에 있고, Edge Function `suggestions`
+// 가 같은 함수를 부른다. 여기 남은 것은 세션 확보·revalidate 뿐이다 — 여기에 if 가 늘기 시작하면
+// 규칙이 새는 것이다(docs/agents/edge-core-bundle.md). 반환 모양·문구·revalidate 는 예전과 같다.
 
 export type SuggestionResult = { error?: string; success?: boolean; id?: string };
-
-// 한 계정이 짧은 시간에 게시판을 도배하는 것만 막는 느슨한 상한. 정상적인 건의는
-// 하루에 몇 건을 넘지 않는다 (문항 오류 신고와 같은 기준).
-const HOURLY_LIMIT = 10;
-// 댓글은 원글보다 가볍게 자주 오가므로 더 넉넉히 잡는다.
-const COMMENT_HOURLY_LIMIT = 30;
 
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
@@ -37,17 +36,17 @@ function revalidateSuggestion(id?: string) {
   if (id) revalidatePath(`/suggestions/${id}`);
 }
 
-// 클라이언트가 보낸 isPinned/isSecret 을 서버가 다시 확정한다. 체크박스는 비관리자
-// 화면에서 아예 지워두지만, 폼 데이터를 직접 조작해 보내는 경로는 여기서 막아야
-// 실제로 지켜진다("관리자만 고정할 수 있다" — canPinSuggestion). 공지는 성격상
-// 비밀글일 이유가 없어, 고정되는 글은 비밀글 여부를 강제로 끈다.
-function resolvePinAndSecret(
-  input: { isSecret: boolean; isPinned: boolean },
-  viewer: SuggestionViewer,
-) {
-  const isPinned = canPinSuggestion(viewer) && input.isPinned === true;
-  const isSecret = isPinned ? false : input.isSecret === true;
-  return { isPinned, isSecret };
+// 규칙에 넘길 사용자. 닉네임은 세션에서만 가져온다 — 클라이언트가 보내는 이름을 믿으면 남의 이름으로
+// 글을 쓸 수 있다. 관리자 여부는 웹이 늘 쓰는 rpc("is_admin")(Edge 는 같은 admins 표를 이메일로 본다).
+async function getSuggestionActor(): Promise<SuggestionActor | null> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return null;
+  const { data: isAdminData } = await supabase.rpc("is_admin");
+  return {
+    userId: user.id,
+    isAdmin: isAdminData === true,
+    metadataNickname: user.user_metadata?.nickname,
+  };
 }
 
 export async function createSuggestion(input: {
@@ -56,56 +55,18 @@ export async function createSuggestion(input: {
   isSecret: boolean;
   isPinned?: boolean;
 }): Promise<SuggestionResult> {
+  // 검증은 규칙도 하지만, 로그인 전에 끊던 웹의 순서를 그대로 둔다(문구 동일).
   const validated = validateSuggestionInput(input);
   if ("error" in validated) return { error: validated.error };
 
-  const { supabase, user } = await getSessionUser();
-  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  const actor = await getSuggestionActor();
+  if (!actor) return { error: "로그인 후 이용할 수 있어요." };
 
-  const { data: isAdminData } = await supabase.rpc("is_admin");
-  const viewer: SuggestionViewer = { userId: user.id, isAdmin: isAdminData === true };
-  const { isPinned, isSecret } = resolvePinAndSecret(
-    { isSecret: input.isSecret, isPinned: input.isPinned ?? false },
-    viewer,
-  );
+  const result = await createSuggestionRule(createAdminClient(), { actor, ...input });
+  if ("error" in result) return { error: result.error };
 
-  const admin = createAdminClient();
-
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const { count } = await admin
-    .from("suggestions")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id)
-    .gte("created_at", oneHourAgo);
-  if ((count ?? 0) >= HOURLY_LIMIT) {
-    return { error: "짧은 시간 동안 너무 많이 작성했어요. 잠시 후 다시 시도해주세요." };
-  }
-
-  // 작성자명은 세션에서만 가져온다 — 클라이언트가 보내는 이름을 믿으면 남의
-  // 이름으로 글을 쓸 수 있다. 화면에 보이는 닉네임의 원본은
-  // auth.users.raw_user_meta_data.nickname 이고(schema.sql 참고) profiles 는
-  // 중복 판별용 그림자 원장이라, 댓글과 같은 순서로 읽는다.
-  // 이메일 로컬파트로 떨어지지 않는다 — 그 값은 닉네임 정책(금칙어·중복)을 지나간 적이
-  // 없어서 "관리자" 같은 이름이 그대로 박힌다(core 의 authorNickname 주석 참고).
-  const nickname = authorNickname(user.user_metadata?.nickname);
-
-  const { data, error } = await admin
-    .from("suggestions")
-    .insert({
-      user_id: user.id,
-      nickname,
-      title: validated.title,
-      content: validated.content,
-      is_secret: isSecret,
-      is_pinned: isPinned,
-    })
-    .select("id")
-    .single();
-
-  if (error || !data) return { error: "등록에 실패했어요." };
-
-  revalidateSuggestion(data.id as string);
-  return { success: true, id: data.id as string };
+  revalidateSuggestion(result.id);
+  return { success: true, id: result.id };
 }
 
 export async function updateSuggestion(input: {
@@ -115,68 +76,29 @@ export async function updateSuggestion(input: {
   isSecret: boolean;
   isPinned?: boolean;
 }): Promise<SuggestionResult> {
-  const id = String(input.id ?? "");
-  if (!isUuid(id)) return { error: "잘못된 접근입니다." };
-
+  // id 모양·검증은 규칙도 보지만, 로그인 전에 끊던 웹의 순서를 그대로 둔다(문구 동일).
+  if (!isUuid(String(input.id ?? ""))) return { error: "잘못된 접근입니다." };
   const validated = validateSuggestionInput(input);
   if ("error" in validated) return { error: validated.error };
 
-  const viewer = await getSuggestionViewer();
-  if (!viewer.loggedIn) return { error: "로그인 후 이용할 수 있어요." };
+  const actor = await getSuggestionActor();
+  if (!actor) return { error: "로그인 후 이용할 수 있어요." };
 
-  const admin = createAdminClient();
-  const { data: post } = await admin
-    .from("suggestions")
-    .select("user_id, is_secret")
-    .eq("id", id)
-    .maybeSingle();
-  if (!post) return { error: "글을 찾을 수 없어요." };
+  const result = await updateSuggestionRule(createAdminClient(), { actor, ...input });
+  if ("error" in result) return { error: result.error };
 
-  if (!canEditSuggestion({ user_id: post.user_id as string, is_secret: post.is_secret as boolean }, viewer)) {
-    return { error: "권한이 없어요." };
-  }
-
-  const { isPinned, isSecret } = resolvePinAndSecret(
-    { isSecret: input.isSecret, isPinned: input.isPinned ?? false },
-    viewer,
-  );
-
-  const { error } = await admin
-    .from("suggestions")
-    .update({
-      title: validated.title,
-      content: validated.content,
-      is_secret: isSecret,
-      is_pinned: isPinned,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", id);
-  if (error) return { error: "수정에 실패했어요." };
-
-  revalidateSuggestion(id);
-  return { success: true, id };
+  revalidateSuggestion(result.id);
+  return { success: true, id: result.id };
 }
 
 export async function deleteSuggestion(id: string): Promise<SuggestionResult> {
   if (!isUuid(id)) return { error: "잘못된 접근입니다." };
 
-  const viewer = await getSuggestionViewer();
-  if (!viewer.loggedIn) return { error: "로그인 후 이용할 수 있어요." };
+  const actor = await getSuggestionActor();
+  if (!actor) return { error: "로그인 후 이용할 수 있어요." };
 
-  const admin = createAdminClient();
-  const { data: post } = await admin
-    .from("suggestions")
-    .select("user_id, is_secret")
-    .eq("id", id)
-    .maybeSingle();
-  if (!post) return { error: "글을 찾을 수 없어요." };
-
-  if (!canDeleteSuggestion({ user_id: post.user_id as string, is_secret: post.is_secret as boolean }, viewer)) {
-    return { error: "권한이 없어요." };
-  }
-
-  const { error } = await admin.from("suggestions").delete().eq("id", id);
-  if (error) return { error: "삭제에 실패했어요." };
+  const result = await deleteSuggestionRule(createAdminClient(), { actor, id });
+  if ("error" in result) return { error: result.error };
 
   revalidateSuggestion(id);
   return { success: true };
@@ -187,173 +109,66 @@ export async function answerSuggestion(input: {
   id: string;
   answer: string;
 }): Promise<SuggestionResult> {
-  const id = String(input.id ?? "");
-  if (!isUuid(id)) return { error: "잘못된 접근입니다." };
-
+  if (!isUuid(String(input.id ?? ""))) return { error: "잘못된 접근입니다." };
   const validated = validateSuggestionAnswer(input.answer);
   if ("error" in validated) return { error: validated.error };
 
-  const viewer = await getSuggestionViewer();
-  if (!viewer.isAdmin) return { error: "권한이 없어요." };
+  // 비로그인도 "권한이 없어요." — 예전 웹이 viewer.isAdmin 만 봤던 것과 같은 문구.
+  const actor = await getSuggestionActor();
+  if (!actor) return { error: "권한이 없어요." };
 
-  const admin = createAdminClient();
-  const { data: post } = await admin
-    .from("suggestions")
-    .select("user_id, title")
-    .eq("id", id)
-    .maybeSingle();
-  if (!post) return { error: "글을 찾을 수 없어요." };
+  const result = await answerSuggestionRule(createAdminClient(), { actor, ...input });
+  if ("error" in result) return { error: result.error };
 
-  const { error } = await admin
-    .from("suggestions")
-    .update({
-      answer: validated.answer,
-      answered_at: new Date().toISOString(),
-      answered_by: viewer.userId,
-    })
-    .eq("id", id);
-  if (error) return { error: "답변 등록에 실패했어요." };
-
-  // 건의를 남긴 사람에게 알린다 — 답변이 달렸는지 확인하러 매번 게시판에 들어와
-  // 보게 만들 이유가 없다(이 알림이 이 기능의 원래 목적에 가장 가깝다).
-  await createNotification({
-    userId: post.user_id as string,
-    type: "suggestion_answer",
-    actorId: viewer.userId ?? "",
-    actorNickname: "운영자",
-    title: (post.title as string) ?? "건의글",
-    preview: notificationPreview(validated.answer),
-    link: `/suggestions/${id}`,
-  });
-
-  revalidateSuggestion(id);
-  return { success: true, id };
+  revalidateSuggestion(result.id);
+  return { success: true, id: result.id };
 }
 
 export async function createSuggestionComment(input: {
   suggestionId: string;
   content: string;
 }): Promise<SuggestionResult> {
-  const suggestionId = String(input.suggestionId ?? "");
-  if (!isUuid(suggestionId)) return { error: "잘못된 접근입니다." };
-
+  if (!isUuid(String(input.suggestionId ?? ""))) return { error: "잘못된 접근입니다." };
   const validated = validateSuggestionCommentContent(input.content);
   if ("error" in validated) return { error: validated.error };
 
-  const { supabase, user } = await getSessionUser();
-  if (!user) return { error: "로그인 후 이용할 수 있어요." };
+  const actor = await getSuggestionActor();
+  if (!actor) return { error: "로그인 후 이용할 수 있어요." };
 
-  const admin = createAdminClient();
+  const result = await createSuggestionCommentRule(createAdminClient(), { actor, ...input });
+  if ("error" in result) return { error: result.error };
 
-  const { data: post } = await admin
-    .from("suggestions")
-    .select("user_id, is_secret, title")
-    .eq("id", suggestionId)
-    .maybeSingle();
-  if (!post) return { error: "글을 찾을 수 없어요." };
-
-  // 댓글은 원글을 볼 수 있는 사람만 달 수 있다 — 여기서 다시 확인하지 않으면
-  // 비밀글의 id를 알아낸 사람이 본문은 못 봐도 댓글로 흔적을 남길 수 있다.
-  const { data: isAdminData } = await supabase.rpc("is_admin");
-  const viewer: SuggestionViewer = { userId: user.id, isAdmin: isAdminData === true };
-  if (!canReadSuggestion({ user_id: post.user_id as string, is_secret: post.is_secret as boolean }, viewer)) {
-    return { error: "잘못된 접근입니다." };
-  }
-
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-  const { count } = await admin
-    .from("suggestion_comments")
-    .select("id", { count: "exact", head: true })
-    .eq("user_id", user.id)
-    .gte("created_at", oneHourAgo);
-  if ((count ?? 0) >= COMMENT_HOURLY_LIMIT) {
-    return { error: "짧은 시간 동안 너무 많이 작성했어요. 잠시 후 다시 시도해주세요." };
-  }
-
-  // 이메일 로컬파트로 떨어지지 않는다 — 그 값은 닉네임 정책(금칙어·중복)을 지나간 적이
-  // 없어서 "관리자" 같은 이름이 그대로 박힌다(core 의 authorNickname 주석 참고).
-  const nickname = authorNickname(user.user_metadata?.nickname);
-
-  const { error } = await admin.from("suggestion_comments").insert({
-    suggestion_id: suggestionId,
-    user_id: user.id,
-    nickname,
-    content: validated.content,
-  });
-  if (error) return { error: "댓글 등록에 실패했어요." };
-
-  // 글쓴이에게 알림. 실패해도 댓글은 이미 달렸으므로 여기서 되돌리지 않는다
-  // (lib/notifications.ts 의 createNotification 주석).
-  await createNotification({
-    userId: post.user_id as string,
-    type: "suggestion_comment",
-    actorId: user.id,
-    actorNickname: nickname,
-    title: (post.title as string) ?? "건의글",
-    preview: notificationPreview(validated.content),
-    link: `/suggestions/${suggestionId}`,
-  });
-
-  revalidateSuggestion(suggestionId);
-  return { success: true, id: suggestionId };
+  revalidateSuggestion(result.id);
+  return { success: true, id: result.id };
 }
 
 export async function updateSuggestionComment(input: {
   commentId: string;
   content: string;
 }): Promise<SuggestionResult> {
-  const commentId = String(input.commentId ?? "");
-  if (!isUuid(commentId)) return { error: "잘못된 접근입니다." };
-
+  if (!isUuid(String(input.commentId ?? ""))) return { error: "잘못된 접근입니다." };
   const validated = validateSuggestionCommentContent(input.content);
   if ("error" in validated) return { error: validated.error };
 
-  const viewer = await getSuggestionViewer();
-  if (!viewer.loggedIn) return { error: "로그인 후 이용할 수 있어요." };
+  const actor = await getSuggestionActor();
+  if (!actor) return { error: "로그인 후 이용할 수 있어요." };
 
-  const admin = createAdminClient();
-  const { data: comment } = await admin
-    .from("suggestion_comments")
-    .select("suggestion_id, user_id")
-    .eq("id", commentId)
-    .maybeSingle();
-  if (!comment) return { error: "댓글을 찾을 수 없어요." };
+  const result = await updateSuggestionCommentRule(createAdminClient(), { actor, ...input });
+  if ("error" in result) return { error: result.error };
 
-  if (!canEditSuggestionComment({ user_id: comment.user_id as string }, viewer)) {
-    return { error: "권한이 없어요." };
-  }
-
-  const { error } = await admin
-    .from("suggestion_comments")
-    .update({ content: validated.content, updated_at: new Date().toISOString() })
-    .eq("id", commentId);
-  if (error) return { error: "수정에 실패했어요." };
-
-  revalidateSuggestion(comment.suggestion_id as string);
-  return { success: true, id: comment.suggestion_id as string };
+  revalidateSuggestion(result.id);
+  return { success: true, id: result.id };
 }
 
 export async function deleteSuggestionComment(commentId: string): Promise<SuggestionResult> {
   if (!isUuid(commentId)) return { error: "잘못된 접근입니다." };
 
-  const viewer = await getSuggestionViewer();
-  if (!viewer.loggedIn) return { error: "로그인 후 이용할 수 있어요." };
+  const actor = await getSuggestionActor();
+  if (!actor) return { error: "로그인 후 이용할 수 있어요." };
 
-  const admin = createAdminClient();
-  const { data: comment } = await admin
-    .from("suggestion_comments")
-    .select("suggestion_id, user_id")
-    .eq("id", commentId)
-    .maybeSingle();
-  if (!comment) return { error: "댓글을 찾을 수 없어요." };
+  const result = await deleteSuggestionCommentRule(createAdminClient(), { actor, commentId });
+  if ("error" in result) return { error: result.error };
 
-  if (!canDeleteSuggestionComment({ user_id: comment.user_id as string }, viewer)) {
-    return { error: "권한이 없어요." };
-  }
-
-  const { error } = await admin.from("suggestion_comments").delete().eq("id", commentId);
-  if (error) return { error: "삭제에 실패했어요." };
-
-  revalidateSuggestion(comment.suggestion_id as string);
+  revalidateSuggestion(result.id);
   return { success: true };
 }

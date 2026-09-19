@@ -5033,6 +5033,8 @@ var BOARD_HOURLY_POST_LIMIT = 10;
 var BOARD_HOURLY_COMMENT_LIMIT = 30;
 var BOARD_HOURLY_IMAGE_LIMIT = 60;
 var NOTICE_COMMENT_HOURLY_LIMIT = 30;
+var SUGGESTION_HOURLY_LIMIT = 10;
+var SUGGESTION_COMMENT_HOURLY_LIMIT = 30;
 var HOURLY_LIMIT_ERROR = "짧은 시간 동안 너무 많이 작성했어요. 잠시 후 다시 시도해주세요.";
 async function overHourlyLimit(client, table, userId, limit, now = /* @__PURE__ */ new Date()) {
   const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1e3).toISOString();
@@ -5054,14 +5056,17 @@ function toRow(input) {
   };
 }
 async function createNotification(client, input) {
+  if (input.userId === null) return;
   if (input.userId === input.actorId) return;
   try {
-    await client.from("notifications").insert(toRow(input));
+    await client.from("notifications").insert(toRow({ ...input, userId: input.userId }));
   } catch {
   }
 }
 async function createNotifications(client, userIds, input) {
-  const targets = [...new Set(userIds.filter((id) => id && id !== input.actorId))];
+  const targets = [
+    ...new Set(userIds.filter((id) => !!id && id !== input.actorId))
+  ];
   if (targets.length === 0) return;
   try {
     await client.from("notifications").insert(targets.map((userId) => toRow({ ...input, userId })));
@@ -5846,7 +5851,7 @@ async function createBoardComment(client, input, deps) {
       id: parent.id,
       parent_id: parent.parent_id ?? null
     });
-    parentAuthorId = parent.is_deleted ? null : parent.user_id;
+    parentAuthorId = parent.is_deleted ? null : parent.user_id ?? null;
   }
   const nickname = authorNickname(await resolveNickname2(client, input.actor));
   const { data: created, error } = await client.from("board_comments").insert({
@@ -6010,6 +6015,519 @@ async function resolveNickname3(client, actor) {
   if (actor.metadataNickname !== void 0) return actor.metadataNickname;
   const { data } = await client.auth.admin.getUserById(actor.userId);
   return data?.user?.user_metadata?.nickname;
+}
+
+// src/suggestions.ts
+var SUGGESTION_TITLE_MAX = 100;
+var SUGGESTION_CONTENT_MAX = 2e3;
+var SUGGESTION_ANSWER_MAX = 2e3;
+var SUGGESTION_COMMENT_MAX = 1e3;
+var SECRET_TITLE_PLACEHOLDER = "비밀글입니다.";
+var SUGGESTIONS_PAGE_SIZE = 20;
+function canReadSuggestion(suggestion, viewer) {
+  if (!suggestion.is_secret) return true;
+  if (viewer.isAdmin) return true;
+  return viewer.userId !== null && viewer.userId === suggestion.user_id;
+}
+function canEditSuggestion(suggestion, viewer) {
+  return viewer.userId !== null && viewer.userId === suggestion.user_id;
+}
+function canDeleteSuggestion(suggestion, viewer) {
+  return viewer.isAdmin || canEditSuggestion(suggestion, viewer);
+}
+function canPinSuggestion(viewer) {
+  return viewer.isAdmin;
+}
+function suggestionListTitle(suggestion, viewer) {
+  return canReadSuggestion(suggestion, viewer) ? suggestion.title : SECRET_TITLE_PLACEHOLDER;
+}
+function validateSuggestionInput(input) {
+  const title = String(input.title ?? "").trim();
+  const content = String(input.content ?? "").trim();
+  if (!title) return { error: "제목을 입력해주세요." };
+  if (title.length > SUGGESTION_TITLE_MAX)
+    return { error: `제목은 ${SUGGESTION_TITLE_MAX}자 이하로 입력해주세요.` };
+  if (!content) return { error: "내용을 입력해주세요." };
+  if (content.length > SUGGESTION_CONTENT_MAX)
+    return { error: `내용은 ${SUGGESTION_CONTENT_MAX}자 이하로 입력해주세요.` };
+  const profanity = profanityError(title) ?? profanityError(content);
+  if (profanity) return { error: profanity };
+  return { title, content };
+}
+function validateSuggestionAnswer(answer) {
+  const trimmed = String(answer ?? "").trim();
+  if (!trimmed) return { error: "답변 내용을 입력해주세요." };
+  if (trimmed.length > SUGGESTION_ANSWER_MAX)
+    return { error: `답변은 ${SUGGESTION_ANSWER_MAX}자 이하로 입력해주세요.` };
+  const profanity = profanityError(trimmed);
+  if (profanity) return { error: profanity };
+  return { answer: trimmed };
+}
+function canEditSuggestionComment(comment, viewer) {
+  return viewer.userId !== null && viewer.userId === comment.user_id;
+}
+function canDeleteSuggestionComment(comment, viewer) {
+  return viewer.isAdmin || canEditSuggestionComment(comment, viewer);
+}
+function validateSuggestionCommentContent(content) {
+  const trimmed = String(content ?? "").trim();
+  if (!trimmed) return { error: "댓글 내용을 입력해주세요." };
+  if (trimmed.length > SUGGESTION_COMMENT_MAX)
+    return { error: `댓글은 ${SUGGESTION_COMMENT_MAX}자 이하로 입력해주세요.` };
+  const profanity = profanityError(trimmed);
+  if (profanity) return { error: profanity };
+  return { content: trimmed };
+}
+
+// src/rules/suggestions.ts
+function nowOf3(deps) {
+  return deps.now ? deps.now() : /* @__PURE__ */ new Date();
+}
+var LIST_COLUMNS = "id, user_id, nickname, title, is_secret, is_pinned, view_count, answer, created_at";
+function toListItem(row, viewer) {
+  const post = {
+    user_id: row.user_id ?? null,
+    is_secret: row.is_secret,
+    title: row.title
+  };
+  return {
+    id: row.id,
+    title: suggestionListTitle(post, viewer),
+    nickname: row.nickname,
+    createdAt: row.created_at,
+    viewCount: row.view_count,
+    isSecret: post.is_secret,
+    isPinned: row.is_pinned,
+    isAnswered: row.answer !== null,
+    readable: canReadSuggestion(post, viewer),
+    authorId: post.user_id
+  };
+}
+async function fetchSuggestionPage(client, page, viewer) {
+  const from = (page - 1) * SUGGESTIONS_PAGE_SIZE;
+  const [{ data, count }, pinnedResult] = await Promise.all([
+    client.from("suggestions").select(LIST_COLUMNS, { count: "exact" }).eq("is_pinned", false).order("created_at", { ascending: false }).range(from, from + SUGGESTIONS_PAGE_SIZE - 1),
+    page === 1 ? client.from("suggestions").select(LIST_COLUMNS).eq("is_pinned", true).order("created_at", { ascending: false }) : Promise.resolve({ data: [] })
+  ]);
+  const total = count ?? 0;
+  const items = (data ?? []).map((row) => toListItem(row, viewer));
+  const pinnedItems = (pinnedResult.data ?? []).map((row) => toListItem(row, viewer));
+  return {
+    items,
+    pinnedItems,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / SUGGESTIONS_PAGE_SIZE))
+  };
+}
+async function fetchSuggestion(client, id, viewer) {
+  const { data } = await client.from("suggestions").select(
+    "id, user_id, nickname, title, content, is_secret, is_pinned, view_count, answer, answered_at, created_at, updated_at"
+  ).eq("id", id).maybeSingle();
+  if (!data) return { status: "not_found" };
+  const post = {
+    user_id: data.user_id ?? null,
+    is_secret: data.is_secret
+  };
+  if (!canReadSuggestion(post, viewer)) return { status: "forbidden" };
+  return {
+    status: "ok",
+    suggestion: {
+      id: data.id,
+      title: data.title,
+      content: data.content,
+      nickname: data.nickname,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      viewCount: data.view_count,
+      isSecret: post.is_secret,
+      isPinned: data.is_pinned,
+      answer: data.answer,
+      answeredAt: data.answered_at,
+      authorId: post.user_id,
+      canEdit: canEditSuggestion(post, viewer),
+      canDelete: canDeleteSuggestion(post, viewer)
+    }
+  };
+}
+async function countSuggestionView(client, id, viewer, authorId) {
+  if (viewer.isAdmin || authorId !== null && viewer.userId === authorId) return;
+  await client.rpc("increment_suggestion_view", { p_suggestion_id: id });
+}
+async function fetchSuggestionComments(client, suggestionId, viewer) {
+  const { data } = await client.from("suggestion_comments").select("id, user_id, nickname, content, created_at, updated_at").eq("suggestion_id", suggestionId).order("created_at", { ascending: true });
+  return (data ?? []).map((row) => {
+    const ownership = { user_id: row.user_id ?? null };
+    return {
+      id: row.id,
+      nickname: row.nickname,
+      content: row.content,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      canEdit: canEditSuggestionComment(ownership, viewer),
+      canDelete: canDeleteSuggestionComment(ownership, viewer),
+      authorId: ownership.user_id
+    };
+  });
+}
+async function readSuggestionComments(client, suggestionId, viewer) {
+  const { data } = await client.from("suggestions").select("user_id, is_secret").eq("id", suggestionId).maybeSingle();
+  if (!data) return { status: "not_found" };
+  const post = {
+    user_id: data.user_id ?? null,
+    is_secret: data.is_secret
+  };
+  if (!canReadSuggestion(post, viewer)) return { status: "forbidden" };
+  return { status: "ok", items: await fetchSuggestionComments(client, suggestionId, viewer) };
+}
+function resolvePinAndSecret(input, viewer) {
+  const isPinned = canPinSuggestion(viewer) && input.isPinned === true;
+  const isSecret = isPinned ? false : input.isSecret === true;
+  return { isPinned, isSecret };
+}
+async function createSuggestion(client, input, deps = {}) {
+  const validated = validateSuggestionInput(input);
+  if ("error" in validated) return { error: validated.error, status: 400 };
+  const { isPinned, isSecret } = resolvePinAndSecret(
+    { isSecret: input.isSecret, isPinned: input.isPinned ?? false },
+    input.actor
+  );
+  if (await overHourlyLimit(client, "suggestions", input.actor.userId, SUGGESTION_HOURLY_LIMIT, nowOf3(deps))) {
+    return { error: HOURLY_LIMIT_ERROR, status: 429 };
+  }
+  const nickname = authorNickname(await resolveNickname4(client, input.actor));
+  const { data, error } = await client.from("suggestions").insert({
+    user_id: input.actor.userId,
+    nickname,
+    title: validated.title,
+    content: validated.content,
+    is_secret: isSecret,
+    is_pinned: isPinned
+  }).select("id").single();
+  if (error || !data) return { error: "등록에 실패했어요.", status: 500 };
+  return { id: data.id };
+}
+async function updateSuggestion(client, input, deps = {}) {
+  const id = String(input.id ?? "");
+  if (!isPaperUuid(id)) return { error: "잘못된 접근입니다.", status: 400 };
+  const validated = validateSuggestionInput(input);
+  if ("error" in validated) return { error: validated.error, status: 400 };
+  const { data: post } = await client.from("suggestions").select("user_id, is_secret").eq("id", id).maybeSingle();
+  if (!post) return { error: "글을 찾을 수 없어요.", status: 404 };
+  const ownership = {
+    user_id: post.user_id ?? null,
+    is_secret: post.is_secret
+  };
+  if (!canEditSuggestion(ownership, input.actor)) {
+    return { error: "권한이 없어요.", status: 403 };
+  }
+  const { isPinned, isSecret } = resolvePinAndSecret(
+    { isSecret: input.isSecret, isPinned: input.isPinned ?? false },
+    input.actor
+  );
+  const { error } = await client.from("suggestions").update({
+    title: validated.title,
+    content: validated.content,
+    is_secret: isSecret,
+    is_pinned: isPinned,
+    updated_at: nowOf3(deps).toISOString()
+  }).eq("id", id).eq("user_id", input.actor.userId);
+  if (error) return { error: "수정에 실패했어요.", status: 500 };
+  return { id };
+}
+async function deleteSuggestion(client, input) {
+  const id = String(input.id ?? "");
+  if (!isPaperUuid(id)) return { error: "잘못된 접근입니다.", status: 400 };
+  const { data: post } = await client.from("suggestions").select("user_id, is_secret").eq("id", id).maybeSingle();
+  if (!post) return { error: "글을 찾을 수 없어요.", status: 404 };
+  const ownership = {
+    user_id: post.user_id ?? null,
+    is_secret: post.is_secret
+  };
+  if (!canDeleteSuggestion(ownership, input.actor)) {
+    return { error: "권한이 없어요.", status: 403 };
+  }
+  let query = client.from("suggestions").delete().eq("id", id);
+  if (!input.actor.isAdmin) query = query.eq("user_id", input.actor.userId);
+  const { error } = await query;
+  if (error) return { error: "삭제에 실패했어요.", status: 500 };
+  return { id };
+}
+async function answerSuggestion(client, input, deps = {}) {
+  const id = String(input.id ?? "");
+  if (!isPaperUuid(id)) return { error: "잘못된 접근입니다.", status: 400 };
+  const validated = validateSuggestionAnswer(input.answer);
+  if ("error" in validated) return { error: validated.error, status: 400 };
+  if (!input.actor.isAdmin) return { error: "권한이 없어요.", status: 403 };
+  const { data: post } = await client.from("suggestions").select("user_id, title").eq("id", id).maybeSingle();
+  if (!post) return { error: "글을 찾을 수 없어요.", status: 404 };
+  const { error } = await client.from("suggestions").update({
+    answer: validated.answer,
+    answered_at: nowOf3(deps).toISOString(),
+    answered_by: input.actor.userId
+  }).eq("id", id);
+  if (error) return { error: "답변 등록에 실패했어요.", status: 500 };
+  await createNotification(client, {
+    userId: post.user_id ?? null,
+    type: "suggestion_answer",
+    actorId: input.actor.userId,
+    actorNickname: "운영자",
+    title: post.title ?? "건의글",
+    preview: notificationPreview(validated.answer),
+    link: `/suggestions/${id}`
+  });
+  return { id };
+}
+async function createSuggestionComment(client, input, deps = {}) {
+  const suggestionId = String(input.suggestionId ?? "");
+  if (!isPaperUuid(suggestionId)) return { error: "잘못된 접근입니다.", status: 400 };
+  const validated = validateSuggestionCommentContent(input.content);
+  if ("error" in validated) return { error: validated.error, status: 400 };
+  const { data: post } = await client.from("suggestions").select("user_id, is_secret, title").eq("id", suggestionId).maybeSingle();
+  if (!post) return { error: "글을 찾을 수 없어요.", status: 404 };
+  const ownership = {
+    user_id: post.user_id ?? null,
+    is_secret: post.is_secret
+  };
+  if (!canReadSuggestion(ownership, input.actor)) {
+    return { error: "잘못된 접근입니다.", status: 403 };
+  }
+  if (await overHourlyLimit(
+    client,
+    "suggestion_comments",
+    input.actor.userId,
+    SUGGESTION_COMMENT_HOURLY_LIMIT,
+    nowOf3(deps)
+  )) {
+    return { error: HOURLY_LIMIT_ERROR, status: 429 };
+  }
+  const nickname = authorNickname(await resolveNickname4(client, input.actor));
+  const { error } = await client.from("suggestion_comments").insert({
+    suggestion_id: suggestionId,
+    user_id: input.actor.userId,
+    nickname,
+    content: validated.content
+  });
+  if (error) return { error: "댓글 등록에 실패했어요.", status: 500 };
+  await createNotification(client, {
+    userId: ownership.user_id,
+    type: "suggestion_comment",
+    actorId: input.actor.userId,
+    actorNickname: nickname,
+    title: post.title ?? "건의글",
+    preview: notificationPreview(validated.content),
+    link: `/suggestions/${suggestionId}`
+  });
+  return { id: suggestionId };
+}
+async function updateSuggestionComment(client, input, deps = {}) {
+  const commentId = String(input.commentId ?? "");
+  if (!isPaperUuid(commentId)) return { error: "잘못된 접근입니다.", status: 400 };
+  const validated = validateSuggestionCommentContent(input.content);
+  if ("error" in validated) return { error: validated.error, status: 400 };
+  const { data: comment } = await client.from("suggestion_comments").select("suggestion_id, user_id").eq("id", commentId).maybeSingle();
+  if (!comment) return { error: "댓글을 찾을 수 없어요.", status: 404 };
+  if (!canEditSuggestionComment({ user_id: comment.user_id ?? null }, input.actor)) {
+    return { error: "권한이 없어요.", status: 403 };
+  }
+  const { error } = await client.from("suggestion_comments").update({ content: validated.content, updated_at: nowOf3(deps).toISOString() }).eq("id", commentId).eq("user_id", input.actor.userId);
+  if (error) return { error: "수정에 실패했어요.", status: 500 };
+  return { id: comment.suggestion_id };
+}
+async function deleteSuggestionComment(client, input) {
+  const commentId = String(input.commentId ?? "");
+  if (!isPaperUuid(commentId)) return { error: "잘못된 접근입니다.", status: 400 };
+  const { data: comment } = await client.from("suggestion_comments").select("suggestion_id, user_id").eq("id", commentId).maybeSingle();
+  if (!comment) return { error: "댓글을 찾을 수 없어요.", status: 404 };
+  if (!canDeleteSuggestionComment({ user_id: comment.user_id ?? null }, input.actor)) {
+    return { error: "권한이 없어요.", status: 403 };
+  }
+  let query = client.from("suggestion_comments").delete().eq("id", commentId);
+  if (!input.actor.isAdmin) query = query.eq("user_id", input.actor.userId);
+  const { error } = await query;
+  if (error) return { error: "삭제에 실패했어요.", status: 500 };
+  return { id: comment.suggestion_id };
+}
+async function resolveNickname4(client, actor) {
+  if (actor.metadataNickname !== void 0) return actor.metadataNickname;
+  const { data } = await client.auth.admin.getUserById(actor.userId);
+  return data?.user?.user_metadata?.nickname;
+}
+
+// src/chat.ts
+var CHAT_CONTENT_MAX = 300;
+function chatContentError(content) {
+  if (!content) return "메시지를 입력해주세요.";
+  if (content.length > CHAT_CONTENT_MAX) {
+    return `메시지는 ${CHAT_CONTENT_MAX}자 이하로 입력해주세요.`;
+  }
+  return profanityError(content);
+}
+var CHAT_MIN_INTERVAL_MS = 1500;
+var CHAT_BURST_WINDOW_MS = 1e4;
+var CHAT_BURST_LIMIT = 5;
+function checkChatFlood(lastMessage, content, nowMs) {
+  if (!lastMessage) return { ok: true };
+  if (nowMs - lastMessage.createdAtMs < CHAT_MIN_INTERVAL_MS) {
+    return { ok: false, error: "너무 빨리 보내고 있어요. 잠시 후 다시 시도해주세요." };
+  }
+  if (lastMessage.content.trim().toLowerCase() === content.trim().toLowerCase()) {
+    return { ok: false, error: "같은 메시지를 반복해서 보낼 수 없어요." };
+  }
+  return { ok: true };
+}
+function checkChatBurst(recentCount) {
+  if (recentCount >= CHAT_BURST_LIMIT) {
+    return { ok: false, error: "메시지를 너무 자주 보내고 있어요. 잠시 후 다시 시도해주세요." };
+  }
+  return { ok: true };
+}
+var CHAT_CLEAR_CONFIRM_TEXT = "채팅 초기화";
+function checkChatClearConfirmation(input) {
+  if (input.trim() !== CHAT_CLEAR_CONFIRM_TEXT) {
+    return { ok: false, error: `확인 문구 "${CHAT_CLEAR_CONFIRM_TEXT}"를 그대로 입력해주세요.` };
+  }
+  return { ok: true };
+}
+
+// src/rules/chat.ts
+async function sendChatMessage(client, input, deps = {}) {
+  const trimmed = String(input.content ?? "").trim();
+  const contentError = chatContentError(trimmed);
+  if (contentError) return { error: contentError, status: 400 };
+  const nowMs = (deps.now ? deps.now() : /* @__PURE__ */ new Date()).getTime();
+  const userId = input.actor.userId;
+  const [{ data: last }, { count: recentCount }] = await Promise.all([
+    client.from("chat_messages").select("content, created_at").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    client.from("chat_messages").select("id", { count: "exact", head: true }).eq("user_id", userId).gte("created_at", new Date(nowMs - CHAT_BURST_WINDOW_MS).toISOString())
+  ]);
+  const floodCheck = checkChatFlood(
+    last ? { content: last.content, createdAtMs: new Date(last.created_at).getTime() } : null,
+    trimmed,
+    nowMs
+  );
+  if (!floodCheck.ok) return { error: floodCheck.error, status: 429 };
+  const burstCheck = checkChatBurst(recentCount ?? 0);
+  if (!burstCheck.ok) return { error: burstCheck.error, status: 429 };
+  const nickname = authorNickname(await resolveNickname5(client, input.actor));
+  const { data, error } = await client.from("chat_messages").insert({ user_id: userId, nickname, content: trimmed }).select("id, user_id, nickname, content, created_at").single();
+  if (error || !data) return { error: "전송에 실패했어요.", status: 500 };
+  return {
+    message: {
+      id: data.id,
+      userId: data.user_id,
+      nickname: data.nickname,
+      content: data.content,
+      createdAt: data.created_at
+    }
+  };
+}
+async function resolveNickname5(client, actor) {
+  if (actor.metadataNickname !== void 0) return actor.metadataNickname;
+  const { data } = await client.auth.admin.getUserById(actor.userId);
+  return data?.user?.user_metadata?.nickname;
+}
+
+// src/rules/account-delete.ts
+var ANONYMIZED_NICKNAME = "탈퇴한 회원";
+var DELETED_POST_TITLE = "탈퇴한 회원의 글";
+var DELETED_POST_TEXT = "탈퇴한 회원의 글입니다.";
+var DELETED_CHAT_TEXT = "탈퇴한 회원의 메시지입니다.";
+function deletedPostHtml() {
+  return sanitizeRichText(`<p>${DELETED_POST_TEXT}</p>`, { imageOrigins: [] });
+}
+var USER_BUCKETS = ["avatars", "board-images"];
+var COMMENT_TABLES = ["comments", "board_comments", "suggestion_comments", "notice_comments"];
+var DETACH = [
+  { table: "exam_papers", column: "uploaded_by" },
+  { table: "answer_keys", column: "uploaded_by" },
+  { table: "law_digests", column: "verified_by" },
+  { table: "suggestions", column: "answered_by" },
+  { table: "notices", column: "created_by" }
+];
+var COMMENT_CLEANUP_FAILED = "댓글 정리에 실패했어요. 잠시 후 다시 시도해 주세요.";
+var POST_CLEANUP_FAILED = "글 정리에 실패했어요. 잠시 후 다시 시도해 주세요.";
+var ACCOUNT_CLEANUP_FAILED = "계정 정리에 실패했어요. 잠시 후 다시 시도해 주세요.";
+var ACCOUNT_DELETE_FAILED = "계정 삭제에 실패했어요. 잠시 후 다시 시도해 주세요.";
+async function deleteAccount(client, input, deps = {}) {
+  const log = deps.log ?? ((message, detail) => console.error(message, detail));
+  const userId = input.userId;
+  for (const table of COMMENT_TABLES) {
+    const { error } = await client.from(table).update({ user_id: null, nickname: ANONYMIZED_NICKNAME }).eq("user_id", userId);
+    if (error) {
+      log(`[account-delete] ${table} 익명화 실패:`, error.message);
+      return { error: COMMENT_CLEANUP_FAILED, status: 500 };
+    }
+  }
+  const postWrites = [
+    {
+      table: "board_posts",
+      values: {
+        user_id: null,
+        nickname: ANONYMIZED_NICKNAME,
+        title: DELETED_POST_TITLE,
+        content_html: deletedPostHtml(),
+        content_text: DELETED_POST_TEXT,
+        thumbnail_url: null
+      }
+    },
+    {
+      table: "suggestions",
+      values: {
+        user_id: null,
+        nickname: ANONYMIZED_NICKNAME,
+        title: DELETED_POST_TITLE,
+        content: DELETED_POST_TEXT
+      }
+    },
+    {
+      table: "chat_messages",
+      values: { user_id: null, nickname: ANONYMIZED_NICKNAME, content: DELETED_CHAT_TEXT }
+    }
+  ];
+  for (const { table, values } of postWrites) {
+    const { error } = await client.from(table).update(values).eq("user_id", userId);
+    if (error) {
+      log(`[account-delete] ${table} 비우기 실패:`, error.message);
+      return { error: POST_CLEANUP_FAILED, status: 500 };
+    }
+  }
+  for (const { table, column } of DETACH) {
+    const { error } = await client.from(table).update({ [column]: null }).eq(column, userId);
+    if (error) {
+      log(`[account-delete] ${table}.${column} 끊기 실패:`, error.message);
+      return { error: ACCOUNT_CLEANUP_FAILED, status: 500 };
+    }
+  }
+  await purgeUserObjects(client, userId, log);
+  const { error: deleteError } = await client.auth.admin.deleteUser(userId);
+  if (deleteError) {
+    log("[account-delete] deleteUser 실패:", deleteError.message);
+    return { error: ACCOUNT_DELETE_FAILED, status: 500 };
+  }
+  return { ok: true };
+}
+async function purgeUserObjects(client, userId, log) {
+  for (const bucket of USER_BUCKETS) {
+    try {
+      for (let page = 0; page < 50; page++) {
+        const { data, error } = await client.storage.from(bucket).list(userId, { limit: 100 });
+        if (error) {
+          log(`[account-delete] ${bucket} 목록 실패:`, error.message);
+          break;
+        }
+        const paths = (data ?? []).map((f) => `${userId}/${f.name}`);
+        if (paths.length === 0) break;
+        const { error: removeError } = await client.storage.from(bucket).remove(paths);
+        if (removeError) {
+          log(`[account-delete] ${bucket} 삭제 실패:`, removeError.message);
+          break;
+        }
+        if (paths.length < 100) break;
+      }
+    } catch (e) {
+      log(`[account-delete] ${bucket} 정리 중 예외:`, e);
+    }
+  }
 }
 
 // src/levels.ts
@@ -6291,6 +6809,17 @@ function isReportReason(value) {
 function reportReasonLabel(slug) {
   return REPORT_REASONS.find((r) => r.slug === slug)?.label ?? "기타";
 }
+var REPORT_TARGET_TYPES = [
+  { slug: "board_post", label: "게시글" },
+  { slug: "suggestion", label: "건의글" },
+  { slug: "chat_message", label: "채팅 메시지" }
+];
+function isReportTargetType(value) {
+  return REPORT_TARGET_TYPES.some((t) => t.slug === value);
+}
+function reportTargetLabel(slug) {
+  return REPORT_TARGET_TYPES.find((t) => t.slug === slug)?.label ?? "게시글";
+}
 var REPORT_DETAIL_MAX = 500;
 function validateReportInput(input) {
   if (!isReportReason(input.reason)) return { error: "신고 사유를 선택해주세요." };
@@ -6306,9 +6835,10 @@ function validateReportInput(input) {
 function filterBlocked(items, blockedIds) {
   const set = blockedIds instanceof Set ? blockedIds : new Set(blockedIds);
   if (set.size === 0) return [...items];
-  return items.filter((item) => !set.has(item.authorId));
+  return items.filter((item) => item.authorId === null || !set.has(item.authorId));
 }
 export {
+  ANONYMIZED_NICKNAME,
   ANON_PREVIEW_CARDS,
   ATTENDANCE_MILESTONES,
   ATTENDANCE_MIN_QUESTIONS,
@@ -6337,8 +6867,16 @@ export {
   BOARD_IMAGE_MAX_WIDTH,
   BOARD_RAW_HTML_MAX,
   BOARD_TITLE_MAX,
+  CHAT_BURST_LIMIT,
+  CHAT_BURST_WINDOW_MS,
+  CHAT_CLEAR_CONFIRM_TEXT,
+  CHAT_CONTENT_MAX,
+  CHAT_MIN_INTERVAL_MS,
   COACH_PER_SUBJECT,
   COMMENT_CONTENT_MAX,
+  DELETED_CHAT_TEXT,
+  DELETED_POST_TEXT,
+  DELETED_POST_TITLE,
   DIAGNOSIS_LOCKED,
   DIAGNOSIS_MODEL_DEFAULT,
   DIAGNOSIS_RECHECK_SECONDS,
@@ -6374,6 +6912,7 @@ export {
   QUESTION_ID_CHUNK,
   REPORT_DETAIL_MAX,
   REPORT_REASONS,
+  REPORT_TARGET_TYPES,
   REVIEW_COOLDOWN_HOURS,
   REVIEW_PICK_RECENT_DAYS,
   REVIEW_PICK_REPEAT_THRESHOLD,
@@ -6381,6 +6920,7 @@ export {
   REVIEW_SESSION_MAX_LIMIT,
   RICH_TEXT_HTML_MAX,
   RICH_TEXT_TAGS,
+  SECRET_TITLE_PLACEHOLDER,
   SRS_EARLY_LAPSE_FACTOR,
   SRS_EARLY_LAPSE_RATIO,
   SRS_EASE_BONUS,
@@ -6396,8 +6936,17 @@ export {
   SRS_MIN_EASE,
   SRS_RELEARN_DELAY_HOURS,
   SRS_SECOND_INTERVAL_DAYS,
+  SUGGESTIONS_PAGE_SIZE,
+  SUGGESTION_ANSWER_MAX,
+  SUGGESTION_COMMENT_HOURLY_LIMIT,
+  SUGGESTION_COMMENT_MAX,
+  SUGGESTION_CONTENT_MAX,
+  SUGGESTION_HOURLY_LIMIT,
+  SUGGESTION_TITLE_MAX,
   TRIAL_DAYS,
+  USER_BUCKETS,
   WRONG_NOTE_QUESTION_LIMIT,
+  answerSuggestion,
   attendanceDaysLeft,
   attendanceEarnedDays,
   attendanceMilestoneDates,
@@ -6423,10 +6972,20 @@ export {
   canDeleteBoardComment,
   canDeleteBoardPost,
   canDeleteNoticeComment,
+  canDeleteSuggestion,
+  canDeleteSuggestionComment,
   canEditBoardComment,
   canEditBoardPost,
   canEditNoticeComment,
+  canEditSuggestion,
+  canEditSuggestionComment,
   canPinBoardPost,
+  canPinSuggestion,
+  canReadSuggestion,
+  chatContentError,
+  checkChatBurst,
+  checkChatClearConfirmation,
+  checkChatFlood,
   chunk,
   collapseDuplicatePapers,
   collectAllReviewCandidates,
@@ -6442,6 +7001,7 @@ export {
   conceptSelectionKey,
   consumeFreeExplanationQuota,
   containsProfanity,
+  countSuggestionView,
   createAllReviewSessionForUser,
   createAnthropicBatchTransport,
   createBoardComment,
@@ -6456,11 +7016,17 @@ export {
   createRetryFromMixSession,
   createReviewSessionForUser,
   createReviewSessionFromItems,
+  createSuggestion,
+  createSuggestionComment,
   daysInMonthKey,
   decodePapers,
+  deleteAccount,
   deleteBoardComment,
   deleteBoardPost,
   deleteNoticeComment,
+  deleteSuggestion,
+  deleteSuggestionComment,
+  deletedPostHtml,
   embedOne,
   encodePapers,
   fetchAllCbtAvailability,
@@ -6484,6 +7050,9 @@ export {
   fetchQuestionMedia,
   fetchSubjectFilters,
   fetchSubjectPapers,
+  fetchSuggestion,
+  fetchSuggestionComments,
+  fetchSuggestionPage,
   fetchWrongNoteMarks,
   filterBlocked,
   filterPapers,
@@ -6531,6 +7100,7 @@ export {
   isPremiumMembership,
   isPremiumUserFor,
   isReportReason,
+  isReportTargetType,
   isSameSrsDay,
   isTrialUnstarted,
   isValidAvatarPath,
@@ -6566,12 +7136,15 @@ export {
   pickWeightedReviewCandidates,
   planCoaching,
   profanityError,
+  purgeUserObjects,
+  readSuggestionComments,
   readWebpInfo,
   recordAttendance,
   recordQuestionResults,
   relativeTimeLabel,
   removeUserAvatar,
   reportReasonLabel,
+  reportTargetLabel,
   representativePaperIds,
   requestDiagnosisForUser,
   resolveBoardCommentParent,
@@ -6588,6 +7161,7 @@ export {
   sanitizeSelectedChoice,
   saveDiagnosisReport,
   saveStudyPhase,
+  sendChatMessage,
   setDailyLimit,
   setDiagnosisSubjectPaused,
   setSubjectPaused,
@@ -6604,6 +7178,7 @@ export {
   submitCbtAttempt,
   submitPendingDiagnoses,
   submitReviewSessionForUser,
+  suggestionListTitle,
   toDiagnosisBoard,
   toExplanationContent,
   toMixOverview,
@@ -6616,6 +7191,8 @@ export {
   updateBoardComment,
   updateBoardPost,
   updateNoticeComment,
+  updateSuggestion,
+  updateSuggestionComment,
   uploadBoardImage,
   uploadUserAvatar,
   validateBoardCommentContent,
@@ -6623,5 +7200,8 @@ export {
   validateNickname,
   validateNoticeCommentContent,
   validateNoticeInput,
-  validateReportInput
+  validateReportInput,
+  validateSuggestionAnswer,
+  validateSuggestionCommentContent,
+  validateSuggestionInput
 };

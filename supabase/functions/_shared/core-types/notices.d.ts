@@ -17,7 +17,7 @@ export type NoticeViewer = {
     isAdmin: boolean;
 };
 export type NoticeCommentOwnership = {
-    user_id: string;
+    user_id: string | null;
 };
 export declare function canEditNoticeComment(comment: NoticeCommentOwnership, viewer: NoticeViewer): boolean;
 export declare function canDeleteNoticeComment(comment: NoticeCommentOwnership, viewer: NoticeViewer): boolean;

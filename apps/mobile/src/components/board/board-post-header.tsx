@@ -11,7 +11,8 @@ import type { BoardPostDetail } from "../../queries/board";
 import { themedIcon } from "../../theme/icons";
 
 // 글 머리(웹 board/[id]/page.tsx <header>): 말머리(또는 공지) → 제목 → 아바타·닉네임·날짜·(수정됨)·조회수·
-// 댓글 수 / 공유·수정·삭제. 그 옆 더보기(⋯ 신고·차단)는 웹에 없는 것으로, 본인 글에는 그리지 않는다.
+// 댓글 수 / 공유·수정·삭제. 그 옆 더보기(⋯ 신고·차단)는 웹에 없는 것으로, 본인 글과 탈퇴한 회원의 글
+// (authorId null — 차단할 계정이 없다)에는 그리지 않는다.
 const EyeIcon = themedIcon(Eye);
 const MessageIcon = themedIcon(MessageSquare);
 
@@ -100,7 +101,7 @@ export function BoardPostHeader({
             </Pressable>
           )}
           {canDelete && <BoardDeleteButton postId={post.id} />}
-          {!isOwn && <BoardMoreMenu postId={post.id} authorId={post.authorId} loggedIn={loggedIn} />}
+          {!isOwn && post.authorId !== null && <BoardMoreMenu postId={post.id} authorId={post.authorId} loggedIn={loggedIn} />}
         </View>
       </View>
     </View>

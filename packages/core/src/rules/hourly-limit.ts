@@ -20,12 +20,22 @@ export const BOARD_HOURLY_COMMENT_LIMIT = 30;
 export const BOARD_HOURLY_IMAGE_LIMIT = 60;
 // 공지 댓글. suggestion_comments 와 같은 기준. 공지 원글은 관리자 전용이라 상한이 없다.
 export const NOTICE_COMMENT_HOURLY_LIMIT = 30;
+// 건의글. 정상적인 건의는 하루에 몇 건을 넘지 않는다(문항 오류 신고와 같은 기준) —
+// 웹 suggestions/actions.ts 에 있던 HOURLY_LIMIT 을 옮긴 것.
+export const SUGGESTION_HOURLY_LIMIT = 10;
+// 건의 댓글. 원글보다 가볍게 자주 오가므로 더 넉넉히(웹 COMMENT_HOURLY_LIMIT).
+export const SUGGESTION_COMMENT_HOURLY_LIMIT = 30;
 
 // 도배 초과 시 문구. 웹 서버 액션 전부가 이 한 문장을 쓴다.
 export const HOURLY_LIMIT_ERROR =
   "짧은 시간 동안 너무 많이 작성했어요. 잠시 후 다시 시도해주세요.";
 
-export type HourlyLimitTable = "board_posts" | "board_comments" | "notice_comments";
+export type HourlyLimitTable =
+  | "board_posts"
+  | "board_comments"
+  | "notice_comments"
+  | "suggestions"
+  | "suggestion_comments";
 
 // user_id 컬럼과 created_at 컬럼을 가진 표라면 어디든 같은 식으로 센다.
 // count 조회가 실패하면(null) 0 으로 본다 — 한도 검사가 죽어서 글쓰기가 통째로 막히는

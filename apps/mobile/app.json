@@ -84,6 +84,11 @@
               "scheme": "https",
               "host": "gongmoa.kr",
               "pathPrefix": "/notices"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/suggestions"
             }
           ],
           "category": [

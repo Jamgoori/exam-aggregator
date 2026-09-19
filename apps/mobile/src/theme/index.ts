@@ -106,8 +106,10 @@ export const richText = {
   // `.board-content text-[15px] leading-7` — 모든 블록이 이 줄높이를 상속한다.
   fontSize: 15,
   lineHeight: 28,
-  // `p { margin: 0 0 0.5rem; min-height: 1lh }` — 빈 줄(엔터)도 한 줄 높이를 차지한다.
-  paragraph: { marginBottom: 8, minHeight: 28 },
+  // `p { margin: 0; min-height: 1lh }` — 빈 줄(엔터)도 한 줄 높이를 차지한다. 여백 0 은 웹이 div 문단
+  // (옛 웹 에디터 저장분)과 p 문단(새 웹 에디터·앱 저장분)을 같은 모습으로 그리려고 2026-09-19 에 맞춘
+  // 값이다(globals.css 주석, 설계서 §13 질문 17). 문단 사이 간격은 빈 줄로만 생긴다.
+  paragraph: { marginBottom: 0, minHeight: 28 },
   h2: { fontSize: 20, marginTop: 20, marginBottom: 8 },
   h3: { fontSize: 17.6, marginTop: 16, marginBottom: 8 },
   // `ul, ol { margin: 0.5rem 0; padding-left: 1.5rem }`, `li { margin: 0.15rem 0 }`.

@@ -54,9 +54,15 @@ export function useAvatarUpload() {
 // 조회라 'me' 접두에 두고, 사진은 자주 바뀌지 않으니 카탈로그 등급(5분)으로 둔다. 키에 정렬한
 // id 목록을 넣어 같은 화면의 재요청은 캐시를 맞고, 결과는 퍼시스트 블롭이 JSON 이라 Map 대신
 // Record 로 든다.
-export function useAvatarUrls(userIds: readonly string[]) {
+//
+// null 은 거른다 — 탈퇴한 회원의 글·댓글(user_id null, 2라운드 탈퇴 정책 #17)이 섞여 오는데 RPC 의
+// uuid[] 에 null 을 넣으면 호출 전체가 거절되어 그 화면의 아바타가 통째로 사라진다.
+export function useAvatarUrls(userIds: readonly (string | null)[]) {
   const { userId } = useAuth();
-  const unique = useMemo(() => [...new Set(userIds.filter(Boolean))].sort(), [userIds]);
+  const unique = useMemo(
+    () => [...new Set(userIds.filter((id): id is string => typeof id === "string" && id.length > 0))].sort(),
+    [userIds],
+  );
   const idsKey = unique.join(",");
   return useQuery<Record<string, string>>({
     queryKey: ["me", userId ?? "", "avatars", idsKey],

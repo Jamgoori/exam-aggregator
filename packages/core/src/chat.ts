@@ -1,3 +1,5 @@
+import { profanityError } from "./profanity";
+
 // 채팅 메시지 정책 (오픈카카오톡 대체 채팅방). 본문 길이·도배 판정 규칙을 여기
 // 하나로 모아 서버 액션이 그대로 쓰게 한다 — comment-constraints.ts 와 같은 이유.
 //
@@ -5,6 +7,17 @@
 // 이 하고, 그 결과를 여기 순수 함수에 넘겨 통과/거절만 판정한다(테스트 용이성 + 웹·
 // 앱이 같은 규칙을 공유할 수 있게 하기 위해 — packages/core 헤더 주석의 DI 원칙과 같다).
 export const CHAT_CONTENT_MAX = 300;
+
+// 본문 검증(빈 값·길이·비속어). 웹 chat/actions.ts 에 있던 validateContent 를 그대로 옮긴 것 —
+// 서버 규칙(rules/chat.ts)이 최종 관문이고, 웹 어댑터는 로그인 확인 전에 같은 함수로 먼저
+// 거른다(웹이 원래 그 순서였다). 호출부가 trim 한 값을 넘긴다.
+export function chatContentError(content: string): string | null {
+  if (!content) return "메시지를 입력해주세요.";
+  if (content.length > CHAT_CONTENT_MAX) {
+    return `메시지는 ${CHAT_CONTENT_MAX}자 이하로 입력해주세요.`;
+  }
+  return profanityError(content);
+}
 
 // 최소 전송 간격. 사람이 타이핑하는 속도보다는 훨씬 짧아 정상 대화를 막지 않으면서,
 // 자동화된 연타 도배는 걸러낸다.

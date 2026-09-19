@@ -6,6 +6,8 @@ import { ProfileImageField } from "@/components/profile-image-field";
 import { avatarUrl } from "@/lib/avatars";
 import { CbtViewModeField } from "@/components/cbt-view-mode-field";
 import { DeleteAccountButton } from "@/components/delete-account-button";
+import { BlockedUsersSection } from "@/components/blocked-users-section";
+import { fetchBlockedUsers } from "@/lib/blocks";
 
 export default async function EditAccountPage({
   searchParams,
@@ -35,6 +37,11 @@ export default async function EditAccountPage({
   const defaultCbtViewMode =
     user.user_metadata?.default_cbt_view_mode === "full" ? "full" : "single";
 
+  // 차단한 사용자 목록(RPC my_blocked_users — 닉네임은 함수가 profiles 에서 붙인다). 조회 실패는
+  // 절 안에 문구로만 나타나고 페이지는 그대로 열린다(1라운드 SQL 미적용 상태에서도 내 정보 수정이
+  // 막히면 안 된다).
+  const blocked = await fetchBlockedUsers();
+
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-8 px-4 pb-12 pt-6 sm:pt-8">
       <div>
@@ -63,6 +70,13 @@ export default async function EditAccountPage({
       <section className="flex flex-col gap-4 border-t border-zinc-100 pt-6 dark:border-zinc-700">
         <h2 className="text-lg font-semibold">CBT 시작 화면</h2>
         <CbtViewModeField defaultValue={defaultCbtViewMode} />
+      </section>
+
+      {/* 앱 /mypage/edit 의 "차단한 사용자" 절과 같은 자리(설계서 §12-2 #16 — 차단한 사용자의
+          글·댓글은 어디에도 보이지 않으므로 해제할 자리가 여기밖에 없다). */}
+      <section className="flex flex-col gap-4 border-t border-zinc-100 pt-6 dark:border-zinc-700">
+        <h2 className="text-lg font-semibold">차단한 사용자</h2>
+        <BlockedUsersSection initialUsers={blocked.users} loadError={blocked.error} />
       </section>
 
       {/* 카카오는 이메일 제공 동의를 안 한 계정이면 email이 없을 수 있다. */}

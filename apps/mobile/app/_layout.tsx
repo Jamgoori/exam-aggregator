@@ -146,6 +146,9 @@ function Gates() {
             첫 전환 애니메이션에 늦게 적용될 수 있어 login 과 같은 자리에 등록한다. */}
         <Stack.Screen name="board/new" options={{ presentation: "modal" }} />
         <Stack.Screen name="board/[id]/edit" options={{ presentation: "modal" }} />
+        {/* 건의 작성·수정(§5 — 같은 이유로 modal). */}
+        <Stack.Screen name="suggestions/new" options={{ presentation: "modal" }} />
+        <Stack.Screen name="suggestions/[id]/edit" options={{ presentation: "modal" }} />
         <Stack.Screen name="+not-found" />
       </Stack>
       <NavDrawer />

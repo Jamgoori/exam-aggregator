@@ -21,6 +21,10 @@ import type { SessionSchedule } from "../review-queue";
 import {
   EDGE_NAMES,
   isBoardWriteImage,
+  isSuggestionsComments,
+  isSuggestionsGet,
+  isSuggestionsList,
+  isSuggestionsWrite,
   isMixCreateHub,
   isMixCreateSession,
   isReviewDueSchedule,
@@ -528,6 +532,81 @@ test("board-write 응답 판별은 이미지와 글을 가른다", () => {
   assert.equal(isBoardWriteImage(boardPostResponse), false);
 });
 
+// ── suggestions / chat-send (§6.7 #19·#20) ──────────────────────────────────
+({ action: "list", page: 2 }) satisfies EdgeRequest<"suggestions">;
+({ action: "get", id: "s1" }) satisfies EdgeRequest<"suggestions">;
+({ action: "comments", id: "s1" }) satisfies EdgeRequest<"suggestions">;
+({ action: "create", title: "제목", content: "내용", isSecret: true }) satisfies EdgeRequest<"suggestions">;
+({ action: "update", id: "s1", title: "제목", content: "내용", isSecret: false, isPinned: true }) satisfies EdgeRequest<"suggestions">;
+({ action: "delete", id: "s1" }) satisfies EdgeRequest<"suggestions">;
+({ action: "answer", id: "s1", answer: "답변" }) satisfies EdgeRequest<"suggestions">;
+({ action: "comment.create", suggestionId: "s1", content: "댓글" }) satisfies EdgeRequest<"suggestions">;
+({ action: "comment.update", commentId: "c1", content: "댓글" }) satisfies EdgeRequest<"suggestions">;
+({ action: "comment.delete", commentId: "c1" }) satisfies EdgeRequest<"suggestions">;
+const suggestionItem = {
+  id: "s1",
+  // 볼 수 없는 비밀글은 서버가 이미 "비밀글입니다." 로 바꿔 보낸다.
+  title: "비밀글입니다.",
+  nickname: "글쓴이",
+  createdAt: "2026-09-19T03:00:00.000Z",
+  viewCount: 3,
+  isSecret: true,
+  isPinned: false,
+  isAnswered: false,
+  readable: false,
+  // 차단 필터용 — 볼 수 없는 비밀글에도 실린다(탈퇴한 회원의 글이면 null).
+  authorId: "u1",
+};
+const suggestionsList = { items: [suggestionItem], pinnedItems: [], total: 1, totalPages: 1 } satisfies EdgeResponse<"suggestions">;
+const suggestionsGet = {
+  status: "ok",
+  suggestion: {
+    id: "s1",
+    title: "제목",
+    content: "내용",
+    nickname: "글쓴이",
+    createdAt: "2026-09-19T03:00:00.000Z",
+    updatedAt: null,
+    viewCount: 3,
+    isSecret: false,
+    isPinned: false,
+    answer: null,
+    answeredAt: null,
+    // 탈퇴한 회원의 글이면 null(§12-2 #17).
+    authorId: null,
+    canEdit: false,
+    canDelete: false,
+  },
+  canEdit: false,
+  canDelete: false,
+  canAnswer: false,
+} satisfies EdgeResponse<"suggestions">;
+({ status: "not_found" }) satisfies EdgeResponse<"suggestions">;
+({ status: "forbidden" }) satisfies EdgeResponse<"suggestions">;
+const suggestionsComments = {
+  items: [
+    { id: "c1", nickname: "댓글러", content: "댓글", createdAt: "2026-09-19T03:00:00.000Z", updatedAt: null, canEdit: true, canDelete: true, authorId: "u2" },
+  ],
+} satisfies EdgeResponse<"suggestions">;
+const suggestionsWrite = { success: true, id: "s1" } satisfies EdgeResponse<"suggestions">;
+
+test("suggestions 응답 판별은 네 갈래를 가른다", () => {
+  assert.equal(isSuggestionsList(suggestionsList), true);
+  assert.equal(isSuggestionsGet(suggestionsGet), true);
+  assert.equal(isSuggestionsComments(suggestionsComments), true);
+  assert.equal(isSuggestionsWrite(suggestionsWrite), true);
+  // 목록에도 items 가 있으므로 comments 판별은 pinnedItems 가 없을 때만 참이어야 한다.
+  assert.equal(isSuggestionsComments(suggestionsList), false);
+  assert.equal(isSuggestionsList(suggestionsComments), false);
+  assert.equal(isSuggestionsGet(suggestionsList), false);
+  assert.equal(isSuggestionsWrite(suggestionsGet), false);
+});
+
+({ content: "안녕하세요" }) satisfies EdgeRequest<"chat-send">;
+({
+  message: { id: "m1", userId: "u1", nickname: "글쓴이", content: "안녕하세요", createdAt: "2026-09-19T03:00:00.000Z" },
+}) satisfies EdgeResponse<"chat-send">;
+
 // ── 오류 본문 ───────────────────────────────────────────────────────────────
 ({ error: "로그인 후 이용할 수 있어요." }) satisfies EdgeErrorBody;
 
@@ -536,8 +615,8 @@ type _EveryEntry = { [N in EdgeName]: EdgeContracts[N] extends { request: unknow
 const _every: _EveryEntry[EdgeName] = true;
 void _every;
 
-test("EDGE_NAMES 는 배포된 함수 20개", () => {
-  assert.equal(EDGE_NAMES.length, 20);
+test("EDGE_NAMES 는 배포된 함수 22개", () => {
+  assert.equal(EDGE_NAMES.length, 22);
   assert.equal(new Set(EDGE_NAMES).size, EDGE_NAMES.length);
 });
 

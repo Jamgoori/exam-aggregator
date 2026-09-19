@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppFooter } from "./app-footer";
 import { AppHeader } from "./app-header";
+import { ChatFab } from "./chat/chat-fab";
 import { OfflineBanner } from "./offline-banner";
 import { ReviewFab } from "./review/review-fab";
 import { useIsOnline } from "../lib/net";
@@ -138,8 +139,14 @@ export function Screen({
         </ScrollView>
       )}
       {/* 복습 FAB 은 overlay 슬롯보다 **먼저** 그린다 — 되돌리기 토스트·선택 바가 겹칠 때는
-          그쪽이 위에 있어야 한다(방금 한 동작을 취소하는 자리가 더 급하다). */}
-      {!immersive && <ScreenOverlay bottom={overlayBottom}><ReviewFab visible={scrolled} /></ScreenOverlay>}
+          그쪽이 위에 있어야 한다(방금 한 동작을 취소하는 자리가 더 급하다). 채팅 FAB(좌하단, 웹 root
+          layout 의 ChatFab)도 같은 슬롯 — 웹이 pathname 으로 빼는 몰입형 판정이 여기서는 immersive 다. */}
+      {!immersive && (
+        <ScreenOverlay bottom={overlayBottom}>
+          <ChatFab />
+          <ReviewFab visible={scrolled} />
+        </ScreenOverlay>
+      )}
       {overlay != null && <ScreenOverlay bottom={overlayBottom}>{overlay}</ScreenOverlay>}
     </View>
   );
@@ -183,6 +190,7 @@ export function ScreenList<T>({
       />
       {!props.immersive && (
         <ScreenOverlay bottom={overlayBottom}>
+          <ChatFab />
           <ReviewFab visible={scrolled} />
         </ScreenOverlay>
       )}

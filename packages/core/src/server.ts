@@ -47,6 +47,12 @@ export * from "./rules/hourly-limit";
 export * from "./rules/notify";
 export * from "./rules/board";
 export * from "./rules/notices";
+// 건의게시판(읽기 포함 — SELECT 조차 회수된 표라 앱도 Edge 로 읽는다)·채팅 전송·회원 탈퇴
+// (Phase 5 2라운드) — 웹 lib/suggestions.ts·suggestions/actions.ts·chat/actions.ts 와 Edge
+// `suggestions`·`chat-send`·`account-delete` 의 공통 규칙.
+export * from "./rules/suggestions";
+export * from "./rules/chat";
+export * from "./rules/account-delete";
 
 // ── 서버 조회(DI) ──────────────────────────────────────────────────────────
 export * from "./data/dedup-signals";
@@ -80,6 +86,9 @@ export * from "./notices";
 export * from "./notifications";
 export * from "./rich-text";
 export * from "./ugc";
+// 건의·채팅의 순수 검증(제목·본문·답변·댓글 길이, 채팅 길이·도배 판정). 규칙(rules/suggestions·chat)이 부른다.
+export * from "./suggestions";
+export * from "./chat";
 // 진단 리포트 스키마·개념 선택 정규화·코칭 대상 선정(순수) — 웹 생성기와 Edge 가 같은 것을 쓴다.
 export * from "./diagnosis-report";
 export * from "./diagnosis-targets";

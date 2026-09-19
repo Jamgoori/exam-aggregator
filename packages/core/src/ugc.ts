@@ -29,6 +29,28 @@ export function reportReasonLabel(slug: string): string {
   return REPORT_REASONS.find((r) => r.slug === slug)?.label ?? "기타";
 }
 
+// 신고 대상 종류. 채팅 메시지·건의글도 UGC 라 신고할 수 있어야 한다(Apple 1.2). 값은
+// content_reports.target_type 과 RPC report_content 의 p_target_type 에 그대로 쓰이므로 바꾸지 말 것.
+// 1라운드의 report_post(p_post_id, …) 는 report_content('board_post', …) 를 부르는 껍데기로 남는다.
+//
+// ⚠ 두 곳을 함께 고친다: 이 배열과 schema.sql 의 `content_reports_target_type_check`(그리고
+// report_content 본문의 대상 존재 확인 분기) — REPORT_REASONS 와 같은 관례.
+export const REPORT_TARGET_TYPES = [
+  { slug: "board_post", label: "게시글" },
+  { slug: "suggestion", label: "건의글" },
+  { slug: "chat_message", label: "채팅 메시지" },
+] as const;
+
+export type ReportTargetType = (typeof REPORT_TARGET_TYPES)[number]["slug"];
+
+export function isReportTargetType(value: unknown): value is ReportTargetType {
+  return REPORT_TARGET_TYPES.some((t) => t.slug === value);
+}
+
+export function reportTargetLabel(slug: string): string {
+  return REPORT_TARGET_TYPES.find((t) => t.slug === slug)?.label ?? "게시글";
+}
+
 // 신고 상세 설명의 길이 상한. DB check(char_length(detail) <= 500)와 같은 값 — 여기서 먼저
 // 막아야 오류 문구가 SQL 메시지가 아니라 사람 말로 나간다.
 export const REPORT_DETAIL_MAX = 500;
@@ -51,13 +73,14 @@ export function validateReportInput(input: {
 }
 
 // 차단 목록으로 목록을 거른다. 게시글·댓글 어느 쪽이든 작성자 id 만 있으면 된다.
+// authorId 가 null 인 항목(탈퇴한 회원의 글)은 차단할 대상이 없으므로 언제나 남는다.
 // 차단은 **내가 보는 화면**에서만 사라지는 것이고(상대는 모른다), 서버 RLS 는 건드리지
 // 않는다 — 차단 목록은 user_blocks 의 "select own" 으로 읽는다.
-export function filterBlocked<T extends { authorId: string }>(
+export function filterBlocked<T extends { authorId: string | null }>(
   items: readonly T[],
   blockedIds: ReadonlySet<string> | readonly string[],
 ): T[] {
   const set = blockedIds instanceof Set ? blockedIds : new Set(blockedIds as readonly string[]);
   if (set.size === 0) return [...items];
-  return items.filter((item) => !set.has(item.authorId));
+  return items.filter((item) => item.authorId === null || !set.has(item.authorId));
 }
