@@ -62,7 +62,8 @@ export type NoticeDetail = {
 
 export type NoticeCommentItem = {
   id: string;
-  authorId: string;
+  // null = 탈퇴한 회원의 댓글(2라운드 탈퇴 정책 #17).
+  authorId: string | null;
   nickname: string;
   content: string;
   createdAt: string;
@@ -176,7 +177,7 @@ async function fetchNoticeComments(noticeId: string): Promise<NoticeCommentItem[
   if (error) throw new Error(`댓글 조회 실패: ${error.message}`);
   return ((data ?? []) as Row[]).map((row) => ({
     id: row.id as string,
-    authorId: row.user_id as string,
+    authorId: (row.user_id as string | null) ?? null,
     nickname: row.nickname as string,
     content: row.content as string,
     createdAt: row.created_at as string,

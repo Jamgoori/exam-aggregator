@@ -159,7 +159,7 @@ export async function updateBoardPost(
     .maybeSingle();
   if (!post) return { error: "글을 찾을 수 없어요.", status: 404 };
 
-  if (!canEditBoardPost({ user_id: post.user_id as string }, input.actor)) {
+  if (!canEditBoardPost({ user_id: post.user_id as string | null }, input.actor)) {
     return { error: "권한이 없어요.", status: 403 };
   }
 
@@ -200,7 +200,7 @@ export async function deleteBoardPost(
     .maybeSingle();
   if (!post) return { error: "글을 찾을 수 없어요.", status: 404 };
 
-  if (!canDeleteBoardPost({ user_id: post.user_id as string }, input.actor)) {
+  if (!canDeleteBoardPost({ user_id: post.user_id as string | null }, input.actor)) {
     return { error: "권한이 없어요.", status: 403 };
   }
 
@@ -320,7 +320,8 @@ export async function createBoardComment(
       id: parent.id as string,
       parent_id: (parent.parent_id as string | null) ?? null,
     });
-    parentAuthorId = parent.is_deleted ? null : (parent.user_id as string);
+    // 탈퇴한 회원의 댓글(user_id null)도 여기서 null 이 된다 — 알림 받을 사람이 없다.
+    parentAuthorId = parent.is_deleted ? null : ((parent.user_id as string | null) ?? null);
   }
 
   const nickname = authorNickname(await resolveNickname(client, input.actor));
@@ -355,9 +356,10 @@ export async function createBoardComment(
       link,
     });
   }
+  // 글쓴이가 탈퇴한 회원이면(user_id null) createNotification 이 받을 사람 없음으로 건너뛴다.
   if (post.user_id !== parentAuthorId) {
     await createNotification(client, {
-      userId: post.user_id as string,
+      userId: post.user_id as string | null,
       type: "board_comment",
       actorId: input.actor.userId,
       actorNickname: nickname,
@@ -388,7 +390,7 @@ export async function updateBoardComment(
     .maybeSingle();
   if (!comment || comment.is_deleted) return { error: "댓글을 찾을 수 없어요.", status: 404 };
 
-  if (!canEditBoardComment({ user_id: comment.user_id as string }, input.actor)) {
+  if (!canEditBoardComment({ user_id: comment.user_id as string | null }, input.actor)) {
     return { error: "권한이 없어요.", status: 403 };
   }
 
@@ -418,7 +420,7 @@ export async function deleteBoardComment(
     .maybeSingle();
   if (!comment) return { error: "댓글을 찾을 수 없어요.", status: 404 };
 
-  if (!canDeleteBoardComment({ user_id: comment.user_id as string }, input.actor)) {
+  if (!canDeleteBoardComment({ user_id: comment.user_id as string | null }, input.actor)) {
     return { error: "권한이 없어요.", status: 403 };
   }
 

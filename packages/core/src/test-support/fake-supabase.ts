@@ -15,6 +15,8 @@
 //   storage.from(bucket).list(prefix, { limit }) — objects[bucket] 에 심어 둔 객체 중 `${prefix}/`
 //     아래 것을 { name, created_at } 로 돌려준다(rules/board.ts 의 이미지 시간당 한도).
 //   auth.admin.getUserById / .updateUserById — users 테이블의 user_metadata 를 병합.
+//   auth.admin.deleteUser — users 에서 행을 빼고 deletedUsers 에 기록(rules/account-delete.ts).
+//   storage.from(bucket).list 는 failNextStorageList 로 한 번 실패시킬 수 있다.
 //
 // select 문자열은 해석하지 않는다 — 테이블에 넣어 둔 행 객체를 그대로 돌려준다.
 // 임베드(questions → question_images)는 행 안에 중첩 객체로 미리 넣어 두면 된다.
@@ -319,6 +321,11 @@ export class FakeSupabase {
   readonly removes: StorageOpLog[] = [];
   // 다음 한 번의 upload 를 실패시킨다(버킷 없음 분기 등).
   failNextUpload: string | null = null;
+  // 다음 한 번의 list 를 실패시킨다(탈퇴 스토리지 정리의 "실패는 로그만" 분기).
+  failNextStorageList: string | null = null;
+  // auth.admin.deleteUser 로 지운 사용자 id(호출 순서대로). 다음 한 번을 실패시키려면 failNextDeleteUser.
+  readonly deletedUsers: string[] = [];
+  failNextDeleteUser: string | null = null;
 
   // 버킷 안에 "이미 있는" 객체. list 가 읽고 upload 가 덧붙인다 — rules/board.ts 의 이미지
   // 시간당 한도가 표가 아니라 스토리지 목록을 세기 때문에 필요하다. created_at 은 ISO 문자열.
@@ -336,6 +343,9 @@ export class FakeSupabase {
         return { data: { path }, error: null };
       },
       list: async (prefix: string, opts?: { limit?: number }) => {
+        const message = this.failNextStorageList;
+        this.failNextStorageList = null;
+        if (message) return { data: null, error: { message } };
         const head = `${prefix}/`;
         const rows = (this.objects[bucket] ?? [])
           .filter((o) => o.path.startsWith(head))
@@ -346,6 +356,11 @@ export class FakeSupabase {
       },
       remove: async (paths: string[]) => {
         this.removes.push({ bucket, paths });
+        // 지운 객체는 목록에서도 빠진다 — 탈퇴 정리가 "빌 때까지" 첫 장을 다시 읽으므로 안 빼면 무한 루프다.
+        const set = new Set(paths);
+        if (this.objects[bucket]) {
+          this.objects[bucket] = this.objects[bucket].filter((o) => !set.has(o.path));
+        }
         return { data: paths.map((p) => ({ name: p })), error: null };
       },
     }),
@@ -363,6 +378,16 @@ export class FakeSupabase {
         const row = (this.tables.users ??= []).find((u) => u.id === id) ?? this.addUser(id);
         row.user_metadata = { ...((row.user_metadata as Row) ?? {}), ...(attrs.user_metadata ?? {}) };
         return { data: { user: { id, user_metadata: row.user_metadata } }, error: null };
+      },
+      deleteUser: async (id: string) => {
+        const message = this.failNextDeleteUser;
+        this.failNextDeleteUser = null;
+        if (message) return { data: { user: null }, error: { message } };
+        const users = this.tables.users ?? [];
+        const idx = users.findIndex((u) => u.id === id);
+        if (idx >= 0) users.splice(idx, 1);
+        this.deletedUsers.push(id);
+        return { data: { user: null }, error: null };
       },
     },
   };

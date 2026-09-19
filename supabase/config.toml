@@ -125,6 +125,9 @@ import_map = "./functions/deno.json"
 [functions.cbt-submit]
 import_map = "./functions/deno.json"
 
+[functions.chat-send]
+import_map = "./functions/deno.json"
+
 [functions.comments-write]
 import_map = "./functions/deno.json"
 
@@ -165,5 +168,8 @@ import_map = "./functions/deno.json"
 import_map = "./functions/deno.json"
 
 [functions.review-submit]
+import_map = "./functions/deno.json"
+
+[functions.suggestions]
 import_map = "./functions/deno.json"
 

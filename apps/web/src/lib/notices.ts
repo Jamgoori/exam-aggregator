@@ -158,7 +158,8 @@ export async function fetchNoticeComments(
     .order("created_at", { ascending: true });
 
   return (data ?? []).map((row) => {
-    const ownership = { user_id: row.user_id as string };
+    // user_id null = 탈퇴한 회원의 댓글(설계서 §12-2 #17) — can* 는 false 로 떨어진다.
+    const ownership = { user_id: (row.user_id as string | null) ?? null };
     return {
       id: row.id as string,
       nickname: row.nickname as string,

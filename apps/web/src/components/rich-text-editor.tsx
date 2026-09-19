@@ -25,6 +25,11 @@ import {
   prepareImageUpload,
   UPLOAD_BODY_LIMIT_BYTES,
 } from "@/lib/prepare-image-upload";
+import {
+  escapeEditorText,
+  wrapRootInlineRuns,
+  type EditorRootNode,
+} from "@/lib/rich-text-editor";
 
 // 자유게시판 글쓰기 에디터.
 //
@@ -40,6 +45,22 @@ import {
 //
 // styleWithCSS: 켜두면 크기·색이 <font size> 대신 <span style> 로 나온다. 꺼져 있는
 // 브라우저를 위해 새니타이저가 <font> 도 span 으로 옮겨 받는다(rich-text.ts).
+//
+// **문단은 <p>, 굵게·기울임·밑줄·취소선은 <b>/<i>/<u>/<strike> 로 낸다(2026-09-19).** 그 전에는
+// defaultParagraphSeparator 를 두지 않아 브라우저가 문단을 <div> 로, styleWithCSS 라 굵게를
+// <span style="font-weight: bold"> 로 저장했고, 앱의 간단 편집기(core rich-text-lite)는 그 모양을
+// 부분집합 밖으로 보아 평문 웹 글도 앱에서 잠겼다(설계서 §12-9·§13 질문 17). 그래서
+//   · 초기화에서 execCommand("defaultParagraphSeparator", "p") — 엔터로 생기는 문단이 <p>(Chrome·
+//     Firefox·Safari 모두 지원, MDN execCommand 명령 표). 지원 밖 브라우저는 <div> 그대로 두고 core
+//     정규화가 받아준다.
+//   · 네 서식 명령만 styleWithCSS 를 잠시 끄고 실행 — <b>/<i>/<u>/<strike> 가 나온다. 크기·색은 그대로
+//     <span style>(원래 lite 로 못 가는 서식이고 <font> 보다 span 이 새니타이저에 곧게 들어간다).
+//   · 첫 줄은 세 브라우저 모두 블록 없이 루트 텍스트로 남긴다(엔터 뒤의 줄만 감싼다) — sync 가 내보내기
+//     직전에 루트의 인라인 연속을 <p> 로 감싼다(lib/rich-text-editor.ts). 빈 에디터에 <p><br></p> 를
+//     심어 두는 방식은 쓰지 않는다: Chrome·Safari 는 전체 선택 + 삭제로 내용을 지우면 그 문단까지 지우고
+//     <br> 하나(또는 아무것도)만 남겨 다음 입력이 다시 루트 텍스트가 된다(에디터 라이브러리들이 저마다
+//     "빈 문단 유지" 코드를 두는 이유). 내보내기 직전의 감싸기는 어느 브라우저에서든 결과가 같다.
+// 화면은 그대로다 — .board-content p 의 여백이 0 이라 루트 텍스트·div·p 가 같은 모습(globals.css).
 
 // 본문 이미지의 긴 변 상한. 서버가 다시 굽는 값(1600px)과 같게 맞춘다 — 여기서
 // 더 크게 보내봐야 서버에서 줄어들 뿐이고, 더 작게 보내면 서버가 못 살리는 화질이
@@ -64,6 +85,23 @@ const TEXT_COLORS = [
   { label: "보라", value: "#7c3aed" },
   { label: "회색", value: "#6b7280" },
 ] as const;
+
+// <span style> 대신 태그로 내보낼 서식 명령. 이 넷만 앱 간단 편집기의 마커(**·*·__·~~)와 맞는다.
+const TAG_COMMANDS = new Set(["bold", "italic", "underline", "strikeThrough"]);
+
+// 에디터 루트의 자식을 wrapRootInlineRuns 가 받는 모양으로. 텍스트는 innerHTML 과 같은 이스케이프,
+// 요소는 outerHTML, 주석은 버린다(브라우저는 붙여넣기에서 주석을 안 만들지만 innerHTML 에는 실린다).
+function rootNodesOf(el: HTMLElement): EditorRootNode[] {
+  const out: EditorRootNode[] = [];
+  el.childNodes.forEach((node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      out.push({ tag: null, html: escapeEditorText(node.textContent ?? "") });
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      out.push({ tag: (node as Element).tagName.toLowerCase(), html: (node as Element).outerHTML });
+    }
+  });
+  return out;
+}
 
 type ToolbarButtonProps = {
   onClick: () => void;
@@ -130,6 +168,12 @@ export function RichTextEditor({
     } catch {
       // 지원하지 않는 브라우저면 <font> 가 나오고, 새니타이저가 그것을 받아준다.
     }
+    try {
+      // 엔터로 생기는 문단을 <div> 가 아니라 <p> 로(머리말). 문서 전역 설정이라 마운트마다 다시 건다.
+      document.execCommand("defaultParagraphSeparator", false, "p");
+    } catch {
+      // 지원하지 않는 브라우저면 <div> 가 나오고, core 정규화(decomposeRichText)가 그것을 받아준다.
+    }
     // initialHtml 은 마운트 시점 값만 쓴다(위 주석).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -138,7 +182,7 @@ export function RichTextEditor({
     const el = editorRef.current;
     if (!el) return;
     setEmpty(el.textContent?.trim() === "" && !el.querySelector("img"));
-    onChange(el.innerHTML);
+    onChange(wrapRootInlineRuns(rootNodesOf(el)));
   }, [onChange]);
 
   const refreshActive = useCallback(() => {
@@ -178,10 +222,22 @@ export function RichTextEditor({
 
   function exec(command: string, value?: string) {
     editorRef.current?.focus();
+    const asTag = TAG_COMMANDS.has(command);
     try {
+      // 굵게·기울임·밑줄·취소선은 <span style> 이 아니라 <b>/<i>/<u>/<strike> 로(머리말). styleWithCSS 는
+      // 문서 전역 상태라 끄고 → 실행 → 다시 켠다(크기·색은 계속 <span style> 이어야 한다).
+      if (asTag) document.execCommand("styleWithCSS", false, "false");
       document.execCommand(command, false, value);
     } catch {
       // 브라우저가 거절하면 아무 일도 일어나지 않는다(본문은 그대로다).
+    } finally {
+      if (asTag) {
+        try {
+          document.execCommand("styleWithCSS", false, "true");
+        } catch {
+          // 위 초기화와 같은 사정 — <font> 가 나오면 새니타이저가 받아준다.
+        }
+      }
     }
     refreshActive();
     sync();

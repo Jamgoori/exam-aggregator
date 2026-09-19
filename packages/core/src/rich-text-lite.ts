@@ -29,7 +29,11 @@
 //   (3) 왕복 compose→decompose 는 lite 원문을 그대로 돌려준다. 정규화되는 것은 `\r\n`→`\n`,
 //       번호 목록의 번호(1부터 다시 셈), 서식 요소 안팎의 공백(`** 글**` 은 마커 밖으로 나온다) 뿐이다.
 //       (웹 글을 되돌릴 때는 &nbsp; 같은 엔티티가 글자로 풀리고 b/i/strike 가 strong/em/s 로 저장된다.
-//       공백·&nbsp;·<br> 만 든 문단(<p>&nbsp;</p> — 웹 에디터가 빈 줄에 자주 남긴다)은 빈 줄로 본다.)
+//       공백·&nbsp;·<br> 만 든 문단(<p>&nbsp;</p> — 웹 에디터가 빈 줄에 자주 남긴다)은 빈 줄로 본다.
+//       웹 에디터(contenteditable)가 브라우저마다 다르게 남기는 문단 모양 — <div> 문단, 루트에 놓인 첫 줄,
+//       <br> 로만 나눈 줄, <span style="font-weight: bold"> 굵게 — 은 "웹 에디터 출력 정규화" 절이 compose 의
+//       모양(<p>·<strong>…)으로 접은 뒤 되돌린다. 앱에서 저장하면 div 가 p 로 바뀌지만 웹 .board-content 는
+//       p 여백이 0 이라(globals.css) 화면이 같다.)
 //
 // ── 한계(문서화) ─────────────────────────────────────────────────────────────
 //   · 마커를 글자로 쓸 방법(이스케이프)이 없다. 짝이 맞지 않는 마커는 글자 그대로 남는다.
@@ -37,8 +41,10 @@
 //   · 마커 안쪽은 공백으로 시작·끝나면 안 된다(`2 * 3 * 4` 가 기울임이 되지 않게).
 //   · 줄 머리 "- ", "1. ", "> " 는 항상 블록이다(그 글자로 시작하는 문단은 쓸 수 없다).
 //   · 주소에 괄호·공백이 든 링크는 쓸 수 없다(위키 주소 등).
-//   · 웹 에디터만 만들 수 있는 것(h2·h3·div·span·pre·code·hr·br 단독·중첩 목록·style·mailto·내부
-//     경로 링크)은 되돌리지 않고 unsupported 로 이름을 돌려준다.
+//   · 웹 에디터만 만들 수 있는 것(h2·h3·pre·code·hr·중첩 목록·목록 항목 안의 br·색/크기/정렬 style·
+//     mailto·내부 경로 링크)은 되돌리지 않고 unsupported 로 이름을 돌려준다.
+//   · 같은 글자에 굵게와 기울임을 같이 건 것(<strong><em>글</em></strong>)은 마커가 "***글***" 로 붙어
+//     다시 조합하면 다른 트리가 되므로 #roundtrip 으로 잠긴다(사이에 다른 글자가 있으면 된다).
 
 import { parseRichText, sanitizeRichText, type RichNode, type RichTextTag } from "./rich-text";
 
@@ -251,7 +257,7 @@ type ElementNode = Extract<RichNode, { type: "element" }>;
 
 // unsupported 에 태그 이름 대신 들어가는 세 가지.
 //   style      — style 속성이 있는 요소(색·크기·정렬은 lite 에 없다)
-//   #text      — 블록 밖(루트·목록 사이)에 놓인 글자
+//   #text      — 블록 안 자리가 아닌 곳(목록 사이)에 놓인 글자
 //   #roundtrip — 되돌린 lite 를 다시 조합했을 때 같은 트리가 나오지 않음(마커 문자 충돌 등)
 export const RICH_TEXT_LITE_UNSUPPORTED_STYLE = "style";
 export const RICH_TEXT_LITE_UNSUPPORTED_TEXT = "#text";
@@ -275,6 +281,8 @@ const INLINE_MARK_BY_TAG: Partial<Record<RichTextTag, string>> = {
   s: RICH_TEXT_LITE_MARKS.strike,
 };
 
+const BLOCK_TAGS = new Set<RichTextTag>(["p", "div", "h2", "h3", "blockquote", "ul", "ol", "li", "pre", "hr", "img"]);
+
 function canonTag(tag: RichTextTag): RichTextTag {
   return TAG_ALIAS[tag] ?? tag;
 }
@@ -286,6 +294,222 @@ function isWhitespaceText(node: RichNode): boolean {
 function isBr(node: RichNode): node is ElementNode {
   return node.type === "element" && node.tag === "br";
 }
+
+function isInlineNode(node: RichNode): boolean {
+  return node.type === "text" || !BLOCK_TAGS.has(canonTag(node.tag));
+}
+
+function onlyChildren(node: ElementNode): RichNode[] {
+  return node.children.filter((c) => !isWhitespaceText(c));
+}
+
+// ───────────────────────── 웹 에디터 출력 정규화 ─────────────────────────
+//
+// 웹 에디터(contenteditable + execCommand)가 만드는 HTML 은 브라우저마다 모양이 다르다. 실제 출력:
+//   Chrome   "첫줄<div>둘째</div><div><br></div><div>셋째</div>"  (첫 줄은 루트 텍스트, 문단은 div, 빈 줄은 <div><br></div>)
+//            '<span style="font-weight: bold;">굵게</span>'      (styleWithCSS 굵게)
+//   Firefox  "첫줄<br>둘째"                                       (옛 br 모드)
+//   Safari   "<div>첫줄</div><div>둘째</div>", "<b>굵게</b>"
+//   공통     '<img src="…"><p><br></p>'(이미지 삽입 뒤 에디터가 붙이는 문단), "<hr><p><br></p>"(구분선)
+// 2026-09-19 부터 웹 에디터는 defaultParagraphSeparator=p 와 styleWithCSS=false 굵게로 <p>·<b> 를 내지만
+// (rich-text-editor.tsx), 그 전에 저장된 글과 지원 밖 브라우저의 글은 위 모양 그대로 DB 에 있다.
+//
+// 여기서 그 변형을 compose 가 만드는 모양으로 접는다. decomposeRichText 와 canonicalHtml(왕복 대조)이
+// **같은 함수**를 거치므로 접는 규칙이 한쪽에만 있어 멀쩡한 글이 #roundtrip 으로 잠기거나, 서식이 조용히
+// 바뀐 글이 통과하는 일이 없다. 접는 것:
+//   · 루트·blockquote·(블록을 품은) div 의 인라인 연속(텍스트·서식·br) → <p>. 같은 층의 <br> 에서 문단을
+//     나눈다("첫줄<br>둘째" → 두 문단). 블록 사이의 공백만 든 연속은 버린다(브라우저도 그리지 않는다).
+//   · 자식이 전부 인라인인 <div> → <p>. 블록을 품은 div 는 껍데기를 벗기고 안의 블록만 남긴다(안의 인라인
+//     연속은 문단으로) — Chrome 은 div 문단 안에서 목록·인용을 만들면 <div><ul>…</ul></div> 로 저장하는데,
+//     div 에는 웹 CSS 규칙이 없어(globals.css .board-content) 벗겨도 화면이 같다. style(정렬)이 있는 div 는
+//     그대로 두어 unsupported 로 남긴다.
+//   · <p> 안의 같은 층 <br> 도 문단 분리 — .board-content p 가 여백 0 이라 <p>a<br>b</p> 와 <p>a</p><p>b</p>
+//     는 화면이 같다. 블록 끝의 <br> 하나는 줄을 만들지 않는다(브라우저 규칙 — 앱 렌더러 normalizeRun 과
+//     같다). 목록 항목 안에서는 나누지 않는다(항목은 한 줄 — br 은 unsupported 로 남는다).
+//   · 공백·&nbsp;·<br>·빈 서식 요소만 든 문단 → <p><br></p>(빈 줄). 그런 목록 항목 → <li></li>.
+//   · style 없는 <p>·<div> 가 <img> 하나만 품으면 → <img>(에디터가 이미지를 문단으로 감싸는 경우).
+//   · <li><p>…</p></li>·<li><div>…</div></li> → <li>…</li>(p/div 에 style 이 없을 때만 — 있으면 그대로 두어
+//     unsupported).
+//   · <span style="…"> 의 선언이 font-weight bold|700 / font-style italic / text-decoration(-line) 의
+//     underline·line-through **뿐**이면 strong/em/u/s 로. 색·크기·정렬이 하나라도 섞이면 span 그대로다
+//     (unsupported style) — 색·크기는 lite 에 없어 조용히 잃을 수 없다.
+// 접지 않는 것: h2·h3·pre·code·hr·중첩 목록·색/크기/정렬 style — 웹 전용 도구라 앱에서 잠기는 것이 맞다.
+//
+// 앱에서 저장하면 div·루트 텍스트·span 이 p·strong 으로 바뀐다. 웹 화면이 같은 이유는 globals.css
+// .board-content p 의 여백이 div 와 같은 0 이기 때문이다(문단 사이 간격은 빈 줄이 만든다).
+
+const MARK_TAGS_SET = new Set<RichTextTag>(["strong", "em", "u", "s", "b", "i", "strike"]);
+
+// 화면에 아무것도 그리지 않는 인라인 노드: 공백·&nbsp; 텍스트, br, 그런 것만 품은 서식 요소.
+function isBlankInline(node: RichNode): boolean {
+  if (node.type === "text") return node.text.trim() === "";
+  if (node.tag === "br") return true;
+  if (MARK_TAGS_SET.has(node.tag)) return node.children.every(isBlankInline);
+  return false;
+}
+
+function brNode(): ElementNode {
+  return { type: "element", tag: "br", attrs: {}, children: [] };
+}
+
+// span 의 style 선언 하나 → 서식 태그. 그 넷 밖의 선언이 하나라도 있으면 span 은 접지 않는다.
+const SPAN_MARK_DECLS: Record<string, (value: string) => RichTextTag[] | null> = {
+  "font-weight": (v) => (v === "bold" || v === "700" ? ["strong"] : null),
+  "font-style": (v) => (v === "italic" ? ["em"] : null),
+  "text-decoration": textDecorationMarks,
+  "text-decoration-line": textDecorationMarks,
+};
+
+function textDecorationMarks(value: string): RichTextTag[] | null {
+  const out: RichTextTag[] = [];
+  for (const part of value.split(/\s+/).filter(Boolean)) {
+    if (part === "underline") out.push("u");
+    else if (part === "line-through") out.push("s");
+    else return null;
+  }
+  return out.length > 0 ? out : null;
+}
+
+// 서식 태그를 감싸는 순서(바깥부터). 대조 양쪽이 같은 함수를 거치므로 순서 자체는 무엇이어도 된다.
+const MARK_WRAP_ORDER: RichTextTag[] = ["strong", "em", "u", "s"];
+
+function spanToMarks(node: ElementNode, children: RichNode[]): RichNode | null {
+  if (node.tag !== "span" || node.attrs.style === undefined) return null;
+  const decls = node.attrs.style.split(";").map((d) => d.trim()).filter(Boolean);
+  if (decls.length === 0) return null;
+  const tags: RichTextTag[] = [];
+  for (const decl of decls) {
+    const idx = decl.indexOf(":");
+    if (idx < 0) return null;
+    const rule = SPAN_MARK_DECLS[decl.slice(0, idx).trim().toLowerCase()];
+    const marks = rule ? rule(decl.slice(idx + 1).trim().toLowerCase()) : null;
+    if (!marks) return null;
+    for (const m of marks) if (!tags.includes(m)) tags.push(m);
+  }
+  let wrapped: RichNode[] = children;
+  for (const tag of [...MARK_WRAP_ORDER].reverse()) {
+    if (tags.includes(tag)) wrapped = [{ type: "element", tag, attrs: {}, children: wrapped }];
+  }
+  return wrapped[0];
+}
+
+// 인라인 노드 하나. 블록(과 블록을 품은 인라인)은 손대지 않는다 — decompose 가 이름을 돌려준다.
+function normInline(node: RichNode): RichNode {
+  if (node.type === "text" || !isInlineNode(node)) return node;
+  if (node.children.some((c) => !isInlineNode(c))) return node;
+  const children = node.children.map(normInline);
+  return spanToMarks(node, children) ?? { ...node, children };
+}
+
+// 인라인 연속을 같은 층의 <br> 에서 나눠 문단 목록으로. attrs 는 원래 문단의 것(style 이 있으면 나뉜 문단
+// 전부에 붙어 unsupported 가 된다 — 정렬을 조용히 잃지 않게).
+function runToParagraphs(run: readonly RichNode[], attrs: Record<string, string>): ElementNode[] {
+  const segments: RichNode[][] = [[]];
+  for (const node of run) {
+    if (isBr(node)) segments.push([]);
+    else segments[segments.length - 1].push(node);
+  }
+  // 블록 끝의 <br> 하나는 줄을 만들지 않는다(`<p>a<br></p>` 는 한 줄, `<p><br></p>` 는 빈 줄 하나).
+  if (segments.length > 1 && segments[segments.length - 1].every(isBlankInline)) segments.pop();
+  return segments.map((seg) => ({
+    type: "element",
+    tag: "p",
+    attrs: { ...attrs },
+    children: seg.every(isBlankInline) ? [brNode()] : seg,
+  }));
+}
+
+// 블록 자리(루트·blockquote·블록을 품은 div)의 자식들. 인라인 연속은 문단으로, 블록은 각자 접는다.
+function normBlockChildren(nodes: readonly RichNode[]): RichNode[] {
+  const out: RichNode[] = [];
+  let run: RichNode[] = [];
+  const flush = () => {
+    // 블록 사이의 공백(`</p>\n<ul>`)은 문단이 아니다. br 이 하나라도 있으면 빈 줄이다.
+    if (run.length > 0 && (run.some(isBr) || !run.every(isBlankInline))) out.push(...runToParagraphs(run, {}));
+    run = [];
+  };
+  for (const node of nodes) {
+    if (node.type === "text" || isInlineNode(node)) {
+      run.push(normInline(node));
+      continue;
+    }
+    flush();
+    out.push(...normBlock(node));
+  }
+  flush();
+  return out;
+}
+
+// style 없는 p·div 가 <img> 하나만 품은 것 — 에디터가 이미지를 문단으로 감싼 모양.
+function soleImage(node: ElementNode): ElementNode | null {
+  const kids = onlyChildren(node);
+  const only = kids.length === 1 ? kids[0] : null;
+  return node.attrs.style === undefined && only?.type === "element" && only.tag === "img" ? only : null;
+}
+
+function normParagraph(node: ElementNode): RichNode[] {
+  // 블록을 품은 문단(<p><p>…)은 손대지 않는다 — decomposeLineContent 가 그 블록 이름을 돌려준다.
+  if (node.children.some((c) => !isInlineNode(c))) return [node];
+  return runToParagraphs(node.children.map(normInline), node.attrs);
+}
+
+function normListItem(node: ElementNode): ElementNode {
+  const kids = onlyChildren(node);
+  let body: RichNode[];
+  if (
+    kids.length === 1 &&
+    kids[0].type === "element" &&
+    (kids[0].tag === "p" || kids[0].tag === "div") &&
+    kids[0].attrs.style === undefined &&
+    kids[0].children.every(isInlineNode)
+  ) {
+    body = kids[0].children.map(normInline);
+  } else {
+    body = node.children.map(normInline);
+  }
+  // <li><p>&nbsp;</p></li>·<li><br></li>(Chrome 의 빈 항목) 은 compose 의 <li></li> 와 같은 빈 항목이다.
+  return { ...node, children: body.every(isBlankInline) ? [] : body };
+}
+
+function normBlock(node: ElementNode): RichNode[] {
+  switch (canonTag(node.tag)) {
+    case "p": {
+      const image = soleImage(node);
+      return image ? [image] : normParagraph(node);
+    }
+    case "div": {
+      const image = soleImage(node);
+      if (image) return [image];
+      if (node.children.every(isInlineNode)) return normParagraph({ ...node, tag: "p" });
+      // 블록을 품은 div(Chrome 의 <div><ul>…</ul></div>): style 이 없으면 껍데기를 벗긴다 — 안의 블록이 루트에
+      // 놓인 것과 화면이 같다(div 에 CSS 규칙이 없다). 유일한 차이는 글 맨 앞일 때 `> *:first-child` 의
+      // margin-top 0 이 div 대신 안의 목록에 붙는 것(위 여백 0.5rem 이 사라진다)뿐이다. style 이 있으면 정렬을
+      // 조용히 잃지 않게 div 를 남겨 unsupported(style·div)가 된다.
+      const inner = normBlockChildren(node.children);
+      return node.attrs.style === undefined ? inner : [{ ...node, children: inner }];
+    }
+    case "blockquote":
+      return [{ ...node, children: normBlockChildren(node.children) }];
+    case "ul":
+    case "ol":
+      return [
+        {
+          ...node,
+          children: node.children.map((c) => (c.type === "element" && c.tag === "li" ? normListItem(c) : c)),
+        },
+      ];
+    default:
+      // h2·h3·pre·hr·img·홀로 선 li — img 말고는 unsupported 라 안을 볼 필요가 없다.
+      return [node];
+  }
+}
+
+// 파서 결과 전체를 compose 의 모양으로. compose 의 출력에는 접을 것이 없어 그대로 나온다(멱등).
+export function normalizeRichTextTree(nodes: readonly RichNode[]): RichNode[] {
+  return normBlockChildren(nodes);
+}
+
+// ───────────────────────── 되돌리기 ─────────────────────────
 
 // 요소가 lite 로 갈 수 있는지 먼저 본다 — style 은 어떤 태그에서도 안 된다.
 function checkAttrs(node: ElementNode, bad: Unsupported) {
@@ -323,7 +547,8 @@ function decomposeInline(nodes: readonly RichNode[], bad: Unsupported): string {
       out += `[${inner}](${href})`;
       continue;
     }
-    // br·img·span·code 처럼 인라인 자리에서 lite 가 표현하지 못하는 것.
+    // br·img·span·code 처럼 인라인 자리에서 lite 가 표현하지 못하는 것(같은 층의 br 은 정규화가 이미
+    // 문단으로 나눴으므로 여기 오는 br 은 서식 안이나 목록 항목 안의 것이다).
     bad.add(tag);
   }
   return out;
@@ -337,20 +562,12 @@ function decomposeLineContent(nodes: readonly RichNode[], bad: Unsupported): str
   return decomposeInline(nodes, bad);
 }
 
-const BLOCK_TAGS = new Set<RichTextTag>(["p", "div", "h2", "h3", "blockquote", "ul", "ol", "li", "pre", "hr", "img"]);
-
-function onlyChildren(node: ElementNode): RichNode[] {
-  return node.children.filter((c) => !isWhitespaceText(c));
-}
-
+// 정규화를 거친 문단: 빈 줄은 <p><br></p> 하나뿐이다(normalizeRichTextTree 가 공백·&nbsp; 문단을 그리 접는다).
 function decomposeParagraph(node: ElementNode, bad: Unsupported): string {
   checkAttrs(node, bad);
   const kids = onlyChildren(node);
   if (kids.length === 0) return "";
   if (kids.length === 1 && isBr(kids[0])) return "";
-  if (kids.length === 1 && kids[0].type === "element" && kids[0].tag === "img") {
-    return decomposeImage(kids[0], bad);
-  }
   return decomposeLineContent(node.children, bad);
 }
 
@@ -363,16 +580,6 @@ function decomposeImage(node: ElementNode, bad: Unsupported): string {
     return "";
   }
   return `![${alt}](${src})`;
-}
-
-function decomposeListItem(node: ElementNode, bad: Unsupported): string {
-  checkAttrs(node, bad);
-  const kids = onlyChildren(node);
-  // <li><p>글</p></li> 은 <li>글</li> 과 같게 본다(정규화에서 p 를 벗긴다).
-  if (kids.length === 1 && kids[0].type === "element" && kids[0].tag === "p") {
-    return decomposeParagraph(kids[0], bad);
-  }
-  return decomposeLineContent(node.children, bad);
 }
 
 function decomposeBlock(node: ElementNode, bad: Unsupported, lines: string[]) {
@@ -396,36 +603,41 @@ function decomposeBlock(node: ElementNode, bad: Unsupported, lines: string[]) {
         }
         n += 1;
         const prefix = tag === "ul" ? RICH_TEXT_LITE_PREFIX.bullet : `${n}. `;
-        lines.push(prefix + decomposeListItem(child, bad));
+        checkAttrs(child, bad);
+        // <li><p>글</p></li> 은 정규화가 이미 <li>글</li> 로 벗겼다.
+        lines.push(prefix + decomposeLineContent(child.children, bad));
       }
       return;
     }
     case "blockquote": {
       checkAttrs(node, bad);
       const kids = onlyChildren(node);
+      // 정규화가 인용 안의 인라인 연속을 문단으로 접었으므로 p 가 아닌 자식은 목록·제목 같은 블록뿐이다.
       const allParagraphs = kids.length > 0 && kids.every((k) => k.type === "element" && k.tag === "p");
       if (allParagraphs) {
         for (const k of kids) lines.push(RICH_TEXT_LITE_PREFIX.quote + decomposeParagraph(k as ElementNode, bad));
         return;
       }
-      // 웹 에디터의 formatBlock 은 <blockquote>글</blockquote> 처럼 p 없이 만든다 — 한 줄로 본다.
       lines.push(RICH_TEXT_LITE_PREFIX.quote + decomposeLineContent(node.children, bad));
       return;
     }
     default:
-      // h2·h3·div·pre·hr·li(홀로) 와 루트에 놓인 인라인 요소.
+      // h2·h3·div(style 이 있어 정규화가 벗기지 않은 것)·pre·hr·li(홀로). style 도 함께 이름을 돌려준다 —
+      // div 가 잠긴 이유가 정렬이라는 것을 화면 문구가 알 수 있게.
+      checkAttrs(node, bad);
       bad.add(tag);
   }
 }
 
-// 게시판 HTML → lite. compose 가 만드는 부분집합(과 그것과 같은 DOM 을 이루는 변형)만 되돌린다.
+// 게시판 HTML → lite. compose 가 만드는 부분집합(과 정규화로 그것과 같은 DOM 이 되는 웹 변형)만 되돌린다.
 export function decomposeRichText(html: string, options: RichTextLiteOptions = {}): DecomposeRichTextResult {
-  const nodes = parseRichText(String(html ?? ""));
+  const nodes = normalizeRichTextTree(parseRichText(String(html ?? "")));
   const bad = new Unsupported();
   const lines: string[] = [];
 
   for (const node of nodes) {
     if (node.type === "text") {
+      // 정규화가 루트의 글자를 전부 문단으로 감쌌으므로 여기 오는 것은 없다 — 방어선만 남긴다.
       if (!isWhitespaceText(node)) bad.add(RICH_TEXT_LITE_UNSUPPORTED_TEXT);
       continue;
     }
@@ -444,16 +656,16 @@ export function decomposeRichText(html: string, options: RichTextLiteOptions = {
 
 // ───────────────────────── 트리 정규화(대조용) ─────────────────────────
 //
-// decompose 가 같게 보는 변형을 한 모양으로 접어 문자열로 만든다. 여기서 접는 것은 전부
-// decompose 도 같게 되돌리는 것들이다(별칭 태그, 블록 사이 공백, li>p, blockquote 의 p 없는 내용,
-// p>img, 빈 p, 공백·&nbsp;·br 만 든 p, 빈 서식 요소, 서식 안팎 공백, a 의 target/rel).
+// decompose 가 같게 보는 변형을 한 모양으로 접어 문자열로 만든다. 문단·목록·인용의 모양은 위의
+// normalizeRichTextTree 가 양쪽(원본·다시 조합한 것)에 똑같이 적용하므로, 여기서 더 접는 것은 인라인 층뿐이다
+// (별칭 태그, 빈 서식 요소, 서식 안팎 공백, 인접 텍스트 병합, a 의 target/rel).
 //
-// **decomposeParagraph 가 "빈 줄"로 보는 것과 여기서 <p><br></p> 로 접는 것은 같은 집합이어야 한다.**
-// 한쪽만 넓히면 멀쩡한 글이 #roundtrip 으로 잠기거나(정규화가 좁을 때), 서식이 조용히 바뀐 글이
-// 통과한다(정규화가 넓을 때).
+// **decompose 가 같게 되돌리는 것과 여기서 같게 접는 것은 같은 집합이어야 한다.** 한쪽만 넓히면 멀쩡한 글이
+// #roundtrip 으로 잠기거나(정규화가 좁을 때), 서식이 조용히 바뀐 글이 통과한다(정규화가 넓을 때). 블록 층을
+// normalizeRichTextTree 하나에 모은 것이 그 때문이다.
 
 function canonicalHtml(html: string): string {
-  return serialize(canonBlocks(parseRichText(html)));
+  return serialize(canonBlocks(normalizeRichTextTree(parseRichText(html))));
 }
 
 function canonBlocks(nodes: readonly RichNode[]): RichNode[] {
@@ -465,55 +677,22 @@ function canonBlocks(nodes: readonly RichNode[]): RichNode[] {
     }
     const tag = canonTag(node.tag);
     if (tag === "p") {
-      const kids = onlyChildren(node);
-      if (kids.length === 1 && kids[0].type === "element" && kids[0].tag === "img") {
-        out.push(canonElement(kids[0], []));
-        continue;
-      }
-      const body = canonParagraphBody(node);
-      out.push(canonElement(node, body ?? [{ type: "element", tag: "br", attrs: {}, children: [] }]));
+      out.push(canonElement(node, canonInline(node.children)));
       continue;
     }
     if (tag === "ul" || tag === "ol") {
       const items: RichNode[] = [];
       for (const child of node.children) {
         if (isWhitespaceText(child)) continue;
-        if (child.type === "element" && child.tag === "li") {
-          const kids = onlyChildren(child);
-          // li>p 는 p 를 벗긴 것과 같다(decomposeListItem). 그 p 가 빈 줄이면 compose 는 <li></li> 를 만든다.
-          const body =
-            kids.length === 1 && kids[0].type === "element" && kids[0].tag === "p"
-              ? (canonParagraphBody(kids[0]) ?? [])
-              : canonInline(child.children);
-          items.push(canonElement(child, body));
-        } else {
-          items.push(child);
-        }
+        if (child.type === "element" && child.tag === "li") items.push(canonElement(child, canonInline(child.children)));
+        else items.push(child);
       }
       out.push(canonElement(node, items));
-      continue;
-    }
-    if (tag === "blockquote") {
-      const kids = onlyChildren(node);
-      const allParagraphs = kids.length > 0 && kids.every((k) => k.type === "element" && k.tag === "p");
-      const body = allParagraphs
-        ? canonBlocks(kids)
-        : [{ type: "element", tag: "p", attrs: {}, children: canonInline(node.children) } satisfies RichNode];
-      out.push(canonElement(node, body));
       continue;
     }
     out.push(canonElement(node, canonBlocks(node.children)));
   }
   return out;
-}
-
-// 문단의 인라인 내용. decomposeParagraph 가 빈 줄로 되돌리는 문단(자식 없음 · <br> 하나 · 공백·&nbsp; 만)
-// 이면 null 을 돌려준다 — 부르는 쪽이 그 자리에 맞는 "빈 줄" 모양(p 는 <br>, li 는 없음)을 넣는다.
-function canonParagraphBody(node: ElementNode): RichNode[] | null {
-  const kids = onlyChildren(node);
-  if (kids.length === 0) return null;
-  if (kids.length === 1 && isBr(kids[0])) return null;
-  return canonInline(node.children);
 }
 
 function canonInline(nodes: readonly RichNode[]): RichNode[] {

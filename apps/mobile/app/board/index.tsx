@@ -165,7 +165,7 @@ function BoardListBody({
           </View>
         )}
         {rows.map((item, i) => (
-          <BoardListRow key={item.id} item={item} avatarUrl={avatars[item.authorId] ?? null} divider={i > 0} />
+          <BoardListRow key={item.id} item={item} avatarUrl={(item.authorId !== null && avatars[item.authorId]) || null} divider={i > 0} />
         ))}
       </View>
 

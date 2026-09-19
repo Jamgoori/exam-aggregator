@@ -80,7 +80,8 @@ export function useUploadBoardImage() {
 // 판정용 작성자 id). RLS 공개 읽기라 세션 없이도 읽히지만 화면은 로그인 뒤에만 연다.
 export type BoardPostEditable = {
   id: string;
-  authorId: string;
+  // null = 탈퇴한 회원의 글(canEditBoardPost 가 false 를 낸다).
+  authorId: string | null;
   title: string;
   category: BoardCategorySlug;
   contentHtml: string;
@@ -106,7 +107,7 @@ export function useBoardPostForEdit(id: string) {
       if (!data) return null;
       return {
         id: data.id as string,
-        authorId: data.user_id as string,
+        authorId: (data.user_id as string | null) ?? null,
         title: data.title as string,
         // 웹 fetchBoardPost 와 같은 폴백 — 목록 밖 값이 들어 있으면 "자유"로 본다.
         category: isBoardCategory(data.category) ? data.category : "free",

@@ -17,6 +17,19 @@ export declare const REPORT_REASONS: readonly [{
 export type ReportReasonSlug = (typeof REPORT_REASONS)[number]["slug"];
 export declare function isReportReason(value: unknown): value is ReportReasonSlug;
 export declare function reportReasonLabel(slug: string): string;
+export declare const REPORT_TARGET_TYPES: readonly [{
+    readonly slug: "board_post";
+    readonly label: "게시글";
+}, {
+    readonly slug: "suggestion";
+    readonly label: "건의글";
+}, {
+    readonly slug: "chat_message";
+    readonly label: "채팅 메시지";
+}];
+export type ReportTargetType = (typeof REPORT_TARGET_TYPES)[number]["slug"];
+export declare function isReportTargetType(value: unknown): value is ReportTargetType;
+export declare function reportTargetLabel(slug: string): string;
 export declare const REPORT_DETAIL_MAX = 500;
 export declare function validateReportInput(input: {
     reason: string;
@@ -28,5 +41,5 @@ export declare function validateReportInput(input: {
     detail: string | null;
 };
 export declare function filterBlocked<T extends {
-    authorId: string;
+    authorId: string | null;
 }>(items: readonly T[], blockedIds: ReadonlySet<string> | readonly string[]): T[];

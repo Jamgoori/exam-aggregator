@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { NotificationType } from "../notifications.d.ts";
 export type CreateNotificationInput = {
-    userId: string;
+    userId: string | null;
     type: NotificationType;
     actorId: string;
     actorNickname: string;
@@ -10,4 +10,4 @@ export type CreateNotificationInput = {
     link: string;
 };
 export declare function createNotification(client: SupabaseClient, input: CreateNotificationInput): Promise<void>;
-export declare function createNotifications(client: SupabaseClient, userIds: readonly string[], input: Omit<CreateNotificationInput, "userId">): Promise<void>;
+export declare function createNotifications(client: SupabaseClient, userIds: readonly (string | null)[], input: Omit<CreateNotificationInput, "userId">): Promise<void>;

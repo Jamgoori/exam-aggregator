@@ -43,7 +43,9 @@ export type BoardViewer = {
 };
 
 export type BoardOwnership = {
-  user_id: string;
+  // null = 탈퇴한 회원의 글·댓글(설계서 §12-2 #17). viewer.userId 는 문자열이라 null 과 같을 수
+  // 없어 아래 판정은 그대로 false — 관리자 삭제만 남는다.
+  user_id: string | null;
 };
 
 // 수정은 글쓴이 본인만 — 관리자에게도 열지 않는다(건의게시판과 같은 이유: 남의 글이

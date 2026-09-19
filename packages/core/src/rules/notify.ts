@@ -11,8 +11,10 @@ import type { NotificationType } from "../notifications";
 // 클라이언트로 한다.
 
 export type CreateNotificationInput = {
-  // 받는 사람.
-  userId: string;
+  // 받는 사람. null 이면 탈퇴한 회원의 글에 달린 사건이다(설계서 §12-2 #17 — 글은 남고
+  // user_id 만 끊긴다) — 받을 사람이 없으니 보내지 않는다. notifications.user_id 는 not null
+  // 이라 그대로 insert 하면 실패하고, 그 실패는 아래 규칙대로 삼켜져 아무 데도 남지 않는다.
+  userId: string | null;
   type: NotificationType;
   actorId: string;
   actorNickname: string;
@@ -25,7 +27,7 @@ export type CreateNotificationInput = {
 // 자를 일이 없지만, 어떤 표의 제목이 실려 오든 여기서 한 번 더 막는다.
 const TITLE_MAX = 100;
 
-function toRow(input: CreateNotificationInput) {
+function toRow(input: CreateNotificationInput & { userId: string }) {
   return {
     user_id: input.userId,
     type: input.type,
@@ -47,11 +49,13 @@ export async function createNotification(
   client: SupabaseClient,
   input: CreateNotificationInput,
 ): Promise<void> {
+  // 받을 사람이 없으면(탈퇴한 회원의 글) 보내지 않는다.
+  if (input.userId === null) return;
   // 내가 내 글에 단 댓글로 나에게 알림이 오면 그건 잡음이다.
   if (input.userId === input.actorId) return;
 
   try {
-    await client.from("notifications").insert(toRow(input));
+    await client.from("notifications").insert(toRow({ ...input, userId: input.userId }));
   } catch {
     // 위 주석 참고 — 알림은 곁다리다.
   }
@@ -61,10 +65,13 @@ export async function createNotification(
 // 본인은 여기서 걸러진다.
 export async function createNotifications(
   client: SupabaseClient,
-  userIds: readonly string[],
+  userIds: readonly (string | null)[],
   input: Omit<CreateNotificationInput, "userId">,
 ): Promise<void> {
-  const targets = [...new Set(userIds.filter((id) => id && id !== input.actorId))];
+  // null(탈퇴한 회원)·빈 값·본인은 걸러진다.
+  const targets = [
+    ...new Set(userIds.filter((id): id is string => !!id && id !== input.actorId)),
+  ];
   if (targets.length === 0) return;
 
   try {

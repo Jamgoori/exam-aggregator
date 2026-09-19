@@ -15,13 +15,20 @@ export const SUGGESTION_COMMENT_MAX = 1000;
 // 사람들이 제목에 "○○○입니다, 결제 오류 문의" 처럼 개인정보를 그대로 적기 때문이다.
 export const SECRET_TITLE_PLACEHOLDER = "비밀글입니다.";
 
+// 목록 한 페이지 크기. 웹 lib/suggestions.ts 와 Edge `suggestions` 가 같은 값으로 페이지를
+// 자른다 — 한쪽만 다르면 같은 page 번호가 다른 글을 가리킨다.
+export const SUGGESTIONS_PAGE_SIZE = 20;
+
 export type SuggestionViewer = {
   userId: string | null;
   isAdmin: boolean;
 };
 
+// user_id 가 null 이면 탈퇴한 회원의 글이다(설계서 §12-2 #17 — 행은 남기고 참조만 끊는다).
+// 본인 판정은 viewer.userId 가 문자열이라 null 과는 절대 같지 않으므로 아래 can* 는 그대로
+// false 가 된다 — 비밀글이면 관리자만 남는다.
 export type SuggestionOwnership = {
-  user_id: string;
+  user_id: string | null;
   is_secret: boolean;
 };
 
@@ -117,7 +124,8 @@ export function validateSuggestionAnswer(answer: string): SuggestionInputError |
 // app/suggestions/actions.ts).
 
 export type SuggestionCommentOwnership = {
-  user_id: string;
+  // null = 탈퇴한 회원의 댓글(원글과 같은 규칙).
+  user_id: string | null;
 };
 
 // 수정은 작성자 본인만 — 원글과 같은 이유로 관리자에게도 열지 않는다.

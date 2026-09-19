@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createPublicClient } from "@/lib/supabase/public";
 import { getSessionUser } from "@/lib/supabase/session";
 import { fetchAvatarUrls } from "@/lib/avatars";
+import { fetchBlockedIds, fetchBlockedIdsWith } from "@/lib/blocks";
 import {
   boardImageOrigin as coreBoardImageOrigin,
   boardPreviewText,
@@ -11,6 +12,7 @@ import {
   canDeleteBoardPost,
   canEditBoardComment,
   canEditBoardPost,
+  filterBlocked,
   isBoardCategory,
   type BoardCategorySlug,
   type BoardViewer,
@@ -22,6 +24,12 @@ import {
 // 목록에 붙는 아바타를 profiles 에서 모아 읽어야 해서(본인 행만 select 가능한 RLS)
 // 여기서는 admin 클라이언트로 통일한다. 내려보내는 값은 모두 게시판에 공개로
 // 붙는 것들이다.
+//
+// 차단(설계서 §12-2 #16, 앱과 같은 세 지점): 뷰어의 차단 집합(lib/blocks.ts — 세션의 user_blocks
+// "select own")을 목록(고정글·일반글)·상세(안내 블록)·댓글 트리(원 댓글·답글)에 댄다. 서버
+// 컴포넌트가 admin 으로 읽는 자리라 필터는 **여기서 끝낸다** — 차단 목록을 클라이언트에 내려보내지
+// 않는다. 페이지 수(count)와 "댓글 N"(comment_count)은 걸러내기 전 값 그대로다(앱과 같은 정책 —
+// 차단은 내 화면에서만 사라지는 것이라 집계까지 바꾸지 않는다).
 
 export const BOARD_PAGE_SIZE = 20;
 
@@ -39,6 +47,8 @@ export type BoardListItem = {
   preview: string;
   nickname: string;
   avatarUrl: string | null;
+  // null = 탈퇴한 회원의 글. 차단 필터(core filterBlocked)가 이 값을 본다.
+  authorId: string | null;
   createdAt: string;
   viewCount: number;
   commentCount: number;
@@ -54,7 +64,8 @@ export type BoardPostDetail = {
   contentHtml: string;
   nickname: string;
   avatarUrl: string | null;
-  authorId: string;
+  // null = 탈퇴한 회원의 글(설계서 §12-2 #17 — 행은 남고 user_id 만 끊긴다).
+  authorId: string | null;
   createdAt: string;
   updatedAt: string | null;
   viewCount: number;
@@ -63,6 +74,8 @@ export type BoardPostDetail = {
   isPinned: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  // 뷰어가 글쓴이를 차단했으면 true — 화면은 본문·댓글 대신 안내 블록을 그린다(앱 [id]/index.tsx).
+  blocked: boolean;
 };
 
 export type BoardCommentItem = {
@@ -70,7 +83,8 @@ export type BoardCommentItem = {
   parentId: string | null;
   nickname: string;
   avatarUrl: string | null;
-  authorId: string;
+  // null = 탈퇴한 회원의 댓글.
+  authorId: string | null;
   content: string;
   createdAt: string;
   updatedAt: string | null;
@@ -81,13 +95,23 @@ export type BoardCommentItem = {
   replies: BoardCommentItem[];
 };
 
-export async function getBoardViewer(): Promise<BoardViewer & { loggedIn: boolean }> {
-  const { supabase, user } = await getSessionUser();
-  if (!user) return { userId: null, isAdmin: false, loggedIn: false };
+// 뷰어 + 차단 집합. 상세·댓글 조회가 같은 집합을 받아 쓰므로 한 요청에 한 번만 읽는다.
+export type BoardWebViewer = BoardViewer & { loggedIn: boolean; blockedIds: ReadonlySet<string> };
 
-  const { data } = await supabase.rpc("is_admin");
-  return { userId: user.id, isAdmin: data === true, loggedIn: true };
+export async function getBoardViewer(): Promise<BoardWebViewer> {
+  const { supabase, user } = await getSessionUser();
+  if (!user) return { userId: null, isAdmin: false, loggedIn: false, blockedIds: new Set() };
+
+  const [{ data }, blockedIds] = await Promise.all([
+    supabase.rpc("is_admin"),
+    fetchBlockedIdsWith(supabase, user.id),
+  ]);
+  return { userId: user.id, isAdmin: data === true, loggedIn: true, blockedIds };
 }
+
+// 차단 집합이 없는 뷰어(BoardViewer 만 넘기는 호출부)는 아무도 차단하지 않은 것으로 본다.
+type ViewerWithBlocks = BoardViewer & { blockedIds?: ReadonlySet<string> };
+const NO_BLOCKS: ReadonlySet<string> = new Set();
 
 const LIST_COLUMNS =
   "id, user_id, nickname, category, title, content_text, thumbnail_url, view_count, comment_count, like_count, is_pinned, created_at";
@@ -101,7 +125,8 @@ function toListItem(row: ListRow, avatars: Map<string, string>): BoardListItem {
     title: row.title as string,
     preview: boardPreviewText((row.content_text as string) ?? ""),
     nickname: row.nickname as string,
-    avatarUrl: avatars.get(row.user_id as string) ?? null,
+    avatarUrl: (row.user_id ? avatars.get(row.user_id as string) : null) ?? null,
+    authorId: (row.user_id as string | null) ?? null,
     createdAt: row.created_at as string,
     viewCount: row.view_count as number,
     commentCount: row.comment_count as number,
@@ -143,7 +168,7 @@ export async function fetchBoardPage({
     if (safe) listQuery = listQuery.or(`title.ilike.%${safe}%,content_text.ilike.%${safe}%`);
   }
 
-  const [{ data, count }, pinnedResult] = await Promise.all([
+  const [{ data, count }, pinnedResult, blockedIds] = await Promise.all([
     listQuery.order("created_at", { ascending: false }).range(from, from + BOARD_PAGE_SIZE - 1),
     // 고정 글은 1페이지에서, 검색·말머리 필터가 없을 때만 얹는다(필터를 건 목록에
     // 상관없는 공지가 끼면 결과가 오염된다).
@@ -154,15 +179,22 @@ export async function fetchBoardPage({
           .eq("is_pinned", true)
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as ListRow[] }),
+    // 뷰어의 차단 집합(비로그인은 빈 집합). 목록 페이지는 뷰어를 따로 받지 않으므로 여기서 읽는다.
+    fetchBlockedIds(),
   ]);
 
   const rows = [...((data ?? []) as ListRow[]), ...((pinnedResult.data ?? []) as ListRow[])];
-  const avatars = await fetchAvatarUrls(rows.map((r) => r.user_id as string));
+  const avatars = await fetchAvatarUrls(rows.map((r) => r.user_id as string | null));
 
+  // 차단한 사용자의 글은 고정글·일반글 모두 뺀다(앱 board/index.tsx 와 같다). total·totalPages 는
+  // 걸러내기 전 값 — 페이지 경계가 뷰어마다 달라지면 "3페이지에 있던 글"이 사람마다 다른 자리가 된다.
   const total = count ?? 0;
   return {
-    items: ((data ?? []) as ListRow[]).map((row) => toListItem(row, avatars)),
-    pinnedItems: ((pinnedResult.data ?? []) as ListRow[]).map((row) => toListItem(row, avatars)),
+    items: filterBlocked(((data ?? []) as ListRow[]).map((row) => toListItem(row, avatars)), blockedIds),
+    pinnedItems: filterBlocked(
+      ((pinnedResult.data ?? []) as ListRow[]).map((row) => toListItem(row, avatars)),
+      blockedIds,
+    ),
     total,
     totalPages: Math.max(1, Math.ceil(total / BOARD_PAGE_SIZE)),
   };
@@ -170,7 +202,7 @@ export async function fetchBoardPage({
 
 export async function fetchBoardPost(
   id: string,
-  viewer: BoardViewer,
+  viewer: ViewerWithBlocks,
 ): Promise<BoardPostDetail | null> {
   const admin = createAdminClient();
   const { data } = await admin
@@ -183,7 +215,7 @@ export async function fetchBoardPost(
 
   if (!data) return null;
 
-  const ownership = { user_id: data.user_id as string };
+  const ownership = { user_id: (data.user_id as string | null) ?? null };
   const avatars = await fetchAvatarUrls([ownership.user_id]);
 
   return {
@@ -192,7 +224,7 @@ export async function fetchBoardPost(
     title: data.title as string,
     contentHtml: data.content_html as string,
     nickname: data.nickname as string,
-    avatarUrl: avatars.get(ownership.user_id) ?? null,
+    avatarUrl: (ownership.user_id ? avatars.get(ownership.user_id) : null) ?? null,
     authorId: ownership.user_id,
     createdAt: data.created_at as string,
     updatedAt: data.updated_at as string | null,
@@ -202,20 +234,23 @@ export async function fetchBoardPost(
     isPinned: data.is_pinned as boolean,
     canEdit: canEditBoardPost(ownership, viewer),
     canDelete: canDeleteBoardPost(ownership, viewer),
+    // 탈퇴한 회원(null)의 글은 차단할 대상이 없으므로 언제나 보인다(core filterBlocked 와 같은 규칙).
+    blocked: ownership.user_id !== null && (viewer.blockedIds ?? NO_BLOCKS).has(ownership.user_id),
   };
 }
 
 // 조회수. 글쓴이 본인이 열어본 것은 세지 않는다(건의게시판과 같은 이유 — 자기 글을
 // 몇 번 열었는지가 "몇 명이 봤나"에 섞이면 숫자의 뜻이 사라진다).
-export async function countBoardView(id: string, viewer: BoardViewer, authorId: string) {
-  if (viewer.userId === authorId) return;
+// authorId 가 null(탈퇴한 회원의 글)이면 "내 글" 일 수 없으므로 비로그인(userId null)도 센다.
+export async function countBoardView(id: string, viewer: BoardViewer, authorId: string | null) {
+  if (authorId !== null && viewer.userId === authorId) return;
   const admin = createAdminClient();
   await admin.rpc("increment_board_view", { p_post_id: id });
 }
 
 export async function fetchBoardComments(
   postId: string,
-  viewer: BoardViewer,
+  viewer: ViewerWithBlocks,
 ): Promise<BoardCommentItem[]> {
   const admin = createAdminClient();
   const { data } = await admin
@@ -225,16 +260,16 @@ export async function fetchBoardComments(
     .order("created_at", { ascending: true });
 
   const rows = data ?? [];
-  const avatars = await fetchAvatarUrls(rows.map((r) => r.user_id as string));
+  const avatars = await fetchAvatarUrls(rows.map((r) => r.user_id as string | null));
 
   const toItem = (row: (typeof rows)[number]): BoardCommentItem => {
-    const ownership = { user_id: row.user_id as string };
+    const ownership = { user_id: (row.user_id as string | null) ?? null };
     const isDeleted = row.is_deleted as boolean;
     return {
       id: row.id as string,
       parentId: (row.parent_id as string | null) ?? null,
       nickname: row.nickname as string,
-      avatarUrl: avatars.get(ownership.user_id) ?? null,
+      avatarUrl: (ownership.user_id ? avatars.get(ownership.user_id) : null) ?? null,
       authorId: ownership.user_id,
       // 지워진 댓글은 본문을 내려보내지 않는다 — 화면에서 가리는 것으로 처리하면
       // HTML 소스에는 그대로 남는다.
@@ -248,7 +283,10 @@ export async function fetchBoardComments(
     };
   };
 
-  const items = rows.map(toItem);
+  // 차단한 사용자의 댓글은 원 댓글·답글 어느 자리든 트리를 짜기 **전에** 뺀다(앱
+  // buildBoardCommentTree 와 같다) — 원 댓글이 빠지면 그 아래 답글은 부모 없는 답글이 되어
+  // 아래 규칙대로 원 댓글 자리로 올라온다.
+  const items = filterBlocked(rows.map(toItem), viewer.blockedIds ?? NO_BLOCKS);
   const byId = new Map(items.map((item) => [item.id, item]));
   const roots: BoardCommentItem[] = [];
 

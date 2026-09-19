@@ -7,6 +7,7 @@ import { BoardComments } from "@/components/board-comments";
 import {
   BoardDeleteButton,
   BoardLikeButton,
+  BoardMoreMenu,
   BoardShareButton,
 } from "@/components/board-post-actions";
 import { RichTextContent } from "@/components/rich-text-content";
@@ -107,83 +108,103 @@ export default async function BoardPostPage({
         ← 자유게시판
       </Link>
 
-      <article className="flex flex-col gap-5">
-        <header className="flex flex-col gap-3 border-b border-zinc-200 pb-4 dark:border-zinc-700">
-          <div className="flex items-center gap-2">
-            {post.isPinned ? (
-              <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
-                <Pin size={11} />
-                공지
-              </span>
-            ) : (
-              <Link
-                href={`/board?category=${post.category}`}
-                className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-              >
-                {boardCategoryLabel(post.category)}
-              </Link>
-            )}
-          </div>
-
-          <h1 className="text-xl font-bold break-words sm:text-2xl">{post.title}</h1>
-
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <Avatar nickname={post.nickname} avatarUrl={post.avatarUrl} size="lg" />
-              <div>
-                <p className="text-sm font-semibold">{post.nickname}</p>
-                <p className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500">
-                  <span>{formatDateTime(post.createdAt)}</span>
-                  {post.updatedAt && <span>(수정됨)</span>}
-                  <span className="flex items-center gap-0.5">
-                    <Eye size={11} />
-                    {post.viewCount}
-                  </span>
-                  <span className="flex items-center gap-0.5">
-                    <MessageSquare size={11} />
-                    {post.commentCount}
-                  </span>
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <BoardShareButton />
-              {post.canEdit && (
-                <Link
-                  href={`/board/${post.id}/edit`}
-                  className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-blue-800 dark:hover:text-blue-400"
-                >
-                  수정
-                </Link>
-              )}
-              {post.canDelete && <BoardDeleteButton postId={post.id} />}
-            </div>
-          </div>
-        </header>
-
-        {/* 본문. 여기 들어오는 HTML 은 서버가 저장 전에 새니타이즈한 값이다
-            (app/board/actions.ts · components/rich-text-content.tsx 주석 참고). */}
-        <RichTextContent html={post.contentHtml} className="min-h-32" />
-
-        <div className="flex justify-center py-2">
-          <BoardLikeButton
-            postId={post.id}
-            initialLiked={liked}
-            initialCount={post.likeCount}
-            loggedIn={viewer.loggedIn}
-          />
+      {/* 차단한 사용자의 글(설계서 §12-2 #16): 본문·댓글 대신 안내 블록 — 앱 [id]/index.tsx 의 두
+          문장 그대로. 차단 직후 이 화면이 이렇게 바뀌는 것이 "차단했어요"의 확인 문구다. */}
+      {post.blocked ? (
+        <div className="flex flex-col gap-2 rounded-2xl border border-dashed border-zinc-200 px-4 py-10 dark:border-zinc-700">
+          <p className="text-center text-sm font-medium text-pretty text-zinc-600 dark:text-zinc-400">
+            차단한 사용자의 글이에요.
+          </p>
+          <p className="text-center text-xs text-pretty text-zinc-400 dark:text-zinc-500">
+            차단한 사용자의 글과 댓글은 보이지 않아요. 내 정보 수정에서 해제할 수 있어요.
+          </p>
         </div>
-      </article>
+      ) : (
+        <>
+          <article className="flex flex-col gap-5">
+            <header className="flex flex-col gap-3 border-b border-zinc-200 pb-4 dark:border-zinc-700">
+              <div className="flex items-center gap-2">
+                {post.isPinned ? (
+                  <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+                    <Pin size={11} />
+                    공지
+                  </span>
+                ) : (
+                  <Link
+                    href={`/board?category=${post.category}`}
+                    className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                  >
+                    {boardCategoryLabel(post.category)}
+                  </Link>
+                )}
+              </div>
 
-      <div className="border-t border-zinc-200 pt-6 dark:border-zinc-700">
-        <BoardComments
-          postId={post.id}
-          comments={comments}
-          commentCount={post.commentCount}
-          loggedIn={viewer.loggedIn}
-        />
-      </div>
+              <h1 className="text-xl font-bold break-words sm:text-2xl">{post.title}</h1>
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Avatar nickname={post.nickname} avatarUrl={post.avatarUrl} size="lg" />
+                  <div>
+                    <p className="text-sm font-semibold">{post.nickname}</p>
+                    <p className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500">
+                      <span>{formatDateTime(post.createdAt)}</span>
+                      {post.updatedAt && <span>(수정됨)</span>}
+                      <span className="flex items-center gap-0.5">
+                        <Eye size={11} />
+                        {post.viewCount}
+                      </span>
+                      <span className="flex items-center gap-0.5">
+                        <MessageSquare size={11} />
+                        {post.commentCount}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <BoardShareButton />
+                  {/* 더보기(신고·차단)는 남의 글에만. 탈퇴한 회원의 글(authorId null)은 차단할 대상이
+                      없어 그리지 않는다. */}
+                  {post.authorId !== null && post.authorId !== viewer.userId && (
+                    <BoardMoreMenu postId={post.id} authorId={post.authorId} loggedIn={viewer.loggedIn} />
+                  )}
+                  {post.canEdit && (
+                    <Link
+                      href={`/board/${post.id}/edit`}
+                      className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:border-blue-300 hover:text-blue-600 dark:border-zinc-700 dark:text-zinc-300 dark:hover:border-blue-800 dark:hover:text-blue-400"
+                    >
+                      수정
+                    </Link>
+                  )}
+                  {post.canDelete && <BoardDeleteButton postId={post.id} />}
+                </div>
+              </div>
+            </header>
+
+            {/* 본문. 여기 들어오는 HTML 은 서버가 저장 전에 새니타이즈한 값이다
+                (app/board/actions.ts · components/rich-text-content.tsx 주석 참고). */}
+            <RichTextContent html={post.contentHtml} className="min-h-32" />
+
+            <div className="flex justify-center py-2">
+              <BoardLikeButton
+                postId={post.id}
+                initialLiked={liked}
+                initialCount={post.likeCount}
+                loggedIn={viewer.loggedIn}
+              />
+            </div>
+          </article>
+
+          <div className="border-t border-zinc-200 pt-6 dark:border-zinc-700">
+            <BoardComments
+              postId={post.id}
+              comments={comments}
+              commentCount={post.commentCount}
+              loggedIn={viewer.loggedIn}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

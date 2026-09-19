@@ -56,7 +56,8 @@ export type BoardListItem = {
   title: string;
   preview: string;
   nickname: string;
-  authorId: string;
+  // null = 탈퇴한 회원의 글(2라운드 탈퇴 정책 #17 — user_id 가 set null 로 끊기고 닉네임·본문은 서버가 비운다).
+  authorId: string | null;
   createdAt: string;
   viewCount: number;
   commentCount: number;
@@ -78,7 +79,7 @@ export type BoardPostDetail = {
   title: string;
   contentHtml: string;
   nickname: string;
-  authorId: string;
+  authorId: string | null;
   createdAt: string;
   updatedAt: string | null;
   viewCount: number;
@@ -91,7 +92,7 @@ export type BoardCommentItem = {
   id: string;
   parentId: string | null;
   nickname: string;
-  authorId: string;
+  authorId: string | null;
   content: string;
   createdAt: string;
   updatedAt: string | null;
@@ -123,7 +124,7 @@ function toListItem(row: Row): BoardListItem {
     title: row.title as string,
     preview: boardPreviewText((row.content_text as string) ?? ""),
     nickname: row.nickname as string,
-    authorId: row.user_id as string,
+    authorId: (row.user_id as string | null) ?? null,
     createdAt: row.created_at as string,
     viewCount: row.view_count as number,
     commentCount: row.comment_count as number,
@@ -210,7 +211,7 @@ async function fetchBoardPost(id: string): Promise<BoardPostDetail | null> {
     title: row.title as string,
     contentHtml: row.content_html as string,
     nickname: row.nickname as string,
-    authorId: row.user_id as string,
+    authorId: (row.user_id as string | null) ?? null,
     createdAt: row.created_at as string,
     updatedAt: (row.updated_at as string | null) ?? null,
     viewCount: row.view_count as number,
@@ -232,8 +233,10 @@ export function useBoardPost(id: string | undefined) {
 // 조회수(웹 countBoardView). 글쓴이 본인이 열어본 것은 세지 않는다(건의게시판과 같은 이유 — 자기 글을
 // 몇 번 열었는지가 "몇 명이 봤나"에 섞이면 숫자의 뜻이 사라진다). RPC 는 anon 도 실행할 수 있어
 // 게스트의 열람도 웹처럼 센다. 실패는 삼킨다 — 조회수 하나 때문에 화면을 막을 이유가 없다.
-export async function countBoardView(postId: string, viewerId: string | null, authorId: string): Promise<void> {
-  if (viewerId === authorId) return;
+// 탈퇴한 회원의 글(authorId null)은 게스트(viewerId null)도 센다 — null === null 로 건너뛰던 자리(웹 countBoardView
+// 와 같은 판정).
+export async function countBoardView(postId: string, viewerId: string | null, authorId: string | null): Promise<void> {
+  if (authorId !== null && viewerId === authorId) return;
   await supabase.rpc("increment_board_view", { p_post_id: postId }).then(() => {}, () => {});
 }
 
@@ -252,7 +255,7 @@ async function fetchBoardComments(postId: string): Promise<BoardCommentItem[]> {
       id: row.id as string,
       parentId: (row.parent_id as string | null) ?? null,
       nickname: row.nickname as string,
-      authorId: row.user_id as string,
+      authorId: (row.user_id as string | null) ?? null,
       // 지워진 댓글은 본문을 들고 있지 않는다(웹은 서버에서 비운다 — 앱은 캐시에 남지 않게 여기서).
       content: isDeleted ? "" : (row.content as string),
       createdAt: row.created_at as string,
@@ -318,10 +321,11 @@ export function useMyBoardLike(postId: string | undefined) {
 
 // plpgsql `raise exception` 의 SQLSTATE. 함수가 일부러 던진 오류만 이 코드로 오고 그 message 가 곧 화면
 // 문구다(queries/notifications.ts·core data/reports.ts 와 같은 규칙). 그 밖의 실패(함수 미적용 PGRST202·
-// 네트워크)는 사용자에게 보여줄 말이 아니라 호출부가 준 한 문장으로 덮는다.
+// 네트워크)는 사용자에게 보여줄 말이 아니라 호출부가 준 한 문장으로 덮는다. queries/ugc.ts(신고 일반화)도
+// 같은 판정을 쓰므로 내보낸다.
 const RAISE_EXCEPTION = "P0001";
 
-function rpcErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
+export function rpcErrorMessage(error: { code?: string; message?: string }, fallback: string): string {
   return error.code === RAISE_EXCEPTION && error.message ? error.message : fallback;
 }
 
