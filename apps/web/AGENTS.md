@@ -86,9 +86,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   `'use cache'` + 공개 클라이언트로 둘 것(`searchParams`·`cookies()` 를 읽으면 셸에서
   빠진다). 확인은 UA 를 Googlebot 으로 바꿔 받은 HTML 의 `<head>` 를 직접 볼 것
   (GitHub Actions "크롤러 head 점검"이 매일 같은 검사를 한다).
-  사이트맵은 `/sitemap.xml`(인덱스) + `/sitemaps/hubs.xml` + `/sitemaps/papers-<시험>.xml`
+  사이트맵은 `/sitemap.xml`(인덱스) + `/sitemap-hubs.xml` + `/sitemap-papers-<시험>.xml`
   로 나뉜다(`lib/sitemap-data.ts`) — 다시 한 파일로 합치지 말 것(서치콘솔에서 시험별
-  색인 현황을 보려는 것). 문제지 카드·상세 링크에 `?level=` 같은 파라미터를 다시 붙이지
+  색인 현황을 보려는 것). **하위 파일을 디렉터리 밑으로 내리지 말 것** — 사이트맵은
+  자기가 놓인 경로 아래의 주소만 담을 수 있고, 구글은 그 제한을 서치콘솔 직접 제출에만
+  면제한다(robots.txt 에 적는 것으로는 안 풀린다). 2026-09-06 에 `/sitemaps/` 밑으로
+  내렸다가 담긴 주소가 한 건도 인정되지 않아, 사이트맵이 내주는 4,760 URL 중 구글이
+  아는 것이 1,559 로 주저앉았다. 루트 주소는 `next.config.ts` 의 rewrite 가 라우트로
+  넘긴다. robots.txt 에는 인덱스 한 줄만 적는다(DB 를 읽게 만들지 말 것). 문제지 카드·상세 링크에 `?level=` 같은 파라미터를 다시 붙이지
   말 것(변형 URL 이 문제지마다 생겨 "대체 페이지"만 쌓인다). 배포 뒤에는
   `/api/cron/warm-papers` 를 **끝까지** 돌릴 것(`CRON_SECRET` 필수) — 승격 전 공용 셸을
   크롤러가 먼저 받지 않게 하려는 것. 한 호출이 전부를 돌지 않는다: 응답의 `next` 가

@@ -8,6 +8,14 @@
    앱(Uniwind)도 같은 파일을 읽으므로 색을 바꿀 때는 그쪽을 고친다. */
 @import "@gongmoa/design-tokens/theme.css";
 
+/* Tailwind v4 는 CSS 가 놓인 앱(apps/web) 아래만 자동으로 훑는다. 배지 색 맵의 정본인
+   packages/core/src/badge-classes.ts 는 node_modules 심볼릭 링크 너머에 있어(자동 탐지는
+   node_modules 를 건너뛴다) 스캔 대상이 아니었고, 그 결과 거기에만 적힌 클래스는 CSS 가
+   아예 생성되지 않았다 — 지방직(bg-emerald-700)·계리직(bg-lime-700) 배지는 배경 없이
+   text-white 만 남아 흰 카드 위에서 글자째 사라졌고, 회독 배지는 그라데이션이 빠진 맨
+   글씨("1회독")로 나왔다. 앱은 apps/mobile/global.css 가 같은 줄을 갖고 있다. */
+@source "../../../../packages/core/src";
+
 /* 다크모드 전환: 모든 요소에 개별 CSS transition을 거는 방식(전 버전)은 DOM 전체를
    동시에 리페인트해서 요소가 많은 페이지에서 프레임이 뚝뚝 끊겼다. 대신 View
    Transitions API로 전/후 화면을 스냅샷 두 장으로 찍어 opacity로 크로스페이드한다 —

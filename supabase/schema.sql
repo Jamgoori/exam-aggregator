@@ -322,17 +322,10 @@ $$;
 
 grant execute on function increment_download_count(uuid) to anon, authenticated;
 
--- 홈 화면 "누적 다운로드" 집계용: exam_papers가 많아져도 전체 행을 클라이언트로
--- 내려받지 않고 DB에서 합계만 계산해서 반환한다.
-create or replace function total_download_count()
-returns bigint
-language sql
-stable
-as $$
-  select coalesce(sum(download_count), 0) from exam_papers;
-$$;
-
-grant execute on function total_download_count() to anon, authenticated;
+-- 홈 화면 "누적 다운로드" 집계(total_download_count)는 이 파일 맨 아래 "홈 통계 카운터
+-- (site_stats)" 절로 옮겼다 — 예전에는 여기서 exam_papers 전체를 sum 하는 함수였는데,
+-- 그게 홈이 열릴 때마다 풀스캔이라 디스크 IO 를 먹었다. 지금은 트리거가 미리 세어 둔
+-- 한 줄을 읽는다.
 
 -- 마이페이지 즐겨찾기: 회원이 문제지를 찜해두고 나중에 다시 찾아볼 수 있게 한다.
 -- (추후 CBT 채점 결과/오답노트/시험별 점수도 마이페이지에 같이 들어갈 예정이라
@@ -611,19 +604,9 @@ create policy "select own cbt attempts" on cbt_attempts
 -- 평균·전국 오답률·총 응시 수)를 오염시킬 수 있어 제거했다 (2026-07-16 보안 점검).
 drop policy if exists "insert own cbt attempts" on cbt_attempts;
 
--- 홈 화면 "누적 응시 수" 집계용: cbt_attempts는 본인 것만 select 가능한 RLS라
--- 전체 응시 건수를 세려면 security definer로 우회해야 한다.
-create or replace function total_cbt_attempt_count()
-returns bigint
-language sql
-stable
-security definer
-set search_path = public
-as $$
-  select count(*) from cbt_attempts;
-$$;
-
-grant execute on function total_cbt_attempt_count() to anon, authenticated;
+-- 홈 화면 "누적 응시 수" 집계(total_cbt_attempt_count)도 이 파일 맨 아래 "홈 통계 카운터
+-- (site_stats)" 절로 옮겼다 — 예전에는 여기서 count(*) 로 cbt_attempts 전체를 세는
+-- security definer 함수였다(행이 쌓일수록 그대로 풀스캔이 됐다).
 
 -- CBT 최소 응시시간 강제용: 사용자가 채점 전 실제로 "시작"한 시각을 서버가 직접
 -- 기록해둔다. 클라이언트가 보내는 durationSeconds는 조작 가능해서 신뢰할 수 없으니,
@@ -3247,6 +3230,233 @@ alter table ai_diagnoses
 -- 확인할 수 있어야 한다(그래야 앱이 기다리는 동안 바로 수거된다).
 alter table ai_diagnosis_batches
   add column if not exists last_checked_at timestamptz not null default '-infinity';
+
+-- ── 홈 통계 카운터 (site_stats) ─────────────────────────────────────────────
+-- 홈·문제지 목록 상단의 "총 자료 수 / 누적 다운로드 / 누적 응시 수"는 검색어·로그인
+-- 여부와 무관하게 늘 같은 값인데, 예전에는 요청이 올 때마다 셋 다 **테이블 전체를
+-- 훑어서** 구했다 (exam_papers count(*), exam_papers 의 download_count sum,
+-- cbt_attempts count(*)). 캐시가 60초라 트래픽이 조금만 있어도 분당 세 번씩 풀스캔이
+-- 돌았고, 데이터가 인스턴스 RAM 캐시보다 커지면 그 스캔이 그대로 디스크 읽기가 된다 —
+-- Supabase 의 디스크 IO 버스트 예산이 마르던 원인 중 하나다(2026-09-18).
+--
+-- 그래서 값을 한 줄짜리 카운터 테이블에 미리 세어 두고, 원본 테이블이 바뀔 때 트리거가
+-- 그 줄을 증감시킨다. 홈이 읽는 건 항상 인덱스 한 번 = 한 행이다.
+--
+-- 주의: 카운터가 한 행이라 쓰기가 그 행에서 직렬화된다. 다운로드·응시 저장은 각각
+-- 한 문장짜리 트랜잭션이라 잠금이 잡히는 시간이 마이크로초 단위고, 이 규모에서는
+-- 풀스캔을 없애는 이득이 훨씬 크다. 초당 수백 건씩 쓰는 규모가 되면 그때 카운터를
+-- 여러 행으로 쪼개(sharded counter) 합산하는 방식으로 바꾼다.
+-- ⚠ 적용 순서: 이 절을 운영 DB 에 먼저 돌린 뒤 웹을 배포할 것. 웹의 getHomeStats 가
+-- home_stats() RPC 를 부르는데, 먼저 배포하면 함수가 없어 숫자 세 개가 0 으로 보인다
+-- (화면이 깨지지는 않는다 — 실패를 0 으로 받는다).
+create table if not exists site_stats (
+  -- 언제나 한 행만 존재한다 (id = true). check 로 다른 값이 들어오는 걸 막는다.
+  id boolean primary key default true check (id),
+  paper_count bigint not null default 0,
+  download_total bigint not null default 0,
+  cbt_attempt_count bigint not null default 0,
+  updated_at timestamptz not null default now()
+);
+
+-- 한 행은 먼저 만들어 둔다. 아래 트리거들은 `update ... where id = true` 라, 행이 없으면
+-- 조용히 0건을 고치고 지나간다(카운터가 영영 0 에 머문다).
+insert into site_stats (id) values (true) on conflict (id) do nothing;
+
+alter table site_stats enable row level security;
+
+-- 정책을 하나도 두지 않는다 = anon·authenticated 는 이 테이블을 직접 못 읽는다.
+-- 조회는 아래 security definer 함수(home_stats)로만 한다 — 값 자체는 공개지만,
+-- 클라이언트가 카운터를 직접 만지는 경로를 아예 만들지 않으려는 것.
+revoke all on site_stats from anon, authenticated;
+
+-- 원본에서 다시 세어 카운터를 맞춘다. 스키마를 다시 적용할 때마다 한 번 돌아서
+-- (맨 아래 select) 혹시 어긋난 값이 저절로 복구된다. 운영 중에 수동으로 고칠 때도
+-- `select recount_site_stats();` 한 줄이면 된다.
+create or replace function recount_site_stats()
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  insert into site_stats (id, paper_count, download_total, cbt_attempt_count, updated_at)
+  values (
+    true,
+    (select count(*) from exam_papers),
+    (select coalesce(sum(download_count), 0) from exam_papers),
+    (select count(*) from cbt_attempts),
+    now()
+  )
+  on conflict (id) do update set
+    paper_count = excluded.paper_count,
+    download_total = excluded.download_total,
+    cbt_attempt_count = excluded.cbt_attempt_count,
+    updated_at = excluded.updated_at;
+$$;
+
+revoke all on function recount_site_stats() from public, anon, authenticated;
+
+-- 트리거는 전부 **문장 단위**(for each statement) + 전이 테이블(referencing)이다.
+-- 배치 업로드나 대량 삭제에서도 카운터 행을 한 번만 건드리게 하려는 것 — 행 단위로
+-- 걸면 5,000행 업로드가 카운터 행을 5,000번 잠근다.
+create or replace function site_stats_papers_inserted()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update site_stats set
+    paper_count = paper_count + (select count(*) from new_rows),
+    download_total = download_total + (select coalesce(sum(download_count), 0) from new_rows),
+    updated_at = now()
+  where id = true;
+  return null;
+end;
+$$;
+
+create or replace function site_stats_papers_deleted()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update site_stats set
+    paper_count = paper_count - (select count(*) from old_rows),
+    download_total = download_total - (select coalesce(sum(download_count), 0) from old_rows),
+    updated_at = now()
+  where id = true;
+  return null;
+end;
+$$;
+
+-- 다운로드 수는 increment_download_count() 가 올린다. 여기서는 증감분(신규 합 - 기존 합)
+-- 만 더한다 — 같은 문장이 여러 행을 고쳐도 한 번에 맞는다.
+create or replace function site_stats_papers_downloads_changed()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update site_stats set
+    download_total = download_total
+      + (select coalesce(sum(download_count), 0) from new_rows)
+      - (select coalesce(sum(download_count), 0) from old_rows),
+    updated_at = now()
+  where id = true;
+  return null;
+end;
+$$;
+
+create or replace function site_stats_attempts_inserted()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update site_stats set
+    cbt_attempt_count = cbt_attempt_count + (select count(*) from new_rows),
+    updated_at = now()
+  where id = true;
+  return null;
+end;
+$$;
+
+create or replace function site_stats_attempts_deleted()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update site_stats set
+    cbt_attempt_count = cbt_attempt_count - (select count(*) from old_rows),
+    updated_at = now()
+  where id = true;
+  return null;
+end;
+$$;
+
+drop trigger if exists site_stats_papers_ins on exam_papers;
+create trigger site_stats_papers_ins
+  after insert on exam_papers
+  referencing new table as new_rows
+  for each statement execute function site_stats_papers_inserted();
+
+drop trigger if exists site_stats_papers_del on exam_papers;
+create trigger site_stats_papers_del
+  after delete on exam_papers
+  referencing old table as old_rows
+  for each statement execute function site_stats_papers_deleted();
+
+-- 컬럼 목록(`of download_count`)은 쓸 수 없다 — Postgres 는 전이 테이블(referencing)과
+-- 컬럼 목록을 같이 지정하면 거부한다(0A000: transition tables cannot be specified for
+-- triggers with column lists). 대신 모든 update 에서 깨어나되, 더하는 값이
+-- "신규 합 - 기존 합" 이라 제목·태그만 고친 update 는 0 을 더하고 지나간다.
+drop trigger if exists site_stats_papers_dl on exam_papers;
+create trigger site_stats_papers_dl
+  after update on exam_papers
+  referencing old table as old_rows new table as new_rows
+  for each statement execute function site_stats_papers_downloads_changed();
+
+drop trigger if exists site_stats_attempts_ins on cbt_attempts;
+create trigger site_stats_attempts_ins
+  after insert on cbt_attempts
+  referencing new table as new_rows
+  for each statement execute function site_stats_attempts_inserted();
+
+drop trigger if exists site_stats_attempts_del on cbt_attempts;
+create trigger site_stats_attempts_del
+  after delete on cbt_attempts
+  referencing old table as old_rows
+  for each statement execute function site_stats_attempts_deleted();
+
+-- 홈이 부르는 유일한 통계 조회. 세 값을 한 번에 돌려줘 왕복도 셋에서 하나로 준다.
+-- site_stats 는 RLS 로 잠겨 있으므로 security definer 로 읽는다(값은 전부 공개값).
+create or replace function home_stats()
+returns table (paper_count bigint, download_total bigint, cbt_attempt_count bigint)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select s.paper_count, s.download_total, s.cbt_attempt_count
+  from site_stats s
+  where s.id = true;
+$$;
+
+grant execute on function home_stats() to anon, authenticated;
+
+-- 옛 이름 두 개는 그대로 남겨 둔다 (앱·외부에서 부르고 있을 수 있다). 내용만
+-- 카운터를 읽는 것으로 바뀌었다 — 더 이상 테이블을 훑지 않는다.
+create or replace function total_download_count()
+returns bigint
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((select download_total from site_stats where id = true), 0);
+$$;
+
+grant execute on function total_download_count() to anon, authenticated;
+
+create or replace function total_cbt_attempt_count()
+returns bigint
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((select cbt_attempt_count from site_stats where id = true), 0);
+$$;
+
+grant execute on function total_cbt_attempt_count() to anon, authenticated;
+
+-- 스키마 적용 시점에 한 번 맞춰 둔다 (멱등 — 다시 돌려도 원본 기준으로 재계산).
+select recount_site_stats();
 
 -- ===== 모바일 앱 재시작 Phase 5 1라운드 (2026-09-19) =====
 -- 자유게시판·공지가 앱에 들어오면서 필요해진 것들(apps/mobile/docs/redesign-architecture.md

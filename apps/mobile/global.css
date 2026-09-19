@@ -6,3 +6,8 @@
 @import "uniwind";
 @import "@gongmoa/design-tokens/theme.css";
 @import "./src/theme/theme.native.css";
+
+/* 자동 탐지는 apps/mobile 아래만 훑는다. 배지 클래스의 정본(packages/core/src/badge-classes.ts)
+   은 그 밖이라 여기서 따로 스캔 대상에 넣어 준다 — 빠지면 지방직·계리직 배지 배경과 회독
+   배지 그라데이션이 통째로 생성되지 않는다(웹에서 실제로 그렇게 나갔다). */
+@source "../../packages/core/src";
