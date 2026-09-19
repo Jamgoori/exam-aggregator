@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   isNotificationType,
   notificationMessage,
+  notificationPreview,
   relativeTimeLabel,
   safeNotificationLink,
   unreadBadgeLabel,
+  NOTIFICATION_PREVIEW_MAX,
 } from "./notifications";
 
 test("알림 종류 판별", () => {
@@ -53,4 +55,12 @@ test("알림 링크는 사이트 안 경로만 통과한다", () => {
   assert.equal(safeNotificationLink("/\t/evil.com"), "/notifications");
   assert.equal(safeNotificationLink(null), "/notifications");
   assert.equal(safeNotificationLink(42), "/notifications");
+});
+
+// 알림 미리보기 — 예전 웹 lib/notifications.ts 의 것. Edge board-write 가 같은 함수로 자른다.
+test("notificationPreview: 서식을 걷어내고 80자에서 자른다", () => {
+  assert.equal(notificationPreview("<p>안녕  <b>세상</b></p>"), "안녕 세상");
+  const long = "가".repeat(NOTIFICATION_PREVIEW_MAX + 5);
+  assert.equal(notificationPreview(long), `${"가".repeat(NOTIFICATION_PREVIEW_MAX)}…`);
+  assert.equal(notificationPreview("가".repeat(NOTIFICATION_PREVIEW_MAX)), "가".repeat(NOTIFICATION_PREVIEW_MAX));
 });

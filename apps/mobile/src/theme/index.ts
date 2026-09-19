@@ -95,3 +95,41 @@ export function useIsDark(): boolean {
 export function useThemeTokens() {
   return useIsDark() ? tokens.dark : tokens.light;
 }
+
+// ── 게시판 본문(richText) 토큰 — 웹 globals.css `.board-content`(410-470행) 1:1 ─────────
+// 설계서 §4.1 `richText` 행. RichTextContent(components/rich-text-content.tsx)가 임의값을
+// 쓰지 않게 여기에 모아 둔다. 웹 rem 은 루트 16px 기준으로 px 로 푼 값이고, 색은 Tailwind
+// 클래스가 정확히 같은 hex 를 주는 자리(zinc-700/200 본문, blue-300 인용 선, blue-600/400 링크,
+// zinc-100/800 pre 배경, zinc-200/700 hr)는 className 으로 두고, 웹이 리터럴로 적어 Tailwind v4
+// 팔레트와 어긋나는 blockquote 글자색(#52525b/#a1a1aa — v3 zinc-600/400)만 값으로 둔다.
+export const richText = {
+  // `.board-content text-[15px] leading-7` — 모든 블록이 이 줄높이를 상속한다.
+  fontSize: 15,
+  lineHeight: 28,
+  // `p { margin: 0 0 0.5rem; min-height: 1lh }` — 빈 줄(엔터)도 한 줄 높이를 차지한다.
+  paragraph: { marginBottom: 8, minHeight: 28 },
+  h2: { fontSize: 20, marginTop: 20, marginBottom: 8 },
+  h3: { fontSize: 17.6, marginTop: 16, marginBottom: 8 },
+  // `ul, ol { margin: 0.5rem 0; padding-left: 1.5rem }`, `li { margin: 0.15rem 0 }`.
+  list: { marginVertical: 8, paddingLeft: 24 },
+  listItem: { marginVertical: 2.4 },
+  // 마커(disc/decimal)는 CSS list-style-position: outside — 들여쓰기 안쪽에 오른쪽 정렬로 놓고
+  // 글과의 틈은 브라우저 마커 박스의 공백 한 칸(≈0.4em) 만큼.
+  listMarkerGap: 6,
+  // `blockquote { margin: 0.75rem 0; border-left: 3px; padding: 0.25rem 0 0.25rem 0.85rem }`.
+  blockquote: {
+    marginVertical: 12,
+    borderLeftWidth: 3,
+    paddingVertical: 4,
+    paddingLeft: 13.6,
+    color: { light: "#52525b", dark: "#a1a1aa" },
+  },
+  // `hr { margin: 1.25rem 0; border-top: 1px }`.
+  hr: { marginVertical: 20, borderTopWidth: 1 },
+  // `pre { margin: 0.75rem 0; border-radius: 0.5rem; padding: 0.75rem 1rem }`,
+  // `pre, code { font-size: 0.9em }` — em 이라 본문 15px 의 0.9 = 13.5px, 중첩되면 다시 0.9배.
+  pre: { marginVertical: 12, borderRadius: 8, paddingVertical: 12, paddingHorizontal: 16 },
+  codeFontScale: 0.9,
+  // `img { margin: 0.75rem 0; max-width: 100%; height: auto; border-radius: 0.75rem }`.
+  image: { marginVertical: 12, borderRadius: 12, placeholderAspectRatio: 4 / 3 },
+} as const;

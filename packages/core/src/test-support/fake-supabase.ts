@@ -12,6 +12,8 @@
 //   insert 가 기본키/onConflict 로 겹치면 { error: { code: "23505" } } (PostgREST 와 같은 모양).
 //   .rpc(name, args) 는 생성자에 넘긴 핸들러가 처리한다.
 //   storage.from(bucket).getPublicUrl / .upload / .remove — 호출을 uploads·removes 에 기록.
+//   storage.from(bucket).list(prefix, { limit }) — objects[bucket] 에 심어 둔 객체 중 `${prefix}/`
+//     아래 것을 { name, created_at } 로 돌려준다(rules/board.ts 의 이미지 시간당 한도).
 //   auth.admin.getUserById / .updateUserById — users 테이블의 user_metadata 를 병합.
 //
 // select 문자열은 해석하지 않는다 — 테이블에 넣어 둔 행 객체를 그대로 돌려준다.
@@ -318,6 +320,10 @@ export class FakeSupabase {
   // 다음 한 번의 upload 를 실패시킨다(버킷 없음 분기 등).
   failNextUpload: string | null = null;
 
+  // 버킷 안에 "이미 있는" 객체. list 가 읽고 upload 가 덧붙인다 — rules/board.ts 의 이미지
+  // 시간당 한도가 표가 아니라 스토리지 목록을 세기 때문에 필요하다. created_at 은 ISO 문자열.
+  readonly objects: Record<string, { path: string; created_at: string }[]> = {};
+
   storage = {
     from: (bucket = "exam-papers") => ({
       getPublicUrl: (path: string) => ({ data: { publicUrl: `https://cdn.test/${path}` } }),
@@ -326,7 +332,17 @@ export class FakeSupabase {
         this.failNextUpload = null;
         if (message) return { data: null, error: { message } };
         this.uploads.push({ bucket, paths: [path] });
+        (this.objects[bucket] ??= []).push({ path, created_at: new Date().toISOString() });
         return { data: { path }, error: null };
+      },
+      list: async (prefix: string, opts?: { limit?: number }) => {
+        const head = `${prefix}/`;
+        const rows = (this.objects[bucket] ?? [])
+          .filter((o) => o.path.startsWith(head))
+          .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+          .slice(0, opts?.limit ?? 100)
+          .map((o) => ({ name: o.path.slice(head.length), created_at: o.created_at }));
+        return { data: rows, error: null };
       },
       remove: async (paths: string[]) => {
         this.removes.push({ bucket, paths });

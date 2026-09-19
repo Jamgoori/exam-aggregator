@@ -98,12 +98,17 @@ export function Screen({
   // 뷰포트에 고정되는 겹침 요소(하단 선택 바·UndoToast). ScreenOverlay 설명 참고 — 본문
   // 안에 두면 목록에 붙어 화면 밖으로 밀리므로 화면이 여기로 올려 준다.
   overlay,
+  // 본문 ScrollView 의 ref. 알림 링크 `/board/{id}#comment-{commentId}` 처럼 화면 안의 한 요소로
+  // 내려가야 하는 화면(웹 ScrollToHash)이 scrollTo 를 부르는 유일한 통로다 — 셸이 ScrollView 를
+  // 감싸고 있어 화면은 그 인스턴스를 달리 잡을 수 없다.
+  scrollRef,
   refreshing,
   onRefresh,
   className,
   contentClassName,
   ...shell
-}: ShellProps & ScrollViewProps & { children?: React.ReactNode; overlay?: React.ReactNode }) {
+}: ShellProps &
+  ScrollViewProps & { children?: React.ReactNode; overlay?: React.ReactNode; scrollRef?: React.Ref<ScrollView> }) {
   const { insets, online, showHeader, showFooter, pad } = useShell(shell);
   const { immersive } = shell;
   const overlayBottom = useOverlayBottom(insets.bottom);
@@ -116,6 +121,7 @@ export function Screen({
         <View className="flex-1">{children}</View>
       ) : (
         <ScrollView
+          ref={scrollRef}
           className="flex-1"
           keyboardShouldPersistTaps="handled"
           onScroll={onScroll}

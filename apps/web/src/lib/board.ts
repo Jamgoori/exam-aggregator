@@ -5,6 +5,7 @@ import { createPublicClient } from "@/lib/supabase/public";
 import { getSessionUser } from "@/lib/supabase/session";
 import { fetchAvatarUrls } from "@/lib/avatars";
 import {
+  boardImageOrigin as coreBoardImageOrigin,
   boardPreviewText,
   canDeleteBoardComment,
   canDeleteBoardPost,
@@ -26,9 +27,9 @@ export const BOARD_PAGE_SIZE = 20;
 
 // 본문에 삽입한 이미지의 공개 URL 접두사. 새니타이저가 이 접두사로 시작하는
 // 이미지만 남긴다(임의의 외부 주소를 본문에 남기면 추적 픽셀 자리가 된다).
+// 조립 규칙은 core board-image.ts 한 곳 — Edge board-write 가 SUPABASE_URL 로 같은 문자열을 만든다.
 export function boardImageOrigin(): string {
-  const base = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/$/, "");
-  return `${base}/storage/v1/object/public/board-images/`;
+  return coreBoardImageOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "");
 }
 
 export type BoardListItem = {

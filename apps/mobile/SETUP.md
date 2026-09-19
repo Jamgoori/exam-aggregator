@@ -286,10 +286,13 @@ curl -i https://gongmoa.kr/.well-known/assetlinks.json
 - iOS: 메모앱에 `https://gongmoa.kr/papers` 를 적고 **길게 눌러 "앱에서 열기"** 가 뜨는지.
   (사파리 주소창에 직접 입력한 주소는 유니버설 링크로 안 열린다 — 애플의 의도된 동작이다)
 
-> **앱에 아직 없는 화면은 일부러 뺐다.** 게시판·건의·공지(Phase 5)는 목록에 없어서 브라우저로
+> **앱에 아직 없는 화면은 일부러 뺐다.** 건의(Phase 5 2라운드)는 목록에 없어서 브라우저로
 > 열린다 — 넣으면 앱이 열렸다가 "페이지를 찾을 수 없어요"로 떨어진다. 화면을 만들 때
 > 세 곳을 함께 연다: `src/lib/next-path.ts`, `app.json` 의 `android.intentFilters`,
-> 웹 `apps/web/src/app/.well-known/apple-app-site-association/route.ts`.
+> 웹 `apps/web/src/app/.well-known/apple-app-site-association/route.ts`
+> (게시판·공지는 Phase 5 1라운드에서 그렇게 열었다 — `/notices/new`·`/notices/*/edit` 는
+> 관리자 전용이라 next-path·AASA 에서 빠져 있고, Android `pathPrefix` 는 제외를 못 해 그 두 주소는
+> 앱이 열렸다가 "페이지를 찾을 수 없어요"가 된다).
 
 ---
 

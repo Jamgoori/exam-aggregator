@@ -19,7 +19,13 @@ export * from "./chat";
 export * from "./suggestions";
 export * from "./notices";
 export * from "./board";
+// 게시판 본문 이미지 규격(앱이 굽는 폭·바이트·base64 상한 — 설계서 §12-8 과 같은 방식)과
+// UGC 신고 사유·차단 필터(Apple 1.2). 둘 다 순수 — 쓰기는 EF board-write·SD RPC 가 한다.
+export * from "./board-image";
+export * from "./ugc";
 export * from "./rich-text";
+// 앱 글쓰기 마크업(lite) ↔ 게시판 HTML — 앱 에디터가 조합·되돌리기에 쓰는 순수 함수(웹은 쓰지 않는다).
+export * from "./rich-text-lite";
 export * from "./notifications";
 export * from "./avatar";
 export * from "./nickname";

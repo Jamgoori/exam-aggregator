@@ -74,6 +74,16 @@
               "scheme": "https",
               "host": "gongmoa.kr",
               "pathPrefix": "/notifications"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/board"
+            },
+            {
+              "scheme": "https",
+              "host": "gongmoa.kr",
+              "pathPrefix": "/notices"
             }
           ],
           "category": [

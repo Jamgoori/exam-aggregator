@@ -20,6 +20,7 @@ import { DIAGNOSIS_RECHECK_SECONDS } from "../rules/diagnosis-batch";
 import type { SessionSchedule } from "../review-queue";
 import {
   EDGE_NAMES,
+  isBoardWriteImage,
   isMixCreateHub,
   isMixCreateSession,
   isReviewDueSchedule,
@@ -502,6 +503,31 @@ test("재확인 간격은 양수다", () => {
 
 // 리포트 본문은 이 두 응답에 없다 — 앱이 ai_diagnoses.report 를 RLS 로 직접 읽는다(§6.7 #21).
 
+// ── board-write / notices-write (§6.7 #17) ──────────────────────────────────
+({ action: "post.create", title: "제목", category: "free", contentHtml: "<p>본문</p>", isPinned: false }) satisfies EdgeRequest<"board-write">;
+({ action: "post.update", id: "p1", title: "제목", category: "question", contentHtml: "<p>본문</p>" }) satisfies EdgeRequest<"board-write">;
+({ action: "post.delete", id: "p1" }) satisfies EdgeRequest<"board-write">;
+// 이미지는 base64 한 필드(avatar-upload 와 같다) — 데이터 URL 접두 없이 본문만.
+({ action: "image", webpBase64: "UklGRg==" }) satisfies EdgeRequest<"board-write">;
+({ action: "comment.create", postId: "p1", content: "댓글", parentId: null }) satisfies EdgeRequest<"board-write">;
+({ action: "comment.update", commentId: "c1", content: "댓글" }) satisfies EdgeRequest<"board-write">;
+({ action: "comment.delete", commentId: "c1" }) satisfies EdgeRequest<"board-write">;
+const boardPostResponse = { success: true, id: "p1" } satisfies EdgeResponse<"board-write">;
+const boardImageResponse = {
+  success: true,
+  url: "https://p.supabase.co/storage/v1/object/public/board-images/u1/a.webp",
+} satisfies EdgeResponse<"board-write">;
+
+({ action: "comment.create", noticeId: "n1", content: "댓글" }) satisfies EdgeRequest<"notices-write">;
+({ action: "comment.update", commentId: "c1", content: "댓글" }) satisfies EdgeRequest<"notices-write">;
+({ action: "comment.delete", commentId: "c1" }) satisfies EdgeRequest<"notices-write">;
+({ success: true, id: "n1" }) satisfies EdgeResponse<"notices-write">;
+
+test("board-write 응답 판별은 이미지와 글을 가른다", () => {
+  assert.equal(isBoardWriteImage(boardImageResponse), true);
+  assert.equal(isBoardWriteImage(boardPostResponse), false);
+});
+
 // ── 오류 본문 ───────────────────────────────────────────────────────────────
 ({ error: "로그인 후 이용할 수 있어요." }) satisfies EdgeErrorBody;
 
@@ -510,8 +536,8 @@ type _EveryEntry = { [N in EdgeName]: EdgeContracts[N] extends { request: unknow
 const _every: _EveryEntry[EdgeName] = true;
 void _every;
 
-test("EDGE_NAMES 는 배포된 함수 18개", () => {
-  assert.equal(EDGE_NAMES.length, 18);
+test("EDGE_NAMES 는 배포된 함수 20개", () => {
+  assert.equal(EDGE_NAMES.length, 20);
   assert.equal(new Set(EDGE_NAMES).size, EDGE_NAMES.length);
 });
 

@@ -9,6 +9,7 @@
 // 곁다리인데 그것 때문에 댓글이 안 달리면 본말이 전도된다.
 
 import { kstDayKey } from "./format";
+import { richTextToPlain } from "./rich-text";
 
 export const NOTIFICATION_TYPES = [
   "board_comment", // 내 게시글에 댓글
@@ -42,6 +43,20 @@ export type NotificationItem = {
 // "알림 전체보기"로 넘어갔을 때 목록이 어긋나므로(페이지 경계가 달라진다) 여기 한 벌만 둔다.
 export const NOTIFICATIONS_PAGE_SIZE = 20;
 export const NOTIFICATION_DROPDOWN_SIZE = 8;
+
+// 알림 미리보기에 싣는 본문 길이. 길게 실으면 드롭다운이 한 화면을 넘긴다.
+// 예전에는 웹 lib/notifications.ts 에만 있었다 — 앱이 Edge(board-write)로 댓글을 달면서
+// 같은 사건의 알림이 두 경로에서 만들어지므로, 미리보기를 자르는 자리도 한 곳이어야
+// 목록에서 웹 댓글과 앱 댓글의 알림이 같은 길이로 보인다.
+export const NOTIFICATION_PREVIEW_MAX = 80;
+
+// 댓글 본문(평문·HTML 모두)에서 알림 한 줄에 실을 미리보기를 만든다.
+export function notificationPreview(content: string): string {
+  const flat = richTextToPlain(content).replace(/\s+/g, " ").trim();
+  return flat.length > NOTIFICATION_PREVIEW_MAX
+    ? `${flat.slice(0, NOTIFICATION_PREVIEW_MAX)}…`
+    : flat;
+}
 
 // 브라우저 URL 파서는 주소를 해석하기 **전에** 탭·개행을 지운다(safe-redirect.ts 의 긴 설명).
 const URL_PARSER_STRIPPED = /[\t\n\r]/g;

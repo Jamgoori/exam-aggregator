@@ -52,7 +52,7 @@
 | URL | 제목 슬러그(`core/paper-slug.ts`, `lib/paper-href.ts`, `lib/paper-slug-map.ts`) | UUID — 유니버설 링크 불가 |
 | 중복 로직 | — | backend 리포트 §8 기준 24항목(≈15 복사 쌍). `_shared/srs.ts`·`review-pick.ts`·`profanity.ts` 는 core 와 의미 동일(공백 차이만). 함수 **정의** 기준 실측: `fetchQuestionMedia` 계열 3벌(`apps/web/src/lib/wrong-notes.ts:200`, `supabase/functions/_shared/media.ts:7`, `apps/mobile/src/lib/wrong-notes.ts:235 fetchQuestionImages`), `kstToday` 3벌(`apps/web/src/lib/ai-diagnosis.ts:145`, `supabase/functions/ai-diagnose/index.ts:15`, `_shared/membership.ts:108`), `isUuid` 8벌(웹 `app/{board,notifications,suggestions,subjects,notices,papers}/actions.ts` + `mypage/attempts/[attemptId]/page.tsx` 7 + `_shared/cbt.ts:31`; 정본은 core `paper-slug.ts:90 UUID_RE`), `chunk` 8벌(웹 `lib/{status-targets,mix-practice,wrong-notes,review-preferences,review-queue,diagnosis-live}.ts` 6 + `_shared/status-targets.ts` + 모바일 `wrong-notes.ts`), Edge 에러 언랩 6벌, `getAttendanceSummary` 웹·앱 verbatim 중복, `computeAttemptRounds` 는 `apps/web/src/app/mypage/page.tsx:82` 와 `apps/mobile/src/lib/mypage.ts:55` 중복. 근본 원인은 Deno 가 `@gongmoa/core` 를 import 못 하는 것 하나 |
 
-**앱에 없는 기능**: 랜딩 `/`, `/exams*`, `/mix`·`/subjects/[slug]/mix`·mix 세션 노트, 오늘의 복습(SRS: `review-due-card`, `review-fab`, 설정), `/notifications`+종, `/membership*`·`/mypage/payments`, `/board*`·`/notices*`·`/suggestions*`·채팅, 문항 신고, 정답지 열기, 회독 평균 비교, 홈 팝업, 테마 토글, 검색 제안, 오답노트·응시 상세의 정답·해설(`paper_answers`·`question_explanations` RLS 차단), `/terms`·`/privacy` 내 링크만 존재.
+**앱에 없는 기능**: 랜딩 `/`, `/exams*`, `/mix`·`/subjects/[slug]/mix`·mix 세션 노트, 오늘의 복습(SRS: `review-due-card`, `review-fab`, 설정), `/notifications`+종, `/membership*`·`/mypage/payments`, `/suggestions*`·채팅, 문항 신고, 정답지 열기, 회독 평균 비교, 홈 팝업, 테마 토글, 검색 제안, 오답노트·응시 상세의 정답·해설(`paper_answers`·`question_explanations` RLS 차단), `/terms`·`/privacy` 내 링크만 존재.
 
 **앱에만 있는 것**: 오프라인 JSON 캐시(`offline.ts`)+`OfflineBanner`, 로컬 20시 리마인더(`reminders.ts`, 단 `cancelAllScheduledNotificationsAsync` 로 타 알림까지 지움), `expo-updates` OTA, Apple 로그인, `FatalErrorScreen`, CBT 안 메모 필드(웹엔 없음), 전역 복습 기록 목록.
 
@@ -312,7 +312,7 @@ Supabase Postgres 한 곳. 앱은 **로컬에 권위 있는 상태를 갖지 않
 | 알림 | `notifications` | RLS 읽기 + RPC `mark_notification_read`/`mark_all_notifications_read`/`delete_notification`(신설) | U/D 회수됨 |
 | 문항 신고 | `question_reports` | RPC `submit_question_report`(신설) | insert 회수, 20/h |
 | 댓글 | `comments` | EF `comments-write`(기존) | — |
-| 게시판 | `board_posts`, `board_comments`, `board_post_likes`, `board-images` | 읽기 RLS / EF `board-write`(신설) / RPC `toggle_board_like`(신설) | `sanitizeRichText` 서버 강제 |
+| 게시판 | `board_posts`, `board_comments`, `board_post_likes`, `board-images` | 읽기 RLS / EF `board-write` ✅ / RPC `toggle_board_like` ✅ | `sanitizeRichText` 서버 강제. 이미지는 앱이 굽고 서버가 헤더 검사(§12-9) |
 | 건의 | `suggestions`, `suggestion_comments` | EF `suggestions`(신설, 읽기 포함) | SELECT 조차 회수 |
 | 채팅 | `chat_messages` | 읽기 RLS + Realtime / EF `chat-send`(신설) | 이미 publication |
 | 아바타 | `avatars` 버킷, `profiles.avatar_path` | EF `avatar-upload` ✅ | 버킷 쓰기 정책 열지 않음. 굽기는 앱(Skia), 서버는 헤더 검사만 — §12-8 |
@@ -387,8 +387,8 @@ TanStack Query 키는 `['catalog', …]`, `['me', userId, …]`, `['edge', name,
 | 14 | `mix-create`(신설) | EF | `lib/mix-practice.ts#getMixOverview/createMixSessionForUser/createRetryFromMixSession` | `{action:"overview", subjectSlug}` → cells/levelGroups; `{action:"create", subjectSlug, levels[], yearRange, limit, requestId}` → `{sessionId,total,unseenCount,coveredAll}`; `{action:"retry", sessionId}` | 3 |
 | 15 | `mark_notification_read(p_id)`, `mark_all_notifications_read()`, `delete_notification(p_id)`(신설) | RPC SD | `notifications/actions.ts` | `auth.uid()` 범위; `mark_all` 은 60일 초과 읽음 정리(`pruneReadNotifications`) 포함 | 4 |
 | 16 | `avatar-upload` ✅ | EF | `app/actions.ts#uploadAvatar/removeAvatar` | 이미지는 **앱이 구워** base64 한 필드로 보낸다(Deno 는 sharp 없음 → WASM 코덱 대신 Skia 로 결정, §12-8). 서버는 디코딩 없이 헤더만 검사(core `avatarBytesError`) 후 규칙 한 벌(core `rules/avatar.ts`)을 부른다. 남의 아바타 일괄 조회(`avatar_paths` RPC)는 **앱에 그 자리가 없어 넣지 않았다** — 필요해지는 날의 SQL 은 §12-8 | 4 |
-| 17 | `board-write`(신설), `toggle_board_like(p_post_id)`(신설) | EF, RPC | `board/actions.ts` 전부 | `{action:"post.create"\|"post.update"\|"post.delete"\|"image"\|"comment.create"\|"comment.update"\|"comment.delete"}`; 순서 **새니타이즈(`sanitizeRichText`) → `validateBoardPostInput` → 저장**; 10/30/60 시간당 한도; 이미지 1600px webp; 알림 생성 | 5 |
-| 18 | `report_post(p_post_id, p_reason)`, `block_user(p_user_id)`(신설) | RPC SD | 웹에 없음 — 스토어 UGC 요건(Apple 1.2) | `board_post_reports`·`user_blocks` 테이블(신설); 차단 목록은 앱 전용 필터로 시작, 웹 적용은 §13 질문 8 | 5 |
+| 17 | `board-write` ✅, `toggle_board_like(p_post_id)` ✅ (§12-9) | EF, RPC | `board/actions.ts` 전부(어댑터화 완료) | `{action:"post.create"\|"post.update"\|"post.delete"\|"image"\|"comment.create"\|"comment.update"\|"comment.delete"}`; 순서 **새니타이즈(`sanitizeRichText`) → `validateBoardPostInput` → 저장**; 10/30/60 시간당 한도; 이미지 1600px webp; 알림 생성 | 5 |
+| 18 | `report_post(p_post_id, p_reason, p_detail)`·`block_user`·`unblock_user`·`my_blocked_users` ✅ (§12-9) | RPC SD | 웹에 없음 — 스토어 UGC 요건(Apple 1.2) | `board_post_reports`·`user_blocks` 테이블 ✅; 차단 목록은 앱 전용 필터(목록·상세·댓글 세 지점), 웹 적용은 §12-2 #16 → 2라운드 | 5 |
 | 19 | `suggestions`(신설) | EF | `lib/suggestions.ts` + `suggestions/actions.ts` | `{action:"list"\|"get"\|"comments"\|"create"\|"update"\|"delete"\|"comment.*"}`; `canReadSuggestion` 마스킹 서버에서; `increment_suggestion_view` 는 EF 내부 | 5 |
 | 20 | `chat-send`(신설) | EF | `chat/actions.ts#sendChatMessage` | `checkChatFlood/checkChatBurst`, 300자, 중복 검사 | 5 |
 | 21 | `diagnosis-request`(신설, `ai-diagnose` 폐기), `diagnosis-aggregate`(신설) | EF | `mypage/actions.ts#requestDiagnosis/checkDiagnosisProgress`, `lib/diagnosis-live.ts` | 요청 행만 삽입(프리미엄·자격 15오답∨3응시·`normalizeConceptSelection` ≤10) → 기존 Vercel 크론 `/api/cron/diagnosis`(시간당, `CRON_SECRET`)가 Batches 로 처리; 앱은 `ai_diagnoses` 를 RLS 로 폴링 | 4 |
@@ -544,8 +544,8 @@ TanStack Query 키는 `['catalog', …]`, `['me', userId, …]`, `['edge', name,
 | 알림함·벨·읽음 | ✓ | ✗ | 4 | RLS + 3 RPC |
 | AI 진단 소개·보드·요청·진행 | ✓(Batches) | 동기 EF(드리프트) | 4 | `diagnosis-request/aggregate` |
 | 멤버십 상태 화면·결제 내역 | ✓ | ✗ | 1(상태) / 2(내역) / 5(IAP) | `membership-get`, `payments` RLS |
-| 자유게시판 읽기/좋아요/댓글/작성 | ✓ | ✗ | 5 | RLS 읽기 + `board-write` + `toggle_board_like` |
-| 공지 읽기·댓글 | ✓ | ✗ | 4 | RLS |
+| 자유게시판 읽기/좋아요/댓글/작성 | ✓ | ✓(5) — 작성은 축소판 에디터 | 5 | RLS 읽기 + `board-write` + `toggle_board_like` |
+| 공지 읽기·댓글 | ✓ | ✓(5) | 4 | RLS 읽기 + EF `notices-write` |
 | 건의게시판 | ✓ | ✗ | 5 | EF `suggestions` |
 | 채팅 | ✓ | ✗ | 5 | Realtime + `chat-send` |
 | UGC 신고·차단 | ✗ | ✗ | 5 | `report_post`, `block_user` |
@@ -1051,6 +1051,94 @@ grant execute on function avatar_paths(uuid[]) to authenticated;
 
 ---
 
+## 12-9. Phase 5 1라운드 — 커뮤니티: 자유게시판·공지사항·리치텍스트·신고/차단 (2026-09-19, 코드 완료 · 실기기 미검증)
+
+Phase 5(커뮤니티·IAP·스토어) 중 **소유자 선행 작업이 없는 부분**을 먼저 넣었다. IAP·스토어 제출·`/terms`
+개정은 사업자 정보·스토어 계약이, AdMob·`/privacy` 개정은 광고 도입 시점 결정이 먼저라 그대로 남는다. 건의게시판·
+채팅·탈퇴 정책(§12-2 #17)·웹 UGC 적용(§12-2 #16)은 **2라운드**다. 루트 `typecheck`/`lint`/`test`(core 626 · web 138 ·
+design-tokens 6), `bundle-edge --check: 최신`, `apps/mobile` `tsc --noEmit` + `expo lint` 통과. Edge 20개는 `tsc`
+하네스로 타입만 검사(오류 0).
+
+| 영역 | 들어간 것 |
+|---|---|
+| 게시판 규칙 | `packages/core/src/rules/board.ts` — 글 작성·수정·삭제, 댓글 작성·수정·삭제, 이미지 업로드. 순서 **새니타이즈 → `validateBoardPostInput` → 저장**(금지선). 시간당 한도(10/30/60)·알림 생성(`rules/notify.ts`, 본인 제외·실패 삼킴)·`notificationPreview` 를 웹에서 core 로 옮겼다. 웹 `board/actions.ts` 는 어댑터(세션·sharp·revalidate)로 줄었고 **웹 동작은 불변**(반환 모양·문구·순서 대조) |
+| 게시판 서버 | EF `board-write`(`post.create/update/delete`·`image`·`comment.create/update/delete`), RPC `toggle_board_like`(웹 `toggleBoardLike` 도 이 RPC 를 부른다 — 규칙 한 곳) |
+| 공지 | `rules/notices.ts` + EF `notices-write`(댓글 3종 — 웹은 세션 클라이언트+RLS 로 쓰지만 규칙 안에 `eq("user_id")` 를 박아 admin 클라이언트로 불러도 남의 댓글에 닿지 않는다). 공지 작성·수정·삭제는 관리자 전용이라 앱에 없다 |
+| 신고·차단 | 테이블 `board_post_reports`·`user_blocks`, RPC `report_post`·`block_user`·`unblock_user`·`my_blocked_users`. 사유 목록은 core `ugc.ts#REPORT_REASONS` 와 DB check **두 곳**(함께 고친다) |
+| 렌더러 | core `parseRichText`(새니타이저의 토크나이저 공유, 22태그 `RICH_TEXT_TAGS` export, 어떤 입력에도 던지지 않음) + 앱 `RichTextContent`(웹 `.board-content` CSS 1:1 — `src/theme/index.ts#richText` 토큰) |
+| 에디터 | core `rich-text-lite.ts`(`composeRichText`/`decomposeRichText` — 마크다운 부분집합 ↔ HTML, 새니타이저 고정점) + 앱 `BoardEditor`(툴바 8종·미리보기·이미지) |
+| 앱 화면 | `/board?page&category&q`, `/board/[id]`(+`#comment-…` 스크롤·강조), `/board/new`·`/board/[id]/edit`(모달), `/notices?page`, `/notices/[id]`, `/mypage/edit` "차단한 사용자" 절 |
+| 딥링크 | `next-path.ts`·AASA·`intentFilters` 세 곳에 `/board*`·`/notices*`(관리자 전용 `/notices/new`·`/notices/*/edit` 제외). 알림의 게시판 링크가 이제 이동한다 |
+
+**이미지는 아바타(§12-8)와 같은 방식이다** — 앱이 Skia 로 굽고(가로 ≤1600, 확대 없음, WEBP q82) 서버는 헤더만 검사한다
+(core `board-image.ts#boardImageBytesError`: 매직바이트·가로·픽셀 수 ≤ 1600×6000·ANIM·RIFF 선언 길이·2MiB). 검토가 실제
+인코더(sharp/libwebp) 산출물을 픽스처로 박아 두었다(1601px·2프레임·PNG·꼬리 붙인 파일 거절). 새 네이티브 의존 없음 —
+**이 라운드는 통째로 OTA 로 나간다**(app.json 변경은 intentFilters 두 줄뿐이라 링크만 새 빌드가 필요).
+
+**에디터는 축소판이다(설계서 #31).** 웹은 contenteditable 리치 에디터인데 RN 에는 그것이 없고 WebView·리치 에디터
+라이브러리는 새 네이티브 의존이다. 그래서 **다중행 TextInput 하나 + 마크다운 부분집합**(`**굵게**` `*기울임*` `__밑줄__`
+`~~취소선~~` `- ` `1. ` `> ` `[글](https://…)` `![설명](https://…)`)으로 가고, 제출 전에 클라이언트가 `composeRichText →
+sanitizeRichText → validateBoardPostInput`(서버와 같은 함수·문구)을 돌린다. 미리보기는 새니타이즈를 거친 값만
+`RichTextContent` 에 넘긴다. 마커 이스케이프는 없다(짝 없는 마커는 글자 — 테스트로 고정).
+
+> ⚠ **소유자 결정 필요 — 웹에서 쓴 글은 앱 수정 화면에서 거의 전부 잠긴다.** 웹 에디터는 `defaultParagraphSeparator`
+> 를 두지 않아 브라우저가 문단을 `<div>` 로, `styleWithCSS` 라 굵게를 `<span style="font-weight: bold">` 로 저장한다.
+> `decomposeRichText` 는 `div`·루트 텍스트·`style` 을 부분집합 밖으로 보므로 **엔터 한 번 친 평문 웹 글도** 앱에서
+> "웹에서 쓴 글은 앱의 간단 편집기로는 수정할 수 없어요" 로 잠긴다(삭제만 가능). 조용히 서식을 잃는 것보다 낫다는
+> 판단이고 동작은 명세대로지만 범위가 넓다. 선택지: **(가)** 웹 `rich-text-editor.tsx` 에
+> `execCommand("defaultParagraphSeparator", false, "p")` 한 줄 — 새 웹 글부터 `<p>` 로 저장돼 앱에서 열리고, 웹 화면에도
+> `.board-content p` 여백이 붙는다(기존 글은 그대로 잠김); **(나)** core `decomposeRichText` 에 `div→p`·루트 텍스트→p·
+> `span style` 굵게/기울임/밑줄/취소선 → 마커 정규화 — 웹 변경 없이 기존 글도 열리지만, 앱에서 저장하면 `div` 가 `p` 로
+> 바뀌어 웹 화면의 문단 여백이 달라진다. §13 질문 17. 권장은 (나)+(가) 둘 다(같은 글이 어디서 저장되든 `<p>` 로 수렴).
+
+**신고·차단(웹에 없음 — Apple 1.2).** 글 머리 더보기(본인 글 제외) → "신고"(사유 5종 라디오, 기타는 상세 필수 ≤500,
+글당 1건 unique → "이미 신고한 글이에요.") / "이 사용자 차단"(Alert 확인). 차단 집합은 `user_blocks` "select own" RLS 로
+읽어 **클라이언트에서** 거른다 — 목록(고정글·일반글)·상세(안내 블록으로 대체)·댓글 트리(원 댓글·답글) 세 지점. 서버 RLS 는
+건드리지 않는다(앱 전용 필터 — 웹 적용은 2라운드). 해제는 `/mypage/edit` "차단한 사용자" 절(닉네임은 SD RPC
+`my_blocked_users` 가 `profiles` 에서 붙인다 — `user_blocks` 에는 id 뿐이고 `profiles` 는 본인 행만 보이는 RLS). 신고는
+**글 단위만**(댓글 줄에는 더보기 없음 — 댓글 신고가 필요하면 `board_comment_reports` 한 벌 더). `board_post_reports` 는
+관리자만 select — 처리 화면은 없고 SQL 로 본다.
+
+**의도적으로 웹과 다르게 둔 것**
+
+- 삭제 확인 `window.confirm` → OS `Alert`(문구 동일). 글 삭제 뒤 `router.replace("/board")`(지워진 글로 되돌아가지 않게).
+- 공유 = RN `Share.share({ url: "https://gongmoa.kr/board/{id}" })` — 항상 웹 canonical URL(§6.7 #32).
+- EF 시간당 한도(429)는 앱 전체 관례(`handleEdgeError`, §6.9 #2)대로 "잠시 후 다시 시도해 주세요" — 서버 문장("짧은 시간
+  동안 너무 많이 작성했어요…")과 다르다. 앱 전체 정책이라 유지.
+- `canEdit/canDelete` 는 공개 캐시에 넣지 않고(뷰어 의존 값을 퍼시스트 캐시에 섞지 않으려고) `authorId` 만 싣고 화면이 core
+  `can*` 로 계산 — 결과는 같다.
+- `/board/new` 의 로그인 유도 문구는 웹 그대로 "로그인 후 글을 쓸 수 있어요"(`useRequireLogin` 에 문구 인자 추가, 기본값 불변).
+- Android `pathPrefix` 는 제외가 안 되므로 `/notices/new`·`/notices/*/edit` 링크는 Android 에서 앱이 열렸다가
+  `+not-found`(관리자만 받는 주소).
+- 웹 `uploadBoardImage` 는 이제 결과가 1600×6000 픽셀을 넘는 초장폭 이미지를 거절한다(전에는 통과) — 규칙 통일의 부수 효과,
+  core 주석에 근거.
+
+**검토가 잡은 것**
+
+- 쓰기 문장에 소유자 조건(`eq("user_id")`)이 없었다 — `can*` 비교는 있었지만 service_role 이라 select→write 사이가 비어
+  있었다. 수정은 항상, 삭제는 비관리자일 때 붙였다.
+- **다크 모드에서 본문이 검정으로 그려졌다.** 렌더러가 `color: undefined` 같은 키를 style 에 실었는데, uniwind 는
+  className 의 style 뒤에 `props.style` 을 잇고 RN Fabric 은 명시적 `undefined` 를 **앞 값을 지우는 null** 로 다룬다 —
+  `text-zinc-200`·링크 색·`pre` 배경이 통째로 사라졌다. 값이 있을 때만 키를 넣는다(실기기 미검증, 코드 경로로 확인).
+- 이미지 업로드를 기다리는 동안 친 글자가 사라졌다(렌더 시점 `value` 위에 삽입) → ref 로 최신값.
+- Skia 굽기에서 원본 비트맵(1200만 화소 48MB)을 인코딩 2회가 끝날 때까지 들고 있었다 → 표면에 그린 직후 놓는다.
+- `<p>&nbsp;</p>` 빈 줄(웹 contenteditable 이 흔히 남긴다)이 왕복 대조에서 어긋나 멀쩡한 글이 잠겼다 → 정규화.
+- `/board/abc` 같은 주소에서 PostgREST `22P02` 원문이 화면에 떴다 → 404 화면(웹 `notFound()` 와 같게).
+- 모달 등록을 화면 안 `<Stack.Screen>` 에서 루트 Stack 으로(첫 전환 애니메이션).
+- 이미지 업로드 401 의 복귀 `next` 가 수정 화면에서도 `/board/new` 로 고정돼 있었다.
+- 파서·왕복 테스트 누락 케이스(22태그 새니타이저 출력 왕복, `&#x27;`·`&AMP;`·범위 밖 코드포인트, 주소의 `)`·설명의 `]`,
+  공백 문단 5종) 추가 — core 테스트 564 → 626.
+
+**운영 DB 에 적용할 SQL** — `schema.sql` 맨 끝 "모바일 앱 재시작 Phase 5 1라운드" 절 전체(함수 6: `toggle_board_like`·
+`report_post`·`block_user`·`unblock_user`·`avatar_paths`·`my_blocked_users`, 테이블 2: `board_post_reports`·`user_blocks`).
+전부 재실행 안전. 이전 라운드 SQL 뒤에 실행한다. **배포 순서**: SQL → Edge 배포(`all` = 20개) → 앱 OTA(링크는 새 빌드).
+
+**2라운드로 넘긴 것**: 건의게시판(EF `suggestions` — SELECT 조차 회수돼 읽기도 EF), 채팅(Realtime + EF `chat-send`,
+`ChatFab`), 탈퇴 정책 #17(cascade 해제 — `board_posts`·`suggestions`·`chat_messages` FK 변경), 웹 신고·차단 UI(#16),
+댓글 단위 신고(선택), 질문 17 의 결정 반영.
+
+---
+
 ## 13. 리스크·미결 사항
 
 | 리스크 | 완화 |
@@ -1074,7 +1162,7 @@ grant execute on function avatar_paths(uuid[]) to authenticated;
 | 스토어 UGC 요건(Apple 1.2) — 웹에 게시글 신고·차단 없음 | Phase 5 `report_post`/`block_user` 최소 구현, 차단은 앱 전용 필터로 시작 |
 | 해외 IP 심사자(App Review·Play)가 `/terms`·`/privacy`·`.well-known`·계정 삭제 안내에서 403(geo-block) | `lib/geo-block.ts` 면제 목록에 `/terms`·`/privacy`·`/app-ads.txt`·`/account/delete-request`(`INFRA_FILES`)·`/.well-known`(`INFRA_DIRS`) 추가(§5). 우회 토큰 링크는 `GEO_BLOCK_BYPASS_TOKEN` 을 앱 번들에 싣는 선택이라 **금지**, 정적 사본은 법적 문서 두 벌 문제로 배제 |
 | expo-router 58 이 `beforeRemove` preventable·`redirect`·`initialRouteName` 제거; iOS 스와이프 뒤로가기·Android 예측 뒤로가기는 `BackHandler` 로 못 잡음 | 57 에서 `unstable_settings` 만 쓰고 이탈 확인은 자체 뒤로가기 + `BackHandler` + 몰입 화면 `gestureEnabled:false`/`fullScreenGestureEnabled:false`(§4.4) |
-| `react-native-render-html` 6.3.4(2022-01)가 함수 컴포넌트 `defaultProps` 를 써 React 19 에서 기본값 미적용 | 채택하지 않음; Phase 5 에 `ALLOWED_TAGS` 22종 자체 렌더러(#31) |
+| `react-native-render-html` 6.3.4(2022-01)가 함수 컴포넌트 `defaultProps` 를 써 React 19 에서 기본값 미적용 | **해소(§12-9)** — 자체 렌더러 `RichTextContent` + core `parseRichText`(22태그) 완료. `react-native-render-html` 은 쓰지 않는다 |
 | 기존 트리 SDK 57 스파이크가 "설정 차이뿐" 이 아님(`offline.ts` 레거시 FS API, seoul kakao 플러그인 옵션 등) | §10 JS 최소 수정 목록을 스파이크 일정에 포함 |
 | 릴리스 크래시가 어디에도 남지 않음(`FatalErrorScreen` 스크린샷뿐) | Sentry(§3.1) Phase 1a 부터; 크래시 payload 에 정답·해설·`user_metadata` 금지 |
 | `supportsTablet: true` 상태로 첫 iOS 빌드 → iPad 스크린샷·심사 요구, 레이아웃 임의 결정 | `supportsTablet: false` + 폰 전용(§4.4); iPad 는 §13 질문 13 |
@@ -1102,6 +1190,7 @@ grant execute on function avatar_paths(uuid[]) to authenticated;
 14. Supabase 플랜에 Storage 이미지 변환(`/render/image/`)이 포함되는가 — 포함되면 문항 이미지(lossless WebP ×3, 수백 KB)를 폰 폭에 맞춰 축소 전송할 수 있다(§6.2 문항 이미지 행).
 15. `review_preferences` 의 RLS insert/update 정책(schema.sql:1804-1823)을 회수할지 — 웹 서버 액션이 세션 클라이언트로 쓰고 있어 회수하려면 웹 어댑터도 admin 클라이언트로 바꿔야 한다(§6.7 #13).
 16. 탈퇴 정책: `board_posts`·`chat_messages`·`suggestions` 등의 cascade 삭제(타인 댓글 동반 삭제)를 유지할지 익명 계정 id 로 이전할지; cascade 로 지워지는 `payments` 를 결제 분쟁 대응용으로 탈퇴 전 스냅샷할지(§7.1).
+17. **웹에서 쓴 글의 앱 수정 잠금 범위**(§12-9): 웹 에디터가 문단을 `<div>`·굵게를 `<span style>` 로 저장해 평문 웹 글도 앱에서 잠긴다. (가) 웹 에디터 `defaultParagraphSeparator=p` 한 줄(새 글부터), (나) core `decomposeRichText` 정규화(기존 글도 열리지만 앱 저장 시 `div→p` 로 웹 여백이 바뀜), 둘 다 — 권장은 둘 다.
 
 ---
 

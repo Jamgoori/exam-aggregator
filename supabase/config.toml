@@ -113,6 +113,9 @@ import_map = "./functions/deno.json"
 [functions.avatar-upload]
 import_map = "./functions/deno.json"
 
+[functions.board-write]
+import_map = "./functions/deno.json"
+
 [functions.ai-diagnose]
 import_map = "./functions/deno.json"
 
@@ -141,6 +144,9 @@ import_map = "./functions/deno.json"
 import_map = "./functions/deno.json"
 
 [functions.mix-create]
+import_map = "./functions/deno.json"
+
+[functions.notices-write]
 import_map = "./functions/deno.json"
 
 [functions.review-create]
