@@ -1,0 +1,21 @@
+export declare const NOTIFICATION_TYPES: readonly ["board_comment", "board_reply", "suggestion_comment", "suggestion_answer"];
+export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
+export declare function isNotificationType(value: unknown): value is NotificationType;
+export type NotificationItem = {
+    id: string;
+    type: NotificationType;
+    actorNickname: string;
+    title: string;
+    preview: string;
+    link: string;
+    isRead: boolean;
+    createdAt: string;
+};
+export declare const NOTIFICATIONS_PAGE_SIZE = 20;
+export declare const NOTIFICATION_DROPDOWN_SIZE = 8;
+export declare const NOTIFICATION_PREVIEW_MAX = 80;
+export declare function notificationPreview(content: string): string;
+export declare function safeNotificationLink(link: unknown): string;
+export declare function notificationMessage(type: NotificationType): string;
+export declare function unreadBadgeLabel(count: number): string;
+export declare function relativeTimeLabel(iso: string, now?: Date): string;

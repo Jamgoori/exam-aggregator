@@ -3457,3 +3457,292 @@ grant execute on function total_cbt_attempt_count() to anon, authenticated;
 
 -- 스키마 적용 시점에 한 번 맞춰 둔다 (멱등 — 다시 돌려도 원본 기준으로 재계산).
 select recount_site_stats();
+
+-- ===== 모바일 앱 재시작 Phase 5 1라운드 (2026-09-19) =====
+-- 자유게시판·공지가 앱에 들어오면서 필요해진 것들(apps/mobile/docs/redesign-architecture.md
+-- §6.7 #17·#18, §12-2 #16, §12-8 마지막 절). 전부 재실행 안전(create or replace / if not exists /
+-- 예외 무시). **운영 DB 미적용** — 적용 순서는 §12-2 #3(운영 SQL → Edge 배포 → 웹 재배포 → 앱).
+-- ⚠ 웹 toggleBoardLike 가 아래 toggle_board_like 를 부르는 어댑터로 바뀌었으므로, 이 절을 적용하기
+-- 전에 웹을 배포하면 좋아요 버튼만 "잠시 후 다시 시도해주세요" 가 난다.
+--
+-- SD 공통 규칙(§6.7 머리말, 위 Phase 0·2·4 절과 같다): (1) auth.uid() 가 null 이면 raise;
+-- (2) set search_path = public; (3) 사용자 범위 조회는 where 에 user_id = auth.uid() 명시(SD 는 RLS 를
+-- 지나친다); (4) 서버 액션의 인자 검증을 본문에서 되풀이; (5) revoke all from public, anon 후
+-- grant execute to authenticated. 오류 문구는 웹 서버 액션과 같은 문장 — PostgREST 가 message 를
+-- 그대로 내려주고 앱은 그 문장을 그대로 보여준다.
+--
+-- board_posts·board_comments·board_post_likes 의 insert/update/delete 회수는 그대로다. 글·댓글은
+-- EF board-write(service_role, 새니타이저 강제)가 쓰고, 좋아요만 아래 RPC 다.
+
+-- ── 좋아요 토글 ──────────────────────────────────────────────────────────────
+-- 웹 toggleBoardLike(board/actions.ts) 의 SQL 판이자 **정본** — 웹도 이제 이 함수를 부른다(규칙
+-- 한 곳). 한 문장 안에서 "내 행이 있으면 delete, 없으면 insert" 를 끝낸다: 두 CTE 가 같은 스냅숏을
+-- 보므로 행이 있으면 del 만, 없으면 ins 만 실행되고(ins 의 not exists 는 문장 시작 시점의 표를
+-- 본다) 둘이 동시에 일어나는 경우는 없다. 개수는 트리거 sync_board_like_count 가 문장 끝에 다시
+-- 세어 board_posts.like_count 에 넣고, 그 값을 그대로 돌려준다 — 앱이 낙관적 반영 뒤 이 숫자로
+-- 맞춘다.
+-- 같은 글에 두 요청이 동시에 insert 하는 경합(unique_violation)은 웹과 같이 "이미 눌린 것"
+-- (liked = true)으로 본다.
+create or replace function toggle_board_like(p_post_id uuid)
+returns table(liked boolean, like_count int)
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_liked boolean;
+begin
+  if v_uid is null then
+    raise exception '로그인 후 이용할 수 있어요.';
+  end if;
+  if p_post_id is null then
+    raise exception '잘못된 접근입니다.';
+  end if;
+  if not exists (select 1 from board_posts p where p.id = p_post_id) then
+    raise exception '글을 찾을 수 없어요.';
+  end if;
+
+  begin
+    with del as (
+      delete from board_post_likes l
+       where l.post_id = p_post_id and l.user_id = v_uid
+      returning 1
+    ), ins as (
+      insert into board_post_likes (post_id, user_id)
+      select p_post_id, v_uid
+       where not exists (
+         select 1 from board_post_likes l
+          where l.post_id = p_post_id and l.user_id = v_uid
+       )
+      returning 1
+    )
+    select exists (select 1 from ins) into v_liked;
+  exception when unique_violation then
+    v_liked := true;
+  end;
+
+  return query
+    select v_liked, p.like_count from board_posts p where p.id = p_post_id;
+end $$;
+
+revoke all on function toggle_board_like(uuid) from public, anon;
+grant execute on function toggle_board_like(uuid) to authenticated;
+
+-- ── UGC 신고·차단(Apple 1.2 — §6.7 #18, §12-2 #16) ───────────────────────────
+-- 사용자가 만든 콘텐츠가 있는 앱은 신고·차단 수단이 있어야 심사를 통과한다. 웹에는 없던 기능이라
+-- 소유자 결정으로 웹에도 함께 넣는다(웹 화면은 별도 라운드). 두 표 모두 쓰기 정책을 열지 않고
+-- 아래 SD RPC 로만 쓴다.
+
+-- 게시글 신고. 운영자가 보는 대기열이라 select 는 관리자만.
+create table if not exists board_post_reports (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references board_posts(id) on delete cascade,
+  reporter_id uuid not null references auth.users(id) on delete cascade,
+  -- 사유. 값 목록의 정본은 packages/core/src/ugc.ts 의 REPORT_REASONS 다 — **두 곳을 함께 고칠 것**
+  -- (notifications_type_check 와 같은 관례). 한쪽만 고치면 화면에서 고른 사유가 여기서 거절돼
+  -- "신고에 실패했어요"만 남는다. 아래 report_post 본문의 목록도 같은 값이다.
+  reason text not null,
+  detail text,
+  created_at timestamptz not null default now(),
+  -- 같은 사람이 같은 글을 두 번 신고하지 않는다(더블클릭·재시도). report_post 가 이 충돌을
+  -- "이미 신고한 글이에요." 로 바꾼다.
+  unique (post_id, reporter_id)
+);
+
+do $$ begin
+  alter table board_post_reports add constraint board_post_reports_reason_check
+    check (reason in ('spam', 'abuse', 'sexual', 'privacy', 'other'));
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  alter table board_post_reports add constraint board_post_reports_detail_len
+    check (detail is null or char_length(detail) <= 500);
+exception when duplicate_object then null; end $$;
+
+create index if not exists board_post_reports_post_idx on board_post_reports(post_id, created_at desc);
+
+alter table board_post_reports enable row level security;
+
+drop policy if exists "admin read board_post_reports" on board_post_reports;
+create policy "admin read board_post_reports" on board_post_reports
+  for select to authenticated using (is_admin());
+
+revoke insert, update, delete on board_post_reports from anon, authenticated;
+
+-- 사용자 차단. 차단은 **내가 보는 화면**에서 상대의 글·댓글이 사라지는 것이고 상대는 모른다 —
+-- 그래서 차단한 사람만 자기 목록을 읽는다(select own). 앱은 로그인 직후 이 표를 읽어
+-- ['me', userId, 'blocks'] 에 두고(persist:false) 목록을 거른다(core ugc.ts#filterBlocked).
+create table if not exists user_blocks (
+  blocker_id uuid not null references auth.users(id) on delete cascade,
+  blocked_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (blocker_id, blocked_id),
+  check (blocker_id <> blocked_id)
+);
+
+alter table user_blocks enable row level security;
+
+drop policy if exists "select own user_blocks" on user_blocks;
+create policy "select own user_blocks" on user_blocks
+  for select to authenticated using (auth.uid() = blocker_id);
+
+revoke insert, update, delete on user_blocks from anon, authenticated;
+
+-- 게시글 신고. 사유 검증은 core validateReportInput 과 같은 값(위 check 주석 — 두 곳을 함께 고친다).
+create or replace function report_post(p_post_id uuid, p_reason text, p_detail text default null)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_detail text;
+begin
+  if v_uid is null then
+    raise exception '로그인 후 이용할 수 있어요.';
+  end if;
+  if p_post_id is null then
+    raise exception '잘못된 접근입니다.';
+  end if;
+  if p_reason is null or p_reason not in ('spam', 'abuse', 'sexual', 'privacy', 'other') then
+    raise exception '신고 사유를 선택해주세요.';
+  end if;
+  -- (4) 서버 액션과 같은 검증: 공백만이면 null, 500자 초과는 거절(제약에 맡기면 SQL 메시지가 된다).
+  v_detail := nullif(btrim(coalesce(p_detail, '')), '');
+  if char_length(v_detail) > 500 then
+    raise exception '상세 설명은 500자 이하로 입력해주세요.';
+  end if;
+  if p_reason = 'other' and v_detail is null then
+    raise exception '기타 사유는 내용을 적어주세요.';
+  end if;
+  if not exists (select 1 from board_posts p where p.id = p_post_id) then
+    raise exception '글을 찾을 수 없어요.';
+  end if;
+
+  begin
+    insert into board_post_reports (post_id, reporter_id, reason, detail)
+    values (p_post_id, v_uid, p_reason, v_detail);
+  exception when unique_violation then
+    raise exception '이미 신고한 글이에요.';
+  end;
+end $$;
+
+revoke all on function report_post(uuid, text, text) from public, anon;
+grant execute on function report_post(uuid, text, text) to authenticated;
+
+-- 사용자 차단. 이미 차단했으면 그대로 성공(멱등 — 재시도가 오류로 보이면 안 된다).
+create or replace function block_user(p_user_id uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception '로그인 후 이용할 수 있어요.';
+  end if;
+  if p_user_id is null then
+    raise exception '잘못된 접근입니다.';
+  end if;
+  if p_user_id = v_uid then
+    raise exception '자기 자신은 차단할 수 없어요.';
+  end if;
+
+  begin
+    insert into user_blocks (blocker_id, blocked_id)
+    values (v_uid, p_user_id)
+    on conflict (blocker_id, blocked_id) do nothing;
+  exception when foreign_key_violation then
+    -- 탈퇴한 계정 등 auth.users 에 없는 id.
+    raise exception '사용자를 찾을 수 없어요.';
+  end;
+end $$;
+
+revoke all on function block_user(uuid) from public, anon;
+grant execute on function block_user(uuid) to authenticated;
+
+-- 차단 해제. 없는 행을 지워도 성공(멱등).
+create or replace function unblock_user(p_user_id uuid)
+returns void
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception '로그인 후 이용할 수 있어요.';
+  end if;
+  if p_user_id is null then
+    raise exception '잘못된 접근입니다.';
+  end if;
+
+  delete from user_blocks
+   where blocker_id = v_uid
+     and blocked_id = p_user_id;
+end $$;
+
+revoke all on function unblock_user(uuid) from public, anon;
+grant execute on function unblock_user(uuid) to authenticated;
+
+-- ── 남의 아바타 일괄 조회(§12-8 마지막 절의 SQL 그대로) ─────────────────────
+-- 이번 라운드부터 앱이 게시판 목록·댓글에 남의 아바타를 그린다. profiles 는 "본인 + 관리자"만
+-- select 하는 RLS 라 앱 세션으로는 남의 행을 못 읽고, 이 함수가 그 창구다(웹 lib/avatars.ts#
+-- fetchAvatarUrls 가 admin 으로 읽는 것과 같은 두 컬럼). 상한 200 은 core AVATAR_PATHS_MAX 와
+-- 같은 값 — 앱은 그 크기로 끊어서 전부 물어본다(자르지 않는다).
+--
+-- **돌려주는 컬럼을 둘로 못 박는 것이 핵심이다** — SD 공통 규칙 (3)("user_id = auth.uid()")의
+-- 유일한 예외라, `select p.*` 로 두면 profiles 에 나중에 비공개 컬럼이 생기는 날 그대로 샌다.
+-- 행 → URL 변환은 core avatarUrlMap 한 곳(경로 모양 검증 isValidAvatarPath 포함).
+create or replace function avatar_paths(p_user_ids uuid[])
+returns table(user_id uuid, avatar_path text)
+language plpgsql stable security definer set search_path = public
+as $$
+declare v_uid uuid := auth.uid();
+begin
+  if v_uid is null then raise exception 'not authenticated'; end if;
+  if p_user_ids is null or array_length(p_user_ids, 1) is null then return; end if;
+  if array_length(p_user_ids, 1) > 200 then raise exception 'too many ids'; end if;
+  return query
+  select p.user_id, p.avatar_path from profiles p
+   where p.user_id = any(p_user_ids) and p.avatar_path is not null;
+end $$;
+revoke all on function avatar_paths(uuid[]) from public, anon;
+grant execute on function avatar_paths(uuid[]) to authenticated;
+
+-- 내가 차단한 사용자 목록(닉네임 포함). 내 정보 수정의 "차단한 사용자" 절이 그린다 — user_blocks 에는
+-- id 만 있어 "select own" RLS 로 읽어도 닉네임을 붙일 수 없다(profiles 는 본인 행만 보이는 RLS). 그래서
+-- SD 함수가 profiles 를 대신 읽는다. 돌려주는 컬럼은 (user_id, nickname, created_at) 셋으로 못 박는다 —
+-- avatar_paths 와 같은 이유(profiles 에 비공개 컬럼이 생겨도 새지 않게). 닉네임은 이미 댓글마다 공개로
+-- 붙는 값이다. profiles 행이 없는 계정(닉네임을 정하기 전)은 '사용자' 로 보인다.
+create or replace function my_blocked_users()
+returns table(user_id uuid, nickname text, created_at timestamptz)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception '로그인 후 이용할 수 있어요.';
+  end if;
+  return query
+  select b.blocked_id, coalesce(p.nickname, '사용자'), b.created_at
+    from user_blocks b
+    left join profiles p on p.user_id = b.blocked_id
+   where b.blocker_id = v_uid
+   order by b.created_at desc;
+end $$;
+revoke all on function my_blocked_users() from public, anon;
+grant execute on function my_blocked_users() to authenticated;

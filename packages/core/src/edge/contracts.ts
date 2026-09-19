@@ -670,6 +670,66 @@ export type DiagnosisAggregateResponse = {
   eligibility: { eligible: boolean; attemptCount: number; wrongCount: number };
 };
 
+// ── board-write (§6.7 #17) ───────────────────────────────────────────────────
+//
+// 자유게시판 쓰기 전부(글·이미지·댓글). 웹 서버 액션 app/board/actions.ts 와 **같은 규칙**
+// (core rules/board.ts)을 부르는 다른 어댑터다 — board_posts·board_comments 는 쓰기 정책이
+// 회수돼 있어 앱이 표에 직접 쓸 길이 없고, 이 함수가 앱의 서버 액션 역할을 한다.
+// 순서는 금지선 그대로 **새니타이즈(sanitizeRichText) → validateBoardPostInput → 저장**.
+// 전부 로그인 필수(401). 시간당 한도 10/30/60 은 웹과 같은 값(core rules/hourly-limit.ts).
+//
+// **이미지는 앱이 굽고 서버가 검사한다**(avatar-upload 와 같은 결정, §12-8). 앱은 Skia 로
+// 가로 ≤ BOARD_IMAGE_MAX_WIDTH(1600px) webp 를 구워 base64 한 필드로 보내고, 서버는 헤더만
+// 읽어 RIFF/WEBP·폭·픽셀 수·애니메이션·RIFF 선언 길이를 본다(core boardImageBytesError).
+// 구워진 바이트 상한 BOARD_IMAGE_ENCODED_MAX_BYTES(2MB), base64 문자 수 상한
+// BOARD_IMAGE_BASE64_MAX_CHARS — atob 전에 문자 수로 먼저 거른다.
+//
+// isPinned 는 관리자(admins 이메일 화이트리스트 — 웹 is_admin() 과 같은 기준)만 반영되고
+// 비관리자가 보낸 값은 조용히 무시된다(웹 canPinBoardPost 와 같다).
+//
+// 오류: 400 검증 실패·잘못된 id · 403 "권한이 없어요." · 404 "글을 찾을 수 없어요."/"댓글을 찾을 수
+// 없어요."/"답글을 달 댓글을 찾을 수 없어요." · 429 시간당 한도 · 500 저장·업로드 실패.
+export type BoardWriteRequest =
+  | { action: "post.create"; title: string; category: string; contentHtml: string; isPinned?: boolean }
+  | { action: "post.update"; id: string; title: string; category: string; contentHtml: string; isPinned?: boolean }
+  | { action: "post.delete"; id: string }
+  // webpBase64: 데이터 URL 접두(`data:image/webp;base64,`) 없이 base64 본문만(avatar-upload 와 같다).
+  | { action: "image"; webpBase64: string }
+  // parentId 가 답글의 id 면 서버가 원 댓글로 접어 올린다(답글 깊이 1단계 — resolveBoardCommentParent).
+  | { action: "comment.create"; postId: string; content: string; parentId?: string | null }
+  | { action: "comment.update"; commentId: string; content: string }
+  | { action: "comment.delete"; commentId: string };
+
+// post.create → id 는 새 글의 id. post.update/post.delete/comment.* → id 는 그 **글**의 id
+// (댓글을 고친 뒤 화면이 돌아갈 곳 — 웹 서버 액션이 돌려주는 값과 같다).
+export type BoardWritePostResponse = { success: true; id: string };
+// action:"image" → 본문에 넣을 공개 URL(`${boardImageOrigin}${userId}/${uuid}.webp`).
+// 새니타이저는 이 접두사로 시작하는 <img src> 만 남기므로 다른 주소를 넣으면 저장 시 빠진다.
+export type BoardWriteImageResponse = { success: true; url: string };
+export type BoardWriteResponse = BoardWritePostResponse | BoardWriteImageResponse;
+
+// 응답 판별 — 이미지면 url, 그 외는 id.
+export function isBoardWriteImage(r: BoardWriteResponse): r is BoardWriteImageResponse {
+  return "url" in r;
+}
+
+// ── notices-write (§6.7 #17 계열) ────────────────────────────────────────────
+//
+// 공지 **댓글** 쓰기. 웹 서버 액션 app/notices/actions.ts 의 createNoticeComment/
+// updateNoticeComment/deleteNoticeComment 와 같은 규칙(core rules/notices.ts). 공지 원글의
+// 작성·수정·삭제는 관리자 전용이라 앱에 없고(§5 — /notices/new·edit 는 AASA 제외) 여기에도 없다.
+// notice_comments 는 RLS 로 직접 쓸 수도 있지만, 시간당 30건·비속어·닉네임 확정을 서버가
+// 강제하려면 웹과 같은 규칙을 지나야 한다. 전부 로그인 필수(401).
+//
+// 오류: 400 검증 실패·잘못된 id · 403 "권한이 없어요." · 404 "댓글을 찾을 수 없어요." · 429 시간당
+// 한도 · 500 저장 실패.
+export type NoticesWriteRequest =
+  | { action: "comment.create"; noticeId: string; content: string }
+  | { action: "comment.update"; commentId: string; content: string }
+  | { action: "comment.delete"; commentId: string };
+// id 는 그 **공지**의 id(화면이 돌아갈 곳 — 웹 서버 액션과 같다).
+export type NoticesWriteResponse = { success: true; id: string };
+
 // ── 맵 ──────────────────────────────────────────────────────────────────────
 
 export type EdgeContracts = {
@@ -691,6 +751,8 @@ export type EdgeContracts = {
   "diagnosis-request": { request: DiagnosisRequestRequest; response: DiagnosisRequestResponse };
   "diagnosis-collect": { request: DiagnosisCollectRequest; response: DiagnosisCollectResponse };
   "diagnosis-aggregate": { request: DiagnosisAggregateRequest; response: DiagnosisAggregateResponse };
+  "board-write": { request: BoardWriteRequest; response: BoardWriteResponse };
+  "notices-write": { request: NoticesWriteRequest; response: NoticesWriteResponse };
 };
 
 export type EdgeName = keyof EdgeContracts;
@@ -717,4 +779,6 @@ export const EDGE_NAMES = [
   "diagnosis-request",
   "diagnosis-collect",
   "diagnosis-aggregate",
+  "board-write",
+  "notices-write",
 ] as const satisfies readonly EdgeName[];

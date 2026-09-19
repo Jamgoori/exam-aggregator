@@ -142,6 +142,10 @@ function Gates() {
           name="onboarding/nickname"
           options={{ presentation: "modal", gestureEnabled: false, fullScreenGestureEnabled: false }}
         />
+        {/* 자유게시판 글쓰기·수정(설계서 §5 — new·edit 는 modal). 화면 안 <Stack.Screen options> 로 선언하면
+            첫 전환 애니메이션에 늦게 적용될 수 있어 login 과 같은 자리에 등록한다. */}
+        <Stack.Screen name="board/new" options={{ presentation: "modal" }} />
+        <Stack.Screen name="board/[id]/edit" options={{ presentation: "modal" }} />
         <Stack.Screen name="+not-found" />
       </Stack>
       <NavDrawer />

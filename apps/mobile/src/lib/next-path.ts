@@ -9,11 +9,15 @@ import { sanitizeNextPath } from "@gongmoa/core";
 // 직후 복귀(`/login?next=…`)·딥링크가 곧장 `+not-found` 로 떨어져, "로그인은 됐는데 화면이
 // 없다"가 된다 — 매처에서 빠지면 대신 `/papers` 로 떨어지니 훨씬 낫다. 그래서 화면이 생기는
 // 단계에 맞춰 아래에 한 줄씩 되돌려 넣는다(Phase 3 에서 `/mix`·`/subjects/[slug]/mix`,
-// Phase 4 에서 `/notifications`·`/mypage/diagnosis` 가 들어왔다):
-//   - Phase 5(§12 "커뮤니티"): `/board*`, `/notices*`, `/suggestions*`
+// Phase 4 에서 `/notifications`·`/mypage/diagnosis`, Phase 5 1라운드에서 `/board*`·`/notices*` 가
+// 들어왔다):
+//   - Phase 5 2라운드(§12 "커뮤니티"): `/suggestions*`
+//
+// `/notices/new`·`/notices/[id]/edit` 는 일부러 빠져 있다 — 관리자 전용 화면이라 앱에 없고(§5),
+// AASA 의 EXCLUDED 에도 같은 두 줄이 서 있다. 정규식의 `(?!new$)` 가 그 자리다.
 //
 // 알림 목록(§6.7 #15)도 이 매처를 쓴다: 알림의 `link` 는 웹 경로라 아직 없는 화면
-// (/board/*, /suggestions/*)을 가리키는 것이 대부분인데, 그 줄을 누를 때 여기서 걸러
+// (/suggestions/*)을 가리키는 것이 있는데, 그 줄을 누를 때 여기서 걸러
 // `+not-found` 대신 그 자리에 머문다(components/notifications/open-notification.ts).
 //
 // **유니버설 링크도 같은 목록이다** — 화면이 생기면 세 곳을 함께 연다(§5 딥링크 문단):
@@ -33,6 +37,11 @@ const ALLOWED: RegExp[] = [
   /^\/mypage\/wrong-notes\/[^/]+(\/[^/]+|\/(mix|review)\/[^/]+)?$/,
   /^\/membership$/,
   /^\/notifications$/,
+  // 자유게시판: 목록·글쓰기·상세·수정 — 웹 주소 모양 그대로(`/board/new` 도 `[^/]+` 에 걸리므로 따로
+  // 적지 않는다; `/board/new/edit` 같은 주소는 웹에도 없다).
+  /^\/board(\/[^/]+(\/edit)?)?$/,
+  // 공지사항: 목록·상세만(`/notices/new`·`/notices/*/edit` 는 관리자 전용 — 위 머리말).
+  /^\/notices(\/(?!new$)[^/]+)?$/,
 ];
 
 export const NEXT_FALLBACK = "/papers";

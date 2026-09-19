@@ -1,6 +1,7 @@
 import { router, type Href } from "expo-router";
 import { Pressable, View } from "react-native";
 import { AppText } from "../../src/components/app-text";
+import { BlockedUsersSection } from "../../src/components/board/blocked-users-section";
 import { AvatarField } from "../../src/components/mypage/avatar-field";
 import { CbtViewModeField } from "../../src/components/mypage/cbt-view-mode-field";
 import { DeleteAccountButton } from "../../src/components/mypage/delete-account-button";
@@ -14,7 +15,7 @@ import { useAuth } from "../../src/providers/auth-provider";
 
 // `/mypage/edit`(설계서 §5 행, 웹 app/mypage/edit/page.tsx 1:1 + 현행 settings.tsx 통합 — §7.1
 // 프로필/아바타 항목): 프로필 사진(EF avatar-upload) → 닉네임 → CBT 시작 화면 →
-// 리마인더(앱 전용) → 이메일 → 회원 탈퇴. 로그아웃은 웹처럼 여기 없다(드로어).
+// 리마인더(앱 전용) → 차단한 사용자(앱 전용, Phase 5) → 이메일 → 회원 탈퇴. 로그아웃은 웹처럼 여기 없다(드로어).
 export default function EditAccountScreen() {
   const { userId, loading } = useRequireLogin("/mypage/edit");
   if (loading) return <Screen contentClassName="gap-8" />;
@@ -54,6 +55,12 @@ function EditAccountBody() {
 
       <Section title="알림">
         <ReminderToggle unresolvedCount={unresolvedCount} />
+      </Section>
+
+      {/* 웹에 없는 절(설계서 §6.7 #18 — 스토어 UGC 요건의 차단 해제 자리). 차단한 사용자의 글·댓글은 어디에도
+          보이지 않아 여기서만 되돌릴 수 있다. */}
+      <Section title="차단한 사용자">
+        <BlockedUsersSection />
       </Section>
 
       {/* 카카오는 이메일 제공 동의를 안 한 계정이면 email 이 없을 수 있다. */}

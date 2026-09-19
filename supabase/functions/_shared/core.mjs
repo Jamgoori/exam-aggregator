@@ -5028,15 +5028,668 @@ async function latestBatchFor(admin, diagnosisId) {
   };
 }
 
-// src/levels.ts
-var LEVEL_ORDER = ["9급", "7급", "5급"];
-function compareLevels(a, b) {
-  const ai = LEVEL_ORDER.indexOf(a);
-  const bi = LEVEL_ORDER.indexOf(b);
-  if (ai === -1 && bi === -1) return a.localeCompare(b);
-  if (ai === -1) return 1;
-  if (bi === -1) return -1;
-  return ai - bi;
+// src/rules/hourly-limit.ts
+var BOARD_HOURLY_POST_LIMIT = 10;
+var BOARD_HOURLY_COMMENT_LIMIT = 30;
+var BOARD_HOURLY_IMAGE_LIMIT = 60;
+var NOTICE_COMMENT_HOURLY_LIMIT = 30;
+var HOURLY_LIMIT_ERROR = "짧은 시간 동안 너무 많이 작성했어요. 잠시 후 다시 시도해주세요.";
+async function overHourlyLimit(client, table, userId, limit, now = /* @__PURE__ */ new Date()) {
+  const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1e3).toISOString();
+  const { count } = await client.from(table).select("id", { count: "exact", head: true }).eq("user_id", userId).gte("created_at", oneHourAgo);
+  return (count ?? 0) >= limit;
+}
+
+// src/rules/notify.ts
+var TITLE_MAX = 100;
+function toRow(input) {
+  return {
+    user_id: input.userId,
+    type: input.type,
+    actor_id: input.actorId || null,
+    actor_nickname: input.actorNickname,
+    title: input.title.slice(0, TITLE_MAX),
+    preview: input.preview,
+    link: input.link
+  };
+}
+async function createNotification(client, input) {
+  if (input.userId === input.actorId) return;
+  try {
+    await client.from("notifications").insert(toRow(input));
+  } catch {
+  }
+}
+async function createNotifications(client, userIds, input) {
+  const targets = [...new Set(userIds.filter((id) => id && id !== input.actorId))];
+  if (targets.length === 0) return;
+  try {
+    await client.from("notifications").insert(targets.map((userId) => toRow({ ...input, userId })));
+  } catch {
+  }
+}
+
+// src/profanity.ts
+var PROFANITY_WORDS = [
+  // 한국어
+  "씨발",
+  "시발",
+  "씨빨",
+  "시빨",
+  "씨팔",
+  "시팔",
+  "씨바",
+  "십새",
+  "씹새",
+  "씹창",
+  "씹할",
+  "씨부랄",
+  "씨부럴",
+  "시부랄",
+  "시부럴",
+  "병신",
+  "븅신",
+  "빙신",
+  "등신",
+  "머저리",
+  "지랄",
+  "지럴",
+  "좆",
+  "좃같",
+  "좇같",
+  "존나",
+  "존내",
+  "존만",
+  "새끼",
+  "쌔끼",
+  "썅",
+  "쌍놈",
+  "쌍년",
+  "개년",
+  "개놈",
+  "개소리",
+  "개같",
+  "개차반",
+  "미친놈",
+  "미친년",
+  "니미",
+  "느금마",
+  "니애미",
+  "애미없",
+  "엠창",
+  "창녀",
+  "화냥년",
+  "걸레같",
+  "입닥쳐",
+  "닥쳐라",
+  "뒈져",
+  "죽여버",
+  // 초성 표기
+  "ㅅㅂ",
+  "ㅆㅂ",
+  "ㅄ",
+  "ㅂㅅ",
+  "ㅈㄹ",
+  "ㅆㅍ",
+  // 영어
+  "fuck",
+  "shit",
+  "bitch",
+  "asshole",
+  "bastard",
+  "cunt",
+  "whore",
+  "nigger",
+  "faggot",
+  "dickhead"
+];
+var PROFANITY_ALLOWED_PHRASES = [
+  "시발점",
+  "시발역",
+  "시발자동차",
+  "시발차"
+];
+var PROFANITY_ERROR = "비속어·욕설이 포함되어 있어 등록할 수 없어요.";
+function normalizeForProfanityCheck(raw) {
+  let text = String(raw ?? "").toLowerCase().normalize("NFC").replace(/[^\p{L}\s]/gu, "").replace(/\s+/gu, " ");
+  for (const allowed of PROFANITY_ALLOWED_PHRASES) {
+    text = text.split(allowed).join(" ");
+  }
+  return text;
+}
+function findProfanity(text) {
+  const normalized = normalizeForProfanityCheck(text);
+  if (!normalized) return null;
+  return PROFANITY_WORDS.find((word) => normalized.includes(word)) ?? null;
+}
+function containsProfanity(text) {
+  return findProfanity(text) !== null;
+}
+function profanityError(text) {
+  return containsProfanity(text) ? PROFANITY_ERROR : null;
+}
+
+// src/rich-text.ts
+var RICH_TEXT_HTML_MAX = 3e4;
+var ALLOWED_TAGS = {
+  p: [],
+  br: [],
+  div: [],
+  span: [],
+  b: [],
+  strong: [],
+  i: [],
+  em: [],
+  u: [],
+  s: [],
+  strike: [],
+  h2: [],
+  h3: [],
+  blockquote: [],
+  ul: [],
+  ol: [],
+  li: [],
+  pre: [],
+  code: [],
+  hr: [],
+  a: ["href", "target", "rel"],
+  img: ["src", "alt"]
+};
+var RICH_TEXT_TAGS = Object.keys(ALLOWED_TAGS);
+function allowedAttrsOf(tag) {
+  return ALLOWED_TAGS[tag];
+}
+var VOID_TAGS = /* @__PURE__ */ new Set(["br", "hr", "img"]);
+var DROP_CONTENT_TAGS = /* @__PURE__ */ new Set([
+  "script",
+  "style",
+  "iframe",
+  "object",
+  "embed",
+  "noscript",
+  "template",
+  "svg",
+  "math",
+  "textarea",
+  "title",
+  "head",
+  "form",
+  "select",
+  "option"
+]);
+var STYLE_RULES = {
+  color: isColor,
+  "background-color": isColor,
+  "font-size": isFontSize,
+  "font-weight": (v) => /^(normal|bold|bolder|lighter|[1-9]00)$/.test(v),
+  "font-style": (v) => /^(normal|italic|oblique)$/.test(v),
+  "text-align": (v) => /^(left|center|right|justify)$/.test(v),
+  "text-decoration": isTextDecoration,
+  "text-decoration-line": isTextDecoration
+};
+function isColor(value) {
+  return /^#[0-9a-f]{3}$/i.test(value) || /^#[0-9a-f]{6}$/i.test(value) || /^rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(,\s*[\d.]+\s*)?\)$/i.test(value) || /^[a-z]{3,20}$/i.test(value);
+}
+function isTextDecoration(value) {
+  return value.split(/\s+/).every((part) => /^(none|underline|line-through|overline)$/.test(part));
+}
+function isFontSize(value) {
+  if (/^(x-small|small|medium|large|x-large|xx-large|smaller|larger)$/.test(value)) return true;
+  const m = /^(\d{1,3}(?:\.\d+)?)(px|pt|em|rem|%)$/.exec(value);
+  if (!m) return false;
+  const n = Number(m[1]);
+  switch (m[2]) {
+    case "px":
+      return n >= 8 && n <= 48;
+    case "pt":
+      return n >= 6 && n <= 36;
+    case "em":
+    case "rem":
+      return n >= 0.5 && n <= 3;
+    default:
+      return n >= 50 && n <= 300;
+  }
+}
+var FONT_SIZE_ATTR = {
+  "1": "x-small",
+  "2": "small",
+  "3": "medium",
+  "4": "large",
+  "5": "x-large",
+  "6": "xx-large",
+  "7": "xx-large"
+};
+function escapeText(text) {
+  return text.replace(/&(?!#?[a-zA-Z0-9]{1,8};)/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function escapeAttr(value) {
+  return escapeText(value).replace(/"/g, "&quot;");
+}
+var ATTR_RE = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*(?:=\s*("[^"]*"|'[^']*'|[^\s"'>]+))?/g;
+function parseAttrs(raw) {
+  const attrs = /* @__PURE__ */ new Map();
+  ATTR_RE.lastIndex = 0;
+  let m;
+  while ((m = ATTR_RE.exec(raw)) !== null) {
+    const name = m[1].toLowerCase();
+    let value = m[2] ?? "";
+    if (value.startsWith('"') || value.startsWith("'")) value = value.slice(1, -1);
+    attrs.set(name, decodeEntities(value.trim()));
+  }
+  return attrs;
+}
+function decodeEntities(value) {
+  return value.replace(/&#x([0-9a-f]+);?/gi, (_, hex) => safeFromCharCode(parseInt(hex, 16))).replace(/&#(\d+);?/g, (_, dec) => safeFromCharCode(parseInt(dec, 10))).replace(/&quot;/gi, '"').replace(/&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&amp;/gi, "&");
+}
+function safeFromCharCode(code) {
+  return Number.isFinite(code) && code >= 0 && code <= 1114111 ? String.fromCodePoint(code) : "";
+}
+function safeHref(raw) {
+  const url = stripControlChars(raw).toLowerCase();
+  if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("mailto:")) {
+    return stripControlChars(raw);
+  }
+  if (url.startsWith("/") && !url.startsWith("//")) return stripControlChars(raw);
+  return null;
+}
+function stripControlChars(raw) {
+  return String(raw).replace(/[\u0000-\u0020\u007f]/g, "");
+}
+function safeImageSrc(raw, origins) {
+  const url = stripControlChars(raw);
+  if (!url) return null;
+  const origin = origins.find((o) => o && url.startsWith(o));
+  if (!origin) return null;
+  if (/["'<>]/.test(url)) return null;
+  const rest = url.slice(origin.length);
+  if (!rest || /[?#\\]/.test(rest)) return null;
+  const isDotSegment = (segment) => {
+    const normalized = segment.replace(/%2e/gi, ".");
+    return normalized === "." || normalized === "..";
+  };
+  if (rest.split("/").some(isDotSegment)) return null;
+  return url;
+}
+function sanitizeStyle(raw) {
+  const out = [];
+  for (const decl of raw.split(";")) {
+    const idx = decl.indexOf(":");
+    if (idx < 0) continue;
+    const name = decl.slice(0, idx).trim().toLowerCase();
+    const value = decl.slice(idx + 1).trim().replace(/!important/gi, "").trim();
+    if (!value) continue;
+    if (/[(){}]/.test(value) && !/^rgba?\(/i.test(value)) continue;
+    const rule = STYLE_RULES[name];
+    if (rule && rule(value)) out.push(`${name}: ${value}`);
+  }
+  return out.join("; ");
+}
+var TOKEN_RE_SOURCE = `<!--[\\s\\S]*?(?:-->|$)|<!\\[CDATA\\[[\\s\\S]*?(?:\\]\\]>|$)|<!--?[^>]*>|<\\/?([a-zA-Z][a-zA-Z0-9]*)((?:"[^"]*"|'[^']*'|[^"'>])*)>?`;
+function createTokenRe() {
+  return new RegExp(TOKEN_RE_SOURCE, "g");
+}
+function sanitizeRichText(html, options = {}) {
+  const source = String(html ?? "");
+  const imageOrigins = options.imageOrigins ?? [];
+  const out = [];
+  const stack = [];
+  let dropDepth = 0;
+  let dropTag = "";
+  const tokenRe = createTokenRe();
+  let last = 0;
+  let match;
+  while ((match = tokenRe.exec(source)) !== null) {
+    const text = source.slice(last, match.index);
+    if (text && dropDepth === 0) out.push(escapeText(text));
+    last = tokenRe.lastIndex;
+    const tagName = match[1]?.toLowerCase();
+    if (!tagName) continue;
+    const isClosing = match[0].startsWith("</");
+    if (dropDepth > 0) {
+      if (tagName === dropTag) dropDepth += isClosing ? -1 : 1;
+      continue;
+    }
+    if (DROP_CONTENT_TAGS.has(tagName)) {
+      if (!isClosing && !match[0].endsWith("/>")) {
+        dropDepth = 1;
+        dropTag = tagName;
+      }
+      continue;
+    }
+    if (isClosing) {
+      const idx = stack.lastIndexOf(tagName);
+      if (idx < 0) continue;
+      for (let i = stack.length - 1; i >= idx; i--) out.push(`</${stack[i]}>`);
+      stack.length = idx;
+      continue;
+    }
+    const attrs = parseAttrs(match[2] ?? "");
+    if (tagName === "font") {
+      const styles = [];
+      const color = attrs.get("color");
+      if (color && isColor(color)) styles.push(`color: ${color}`);
+      const size = attrs.get("size");
+      if (size && FONT_SIZE_ATTR[size]) styles.push(`font-size: ${FONT_SIZE_ATTR[size]}`);
+      const inline = attrs.get("style");
+      if (inline) {
+        const cleaned = sanitizeStyle(inline);
+        if (cleaned) styles.push(cleaned);
+      }
+      stack.push("span");
+      out.push(styles.length ? `<span style="${escapeAttr(styles.join("; "))}">` : "<span>");
+      continue;
+    }
+    const allowedAttrs = allowedAttrsOf(tagName);
+    if (!allowedAttrs) continue;
+    const parts = [];
+    if (tagName === "a") {
+      const href = attrs.get("href");
+      const safe = href ? safeHref(href) : null;
+      if (safe) parts.push(`href="${escapeAttr(safe)}"`);
+      if (safe && !safe.startsWith("/")) {
+        parts.push('target="_blank"', 'rel="noopener noreferrer nofollow"');
+      }
+    } else if (tagName === "img") {
+      const src = attrs.get("src");
+      const safe = src ? safeImageSrc(src, imageOrigins) : null;
+      if (!safe) continue;
+      parts.push(`src="${escapeAttr(safe)}"`);
+      const alt = attrs.get("alt");
+      if (alt) parts.push(`alt="${escapeAttr(alt.slice(0, 100))}"`);
+    }
+    const style = attrs.get("style");
+    if (style) {
+      const cleaned = sanitizeStyle(style);
+      if (cleaned) parts.push(`style="${escapeAttr(cleaned)}"`);
+    }
+    const open = parts.length ? `<${tagName} ${parts.join(" ")}>` : `<${tagName}>`;
+    if (VOID_TAGS.has(tagName)) {
+      out.push(open);
+    } else {
+      stack.push(tagName);
+      out.push(open);
+    }
+  }
+  const tail = source.slice(last);
+  if (tail && dropDepth === 0) out.push(escapeText(tail));
+  for (let i = stack.length - 1; i >= 0; i--) out.push(`</${stack[i]}>`);
+  return out.join("");
+}
+var NAMED_ENTITIES = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " "
+};
+function decodeTextEntities(text) {
+  if (text.indexOf("&") < 0) return text;
+  return text.replace(/&(?:#x([0-9a-f]+)|#(\d+)|([a-z]+));?/gi, (whole, hex, dec, name) => {
+    if (hex) return safeFromCharCode(parseInt(hex, 16)) || whole;
+    if (dec) return safeFromCharCode(parseInt(dec, 10)) || whole;
+    if (!whole.endsWith(";")) return whole;
+    const decoded = NAMED_ENTITIES[name.toLowerCase()];
+    return decoded ?? whole;
+  });
+}
+function parseRichText(html) {
+  const source = String(html ?? "");
+  const root = [];
+  const stack = [];
+  const currentChildren = () => stack.length ? stack[stack.length - 1].children : root;
+  const pushText = (raw) => {
+    if (!raw) return;
+    const text = decodeTextEntities(raw);
+    const siblings = currentChildren();
+    const lastNode = siblings[siblings.length - 1];
+    if (lastNode && lastNode.type === "text") lastNode.text += text;
+    else siblings.push({ type: "text", text });
+  };
+  let dropDepth = 0;
+  let dropTag = "";
+  const tokenRe = createTokenRe();
+  let last = 0;
+  let match;
+  while ((match = tokenRe.exec(source)) !== null) {
+    if (dropDepth === 0) pushText(source.slice(last, match.index));
+    last = tokenRe.lastIndex;
+    const tagName = match[1]?.toLowerCase();
+    if (!tagName) continue;
+    const isClosing = match[0].startsWith("</");
+    if (dropDepth > 0) {
+      if (tagName === dropTag) dropDepth += isClosing ? -1 : 1;
+      continue;
+    }
+    if (DROP_CONTENT_TAGS.has(tagName)) {
+      if (!isClosing && !match[0].endsWith("/>")) {
+        dropDepth = 1;
+        dropTag = tagName;
+      }
+      continue;
+    }
+    if (isClosing) {
+      let idx = -1;
+      for (let i = stack.length - 1; i >= 0; i--) {
+        if (stack[i].tag === tagName) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0) stack.length = idx;
+      continue;
+    }
+    const allowedAttrs = allowedAttrsOf(tagName);
+    if (!allowedAttrs) continue;
+    const tag = tagName;
+    const attrs = {};
+    const rawAttrs = match[2] ?? "";
+    if (rawAttrs.trim()) {
+      for (const [name, value] of parseAttrs(rawAttrs)) {
+        if (name === "style" || allowedAttrs.includes(name)) attrs[name] = value;
+      }
+    }
+    const node = { type: "element", tag, attrs, children: [] };
+    currentChildren().push(node);
+    if (!VOID_TAGS.has(tagName)) stack.push(node);
+  }
+  if (dropDepth === 0) pushText(source.slice(last));
+  return root;
+}
+function richTextNodesToText(nodes) {
+  const out = [];
+  const walk = (list2) => {
+    for (const node of list2) {
+      if (node.type === "text") out.push(node.text);
+      else walk(node.children);
+    }
+  };
+  walk(nodes);
+  return out.join("");
+}
+function richTextToPlain(html) {
+  return String(html ?? "").replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h2|h3|blockquote|pre)>/gi, "\n").replace(/<[^>]*>/g, "").replace(/&nbsp;/gi, " ").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#0*39;|&apos;/gi, "'").replace(/&amp;/gi, "&").replace(/[ \t ]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+function firstImageSrc(html) {
+  const m = /<img\b[^>]*\bsrc="([^"]+)"/i.exec(String(html ?? ""));
+  return m ? m[1] : null;
+}
+function hasRichTextBody(html) {
+  return richTextToPlain(html).length > 0 || /<img\b/i.test(String(html ?? ""));
+}
+
+// src/board.ts
+var BOARD_TITLE_MAX = 100;
+var BOARD_CONTENT_HTML_MAX = RICH_TEXT_HTML_MAX;
+var BOARD_CONTENT_TEXT_MAX = 1e4;
+var BOARD_COMMENT_MAX = 1e3;
+var BOARD_CATEGORIES = [
+  { slug: "free", label: "자유", hint: "무슨 이야기든" },
+  { slug: "question", label: "질문", hint: "공부하다 막힌 것" },
+  { slug: "info", label: "정보", hint: "시험·일정·자료" },
+  { slug: "review", label: "합격수기", hint: "직접 겪은 이야기" }
+];
+function isBoardCategory(value) {
+  return BOARD_CATEGORIES.some((c) => c.slug === value);
+}
+function boardCategoryLabel(slug) {
+  return BOARD_CATEGORIES.find((c) => c.slug === slug)?.label ?? "자유";
+}
+function canEditBoardPost(post, viewer) {
+  return viewer.userId !== null && viewer.userId === post.user_id;
+}
+function canDeleteBoardPost(post, viewer) {
+  return viewer.isAdmin || canEditBoardPost(post, viewer);
+}
+function canPinBoardPost(viewer) {
+  return viewer.isAdmin;
+}
+function canEditBoardComment(comment, viewer) {
+  return viewer.userId !== null && viewer.userId === comment.user_id;
+}
+function canDeleteBoardComment(comment, viewer) {
+  return viewer.isAdmin || canEditBoardComment(comment, viewer);
+}
+function validateBoardPostInput(input) {
+  const title = String(input.title ?? "").trim();
+  if (!title) return { error: "제목을 입력해주세요." };
+  if (title.length > BOARD_TITLE_MAX)
+    return { error: `제목은 ${BOARD_TITLE_MAX}자 이하로 입력해주세요.` };
+  if (!isBoardCategory(input.category)) return { error: "말머리를 선택해주세요." };
+  const contentHtml = String(input.sanitizedHtml ?? "");
+  if (!hasRichTextBody(contentHtml)) return { error: "내용을 입력해주세요." };
+  if (contentHtml.length > BOARD_CONTENT_HTML_MAX)
+    return { error: "본문이 너무 깁니다. 글을 나눠서 올려주세요." };
+  const contentText = richTextToPlain(contentHtml);
+  if (contentText.length > BOARD_CONTENT_TEXT_MAX)
+    return { error: `내용은 ${BOARD_CONTENT_TEXT_MAX}자 이하로 입력해주세요.` };
+  const profanity = profanityError(title) ?? profanityError(contentText);
+  if (profanity) return { error: profanity };
+  return { title, category: input.category, contentHtml, contentText };
+}
+function validateBoardCommentContent(content) {
+  const trimmed = String(content ?? "").trim();
+  if (!trimmed) return { error: "댓글 내용을 입력해주세요." };
+  if (trimmed.length > BOARD_COMMENT_MAX)
+    return { error: `댓글은 ${BOARD_COMMENT_MAX}자 이하로 입력해주세요.` };
+  const profanity = profanityError(trimmed);
+  if (profanity) return { error: profanity };
+  return { content: trimmed };
+}
+function boardPreviewText(contentText, limit = 120) {
+  const flat = String(contentText ?? "").replace(/\s+/g, " ").trim();
+  return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
+}
+function resolveBoardCommentParent(target) {
+  return target.parent_id ?? target.id;
+}
+
+// src/board-image.ts
+var BOARD_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+var BOARD_IMAGE_ALLOWED_MIME = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/avif"
+];
+function isAllowedBoardImageMime(mime) {
+  return BOARD_IMAGE_ALLOWED_MIME.includes(mime);
+}
+var BOARD_IMAGE_MAX_WIDTH = 1600;
+var BOARD_IMAGE_MAX_PIXELS = BOARD_IMAGE_MAX_WIDTH * 6e3;
+var BOARD_IMAGE_ENCODED_MAX_BYTES = 2 * 1024 * 1024;
+var BOARD_IMAGE_BASE64_MAX_CHARS = Math.ceil(BOARD_IMAGE_ENCODED_MAX_BYTES / 3) * 4;
+function boardImageOrigin(supabaseUrl) {
+  return `${String(supabaseUrl ?? "").replace(/\/$/, "")}/storage/v1/object/public/board-images/`;
+}
+function boardImageUploadError(file) {
+  if (!file || file.size === 0) return "이미지를 선택해주세요.";
+  if (!isAllowedBoardImageMime(file.type)) return "JPG·PNG·WEBP·GIF 이미지만 올릴 수 있어요.";
+  if (file.size > BOARD_IMAGE_MAX_BYTES) {
+    return `이미지는 ${BOARD_IMAGE_MAX_BYTES / (1024 * 1024)}MB 이하로 올려주세요.`;
+  }
+  return null;
+}
+function boardImageBytesError(bytes) {
+  if (bytes.length === 0) return "이미지를 선택해주세요.";
+  if (bytes.length > BOARD_IMAGE_ENCODED_MAX_BYTES) {
+    return "이미지가 너무 커요. 다른 사진으로 시도해주세요.";
+  }
+  const info = readWebpInfo(bytes);
+  if (!info) return "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요.";
+  if (info.animated) return "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요.";
+  if (info.width < 1 || info.height < 1 || info.width > BOARD_IMAGE_MAX_WIDTH) {
+    return "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요.";
+  }
+  if (info.width * info.height > BOARD_IMAGE_MAX_PIXELS) {
+    return "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요.";
+  }
+  if (bytes.length > riffDeclaredLength(bytes) + 8) {
+    return "이미지를 처리할 수 없어요. 다른 파일로 시도해주세요.";
+  }
+  return null;
+}
+function riffDeclaredLength(bytes) {
+  return (bytes[4] | bytes[5] << 8 | bytes[6] << 16 | bytes[7] << 24) >>> 0;
+}
+
+// src/notifications.ts
+var NOTIFICATION_TYPES = [
+  "board_comment",
+  // 내 게시글에 댓글
+  "board_reply",
+  // 내 댓글에 답글
+  "suggestion_comment",
+  // 내 건의글에 댓글
+  "suggestion_answer"
+  // 내 건의글에 운영자 답변
+];
+function isNotificationType(value) {
+  return NOTIFICATION_TYPES.includes(value);
+}
+var NOTIFICATIONS_PAGE_SIZE = 20;
+var NOTIFICATION_DROPDOWN_SIZE = 8;
+var NOTIFICATION_PREVIEW_MAX = 80;
+function notificationPreview(content) {
+  const flat = richTextToPlain(content).replace(/\s+/g, " ").trim();
+  return flat.length > NOTIFICATION_PREVIEW_MAX ? `${flat.slice(0, NOTIFICATION_PREVIEW_MAX)}…` : flat;
+}
+var URL_PARSER_STRIPPED = /[\t\n\r]/g;
+function safeNotificationLink(link) {
+  if (typeof link !== "string") return "/notifications";
+  const path = link.replace(URL_PARSER_STRIPPED, "");
+  return path.startsWith("/") && !path.startsWith("//") && !path.startsWith("/\\") ? path : "/notifications";
+}
+function notificationMessage(type) {
+  switch (type) {
+    case "board_comment":
+      return "님이 회원님의 글에 댓글을 남겼어요";
+    case "board_reply":
+      return "님이 회원님의 댓글에 답글을 남겼어요";
+    case "suggestion_comment":
+      return "님이 회원님의 건의글에 댓글을 남겼어요";
+    case "suggestion_answer":
+      return "님이 회원님의 건의글에 답변했어요";
+  }
+}
+function unreadBadgeLabel(count) {
+  if (count <= 0) return "";
+  return count > 99 ? "99+" : String(count);
+}
+function relativeTimeLabel(iso, now = /* @__PURE__ */ new Date()) {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "";
+  const diffSec = Math.max(0, Math.floor((now.getTime() - then) / 1e3));
+  if (diffSec < 60) return "방금";
+  const min = Math.floor(diffSec / 60);
+  if (min < 60) return `${min}분 전`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return `${hour}시간 전`;
+  const day = Math.floor(hour / 24);
+  if (day < 7) return `${day}일 전`;
+  const [year, month, dayOfMonth] = kstDayKey(new Date(then)).split("-");
+  return `${year.slice(2)}.${month}.${dayOfMonth}`;
 }
 
 // src/paper-slug.ts
@@ -5062,6 +5715,312 @@ function normalizePaperSlugParam(param) {
 var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isPaperUuid(value) {
   return UUID_RE.test(value);
+}
+
+// src/rules/board.ts
+var BOARD_RAW_HTML_MAX = BOARD_CONTENT_HTML_MAX * 4;
+var RAW_TOO_LONG = "본문이 너무 깁니다. 글을 나눠서 올려주세요.";
+function nowOf(deps) {
+  return deps.now ? deps.now() : /* @__PURE__ */ new Date();
+}
+function prepareBoardPost(input, deps) {
+  if (String(input.contentHtml ?? "").length > BOARD_RAW_HTML_MAX) {
+    return { error: RAW_TOO_LONG, status: 400 };
+  }
+  const sanitizedHtml = sanitizeRichText(input.contentHtml, { imageOrigins: [deps.imageOrigin] });
+  const validated = validateBoardPostInput({
+    title: input.title,
+    category: input.category,
+    sanitizedHtml
+  });
+  if ("error" in validated) return { error: validated.error, status: 400 };
+  return validated;
+}
+async function createBoardPost(client, input, deps) {
+  const validated = prepareBoardPost(input, deps);
+  if ("error" in validated) return validated;
+  const isPinned = canPinBoardPost(input.actor) && input.isPinned === true;
+  if (await overHourlyLimit(client, "board_posts", input.actor.userId, BOARD_HOURLY_POST_LIMIT, nowOf(deps))) {
+    return { error: HOURLY_LIMIT_ERROR, status: 429 };
+  }
+  const { data, error } = await client.from("board_posts").insert({
+    user_id: input.actor.userId,
+    nickname: authorNickname(await resolveNickname2(client, input.actor)),
+    category: validated.category,
+    title: validated.title,
+    content_html: validated.contentHtml,
+    content_text: validated.contentText,
+    thumbnail_url: firstImageSrc(validated.contentHtml),
+    is_pinned: isPinned
+  }).select("id").single();
+  if (error || !data) return { error: "등록에 실패했어요.", status: 500 };
+  return { id: data.id };
+}
+async function updateBoardPost(client, input, deps) {
+  const id = String(input.id ?? "");
+  if (!isPaperUuid(id)) return { error: "잘못된 접근입니다.", status: 400 };
+  const validated = prepareBoardPost(input, deps);
+  if ("error" in validated) return validated;
+  const { data: post } = await client.from("board_posts").select("user_id").eq("id", id).maybeSingle();
+  if (!post) return { error: "글을 찾을 수 없어요.", status: 404 };
+  if (!canEditBoardPost({ user_id: post.user_id }, input.actor)) {
+    return { error: "권한이 없어요.", status: 403 };
+  }
+  const { error } = await client.from("board_posts").update({
+    category: validated.category,
+    title: validated.title,
+    content_html: validated.contentHtml,
+    content_text: validated.contentText,
+    thumbnail_url: firstImageSrc(validated.contentHtml),
+    // 고정 여부는 관리자가 고칠 때만 손댄다 — 비관리자가 자기 글을 수정할 때 이 값을
+    // 같이 보내면 관리자가 걸어둔 공지 고정이 풀린다.
+    ...canPinBoardPost(input.actor) ? { is_pinned: input.isPinned === true } : {},
+    updated_at: nowOf(deps).toISOString()
+  }).eq("id", id).eq("user_id", input.actor.userId);
+  if (error) return { error: "수정에 실패했어요.", status: 500 };
+  return { id };
+}
+async function deleteBoardPost(client, input) {
+  const id = String(input.id ?? "");
+  if (!isPaperUuid(id)) return { error: "잘못된 접근입니다.", status: 400 };
+  const { data: post } = await client.from("board_posts").select("user_id").eq("id", id).maybeSingle();
+  if (!post) return { error: "글을 찾을 수 없어요.", status: 404 };
+  if (!canDeleteBoardPost({ user_id: post.user_id }, input.actor)) {
+    return { error: "권한이 없어요.", status: 403 };
+  }
+  let query = client.from("board_posts").delete().eq("id", id);
+  if (!input.actor.isAdmin) query = query.eq("user_id", input.actor.userId);
+  const { error } = await query;
+  if (error) return { error: "삭제에 실패했어요.", status: 500 };
+  return { id };
+}
+async function uploadBoardImage(client, input, deps) {
+  const invalid = boardImageBytesError(input.webp);
+  if (invalid) return { error: invalid, status: 400 };
+  const oneHourAgo = new Date(nowOf(deps).getTime() - 60 * 60 * 1e3).toISOString();
+  const { data: recent } = await client.storage.from("board-images").list(input.userId, {
+    limit: BOARD_HOURLY_IMAGE_LIMIT,
+    sortBy: { column: "created_at", order: "desc" }
+  });
+  const recentCount = (recent ?? []).filter(
+    (f) => (f.created_at ?? "") > oneHourAgo
+  ).length;
+  if (recentCount >= BOARD_HOURLY_IMAGE_LIMIT) {
+    return {
+      error: "짧은 시간 동안 이미지를 너무 많이 올렸어요. 잠시 후 다시 시도해주세요.",
+      status: 429
+    };
+  }
+  const uuid = deps.randomUuid ?? (() => crypto.randomUUID());
+  const path = `${input.userId}/${uuid()}.webp`;
+  const { error } = await client.storage.from("board-images").upload(path, input.webp, { contentType: "image/webp", cacheControl: "31536000" });
+  if (error) {
+    console.error("[board] 이미지 업로드 실패:", error.message);
+    return {
+      error: /bucket/i.test(error.message) ? "이미지 저장소가 아직 준비되지 않았어요. 운영자에게 알려주세요." : "업로드에 실패했어요. 잠시 후 다시 시도해주세요.",
+      status: 500
+    };
+  }
+  return { url: `${deps.imageOrigin}${path}` };
+}
+async function createBoardComment(client, input, deps) {
+  const postId = String(input.postId ?? "");
+  if (!isPaperUuid(postId)) return { error: "잘못된 접근입니다.", status: 400 };
+  const validated = validateBoardCommentContent(input.content);
+  if ("error" in validated) return { error: validated.error, status: 400 };
+  const { data: post } = await client.from("board_posts").select("user_id, title").eq("id", postId).maybeSingle();
+  if (!post) return { error: "글을 찾을 수 없어요.", status: 404 };
+  if (await overHourlyLimit(client, "board_comments", input.actor.userId, BOARD_HOURLY_COMMENT_LIMIT, nowOf(deps))) {
+    return { error: HOURLY_LIMIT_ERROR, status: 429 };
+  }
+  let parentId = null;
+  let parentAuthorId = null;
+  const requestedParent = String(input.parentId ?? "");
+  if (requestedParent) {
+    if (!isPaperUuid(requestedParent)) return { error: "잘못된 접근입니다.", status: 400 };
+    const { data: parent } = await client.from("board_comments").select("id, parent_id, post_id, user_id, is_deleted").eq("id", requestedParent).maybeSingle();
+    if (!parent || parent.post_id !== postId) {
+      return { error: "답글을 달 댓글을 찾을 수 없어요.", status: 404 };
+    }
+    parentId = resolveBoardCommentParent({
+      id: parent.id,
+      parent_id: parent.parent_id ?? null
+    });
+    parentAuthorId = parent.is_deleted ? null : parent.user_id;
+  }
+  const nickname = authorNickname(await resolveNickname2(client, input.actor));
+  const { data: created, error } = await client.from("board_comments").insert({
+    post_id: postId,
+    parent_id: parentId,
+    user_id: input.actor.userId,
+    nickname,
+    content: validated.content
+  }).select("id").single();
+  if (error || !created) return { error: "댓글 등록에 실패했어요.", status: 500 };
+  const link = `/board/${postId}#comment-${created.id}`;
+  const preview = notificationPreview(validated.content);
+  const title = post.title;
+  if (parentAuthorId) {
+    await createNotification(client, {
+      userId: parentAuthorId,
+      type: "board_reply",
+      actorId: input.actor.userId,
+      actorNickname: nickname,
+      title,
+      preview,
+      link
+    });
+  }
+  if (post.user_id !== parentAuthorId) {
+    await createNotification(client, {
+      userId: post.user_id,
+      type: "board_comment",
+      actorId: input.actor.userId,
+      actorNickname: nickname,
+      title,
+      preview,
+      link
+    });
+  }
+  return { id: postId };
+}
+async function updateBoardComment(client, input, deps) {
+  const commentId = String(input.commentId ?? "");
+  if (!isPaperUuid(commentId)) return { error: "잘못된 접근입니다.", status: 400 };
+  const validated = validateBoardCommentContent(input.content);
+  if ("error" in validated) return { error: validated.error, status: 400 };
+  const { data: comment } = await client.from("board_comments").select("post_id, user_id, is_deleted").eq("id", commentId).maybeSingle();
+  if (!comment || comment.is_deleted) return { error: "댓글을 찾을 수 없어요.", status: 404 };
+  if (!canEditBoardComment({ user_id: comment.user_id }, input.actor)) {
+    return { error: "권한이 없어요.", status: 403 };
+  }
+  const { error } = await client.from("board_comments").update({ content: validated.content, updated_at: nowOf(deps).toISOString() }).eq("id", commentId).eq("user_id", input.actor.userId);
+  if (error) return { error: "수정에 실패했어요.", status: 500 };
+  return { id: comment.post_id };
+}
+async function deleteBoardComment(client, input, deps) {
+  const commentId = String(input.commentId ?? "");
+  if (!isPaperUuid(commentId)) return { error: "잘못된 접근입니다.", status: 400 };
+  const { data: comment } = await client.from("board_comments").select("post_id, user_id, parent_id").eq("id", commentId).maybeSingle();
+  if (!comment) return { error: "댓글을 찾을 수 없어요.", status: 404 };
+  if (!canDeleteBoardComment({ user_id: comment.user_id }, input.actor)) {
+    return { error: "권한이 없어요.", status: 403 };
+  }
+  const { count: replyCount } = await client.from("board_comments").select("id", { count: "exact", head: true }).eq("parent_id", commentId);
+  let query = (replyCount ?? 0) > 0 ? client.from("board_comments").update({
+    is_deleted: true,
+    content: "삭제된 댓글입니다.",
+    updated_at: nowOf(deps).toISOString()
+  }).eq("id", commentId) : client.from("board_comments").delete().eq("id", commentId);
+  if (!input.actor.isAdmin) query = query.eq("user_id", input.actor.userId);
+  const { error } = await query;
+  if (error) return { error: "삭제에 실패했어요.", status: 500 };
+  return { id: comment.post_id };
+}
+async function resolveNickname2(client, actor) {
+  if (actor.metadataNickname !== void 0) return actor.metadataNickname;
+  const { data } = await client.auth.admin.getUserById(actor.userId);
+  return data?.user?.user_metadata?.nickname;
+}
+
+// src/notices.ts
+var NOTICE_TITLE_MAX = 100;
+var NOTICE_CONTENT_MAX = 5e3;
+var NOTICE_COMMENT_MAX = 1e3;
+function validateNoticeInput(input) {
+  const title = String(input.title ?? "").trim();
+  const content = String(input.content ?? "").trim();
+  if (!title) return { error: "제목을 입력해주세요." };
+  if (title.length > NOTICE_TITLE_MAX)
+    return { error: `제목은 ${NOTICE_TITLE_MAX}자 이하로 입력해주세요.` };
+  if (!content) return { error: "내용을 입력해주세요." };
+  if (content.length > NOTICE_CONTENT_MAX)
+    return { error: `내용은 ${NOTICE_CONTENT_MAX}자 이하로 입력해주세요.` };
+  const profanity = profanityError(title) ?? profanityError(content);
+  if (profanity) return { error: profanity };
+  return { title, content };
+}
+function canEditNoticeComment(comment, viewer) {
+  return viewer.userId !== null && viewer.userId === comment.user_id;
+}
+function canDeleteNoticeComment(comment, viewer) {
+  return viewer.isAdmin || canEditNoticeComment(comment, viewer);
+}
+function validateNoticeCommentContent(content) {
+  const trimmed = String(content ?? "").trim();
+  if (!trimmed) return { error: "댓글 내용을 입력해주세요." };
+  if (trimmed.length > NOTICE_COMMENT_MAX)
+    return { error: `댓글은 ${NOTICE_COMMENT_MAX}자 이하로 입력해주세요.` };
+  const profanity = profanityError(trimmed);
+  if (profanity) return { error: profanity };
+  return { content: trimmed };
+}
+
+// src/rules/notices.ts
+function nowOf2(deps) {
+  return deps.now ? deps.now() : /* @__PURE__ */ new Date();
+}
+async function createNoticeComment(client, input, deps = {}) {
+  const noticeId = String(input.noticeId ?? "");
+  if (!isPaperUuid(noticeId)) return { error: "잘못된 접근입니다.", status: 400 };
+  const validated = validateNoticeCommentContent(input.content);
+  if ("error" in validated) return { error: validated.error, status: 400 };
+  if (await overHourlyLimit(client, "notice_comments", input.actor.userId, NOTICE_COMMENT_HOURLY_LIMIT, nowOf2(deps))) {
+    return { error: HOURLY_LIMIT_ERROR, status: 429 };
+  }
+  const nickname = authorNickname(await resolveNickname3(client, input.actor));
+  const { error } = await client.from("notice_comments").insert({
+    notice_id: noticeId,
+    user_id: input.actor.userId,
+    nickname,
+    content: validated.content
+  });
+  if (error) return { error: "댓글 등록에 실패했어요.", status: 500 };
+  return { id: noticeId };
+}
+async function updateNoticeComment(client, input, deps = {}) {
+  const commentId = String(input.commentId ?? "");
+  if (!isPaperUuid(commentId)) return { error: "잘못된 접근입니다.", status: 400 };
+  const validated = validateNoticeCommentContent(input.content);
+  if ("error" in validated) return { error: validated.error, status: 400 };
+  const { data: comment } = await client.from("notice_comments").select("notice_id, user_id").eq("id", commentId).maybeSingle();
+  if (!comment) return { error: "댓글을 찾을 수 없어요.", status: 404 };
+  if (!canEditNoticeComment({ user_id: comment.user_id }, input.actor)) {
+    return { error: "권한이 없어요.", status: 403 };
+  }
+  const { error } = await client.from("notice_comments").update({ content: validated.content, updated_at: nowOf2(deps).toISOString() }).eq("id", commentId).eq("user_id", input.actor.userId);
+  if (error) return { error: "수정에 실패했어요.", status: 500 };
+  return { id: comment.notice_id };
+}
+async function deleteNoticeComment(client, input) {
+  const commentId = String(input.commentId ?? "");
+  if (!isPaperUuid(commentId)) return { error: "잘못된 접근입니다.", status: 400 };
+  const { data: comment } = await client.from("notice_comments").select("notice_id, user_id").eq("id", commentId).maybeSingle();
+  if (!comment) return { error: "댓글을 찾을 수 없어요.", status: 404 };
+  if (!canDeleteNoticeComment({ user_id: comment.user_id }, input.actor)) {
+    return { error: "권한이 없어요.", status: 403 };
+  }
+  let query = client.from("notice_comments").delete().eq("id", commentId);
+  if (!input.actor.isAdmin) query = query.eq("user_id", input.actor.userId);
+  const { error } = await query;
+  if (error) return { error: "삭제에 실패했어요.", status: 500 };
+  return { id: comment.notice_id };
+}
+async function resolveNickname3(client, actor) {
+  if (actor.metadataNickname !== void 0) return actor.metadataNickname;
+  const { data } = await client.auth.admin.getUserById(actor.userId);
+  return data?.user?.user_metadata?.nickname;
+}
+
+// src/levels.ts
+var LEVEL_ORDER = ["9급", "7급", "5급"];
+function compareLevels(a, b) {
+  const ai = LEVEL_ORDER.indexOf(a);
+  const bi = LEVEL_ORDER.indexOf(b);
+  if (ai === -1 && bi === -1) return a.localeCompare(b);
+  if (ai === -1) return 1;
+  if (bi === -1) return -1;
+  return ai - bi;
 }
 
 // src/data/papers.ts
@@ -5315,108 +6274,40 @@ async function fetchMyRoundCounts(client, userId) {
   return counts;
 }
 
-// src/profanity.ts
-var PROFANITY_WORDS = [
-  // 한국어
-  "씨발",
-  "시발",
-  "씨빨",
-  "시빨",
-  "씨팔",
-  "시팔",
-  "씨바",
-  "십새",
-  "씹새",
-  "씹창",
-  "씹할",
-  "씨부랄",
-  "씨부럴",
-  "시부랄",
-  "시부럴",
-  "병신",
-  "븅신",
-  "빙신",
-  "등신",
-  "머저리",
-  "지랄",
-  "지럴",
-  "좆",
-  "좃같",
-  "좇같",
-  "존나",
-  "존내",
-  "존만",
-  "새끼",
-  "쌔끼",
-  "썅",
-  "쌍놈",
-  "쌍년",
-  "개년",
-  "개놈",
-  "개소리",
-  "개같",
-  "개차반",
-  "미친놈",
-  "미친년",
-  "니미",
-  "느금마",
-  "니애미",
-  "애미없",
-  "엠창",
-  "창녀",
-  "화냥년",
-  "걸레같",
-  "입닥쳐",
-  "닥쳐라",
-  "뒈져",
-  "죽여버",
-  // 초성 표기
-  "ㅅㅂ",
-  "ㅆㅂ",
-  "ㅄ",
-  "ㅂㅅ",
-  "ㅈㄹ",
-  "ㅆㅍ",
-  // 영어
-  "fuck",
-  "shit",
-  "bitch",
-  "asshole",
-  "bastard",
-  "cunt",
-  "whore",
-  "nigger",
-  "faggot",
-  "dickhead"
-];
-var PROFANITY_ALLOWED_PHRASES = [
-  "시발점",
-  "시발역",
-  "시발자동차",
-  "시발차"
-];
-var PROFANITY_ERROR = "비속어·욕설이 포함되어 있어 등록할 수 없어요.";
-function normalizeForProfanityCheck(raw) {
-  let text = String(raw ?? "").toLowerCase().normalize("NFC").replace(/[^\p{L}\s]/gu, "").replace(/\s+/gu, " ");
-  for (const allowed of PROFANITY_ALLOWED_PHRASES) {
-    text = text.split(allowed).join(" ");
-  }
-  return text;
-}
-function findProfanity(text) {
-  const normalized = normalizeForProfanityCheck(text);
-  if (!normalized) return null;
-  return PROFANITY_WORDS.find((word) => normalized.includes(word)) ?? null;
-}
-function containsProfanity(text) {
-  return findProfanity(text) !== null;
-}
-function profanityError(text) {
-  return containsProfanity(text) ? PROFANITY_ERROR : null;
-}
-
 // src/comment-constraints.ts
 var COMMENT_CONTENT_MAX = 2e3;
+
+// src/ugc.ts
+var REPORT_REASONS = [
+  { slug: "spam", label: "스팸·광고" },
+  { slug: "abuse", label: "욕설·혐오" },
+  { slug: "sexual", label: "음란물" },
+  { slug: "privacy", label: "개인정보 노출" },
+  { slug: "other", label: "기타" }
+];
+function isReportReason(value) {
+  return REPORT_REASONS.some((r) => r.slug === value);
+}
+function reportReasonLabel(slug) {
+  return REPORT_REASONS.find((r) => r.slug === slug)?.label ?? "기타";
+}
+var REPORT_DETAIL_MAX = 500;
+function validateReportInput(input) {
+  if (!isReportReason(input.reason)) return { error: "신고 사유를 선택해주세요." };
+  const detail = String(input.detail ?? "").trim();
+  if (detail.length > REPORT_DETAIL_MAX) {
+    return { error: `상세 설명은 ${REPORT_DETAIL_MAX}자 이하로 입력해주세요.` };
+  }
+  if (input.reason === "other" && !detail) {
+    return { error: "기타 사유는 내용을 적어주세요." };
+  }
+  return { reason: input.reason, detail: detail || null };
+}
+function filterBlocked(items, blockedIds) {
+  const set = blockedIds instanceof Set ? blockedIds : new Set(blockedIds);
+  if (set.size === 0) return [...items];
+  return items.filter((item) => !set.has(item.authorId));
+}
 export {
   ANON_PREVIEW_CARDS,
   ATTENDANCE_MILESTONES,
@@ -5431,6 +6322,21 @@ export {
   AVATAR_SIZE,
   AnthropicRequestError,
   BANNED_SUBSTRINGS,
+  BOARD_CATEGORIES,
+  BOARD_COMMENT_MAX,
+  BOARD_CONTENT_HTML_MAX,
+  BOARD_CONTENT_TEXT_MAX,
+  BOARD_HOURLY_COMMENT_LIMIT,
+  BOARD_HOURLY_IMAGE_LIMIT,
+  BOARD_HOURLY_POST_LIMIT,
+  BOARD_IMAGE_ALLOWED_MIME,
+  BOARD_IMAGE_BASE64_MAX_CHARS,
+  BOARD_IMAGE_ENCODED_MAX_BYTES,
+  BOARD_IMAGE_MAX_BYTES,
+  BOARD_IMAGE_MAX_PIXELS,
+  BOARD_IMAGE_MAX_WIDTH,
+  BOARD_RAW_HTML_MAX,
+  BOARD_TITLE_MAX,
   COACH_PER_SUBJECT,
   COMMENT_CONTENT_MAX,
   DIAGNOSIS_LOCKED,
@@ -5446,22 +6352,35 @@ export {
   FREE_MEMBERSHIP,
   FREE_UNTIL,
   FREE_UNTIL_LABEL,
+  HOURLY_LIMIT_ERROR,
   KST_TIME_ZONE,
   MIN_ATTEMPT_SECONDS,
   MIX_SCOPE,
   NICKNAME_MAX,
   NICKNAME_MIN,
+  NOTICE_COMMENT_HOURLY_LIMIT,
+  NOTICE_COMMENT_MAX,
+  NOTICE_CONTENT_MAX,
+  NOTICE_TITLE_MAX,
+  NOTIFICATIONS_PAGE_SIZE,
+  NOTIFICATION_DROPDOWN_SIZE,
+  NOTIFICATION_PREVIEW_MAX,
+  NOTIFICATION_TYPES,
   PAGE_BATCH_SIZE,
   PROFANITY_ALLOWED_PHRASES,
   PROFANITY_ERROR,
   PROFANITY_WORDS,
   QUERY_CONCURRENCY,
   QUESTION_ID_CHUNK,
+  REPORT_DETAIL_MAX,
+  REPORT_REASONS,
   REVIEW_COOLDOWN_HOURS,
   REVIEW_PICK_RECENT_DAYS,
   REVIEW_PICK_REPEAT_THRESHOLD,
   REVIEW_PICK_TIER_WEIGHTS,
   REVIEW_SESSION_MAX_LIMIT,
+  RICH_TEXT_HTML_MAX,
+  RICH_TEXT_TAGS,
   SRS_EARLY_LAPSE_FACTOR,
   SRS_EARLY_LAPSE_RATIO,
   SRS_EASE_BONUS,
@@ -5492,10 +6411,22 @@ export {
   avatarUploadError,
   avatarUrlMap,
   batchCustomId,
+  boardCategoryLabel,
+  boardImageBytesError,
+  boardImageOrigin,
+  boardImageUploadError,
+  boardPreviewText,
   buildCoachingParams,
   buildMixHubIndex,
   buildMixPool,
   buildSubjectIndex,
+  canDeleteBoardComment,
+  canDeleteBoardPost,
+  canDeleteNoticeComment,
+  canEditBoardComment,
+  canEditBoardPost,
+  canEditNoticeComment,
+  canPinBoardPost,
   chunk,
   collapseDuplicatePapers,
   collectAllReviewCandidates,
@@ -5513,15 +6444,23 @@ export {
   containsProfanity,
   createAllReviewSessionForUser,
   createAnthropicBatchTransport,
+  createBoardComment,
+  createBoardPost,
   createConceptReviewSessionForUser,
   createDueReviewSessionForUser,
   createMixSessionForUser,
+  createNoticeComment,
+  createNotification,
+  createNotifications,
   createPaperReviewSessionForUser,
   createRetryFromMixSession,
   createReviewSessionForUser,
   createReviewSessionFromItems,
   daysInMonthKey,
   decodePapers,
+  deleteBoardComment,
+  deleteBoardPost,
+  deleteNoticeComment,
   embedOne,
   encodePapers,
   fetchAllCbtAvailability,
@@ -5546,10 +6485,12 @@ export {
   fetchSubjectFilters,
   fetchSubjectPapers,
   fetchWrongNoteMarks,
+  filterBlocked,
   filterPapers,
   filterQuestionsAnsweredByUser,
   findProfanity,
   findUnfinishedDueSession,
+  firstImageSrc,
   formatCount,
   formatDuration,
   formatFileSize,
@@ -5574,17 +6515,22 @@ export {
   getWeeklyDiagnosis,
   groupByYearAndSubject,
   hasOwnPremiumPeriod,
+  hasRichTextBody,
   inParallel,
   isAdFreeMembership,
   isAdminEmail,
   isAllowedAvatarMime,
+  isAllowedBoardImageMime,
   isAttendanceOpen,
+  isBoardCategory,
   isCbtRuleError,
   isFreeForAll,
   isLeechTrigger,
+  isNotificationType,
   isPaperUuid,
   isPremiumMembership,
   isPremiumUserFor,
+  isReportReason,
   isSameSrsDay,
   isTrialUnstarted,
   isValidAvatarPath,
@@ -5607,9 +6553,13 @@ export {
   normalizeConceptSelection,
   normalizeForProfanityCheck,
   normalizePaperSlugParam,
+  notificationMessage,
+  notificationPreview,
+  overHourlyLimit,
   paperDedupKey,
   parseBatchCustomId,
   parseCoachingItems,
+  parseRichText,
   pickCoachTargets,
   pickRandomReviewCandidates,
   pickReviewCandidates,
@@ -5619,15 +6569,22 @@ export {
   readWebpInfo,
   recordAttendance,
   recordQuestionResults,
+  relativeTimeLabel,
   removeUserAvatar,
+  reportReasonLabel,
   representativePaperIds,
   requestDiagnosisForUser,
+  resolveBoardCommentParent,
   resolveDiagnosisModel,
   resolveExplanationAccess,
   resolveStatusTargets,
   resolveWrongNoteExplanations,
   restoreSuspendedQuestions,
   reviewPickTier,
+  richTextNodesToText,
+  richTextToPlain,
+  safeNotificationLink,
+  sanitizeRichText,
   sanitizeSelectedChoice,
   saveDiagnosisReport,
   saveStudyPhase,
@@ -5655,6 +6612,16 @@ export {
   toReviewSolveItems,
   trialDaysLeft,
   trialExpiresAt,
+  unreadBadgeLabel,
+  updateBoardComment,
+  updateBoardPost,
+  updateNoticeComment,
+  uploadBoardImage,
   uploadUserAvatar,
-  validateNickname
+  validateBoardCommentContent,
+  validateBoardPostInput,
+  validateNickname,
+  validateNoticeCommentContent,
+  validateNoticeInput,
+  validateReportInput
 };
